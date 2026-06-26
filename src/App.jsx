@@ -2240,7 +2240,6 @@ if (key === "pass_premium") setPassPremium(value);
 if (key === "pass_claimed") setPassClaimed(value);
 if (key === "pass_tokens")  setPassTokens(value);
     });
-    });
      return () => { unsub(); clearInterval(hbInterval); };
   }, [currentPlayer]);
 
