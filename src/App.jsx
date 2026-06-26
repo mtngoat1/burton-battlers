@@ -936,6 +936,13 @@ export default function App() {
   if (loading) return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center"}}><div style={{color:"#4A5066",fontSize:13,letterSpacing:1}}>loading team data…</div></div></>;
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
 
+const touchStartY = useRef(0);
+const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
+const handleTouchEnd = (e) => {
+  const diff = e.changedTouches[0].clientY - touchStartY.current;
+  if (diff > 80) loadSharedData(currentPlayer);
+};
+
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const isAdmin=currentPlayer===ADMIN_ID;
   const TABS=[
@@ -963,7 +970,7 @@ export default function App() {
         </div>
       </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
-      <div style={s.tabBody}>
+      <div style={s.tabBody} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
