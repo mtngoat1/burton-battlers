@@ -1624,20 +1624,21 @@ const badges = {
       enable notifs
     </button>
   </div>
-  <div style={s.topBarRight}>
-    {isAdmin&&<Shield size={13} color="#FF5C8A" style={{marginRight:2}}/>}
-          <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
-          <span style={s.youName}>{playerObj.name}</span>
-          <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button>
-          <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
-            {Object.values(THEMES).map(t=>(
-              <button key={t.id} onClick={()=>setThemeId(t.id)}
-                style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
+<div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:6}}>
+  {isAdmin&&<Shield size={13} color="#FF5C8A"/>}
+  <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
+  <span style={s.youName}>{playerObj.name}</span>
+</div>
+<div style={s.topBarRight}>
+  <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button>
+  <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
+    {Object.values(THEMES).map(t=>(
+      <button key={t.id} onClick={()=>setThemeId(t.id)}
+        style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
+      />
+    ))}
+  </div>
+</div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
        {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions}/>}
@@ -1675,7 +1676,7 @@ const badges = {
 const s = {
   appShell:{display:"flex",flexDirection:"column",height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",maxWidth:480,margin:"0 auto",position:"relative",overflow:"hidden"},
   screen:{height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
-  topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
+topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
   topBarRight:{display:"flex",alignItems:"center",gap:8},
   youDot:{width:8,height:8,borderRadius:99},
