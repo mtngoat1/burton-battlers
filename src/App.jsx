@@ -273,52 +273,70 @@ function ReminderBanner({ incompleteDays, onJump, onDismiss }) {
 </div>
   );
 }
-const CHALLENGES = [
-  (me, rival, field) => `score ${Math.max(1,Math.ceil(rival[field]-me[field]+1))} more ${field} per game to surpass ${rival.name}`,
-  (me, rival, field) => `avg ${(me[field]+0.5).toFixed(1)} ${field}/game for 3 games — earn 10 pts`,
-  (me, rival, field) => `beat ${rival.name}'s ${field} average (${rival[field]}) twice this week`,
-  (me, rival, field) => `hit ${Math.ceil(me[field]*1.2)} ${field} in your next game for a streak bonus`,
-  (me, rival, field) => `post ${Math.ceil(rival[field]+1)} ${field} and claim the ${field} crown from ${rival.name}`,
-];
-const CHALLENGE_FIELDS = ["goals","assists","saves","demos","shots"];
-
 function StatChallenges({ stats, currentPlayer, completions, setCompletions }) {
-  const myGames = stats.filter(g => g.playerId === currentPlayer);
   const avg = (pid, field) => {
-    const pg = stats.filter(g => g.playerId === pid);
+    const pg = stats.filter(g => g.playerId === pid && g.mode === "3v3");
     return pg.length ? pg.reduce((s,g) => s+(g[field]||0), 0)/pg.length : 0;
   };
   const rivals = PLAYERS.filter(p => p.id !== currentPlayer);
-  const [challengeIdx, setChallengeIdx] = useState(() => Math.floor(Math.random()*CHALLENGES.length));
-  const [fieldIdx, setFieldIdx] = useState(() => Math.floor(Math.random()*CHALLENGE_FIELDS.length));
+  const [fieldIdx, setFieldIdx] = useState(0);
   const [rivalIdx, setRivalIdx] = useState(0);
-  const [completed, setCompleted] = useState([]);
 
-  const field = CHALLENGE_FIELDS[fieldIdx];
+  const field = CHALLENGE_FIELDS[fieldIdx % CHALLENGE_FIELDS.length];
   const rival = rivals[rivalIdx % rivals.length];
-  const me = { name: PLAYERS.find(p=>p.id===currentPlayer)?.name, [field]: avg(currentPlayer, field) };
-  const rivalStats = { name: rival.name, [field]: avg(rival.id, field) };
-  const challengeText = CHALLENGES[challengeIdx](me, rivalStats, field);
+  const myAvg = avg(currentPlayer, field);
+  const rivalAvg = avg(rival.id, field);
+  const target = Math.max(rivalAvg + 0.1, myAvg + 0.5);
+  const progress = target > 0 ? Math.min(1, myAvg / target) : 0;
+  const playerColor = PLAYERS.find(p=>p.id===currentPlayer)?.color || "#B8FF4D";
+  const myGames = stats.filter(g => g.playerId === currentPlayer && g.mode === "3v3");
+  const lastGame = myGames.length ? myGames[myGames.length-1] : null;
+  const lastVal = lastGame ? (lastGame[field]||0) : null;
 
-  const completeChallenge = () => {
-    setCompleted(prev => [...prev, challengeIdx]);
-    setChallengeIdx(Math.floor(Math.random()*CHALLENGES.length));
-    setFieldIdx(Math.floor(Math.random()*CHALLENGE_FIELDS.length));
-    setRivalIdx(r => r+1);
+  const nextChallenge = () => {
+    setFieldIdx(f => (f+1) % CHALLENGE_FIELDS.length);
+    setRivalIdx(r => (r+1) % rivals.length);
   };
 
-  const playerColor = PLAYERS.find(p=>p.id===currentPlayer)?.color || "#B8FF4D";
+  const challengeText = myAvg >= target
+    ? `🏆 challenge complete! you're averaging ${myAvg.toFixed(1)} ${field} — above ${rival.name}'s ${rivalAvg.toFixed(1)}`
+    : `average ${target.toFixed(1)} ${field}/game in 3v3 to beat ${rival.name}'s average (${rivalAvg.toFixed(1)})`;
+
+  const done = myAvg >= target;
 
   return (
     <div style={{marginBottom:20}}>
-      <div style={{...s.sectionLabel,marginBottom:10}}>stat challenges</div>
-      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${playerColor}22`,marginBottom:12}}>
-        <div style={{fontSize:11,color:playerColor,fontWeight:700,letterSpacing:0.8,marginBottom:8}}>CURRENT CHALLENGE</div>
+      <div style={{...s.sectionLabel,marginBottom:10}}>stat challenge</div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${playerColor}22`,marginBottom:8}}>
+        <div style={{fontSize:11,color:playerColor,fontWeight:700,letterSpacing:0.8,marginBottom:8}}>CURRENT CHALLENGE · 3V3</div>
         <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{challengeText}</div>
-        <button onClick={completeChallenge} className="bb-pressable bb-glow-lime" style={{background:playerColor,color:"#06070D",border:"none",borderRadius:10,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
-          mark complete → next challenge
-        </button>
+
+        {/* Progress bar */}
+        <div style={{marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
+            <span>your avg: <span style={{color:playerColor,fontWeight:700}}>{myAvg.toFixed(1)}</span></span>
+            <span>target: <span style={{color:"#E8ECF4",fontWeight:700}}>{target.toFixed(1)}</span></span>
+          </div>
+          <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${progress*100}%`,background:done?"#7CFFB2":playerColor,borderRadius:99,transition:"width .4s ease",boxShadow:done?`0 0 8px #7CFFB299`:`0 0 8px ${playerColor}88`}}/>
+          </div>
+          {lastVal!==null&&<div style={{fontSize:11,color:"#4A5066",marginTop:4}}>last game: {lastVal} {field}</div>}
+        </div>
+
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>setFieldIdx(f=>(f+1)%CHALLENGE_FIELDS.length)} className="bb-pressable"
+            style={{flex:1,background:"rgba(255,255,255,0.06)",border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer"}}>
+            next challenge →
+          </button>
+          {done&&<button onClick={nextChallenge} className="bb-pressable bb-glow-lime"
+            style={{flex:1,background:playerColor,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
+            claim & next 🏆
+          </button>}
+        </div>
+        <div style={{fontSize:11,color:"#4A5066",marginTop:8}}>progress updates automatically when you log 3v3 games</div>
       </div>
+
+      {/* Mini leaderboard */}
       <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
         <div style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:8}}>
           <div/>
@@ -340,7 +358,6 @@ function StatChallenges({ stats, currentPlayer, completions, setCompletions }) {
     </div>
   );
 }
-
 // ===================== Home Tab =====================
 function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
