@@ -436,9 +436,10 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
         })}
       </div>
     </div>
-  );
+);
 }
-            // ===================== Coach Note =====================
+
+// ===================== Coach Note =====================
 function getCoachNote(stats, playerId) {
   const todayKey = dateKey(todayAtMidnight());
   const playerGames = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
