@@ -756,12 +756,11 @@ function HeatStreakCard({ stats, currentPlayer }) {
   );
 }      
 // ===================== Home Tab =====================
-function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP }) {
+function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
   const record = schedule.league.reduce((acc,m)=>{
-function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
     if (!m.result) return acc;
     if (m.result.status==="win"||m.result.status==="forfeit_win"||m.result.status==="bye") acc.w++; else acc.l++;
     acc.gf += m.result.ours||0; acc.ga += m.result.theirs||0;
@@ -1757,10 +1756,11 @@ const PREMIUM_PASS_REWARDS = {
   200:{ type:"car",    value:"🏎️", label:"burton legend car" },
 };
 const PASS_WEEKLY_FIELDS = ["goals", "assists", "saves", "demos", "shots"];
+const TIME_GOALS_BY_WEEK = [6, 7, 8, 9, 10, 11, 12, 13];
+
 function getWeeklyPassChallenge(playerId, stats) {
   const idx = PLAYERS.findIndex(p => p.id === playerId);
-  const weekNum = Math.floor(Date.now() / WEEK_MS);
-const TIME_GOALS_BY_WEEK = [6, 7, 8, 9, 10, 11, 12, 13]; // hours, ramps up each week toward tournament
+  const weekNum = Math.floor(Date.now() / WEEK_MS); // hours, ramps up each week toward tournament
   const field = PASS_WEEKLY_FIELDS[(weekNum + idx) % PASS_WEEKLY_FIELDS.length];
   const pg = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
   const avg = pg.length ? pg.reduce((s,g) => s+(g[field]||0), 0)/pg.length : 0;
@@ -2507,10 +2507,9 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
-const RT_KEYS = [..., "time_logs"];
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -3034,14 +3033,34 @@ if (key === "pass_tokens")  setPassTokens(value);
 
   const selectName=async(pid)=>{ setSelectedPlayerId(pid); const auth=await storeGet(`auth:${pid}`); setAuthStage(auth?"enter":"create"); };
 
-const loadSharedData=async(pid)=>{
-    setLoading(true);
-   const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab]=await Promise.all([
-storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),storeGet("bets"),storeGet("pass_xp"),storeGet("pass_premium"),storeGet("pass_claimed"),storeGet("pass_tokens"),storeGet("pass_active_boosts"),
-]);
+const loadSharedData = async (pid) => {
+  setLoading(true);
 
-storeGet("time_logs"),
-    if (sched) setSchedule(sched);
+  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs] = await Promise.all([
+    storeGet("schedule"),
+    storeGet("training"),
+    storeGet("completions"),
+    storeGet("chat"),
+    storeGet("comments"),
+    storeGet("posts"),
+    storeGet("stream_profiles"),
+    storeGet("stats"),
+    storeGet("presence"),
+    storeGet("pings"),
+    storeGet("points"),
+    storeGet("bets"),
+    storeGet("pass_xp"),
+    storeGet("pass_premium"),
+    storeGet("pass_claimed"),
+    storeGet("pass_tokens"),
+    storeGet("pass_active_boosts"),
+    storeGet("time_logs"),
+  ]);
+
+  // rest of your function...
+};
+
+if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
     if (comp) setCompletions(comp);
     if (chat) setMessages(chat);
@@ -3058,6 +3077,7 @@ if (ppm) setPassPremium(ppm);
 if (pcl) setPassClaimed(pcl);
 if (ptk) setPassTokens(ptk);
 if (pab) setPassActiveBoosts(pab);
+if (tlogs) setTimeLogs(tlogs);
 const savedLastSeen = await storeGet(`lastSeen:${pid}`);
 if (savedLastSeen) setLastSeen(savedLastSeen);
 else setLastSeen({social:0, chat:0, training:0});
@@ -3182,8 +3202,7 @@ const badges = {
 </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-{tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP}/>}
-{tab==="home"&&<HomeTab ... timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>}
+{tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
        {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast}/>}
