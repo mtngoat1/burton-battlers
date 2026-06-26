@@ -1534,23 +1534,17 @@ const touchStartY = useRef(0);
 }} className="bb-pressable" style={{background:"none",border:"none",color:"#B8FF4D",fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px"}}>
   enable notifs
 </button>
-          {isAdmin&&<Shield size={13} color="#FF5C8A" style={{marginRight:2}}/>}
+{isAdmin&&<Shield size={13} color="#FF5C8A" style={{marginRight:2}}/>}
           <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
           <span style={s.youName}>{playerObj.name}</span>
-          <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button> <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
-  {Object.values(THEMES).map(t=>(
-    <button key={t.id} onClick={()=>setThemeId(t.id)}
-      style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
-    />
-  ))}
-</div>
-<div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
-  {Object.values(THEMES).map(t=>(
-    <button key={t.id} onClick={()=>setThemeId(t.id)}
-      style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
-    />
-  ))}
-</div>
+          <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button>
+          <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
+            {Object.values(THEMES).map(t=>(
+              <button key={t.id} onClick={()=>setThemeId(t.id)}
+                style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
+              />
+            ))}
+          </div>
         </div>
       </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
