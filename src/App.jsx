@@ -1037,26 +1037,12 @@ const THEMES = {
     sub: "#8B92A8", muted: "#4A5066", tabBg: "#0A0C16",
     swatch: "linear-gradient(135deg,#06070D 50%,#B8FF4D 50%)",
   },
-  inverse: {
-    id: "inverse",
-    bg: "#F0F2F5", card: "#FFFFFF", border: "rgba(0,0,0,0.08)",
-    accent: "#1A1D2E", accentText: "#F0F2F5", text: "#0A0C16",
-    sub: "#555E72", muted: "#9AA0B0", tabBg: "#E4E7ED",
-    swatch: "linear-gradient(135deg,#F0F2F5 50%,#1A1D2E 50%)",
-  },
   starfield: {
     id: "starfield",
     bg: "#040818", card: "#0B1230", border: "rgba(100,140,255,0.15)",
     accent: "#7EB8FF", accentText: "#040818", text: "#D8E8FF",
     sub: "#7A90B8", muted: "#3A4E72", tabBg: "#060C1E",
     swatch: "radial-gradient(circle at 30% 40%,#7EB8FF 0%,#040818 70%)",
-  },
-  pop: {
-    id: "pop",
-    bg: "#0F1210", card: "#171E18", border: "rgba(255,255,255,0.07)",
-    accent: "#39FF6A", accentText: "#0F1210", text: "#F0F5F1",
-    sub: "#8AAF90", muted: "#3D5C44", tabBg: "#0A0F0B",
-    swatch: "linear-gradient(135deg,#39FF6A 0%,#FF6B35 50%,#3D9BFF 100%)",
   },
 };
 const SHOP_ITEMS = [
