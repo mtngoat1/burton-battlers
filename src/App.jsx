@@ -506,7 +506,7 @@ function CoachNoteCard({ stats, currentPlayer, onJumpToLog }) {
     </button>
   );
 }
-            // ===================== Heat Streak =====================
+// ===================== Heat Streak =====================
 function getNightStreaks(stats) {
   const wins = stats
     .filter(g => g.mode === "3v3" && g.ourScore > g.theirScore)
@@ -821,12 +821,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
           );
         })}
       </div>
-
-      <div style={{...s.sectionLabel,marginTop:22}}>team mmr</div>
-      {PLAYERS.map((p)=>(
-        <MMRCard key={p.id} profile={mmrProfiles[p.id]} playerName={p.name} accent={p.color} onResync={()=>onResync(p.id)} resyncing={resyncingId===p.id} verifiedBadge/>
-      ))}
-    </div>
+    </div>      
   );
 }
 
@@ -1335,19 +1330,8 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       {assigning&&<AdminAssignTraining dateKeyStr={assigning.dateKeyStr} player={PLAYERS.find((p)=>p.id===assigning.playerId)} existing={trainingData[tKey(assigning.dateKeyStr,assigning.playerId)]} onSave={(data)=>saveTraining(assigning.dateKeyStr,assigning.playerId,data)} onClose={()=>setAssigning(null)}/>}
-      {settingMmrFor&&<AdminSetMMR player={PLAYERS.find((p)=>p.id===settingMmrFor)} existing={mmrProfiles[settingMmrFor]} onSave={(profile)=>saveMmr(settingMmrFor,profile)} onClose={()=>setSettingMmrFor(null)}/>}
   <VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP}/>
       <div style={s.adminHeader}><Shield size={16} color="#FF5C8A"/><span style={s.adminHeaderText}>captain controls</span></div>
-      <div style={s.sectionLabel}>set teammate mmr</div>
-      <div style={s.sectionSubLabel}>overrides synced data — captain-verified</div>
-      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:22}}>
-        {PLAYERS.filter((p)=>p.id!==ADMIN_ID).map((p)=>(
-          <button key={p.id} onClick={()=>setSettingMmrFor(p.id)} className="bb-pressable bb-glow-pink" style={s.adminPlayerRow}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}><div style={{width:8,height:8,borderRadius:99,background:p.color}}/><span style={{fontWeight:600}}>{p.name}</span></div>
-            <Edit3 size={14} color="#8B92A8"/>
-          </button>
-        ))}
-      </div>
       <div style={s.sectionLabel}>assign training</div>
       <div style={s.sectionSubLabel}>pick a teammate, tap a day</div>
       <div style={s.playerTabRow}>
@@ -2137,6 +2121,13 @@ const upd = [...myUpd, ...others];
     </div>
   );
 }    
+function getPassRewardForOwnedId(ownedId) {   // ← NEW LOCATION
+  const parts = ownedId.split("_");
+  const t = parts[1];
+  const tier = Number(parts[2]);
+  const rewards = t === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
+  return rewards[tier] || null;
+}
 // ===================== Garage Tab =====================
 function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed, passActiveBoosts }) {
   const [track, setTrack] = useState("free");
@@ -2344,15 +2335,6 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
           const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
           setPoints(upd);
           await storeSet("points", upd);
-        };
-
-        const getPassRewardForOwnedId = (ownedId) => {
-          // format: pass_free_5 or pass_premium_15
-          const parts = ownedId.split("_");
-          const t = parts[1];
-          const tier = Number(parts[2]);
-          const rewards = t === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
-          return rewards[tier] || null;
         };
 
         return (
