@@ -852,11 +852,65 @@ function HeatStreakCard({ stats, currentPlayer }) {
     </div>
   );
 }
+function TeamComparisonModal({ stats, currentPlayer, onClose }) {
+  const modeGames = stats.filter(g => g.mode === "3v3");
+  const avg = (arr, field) => arr.length ? (arr.reduce((s,g) => s+(g[field]||0),0)/arr.length).toFixed(1) : "—";
+  const winRate = (arr) => arr.length ? Math.round((arr.filter(g=>g.ourScore>g.theirScore).length/arr.length)*100)+"%" : "—";
+  const ALL_FIELDS = ["goals","assists","saves","shots","score","demos"];
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+          <ChevronLeft size={18}/>
+        </button>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>team comparison · 3v3</div>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+        {PLAYERS.map(p => {
+          const pg = modeGames.filter(g => g.playerId === p.id);
+          const wins = pg.filter(g => g.ourScore > g.theirScore).length;
+          const losses = pg.length - wins;
+          const isMe = p.id === currentPlayer;
+          return (
+            <div key={p.id} style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"18px 16px",marginBottom:14,border:`1px solid ${p.color}22`,boxShadow:isMe?`0 0 20px ${p.color}18`:"none"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:10,height:10,borderRadius:99,background:p.color,boxShadow:`0 0 8px ${p.color}99`}}/>
+                  <span style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:p.color}}>{p.name}</span>
+                  {isMe && <span style={{fontSize:9,color:p.color,fontWeight:700,background:`${p.color}22`,padding:"2px 7px",borderRadius:99}}>YOU</span>}
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:700,color:"#E8ECF4"}}>{wins}W – {losses}L</div>
+                  <div style={{fontSize:10,color:"#4A5066",marginTop:1}}>{pg.length} games · {winRate(pg)} win rate</div>
+                </div>
+              </div>
+              {pg.length === 0 ? (
+                <div style={{fontSize:13,color:"#4A5066",textAlign:"center",padding:"10px 0"}}>no 3v3 games logged yet</div>
+              ) : (
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  {ALL_FIELDS.map(f => (
+                    <div key={f} style={{background:"rgba(255,255,255,0.03)",borderRadius:12,padding:"10px 8px",textAlign:"center",border:"1px solid rgba(255,255,255,0.04)"}}>
+                      <div style={{fontSize:9,color:"#4A5066",fontWeight:700,textTransform:"uppercase",letterSpacing:0.6,marginBottom:6}}>{f}</div>
+                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:p.color}}>{avg(pg,f)}</div>
+                      <div style={{fontSize:9.5,color:"#4A5066",marginTop:3}}>per game</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 // ===================== Home Tab =====================
 function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
+  const [showTeamComparison, setShowTeamComparison] = useState(null);
   const record = schedule.league.reduce((acc,m)=>{
     if (!m.result) return acc;
     if (m.result.status==="win"||m.result.status==="forfeit_win"||m.result.status==="bye") acc.w++; else acc.l++;
@@ -869,6 +923,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
 
 return (
     <div className="bb-tab-content" style={s.tabContent}>
+     {showTeamComparison && <TeamComparisonModal stats={stats} currentPlayer={currentPlayer} onClose={()=>setShowTeamComparison(false)}/>}
       <div style={s.heroCard}>
         <div style={s.heroEyebrow}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
         {nextMatch ? (
@@ -927,7 +982,33 @@ return (
       <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
       <HeatStreakCard stats={stats} currentPlayer={currentPlayer} />
       <TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
-      <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
+      <button onClick={()=>setShowTeamComparison(true)} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
+  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+    <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1}}>TEAM COMPARISON · 3V3</div>
+    <ChevronRight size={14} color="#4A5066"/>
+  </div>
+  <div style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:8}}>
+    <div/>
+    {["goals","assists","saves","shots"].map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
+  </div>
+  {PLAYERS.map(p=>{
+    const pg = stats.filter(g=>g.playerId===p.id&&g.mode==="3v3");
+    const avg = (field) => pg.length ? (pg.reduce((s,g)=>s+(g[field]||0),0)/pg.length).toFixed(1) : "—";
+    return (
+      <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:5}}>
+          <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
+          <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
+        </div>
+        {["goals","assists","saves","shots"].map(f=>(
+          <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(f)}</div>
+        ))}
+      </div>
+    );
+  })}
+  <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>tap for full breakdown →</div>
+</button>
+        <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
     </div>
 );
 }
