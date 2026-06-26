@@ -1385,11 +1385,6 @@ const [toasts, setToasts] = useState([]);
   const [pushSub, setPushSub] = useState(null);
 const [themeId, setThemeId] = useState("default");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
-const [bannerDismissed,setBannerDismissed]=useState(false);
-const [pushSub, setPushSub] = useState(null);
-const [themeId, setThemeId] = useState("default");
-const theme = THEMES[themeId];
-const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const theme = THEMES[themeId];
 const addToast = (text, icon = "🔔") => {
   const id = Date.now().toString();
@@ -1500,8 +1495,6 @@ const badges = {
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
 
-  return (
-<div style={{...s.appShell, background:theme.bg, color:theme.text}}>
   return (
 <div style={{...s.appShell, background:theme.bg, color:theme.text}}>
       <GlobalStyles/>
