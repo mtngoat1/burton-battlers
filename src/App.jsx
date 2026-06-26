@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Home, Lock, Check, ChevronRight, Send, X, Plus, Minus, Trophy, Dumbbell,
   MessageCircle, LogOut, Shield, Edit3, ChevronLeft, Image as ImageIcon,
-  Heart, ClipboardCheck, Bell, ThumbsDown, ThumbsUp, Clock, Tv, Circle,
+  Heart, ClipboardCheck, Bell, ThumbsDown, ThumbsUp, Clock, Tv, Circle, BarChart2,
 } from "lucide-react";
 import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti } from "./lib/storage";
 
@@ -858,6 +858,7 @@ export default function App() {
   const [currentPlayer,setCurrentPlayer]=useState(null);
   const [loading,setLoading]=useState(false);
   const [tab,setTab]=useState("home");
+  const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats"];
   const [schedule,setSchedule]=useState({league:buildLeagueWeeks(),playoffs:buildPlayoffRounds()});
   const [mmrProfiles,setMmrProfiles]=useState({});
   const [trainingData,setTrainingData]=useState({});
@@ -866,6 +867,7 @@ export default function App() {
   const [comments,setComments]=useState({});
   const [posts,setPosts]=useState([]);
   const [streamProfiles,setStreamProfiles]=useState({});
+  const [stats,setStats]=useState([]);
   const [resyncingId,setResyncingId]=useState(null);
   const [resyncOverlay,setResyncOverlay]=useState(false);
   const [pendingResyncPlayer,setPendingResyncPlayer]=useState(null);
@@ -884,6 +886,7 @@ export default function App() {
       if (key === "schedule")       setSchedule(value);
       if (key === "comments")       setComments(value);
       if (key === "stream_profiles") setStreamProfiles(value);
+      if (key === "stats")           setStats(value);
     });
     return unsub;
   }, [currentPlayer]);
@@ -892,8 +895,8 @@ export default function App() {
 
   const loadSharedData=async(pid)=>{
     setLoading(true);
-    const [sched,training,comp,chat,cmts,pst,strm]=await Promise.all([
-      storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),
+       const [sched,training,comp,chat,cmts,pst,strm,sts]=await Promise.all([
+      storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),
     ]);
     if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
@@ -902,6 +905,7 @@ export default function App() {
     if (cmts) setComments(cmts);
     if (pst) setPosts(pst);
     if (strm) setStreamProfiles(strm);
+    if (sts) setStats(sts);
     const profiles={};
     for (const p of PLAYERS) { const profile=await getMMR(p.id); if(profile) profiles[p.id]=profile; }
     setMmrProfiles(profiles);
