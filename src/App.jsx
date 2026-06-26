@@ -102,7 +102,9 @@ function GlobalStyles() {
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600&family=Inter:wght@400;600;700&display=swap');
       @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes fadeSlideUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
-      @keyframes dropDown { from { transform:translateY(-100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+@keyframes dropDown { from { transform:translateY(-100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+      @keyframes chatSlideIn { from { transform:translateY(100%); } to { transform:translateY(0); } }
+      @keyframes chatFadeIn { from { opacity:0; } to { opacity:1; } }
       @keyframes heartPop { 0%{transform:scale(1)} 40%{transform:scale(1.35)} 100%{transform:scale(1)} }
       @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
       * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -274,93 +276,401 @@ function ReminderBanner({ incompleteDays, onJump, onDismiss }) {
   );
 }
 const CHALLENGE_FIELDS = ["goals","assists","saves","demos","shots"];
-function StatChallenges({ stats, currentPlayer, completions, setCompletions }) {
-  const avg = (pid, field) => {
-    const pg = stats.filter(g => g.playerId === pid && g.mode === "3v3");
-    return pg.length ? pg.reduce((s,g) => s+(g[field]||0), 0)/pg.length : 0;
-  };
+
+const ALL_CHALLENGES = [
+  // 3v3
+  { mode:"3v3", type:"avg", field:"goals",   target:2.5, desc:(t,r)=>`average ${t} goals/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
+  { mode:"3v3", type:"avg", field:"assists",  target:2.0, desc:(t,r)=>`average ${t} assists/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
+  { mode:"3v3", type:"avg", field:"saves",    target:3.0, desc:(t,r)=>`average ${t} saves/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
+  { mode:"3v3", type:"avg", field:"demos",    target:2.0, desc:(t,r)=>`average ${t} demos/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
+  { mode:"3v3", type:"avg", field:"shots",    target:3.5, desc:(t,r)=>`average ${t} shots/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
+  // 2v2
+  { mode:"2v2", type:"cumulative", field:"assists", target:10, desc:(t)=>`get ${t} total assists across your 2v2 games this week`, color:"#FF61C1" },
+  { mode:"2v2", type:"cumulative", field:"saves",   target:15, desc:(t)=>`rack up ${t} saves in 2v2 this week`, color:"#FF61C1" },
+  { mode:"2v2", type:"avg",        field:"goals",   target:2.0, desc:(t)=>`average ${t}+ goals per game in 2v2 this week`, color:"#FF61C1" },
+  { mode:"2v2", type:"winrate",    field:null,      target:0.6, desc:()=>`win more than 60% of your 2v2 games this week`, color:"#FF61C1" },
+  { mode:"2v2", type:"cumulative", field:"demos",   target:8,  desc:(t)=>`land ${t} demos in 2v2 this week`, color:"#FF61C1" },
+  // 1v1
+  { mode:"1v1", type:"streak",     field:null,      target:3,  desc:()=>`win 3 in a row in 1v1`, color:"#4D9EFF" },
+  { mode:"1v1", type:"avg",        field:"goals",   target:3.0, desc:(t)=>`average ${t}+ goals per game in 1v1 this week`, color:"#4D9EFF" },
+  { mode:"1v1", type:"cumulative", field:"shots",   target:20, desc:(t)=>`take ${t} total shots in 1v1 this week`, color:"#4D9EFF" },
+  { mode:"1v1", type:"avg",        field:"saves",   target:2.0, desc:(t)=>`average ${t}+ saves per game in 1v1`, color:"#4D9EFF" },
+  { mode:"1v1", type:"streak",     field:null,      target:3,  desc:()=>`score first in 3 consecutive 1v1 games`, color:"#4D9EFF" },
+];
+function getWeekStart() {
+  const d = new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+function getChallengeProgress(challenge, stats, playerId) {
+  const weekStart = getWeekStart();
+  const games = stats.filter(g =>
+    g.playerId === playerId &&
+    g.mode === challenge.mode &&
+    new Date(g.ts) >= weekStart
+  );
+
+  if (challenge.type === "avg") {
+    const val = games.length ? games.reduce((s,g) => s+(g[challenge.field]||0),0)/games.length : 0;
+    return { current: val, target: challenge.target, done: val >= challenge.target, display: val.toFixed(1) };
+  }
+  if (challenge.type === "cumulative") {
+    const val = games.reduce((s,g) => s+(g[challenge.field]||0),0);
+    return { current: val, target: challenge.target, done: val >= challenge.target, display: val };
+  }
+  if (challenge.type === "winrate") {
+    const wins = games.filter(g => g.ourScore > g.theirScore).length;
+    const rate = games.length ? wins/games.length : 0;
+    return { current: rate, target: challenge.target, done: rate >= challenge.target, display: `${Math.round(rate*100)}%` };
+  }
+  if (challenge.type === "streak") {
+    const sorted = [...games].sort((a,b) => new Date(a.ts)-new Date(b.ts));
+    let streak = 0;
+    for (let i = sorted.length-1; i >= 0; i--) {
+      if (sorted[i].ourScore > sorted[i].theirScore) streak++;
+      else break;
+    }
+    return { current: streak, target: challenge.target, done: streak >= challenge.target, display: streak };
+  }
+  return { current: 0, target: challenge.target, done: false, display: 0 };
+}
+
+function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, setCompletions }) {
+  const playerIdx = PLAYERS.findIndex(p => p.id === currentPlayer);
+  const weekNum = Math.floor(Date.now() / (WEEK_MS));
+  
+  // Pick a deterministic but varied challenge per player per week
+  const seed = weekNum * 31 + playerIdx * 7;
+  const challengeIdx = seed % ALL_CHALLENGES.length;
+  const challenge = ALL_CHALLENGES[challengeIdx];
+
+  // For 3v3 avg challenges find a rival
   const rivals = PLAYERS.filter(p => p.id !== currentPlayer);
-  const [fieldIdx, setFieldIdx] = useState(0);
-  const [rivalIdx, setRivalIdx] = useState(0);
+  const rival = rivals[seed % rivals.length];
+  const rivalGames = stats.filter(g => g.playerId === rival.id && g.mode === "3v3");
+  const rivalAvg = challenge.field && rivalGames.length
+    ? (rivalGames.reduce((s,g) => s+(g[challenge.field]||0),0)/rivalGames.length).toFixed(1)
+    : null;
 
-  const field = CHALLENGE_FIELDS[fieldIdx % CHALLENGE_FIELDS.length];
-  const rival = rivals[rivalIdx % rivals.length];
-  const myAvg = avg(currentPlayer, field);
-  const rivalAvg = avg(rival.id, field);
-  const target = Math.max(rivalAvg + 0.1, myAvg + 0.5);
-  const progress = target > 0 ? Math.min(1, myAvg / target) : 0;
-  const playerColor = PLAYERS.find(p=>p.id===currentPlayer)?.color || "#B8FF4D";
-  const myGames = stats.filter(g => g.playerId === currentPlayer && g.mode === "3v3");
-  const lastGame = myGames.length ? myGames[myGames.length-1] : null;
-  const lastVal = lastGame ? (lastGame[field]||0) : null;
+  const adjustedTarget = challenge.type === "avg" && rivalAvg
+    ? Math.max(Number(rivalAvg)+0.1, challenge.target)
+    : challenge.target;
 
-  const nextChallenge = () => {
-    setFieldIdx(f => (f+1) % CHALLENGE_FIELDS.length);
-    setRivalIdx(r => (r+1) % rivals.length);
+  const progress = getChallengeProgress({...challenge, target: adjustedTarget}, stats, currentPlayer);
+  const claimKey = `challenge_${currentPlayer}_${weekNum}_${challengeIdx}`;
+  const claimed = !!completions[claimKey];
+
+  const claimXP = async () => {
+    if (!progress.done || claimed) return;
+    const upd = {...completions, [claimKey]: true};
+    setCompletions(upd);
+    await storeSet("completions", upd);
+    const pxp = await storeGet("pass_xp") || {};
+    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+50};
+    setPassXP(updXP);
+    await storeSet("pass_xp", updXP);
   };
 
-  const challengeText = myAvg >= target
-    ? `🏆 challenge complete! you're averaging ${myAvg.toFixed(1)} ${field} — above ${rival.name}'s ${rivalAvg.toFixed(1)}`
-    : `average ${target.toFixed(1)} ${field}/game in 3v3 to beat ${rival.name}'s average (${rivalAvg.toFixed(1)})`;
+  const modeLabel = { "3v3":"3V3","2v2":"2V2","1v1":"1V1" }[challenge.mode];
+  const color = challenge.color;
+  const progressPct = Math.min(1, progress.current / adjustedTarget);
 
-  const done = myAvg >= target;
+  const descText = challenge.mode === "3v3" && rivalAvg
+    ? challenge.desc(adjustedTarget.toFixed(1), rival.name)
+    : challenge.desc(adjustedTarget);
 
   return (
     <div style={{marginBottom:20}}>
-      <div style={{...s.sectionLabel,marginBottom:10}}>stat challenge</div>
-      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${playerColor}22`,marginBottom:8}}>
-        <div style={{fontSize:11,color:playerColor,fontWeight:700,letterSpacing:0.8,marginBottom:8}}>CURRENT CHALLENGE · 3V3</div>
-        <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{challengeText}</div>
+      <div style={{...s.sectionLabel,marginBottom:10}}>weekly challenge</div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${color}22`,marginBottom:8}}>
+        
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+          <div style={{fontSize:10,color:color,fontWeight:700,letterSpacing:0.8}}>
+            {modeLabel} CHALLENGE
+          </div>
+          <div style={{width:6,height:6,borderRadius:99,background:color}}/>
+        </div>
 
-        {/* Progress bar */}
+        <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{descText}</div>
+
         <div style={{marginBottom:12}}>
           <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
-            <span>your avg: <span style={{color:playerColor,fontWeight:700}}>{myAvg.toFixed(1)}</span></span>
-            <span>target: <span style={{color:"#E8ECF4",fontWeight:700}}>{target.toFixed(1)}</span></span>
+            <span>progress: <span style={{color,fontWeight:700}}>{progress.display}</span></span>
+            <span>target: <span style={{color:"#E8ECF4",fontWeight:700}}>{challenge.type==="winrate"?"60%":adjustedTarget}</span></span>
           </div>
           <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
-            <div style={{height:"100%",width:`${progress*100}%`,background:done?"#7CFFB2":playerColor,borderRadius:99,transition:"width .4s ease",boxShadow:done?`0 0 8px #7CFFB299`:`0 0 8px ${playerColor}88`}}/>
+            <div style={{height:"100%",width:`${progressPct*100}%`,background:progress.done?"#7CFFB2":color,borderRadius:99,transition:"width .4s ease",boxShadow:progress.done?`0 0 8px #7CFFB299`:`0 0 8px ${color}88`}}/>
           </div>
-          {lastVal!==null&&<div style={{fontSize:11,color:"#4A5066",marginTop:4}}>last game: {lastVal} {field}</div>}
         </div>
 
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>setFieldIdx(f=>(f+1)%CHALLENGE_FIELDS.length)} className="bb-pressable"
-            style={{flex:1,background:"rgba(255,255,255,0.06)",border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer"}}>
-            next challenge →
+        {progress.done && !claimed && (
+          <button onClick={claimXP} className="bb-pressable bb-glow-lime"
+            style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
+            🏆 claim +50 pass xp
           </button>
-          {done&&<button onClick={nextChallenge} className="bb-pressable bb-glow-lime"
-            style={{flex:1,background:playerColor,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
-            claim & next 🏆
-          </button>}
-        </div>
-        <div style={{fontSize:11,color:"#4A5066",marginTop:8}}>progress updates automatically when you log 3v3 games</div>
+        )}
+        {claimed && (
+          <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +50 xp claimed this week</div>
+        )}
+
+        <div style={{fontSize:11,color:"#4A5066"}}>resets weekly · logs from {challenge.mode} games only</div>
       </div>
 
-      {/* Mini leaderboard */}
-      <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
-        <div style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:8}}>
-          <div/>
-          {CHALLENGE_FIELDS.map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
-        </div>
-        {PLAYERS.map(p=>(
-          <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
-              <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
-            </div>
-            {CHALLENGE_FIELDS.map(f=>{
-              const val = avg(p.id, f);
-              return <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{val>0?val.toFixed(1):"—"}</div>;
-            })}
+      {/* Mini leaderboard — only for 3v3 avg challenges */}
+      {challenge.mode === "3v3" && challenge.type === "avg" && (
+        <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+          <div style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:8}}>
+            <div/>
+            {CHALLENGE_FIELDS.map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
           </div>
-        ))}
-      </div>
+          {PLAYERS.map(p=>{
+            const pg = stats.filter(g => g.playerId===p.id && g.mode==="3v3");
+            const avg = (field) => pg.length ? (pg.reduce((s,g)=>s+(g[field]||0),0)/pg.length).toFixed(1) : "—";
+            return (
+              <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
+                  <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
+                </div>
+                {CHALLENGE_FIELDS.map(f=>(
+                  <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(f)}</div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
+            // ===================== Coach Note =====================
+function getCoachNote(stats, playerId) {
+  const yesterday = new Date(todayAtMidnight().getTime() - DAY_MS);
+  const ydKey = dateKey(yesterday);
+  const lastNightGames = stats.filter(g =>
+    g.playerId === playerId &&
+    g.mode === "3v3" &&
+    dateKey(new Date(g.ts)) === ydKey
+  );
+  if (!lastNightGames.length) return null;
+
+  const avg = (field) => lastNightGames.reduce((s, g) => s + (g[field] || 0), 0) / lastNightGames.length;
+  const wins = lastNightGames.filter(g => g.ourScore > g.theirScore).length;
+  const losses = lastNightGames.length - wins;
+  const avgGoals = avg("goals");
+  const avgAssists = avg("assists");
+  const avgSaves = avg("saves");
+  const avgDemos = avg("demos");
+  const avgShots = avg("shots");
+  const avgScore = avg("score");
+
+  let note = null;
+
+  if (wins >= 3 && losses === 0) {
+    note = { text: "you were locked in last night — keep that same energy, don't change anything.", emoji: "🔥" };
+  } else if (losses > wins) {
+    if (avgScore > 400) {
+      note = { text: "your numbers were good last night but the W's weren't there — focus on team plays today.", emoji: "🤝" };
+    } else {
+      note = { text: "rough night last night — reset and focus on one thing today, don't try to do everything at once.", emoji: "🧘" };
+    }
+  } else if (avgAssists > avgGoals && avgAssists > 1.5) {
+    note = { text: "you set up a lot last night — try being more selfish today, take the shots yourself.", emoji: "🎯" };
+  } else if (avgGoals > 2) {
+    note = { text: "you were on fire last night — try carrying that aggression into solo queue today.", emoji: "⚡" };
+  } else if (avgSaves > 3) {
+    note = { text: "you were doing a lot of defending last night — work on rotating faster so you're not always last back.", emoji: "🔄" };
+  } else if (avgDemos > 2) {
+    note = { text: "you were playing aggressively last night — channel that into positioning today instead.", emoji: "📍" };
+  } else if (avgShots < 1) {
+    note = { text: "you weren't shooting much last night — challenge yourself to take at least 2 shots per game today.", emoji: "🏹" };
+  } else {
+    note = { text: "solid session last night — keep building on it today.", emoji: "📈" };
+  }
+
+  return { ...note, date: ydKey, games: lastNightGames };
+}
+
+function CoachNoteCard({ stats, currentPlayer, onJumpToLog }) {
+  const note = getCoachNote(stats, currentPlayer);
+  if (!note) return null;
+  const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
+
+  return (
+    <button onClick={() => onJumpToLog(note.date)} className="bb-pressable" style={{ width: "100%", background: "linear-gradient(135deg,#0E1020,#0A0C1A)", border: `1px solid ${playerColor}22`, borderRadius: 16, padding: "14px 16px", marginBottom: 16, textAlign: "left", cursor: "pointer" }}>
+      <div style={{ fontSize: 10, color: playerColor, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>COACH NOTE · {new Date(note.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase()}</div>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+        <span style={{ fontSize: 22, flexShrink: 0 }}>{note.emoji}</span>
+        <div>
+          <div style={{ fontSize: 13.5, color: "#E8ECF4", lineHeight: 1.5 }}>{note.text}</div>
+          <div style={{ fontSize: 11, color: "#4A5066", marginTop: 6 }}>{note.games.length} games logged · tap to view</div>
+        </div>
+      </div>
+    </button>
+  );
+}
+            // ===================== Heat Streak =====================
+function getNightStreaks(stats) {
+  const wins = stats
+    .filter(g => g.mode === "3v3" && g.ourScore > g.theirScore)
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+  const byDay = {};
+  wins.forEach(g => {
+    const dk = dateKey(new Date(g.ts));
+    if (!byDay[dk]) byDay[dk] = [];
+    byDay[dk].push(g);
+  });
+
+  const streaks = [];
+  Object.entries(byDay).forEach(([dk, games]) => {
+    const allGames = stats
+      .filter(g => g.mode === "3v3" && dateKey(new Date(g.ts)) === dk)
+      .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+    const uniqueTimes = [...new Set(allGames.map(g => g.ts))].sort();
+    let consecutive = 0;
+    let streakGames = [];
+
+    uniqueTimes.forEach(ts => {
+      const gamesAtTime = allGames.filter(g => g.ts === ts);
+      const isWin = gamesAtTime.some(g => g.ourScore > g.theirScore);
+      if (isWin) {
+        consecutive++;
+        streakGames.push({ ts, games: gamesAtTime });
+      } else {
+        if (consecutive >= 3) {
+          streaks.push({ dk, games: streakGames, peak: consecutive });
+        }
+        consecutive = 0;
+        streakGames = [];
+      }
+    });
+    if (consecutive >= 3) {
+      streaks.push({ dk, games: streakGames, peak: consecutive });
+    }
+  });
+
+  return streaks.sort((a, b) => new Date(b.dk) - new Date(a.dk));
+}
+
+function heatMultiplier(wins) {
+  if (wins >= 6) return 10;
+  if (wins >= 5) return 7;
+  if (wins >= 4) return 4;
+  if (wins >= 3) return 2;
+  return 1;
+}
+
+function HeatStreakCard({ stats, currentPlayer }) {
+  const todayDk = dateKey(todayAtMidnight());
+  const allStreaks = getNightStreaks(stats);
+  const todayStreak = allStreaks.find(s => s.dk === todayDk);
+  const history = allStreaks.filter(s => s.dk !== todayDk);
+  const [expanded, setExpanded] = useState(null);
+
+  const mult = todayStreak ? heatMultiplier(todayStreak.peak) : 1;
+  const flames = ["🔥","🔥🔥","🔥🔥🔥","🔥🔥🔥🔥"];
+  const flameIdx = Math.min(3, Math.max(0, todayStreak ? todayStreak.peak - 3 : 0));
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      {todayStreak && (
+        <div style={{ background: "linear-gradient(135deg,#1A0A00,#2A1000)", border: "1px solid rgba(255,140,50,0.4)", borderRadius: 18, padding: "16px", marginBottom: 14, boxShadow: "0 0 24px rgba(255,140,50,0.15)" }}>
+          <div style={{ fontSize: 11, color: "#FF8C32", fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>HEAT STREAK — TONIGHT {flames[flameIdx]}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 32, fontWeight: 700, color: "#FF8C32" }}>{todayStreak.peak}<span style={{ fontSize: 14, color: "#8B92A8", marginLeft: 6 }}>wins</span></div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 24, fontWeight: 700, color: "#FFD166" }}>{mult}x</div>
+              <div style={{ fontSize: 10, color: "#8B92A8" }}>pass xp bonus</div>
+            </div>
+          </div>
+          {todayStreak.games.map((slot, i) => {
+            const rep = slot.games[0];
+            const won = rep.ourScore > rep.theirScore;
+            return (
+              <div key={i} style={{ background: "rgba(255,140,50,0.06)", borderRadius: 11, padding: "10px 12px", marginBottom: 6, border: "1px solid rgba(255,140,50,0.15)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700 }}>{rep.ourScore}–{rep.theirScore}</div>
+                  <div style={{ fontSize: 10, color: won ? "#7CFFB2" : "#FF5C8A", fontWeight: 700 }}>W · game {i + 1}</div>
+                </div>
+                {PLAYERS.map(p => {
+                  const pg = slot.games.find(g => g.playerId === p.id);
+                  return (
+                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                      <div style={{ width: 6, height: 6, borderRadius: 99, background: pg ? p.color : "#2E3346", flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, fontWeight: 700, color: pg ? p.color : "#4A5066", width: 70 }}>{p.name}</span>
+                      {pg ? (
+                        <span style={{ fontSize: 11, color: "#8B92A8" }}>{pg.goals}g {pg.assists}a {pg.saves}sv {pg.demos}dm</span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: "#4A5066", fontStyle: "italic" }}>didn't log</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <>
+          <div style={{ fontSize: 12, letterSpacing: 1, color: "#4A5066", fontWeight: 700, marginBottom: 10 }}>PAST HEAT STREAKS</div>
+          {history.map((streak, si) => {
+            const isOpen = expanded === si;
+            const m = heatMultiplier(streak.peak);
+            return (
+              <div key={si} style={{ background: "#11131F", borderRadius: 14, marginBottom: 8, border: "1px solid rgba(255,140,50,0.15)", overflow: "hidden" }}>
+                <button onClick={() => setExpanded(isOpen ? null : si)} className="bb-pressable" style={{ width: "100%", background: "none", border: "none", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                  <div style={{ textAlign: "left" }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#FF8C32" }}>{new Date(streak.dk + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} 🔥</div>
+                    <div style={{ fontSize: 11, color: "#8B92A8", marginTop: 2 }}>{streak.peak} win streak · peak {m}x xp</div>
+                  </div>
+                  <ChevronRight size={15} color="#4A5066" style={{ transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
+                </button>
+                {isOpen && (
+                  <div style={{ padding: "0 14px 14px" }}>
+                    {streak.games.map((slot, i) => {
+                      const rep = slot.games[0];
+                      return (
+                        <div key={i} style={{ background: "rgba(255,140,50,0.04)", borderRadius: 10, padding: "10px 12px", marginBottom: 6, border: "1px solid rgba(255,140,50,0.1)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700 }}>{rep.ourScore}–{rep.theirScore}</div>
+                            <div style={{ fontSize: 10, color: "#7CFFB2", fontWeight: 700 }}>W · game {i + 1} · {heatMultiplier(i + 3)}x</div>
+                          </div>
+                          {PLAYERS.map(p => {
+                            const pg = slot.games.find(g => g.playerId === p.id);
+                            return (
+                              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                                <div style={{ width: 6, height: 6, borderRadius: 99, background: pg ? p.color : "#2E3346", flexShrink: 0 }} />
+                                <span style={{ fontSize: 11, fontWeight: 700, color: pg ? p.color : "#4A5066", width: 70 }}>{p.name}</span>
+                                {pg ? (
+                                  <span style={{ fontSize: 11, color: "#8B92A8" }}>{pg.goals}g {pg.assists}a {pg.saves}sv {pg.demos}dm</span>
+                                ) : (
+                                  <span style={{ fontSize: 11, color: "#4A5066", fontStyle: "italic" }}>didn't log</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+            
 // ===================== Home Tab =====================
-function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions }) {
+function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
@@ -395,7 +705,9 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
         <div style={s.recordBox}><div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div><div style={s.recordLabel}>goal diff</div></div>
         <div style={s.recordBox}><div style={s.recordNum}>{record.gf}</div><div style={s.recordLabel}>goals for</div></div>
       </div>
-<StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions}/>
+<CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
+<HeatStreakCard stats={stats} currentPlayer={currentPlayer} />
+<StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
         <button onClick={onGotoTraining} className="bb-pressable" style={s.viewAllBtn}>view all <ChevronRight size={12}/></button>
@@ -613,8 +925,10 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
       const pts=await storeGet("points")||{};
       const pid=key.split("__")[1];
       await storeSet("points",{...pts,[pid]:(pts[pid]||0)+15});
-      const pxp=await storeGet("pass_xp")||{};
-      const updXP={...pxp,[pid]:(pxp[pid]||0)+20};
+   const pxp=await storeGet("pass_xp")||{};
+      const activeBoosts=await storeGet("pass_active_boosts")||{};
+      const mult=getActiveBoostMultiplier(pid,activeBoosts);
+      const updXP={...pxp,[pid]:(pxp[pid]||0)+20*mult};
       setPassXP(updXP); await storeSet("pass_xp",updXP);
     }
     setNoteDraft((d)=>{ const n={...d}; delete n[key]; return n; });
@@ -990,37 +1304,21 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   const [theirScore,setTheirScore]=useState("");
     const [fields,setFields]=useState({goals:"",assists:"",saves:"",demos:"",shots:"",score:""});
   const set=(f,v)=>setFields(p=>({...p,[f]:v}));
-  const save=()=>{
-    if(ourScore===""||theirScore==="")return;
-       onSave({id:Date.now().toString(),playerId:currentPlayer,mode,ourScore:Number(ourScore),theirScore:Number(theirScore),goals:Number(fields.goals)||0,assists:Number(fields.assists)||0,saves:Number(fields.saves)||0,demos:Number(fields.demos)||0,shots:Number(fields.shots)||0,score:Number(fields.score)||0,ts:new Date().toISOString()});
-    onClose();
-  };
-  return (
-    <div style={s.modalOverlay} onClick={onClose}><div style={s.modalBox} onClick={e=>e.stopPropagation()}>
-      <div style={s.modalHeader}><div style={s.modalTitle}>log {mode} game</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
-      <div style={s.modalLabel}>final score</div>
-      <div style={s.modalScoreRow}>
-        <div style={{flex:1}}><div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,marginBottom:6}}>us</div><input type="number" value={ourScore} onChange={e=>setOurScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
-        <div style={{alignSelf:"flex-end",paddingBottom:12,color:"#4A5066",fontWeight:700,fontSize:18,padding:"0 8px"}}>–</div>
-        <div style={{flex:1}}><div style={{fontSize:11,color:"#FF5C8A",fontWeight:700,marginBottom:6}}>them</div><input type="number" value={theirScore} onChange={e=>setTheirScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
-      </div>
-      <div style={s.modalLabel}>your stats</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
-        {STAT_FIELDS.map(f=>(
-          <div key={f}>
-            <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>
-            <input type="number" value={fields[f]} onChange={e=>set(f,e.target.value)} placeholder="0" style={s.modalInput}/>
-          </div>
-        ))}
-      </div>
-      <button onClick={save} disabled={ourScore===""||theirScore===""} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:16,opacity:ourScore===""||theirScore===""?0.4:1}}>save game</button>
-    </div></div>
-  );
-}
-
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP }) {
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
+  const [showAllGames, setShowAllGames]=useState(false);
+useEffect(() => {
+  if (jumpDate) {
+    setMode("3v3");
+    setShowAllGames(true);
+    setTimeout(() => {
+      document.getElementById(`gamelog-${jumpDate}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      onJumpHandled();
+    }, 100);
+  }
+}, [jumpDate]);
+
 const saveGame=async(entry)=>{
   const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd);
   const pts=await storeGet("points")||{};
@@ -1041,7 +1339,19 @@ const saveGame=async(entry)=>{
   await storeSet("bets",resolvedBets);
 await storeSet("points",{...pts,[currentPlayer]:cur});
   const pxp=await storeGet("pass_xp")||{};
-  const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+15};
+  const activeBoosts=await storeGet("pass_active_boosts")||{};
+  const mult=getActiveBoostMultiplier(currentPlayer,activeBoosts);
+const todayDk = dateKey(new Date(entry.ts));
+const todayWins = upd.filter(g => g.mode === "3v3" && g.playerId === currentPlayer && dateKey(new Date(g.ts)) === todayDk && g.ourScore > g.theirScore);
+const allTodayGames = upd.filter(g => g.mode === "3v3" && dateKey(new Date(g.ts)) === todayDk);
+let streak = 0;
+for (let i = allTodayGames.length - 1; i >= 0; i--) {
+  if (allTodayGames[i].ourScore > allTodayGames[i].theirScore) streak++;
+  else break;
+}
+const heatMult = heatMultiplier(streak);
+const finalMult = mult * heatMult;
+const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+15*finalMult};
   setPassXP(updXP); await storeSet("pass_xp",updXP);
 };
   const modeGames=stats.filter(g=>g.mode===mode);
@@ -1114,7 +1424,43 @@ await storeSet("points",{...pts,[currentPlayer]:cur});
         </>
       )}
       <div style={{...s.sectionLabel,marginBottom:10}}>your game log</div>
-      {[...myGames].reverse().map(g=>{
+     {[...myGames].reverse().slice(0, showAllGames ? undefined : 5).map(g=>{
+  const gdk = dateKey(new Date(g.ts));
+        const won=g.ourScore>g.theirScore;
+        return (
+        <div key={g.id} id={`gamelog-${gdk}`} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700}}>{g.ourScore} – {g.theirScore}</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",background:won?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.1)",padding:"3px 8px",borderRadius:99}}>{won?"WIN":"LOSS"}</div>
+                <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(g.ts)}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:12}}>
+              {STAT_FIELDS.map(f=>(
+                <div key={f} style={{textAlign:"center"}}>
+                  <div style={{fontSize:9.5,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:playerColor}}>{g[f]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {myGames.length > 5 && (
+        <button onClick={()=>setShowAllGames(v=>!v)} className="bb-pressable"
+          style={{width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer",marginTop:4}}>
+          {showAllGames ? `▲ show less` : `▼ show all ${myGames.length} games`}
+        </button>
+      )}
+    </div>
+  );
+}
+        </button>
+      )}
+    </>
+  );
+})()}
         const won=g.ourScore>g.theirScore;
         return (
           <div key={g.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
@@ -1364,6 +1710,14 @@ function tierFromXP(xp, cap) {
   const tier = Math.min(cap, Math.floor(xp / XP_PER_TIER));
   const xpIntoTier = xp - tier * XP_PER_TIER;
   return { tier, xpIntoTier, xpForNext: XP_PER_TIER };
+}
+const DOUBLE_XP_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+function getActiveBoostMultiplier(playerId, activeBoosts) {
+  const boost = activeBoosts?.[playerId];
+  if (!boost) return 1;
+  if (boost.type !== "double_xp") return 1;
+  if (Date.now() > new Date(boost.expiresAt).getTime()) return 1;
+  return 2;
 }
 function isOnline(ts) {
   if (!ts) return false;
@@ -1722,9 +2076,11 @@ const upd = [...myUpd, ...others];
   );
 }    
 // ===================== Garage Tab =====================
-function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed }) {
+function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed, passActiveBoosts }) {
   const [track, setTrack] = useState("free");
   const [claimResult, setClaimResult] = useState(null);
+  const [selectedToken, setSelectedToken] = useState(null);
+  const passActiveBoostsLocal = passActiveBoosts;
 
   const myXP = passXP?.[currentPlayer] || 0;
   const isPremium = !!passPremium?.[currentPlayer];
@@ -1967,22 +2323,109 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
         );
       })()}
       {/* Token inventory */}
+{/* Token inventory */}
       {myTokens.length > 0 && (
         <div style={{ marginTop: 24 }}>
           <div style={{ ...s.sectionLabel, marginBottom: 10 }}>your tokens</div>
           <div style={{ background: "#11131F", borderRadius: 14, padding: 14, border: "1px solid rgba(255,255,255,0.05)" }}>
             {myTokens.map((tok, i) => (
-              <div key={tok.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: i < myTokens.length - 1 ? 10 : 0, paddingBottom: i < myTokens.length - 1 ? 10 : 0, borderBottom: i < myTokens.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+              <button key={tok.id} onClick={()=>setSelectedToken(tok)} className="bb-pressable" style={{ width:"100%", background:"none", border:"none", textAlign:"left", cursor:"pointer", display: "flex", alignItems: "center", gap: 10, marginBottom: i < myTokens.length - 1 ? 10 : 0, paddingBottom: i < myTokens.length - 1 ? 10 : 0, borderBottom: i < myTokens.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
                 <span style={{ fontSize: 18 }}>🎟</span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700 }}>{tok.label}</div>
-                  <div style={{ fontSize: 10, color: "#4A5066", marginTop: 1 }}>earned {fmtRelTime(tok.earnedAt)}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color:"#E8ECF4" }}>{tok.label}</div>
+                  <div style={{ fontSize: 10, color: "#4A5066", marginTop: 1 }}>earned {fmtRelTime(tok.earnedAt)} · tap to view</div>
                 </div>
-              </div>
+                <ChevronRight size={15} color="#4A5066"/>
+              </button>
             ))}
           </div>
         </div>
       )}
+      {selectedToken && (
+        <TokenDetailModal
+          token={selectedToken}
+          currentPlayer={currentPlayer}
+          passTokens={passTokens}
+          setPassTokens={setPassTokens}
+          activeBoost={passActiveBoostsLocal?.[currentPlayer]}
+          onClose={()=>setSelectedToken(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function TokenDetailModal({ token, currentPlayer, passTokens, setPassTokens, activeBoost, onClose }) {
+  const [activating, setActivating] = useState(false);
+  const isDoubleXp = token.type === "double_xp";
+  const alreadyActive = activeBoost && activeBoost.type === "double_xp" && Date.now() < new Date(activeBoost.expiresAt).getTime();
+  const [remaining, setRemaining] = useState(0);
+
+  useEffect(() => {
+    if (!alreadyActive) return;
+    const iv = setInterval(() => {
+      setRemaining(Math.max(0, new Date(activeBoost.expiresAt).getTime() - Date.now()));
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [alreadyActive, activeBoost]);
+
+  const fmtRemaining = (ms) => {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    const sec = Math.floor((ms % 60000) / 1000);
+    return `${h}h ${m}m ${sec}s`;
+  };
+
+  const activate = async () => {
+    if (alreadyActive || activating) return;
+    setActivating(true);
+    const now = Date.now();
+    const expiresAt = new Date(now + DOUBLE_XP_DURATION_MS).toISOString();
+    const activeBoosts = await storeGet("pass_active_boosts") || {};
+    const updBoosts = { ...activeBoosts, [currentPlayer]: { type: token.type, label: token.label, activatedAt: new Date(now).toISOString(), expiresAt } };
+    await storeSet("pass_active_boosts", updBoosts);
+    // consume the token (one-time use)
+    const myTokens = passTokens?.[currentPlayer] || [];
+    const updTokens = { ...passTokens, [currentPlayer]: myTokens.filter(t => t.id !== token.id) };
+    setPassTokens(updTokens);
+    await storeSet("pass_tokens", updTokens);
+    setActivating(false);
+    onClose();
+  };
+
+  return (
+    <div style={s.modalOverlay} onClick={onClose}>
+      <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={s.modalHeader}>
+          <div style={s.modalTitle}>🎟 {token.label}</div>
+          <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20} /></button>
+        </div>
+        {isDoubleXp ? (
+          <>
+            <div style={{ fontSize: 13.5, color: "#A8B2C4", lineHeight: 1.5, marginBottom: 16 }}>
+              activating this doubles all your battle pass xp — training approvals (+20 → +40) and logged games (+15 → +30) — for the next 24 hours. one-time use.
+            </div>
+            {alreadyActive ? (
+              <>
+                <div style={{ background: "rgba(167,139,250,0.1)", border: "1px solid rgba(167,139,250,0.3)", borderRadius: 12, padding: 14, textAlign: "center", marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: "#A78BFA", fontWeight: 700, marginBottom: 6 }}>DOUBLE XP ALREADY ACTIVE</div>
+                  <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 20, fontWeight: 700, color: "#E8ECF4" }}>{fmtRemaining(remaining)}</div>
+                  <div style={{ fontSize: 10.5, color: "#4A5066", marginTop: 4 }}>remaining</div>
+                </div>
+                <div style={{ fontSize: 11.5, color: "#4A5066", textAlign: "center" }}>this token is still in your inventory — use it after your current boost ends.</div>
+              </>
+            ) : (
+              <button onClick={activate} disabled={activating} className="bb-pressable bb-glow-violet" style={{ width: "100%", background: "#A78BFA", color: "#06070D", border: "none", borderRadius: 12, padding: 14, fontSize: 13.5, fontWeight: 700, cursor: "pointer", opacity: activating ? 0.6 : 1 }}>
+                {activating ? "activating…" : "activate double xp — 24h"}
+              </button>
+            )}
+          </>
+        ) : (
+          <div style={{ fontSize: 13.5, color: "#A8B2C4", lineHeight: 1.5 }}>
+            {token.type === "training_skip" ? "use this to skip a single assigned training session without it counting against you — show this to your captain." : token.type === "coaching_session" ? "redeem this with your captain for a 1-on-1 coaching session." : "a reward token earned from the battle pass."}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -2003,7 +2446,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -2083,51 +2526,53 @@ function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
   const [spinning, setSpinning] = useState(false);
   const [spinResult, setSpinResult] = useState(null);
   const [rotation, setRotation] = useState(0);
-  const [propWager, setPropWager] = useState(10);
+const [propWager, setPropWager] = useState(10);
   const [selectedProp, setSelectedProp] = useState(null);
   const [propSide, setPropSide] = useState(null);
+  const [lineIndexByProp, setLineIndexByProp] = useState({}); // { [propId]: index into lineOptions }
 
   const myPoints = points?.[currentPlayer] || 0;
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
 
   // Build player props from stats
+const PROP_FIELD_CONFIG = {
+    goals:   { lines: [0.5, 1.5, 2.5, 3.5] },
+    assists: { lines: [0.5, 1.5, 2.5] },
+    saves:   { lines: [0.5, 1.5, 2.5, 3.5] },
+    shots:   { lines: [0.5, 1.5, 2.5, 3.5, 4.5] },
+    demos:   { lines: [0.5, 1.5, 2.5] },
+  };
+
+  // Build one prop "card" per player+stat, with all candidate lines and per-line odds precomputed.
+  // The card itself doesn't lock a line — the user picks one via the slider in the UI.
   const buildProps = () => {
-    const props = [];
-    const lines = [
-      { field: "goals", lines: [0.5, 1.5, 2.5] },
-      { field: "assists", lines: [0.5, 1.5] },
-      { field: "saves", lines: [0.5, 1.5, 2.5] },
-      { field: "shots", lines: [1.5, 2.5, 3.5] },
-      { field: "demos", lines: [0.5, 1.5] },
-    ];
+    const cards = [];
     PLAYERS.filter(p => p.id !== currentPlayer).forEach(player => {
       const pg = stats.filter(g => g.playerId === player.id && g.mode === "3v3");
       if (pg.length < 1) return;
-      lines.forEach(({ field, lines: lineVals }) => {
+      Object.entries(PROP_FIELD_CONFIG).forEach(([field, { lines: lineVals }]) => {
         const avg = pg.reduce((s, g) => s + (g[field] || 0), 0) / pg.length;
-        lineVals.forEach(line => {
+        const lineOptions = lineVals.map(line => {
           const overCount = pg.filter(g => (g[field] || 0) > line).length;
           const overPct = pg.length > 0 ? overCount / pg.length : 0.5;
           const underPct = 1 - overPct;
-          const overOdds = calcOdds(Math.max(0.1, Math.min(0.9, overPct)));
-          const underOdds = calcOdds(Math.max(0.1, Math.min(0.9, underPct)));
-          props.push({
-            id: `${player.id}_${field}_${line}`,
-            playerId: player.id,
-            playerName: player.name,
-            playerColor: player.color,
-            field,
-            line,
-            avg: avg.toFixed(1),
-            overPct,
-            underPct,
-            overOdds,
-            underOdds,
-          });
+          const overOdds = calcOdds(Math.max(0.08, Math.min(0.92, overPct)));
+          const underOdds = calcOdds(Math.max(0.08, Math.min(0.92, underPct)));
+          return { line, overPct, underPct, overOdds, underOdds };
+        });
+        cards.push({
+          id: `${player.id}_${field}`,
+          playerId: player.id,
+          playerName: player.name,
+          playerColor: player.color,
+          field,
+          avg: avg.toFixed(1),
+          gamesPlayed: pg.length,
+          lineOptions, // array of {line, overPct, underPct, overOdds, underOdds}
         });
       });
     });
-    return props;
+    return cards;
   };
 
   const props = buildProps();
@@ -2139,11 +2584,21 @@ function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
     setSpinning(true);
     setSpinResult(null);
     const seg = pickSegment();
-    const spins = 5 + Math.random() * 3;
-    const segIdx = WHEEL_SEGMENTS.indexOf(seg);
-    const segAngle = 360 / WHEEL_SEGMENTS.length;
-    const targetAngle = spins * 360 + segIdx * segAngle + Math.random() * segAngle;
-    setRotation(prev => prev + targetAngle);
+const spins = 5 + Math.random() * 3;
+const segIdx = WHEEL_SEGMENTS.indexOf(seg);
+const segAngle = 360 / WHEEL_SEGMENTS.length;
+// Segment i sits at angle (i * segAngle) measured from 12 o'clock, clockwise.
+// To bring that segment's center UNDER the fixed pointer at 12 o'clock,
+// we need to rotate the wheel by the negative of that angle (plus full spins).
+const segCenterAngle = segIdx * segAngle + segAngle / 2;
+const jitter = (Math.random() - 0.5) * (segAngle * 0.6); // stay within the wedge, off-center a bit
+const targetAngle = spins * 360 - segCenterAngle - jitter;
+setRotation(prev => {
+  // normalize so we always spin forward a fresh amount from current visual position
+  const current = prev % 360;
+  const delta = ((targetAngle - current) % 360 + 360) % 360 + spins * 360;
+  return prev + delta;
+});
     setTimeout(async () => {
       const payout = Math.round(wager * seg.mult);
       const net = payout - wager;
@@ -2156,25 +2611,29 @@ function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
     }, 3000);
   };
 
-  const placeBet = async () => {
+const placeBet = async (chosenLine) => {
     if (!selectedProp || !propSide || propWager < 1 || myPoints < propWager) return;
-    const prop = props.find(p => p.id === selectedProp);
-    if (!prop) return;
-    const odds = propSide === "over" ? prop.overOdds : prop.underOdds;
+    const card = props.find(p => p.id === selectedProp);
+    if (!card) return;
+    const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor(card.lineOptions.length/2);
+    const current = card.lineOptions[lineIdx];
+    const line = chosenLine ?? current.line;
+    const odds = propSide === "over" ? current.overOdds : current.underOdds;
     const payout = calcPayout(propWager, odds.decimal);
     const bet = {
       id: Date.now().toString(),
       bettorId: currentPlayer,
-      playerId: prop.playerId,
-      playerName: prop.playerName,
-      field: prop.field,
-      line: prop.line,
+      playerId: card.playerId,
+      playerName: card.playerName,
+      field: card.field,
+      line,
       side: propSide,
       wager: propWager,
       payout,
       odds: odds.american,
       status: "open",
       placedAt: new Date().toISOString(),
+
     };
     const newPts = myPoints - propWager;
     const upd = { ...points, [currentPlayer]: newPts };
@@ -2292,35 +2751,100 @@ function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
       )}
 
       {/* PROPS */}
+   {/* PROPS */}
       {section==="props"&&(
         <div>
-          <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>bet on your teammates' stats. odds are based on their actual averages. resolves when they log a 3v3 game.</div>
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>bet on your teammates' stats. drag the line to set your bet — odds update live based on their actual averages. resolves when they log a 3v3 game.</div>
           {props.length===0&&<div style={s.emptyQueue}>not enough game data yet — props unlock after teammates log 3v3 games.</div>}
-          {props.map(prop=>{
-            const isSelected = selectedProp===prop.id;
+          {props.map(card=>{
+            const lineIdx = lineIndexByProp[card.id] ?? Math.floor(card.lineOptions.length/2);
+            const current = card.lineOptions[lineIdx];
+            const isSelected = selectedProp===card.id;
             return (
-              <div key={prop.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${isSelected?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.05)"}`}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                  <div style={{width:8,height:8,borderRadius:99,background:prop.playerColor}}/>
-                  <span style={{fontWeight:700,fontSize:13,color:prop.playerColor}}>{prop.playerName}</span>
-                  <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>avg: {prop.avg}</span>
+              <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${isSelected?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.05)"}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                  <div style={{width:8,height:8,borderRadius:99,background:card.playerColor}}/>
+                  <span style={{fontWeight:700,fontSize:13,color:card.playerColor}}>{card.playerName}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:"#E8ECF4",marginLeft:4}}>· {card.field}</span>
+                  <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>avg: {card.avg} ({card.gamesPlayed}g)</span>
                 </div>
-                <div style={{fontSize:15,fontWeight:700,marginBottom:12}}>{prop.line} {prop.field}</div>
+
+                {/* Line slider */}
+                <div style={{margin:"14px 0 12px"}}>
+                  <div style={{textAlign:"center",marginBottom:8}}>
+                    <span style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"#E8ECF4"}}>{current.line}</span>
+                    <span style={{fontSize:12,color:"#4A5066",marginLeft:6}}>{card.field}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={card.lineOptions.length-1}
+                    step={1}
+                    value={lineIdx}
+                    onChange={(e)=>{
+                      const idx=Number(e.target.value);
+                      setLineIndexByProp(p=>({...p,[card.id]:idx}));
+                      if (isSelected) setPropSide(null); // force re-pick of side when line changes mid-selection
+                    }}
+                    style={{width:"100%",accentColor:card.playerColor}}
+                  />
+                  <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+                    {card.lineOptions.map((opt,i)=>(
+                      <span key={opt.line} style={{fontSize:9,color:i===lineIdx?"#8B92A8":"#3A4256",fontWeight:i===lineIdx?700:400}}>{opt.line}</span>
+                    ))}
+                  </div>
+                </div>
+
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>{setSelectedProp(prop.id);setPropSide("over");}} className="bb-pressable"
+                  <button onClick={()=>{setSelectedProp(card.id);setPropSide("over");}} className="bb-pressable"
                     style={{flex:1,background:isSelected&&propSide==="over"?"#7CFFB2":"rgba(124,255,178,0.08)",border:`1px solid ${isSelected&&propSide==="over"?"#7CFFB2":"rgba(124,255,178,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer"}}>
-                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>OVER</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="over"?"#06070D":"#7CFFB2"}}>{prop.overOdds.american}</div>
+                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>OVER {current.line}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="over"?"#06070D":"#7CFFB2"}}>{current.overOdds.american}</div>
                   </button>
-                  <button onClick={()=>{setSelectedProp(prop.id);setPropSide("under");}} className="bb-pressable"
+                  <button onClick={()=>{setSelectedProp(card.id);setPropSide("under");}} className="bb-pressable"
                     style={{flex:1,background:isSelected&&propSide==="under"?"#FF5C8A":"rgba(255,92,138,0.08)",border:`1px solid ${isSelected&&propSide==="under"?"#FF5C8A":"rgba(255,92,138,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer"}}>
-                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>UNDER</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="under"?"#06070D":"#FF5C8A"}}>{prop.underOdds.american}</div>
+                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>UNDER {current.line}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="under"?"#06070D":"#FF5C8A"}}>{current.underOdds.american}</div>
                   </button>
                 </div>
               </div>
             );
           })}
+
+          {selectedProp&&propSide&&(
+            <div style={{position:"sticky",bottom:0,background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
+              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                {[5,10,25,50].map(amt=>(
+                  <button key={amt} onClick={()=>setPropWager(amt)} className="bb-pressable"
+                    style={{flex:1,background:propWager===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"7px 0",fontSize:11,fontWeight:700,color:propWager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                    {amt}
+                  </button>
+                ))}
+              </div>
+              {(() => {
+                const card = props.find(p => p.id === selectedProp);
+                const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor((card?.lineOptions.length||1)/2);
+                const current = card?.lineOptions[lineIdx];
+                const odds = propSide === "over" ? current?.overOdds : current?.underOdds;
+                const payout = odds ? calcPayout(propWager, odds.decimal) : 0;
+                return (
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <div style={{flex:1,background:"rgba(184,255,77,0.06)",borderRadius:10,padding:"10px 12px",border:"1px solid rgba(184,255,77,0.15)"}}>
+                      <div style={{fontSize:10,color:"#4A5066",marginBottom:2}}>TO WIN</div>
+                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#B8FF4D"}}>{payout} pts</div>
+                    </div>
+                    <button onClick={()=>placeBet(current?.line)} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
+                      style={{flex:1,background:"#B8FF4D",border:"none",borderRadius:10,padding:"14px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",opacity:myPoints<propWager?0.4:1}}>
+                      place bet
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
 
           {selectedProp&&propSide&&(
             <div style={{position:"sticky",bottom:0,background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
@@ -2424,6 +2948,7 @@ const [passXP, setPassXP] = useState({});       // { [playerId]: number }
 const [passPremium, setPassPremium] = useState({}); // { [playerId]: true }
 const [passClaimed, setPassClaimed] = useState({}); // { [playerId+"_"+track+"_"+tier]: true }
 const [passTokens, setPassTokens] = useState({});   // { [playerId]: [{id,type,label,earnedAt}] }
+const [passActiveBoosts, setPassActiveBoosts] = useState({}); // { [playerId]: {type,label,activatedAt,expiresAt} }
   const [resyncOverlay,setResyncOverlay]=useState(false);
   const [pendingResyncPlayer,setPendingResyncPlayer]=useState(null);
   const [commentDay,setCommentDay]=useState(null);
@@ -2432,6 +2957,9 @@ const [passTokens, setPassTokens] = useState({});   // { [playerId]: [{id,type,l
   const [pushSub, setPushSub] = useState(null);
 const [themeId, setThemeId] = useState("default");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
+const [showAllGames, setShowAllGames] = useState(false);
+const [statsJumpDate, setStatsJumpDate] = useState(null);
+const [chatOpen, setChatOpen] = useState(false);
 const theme = THEMES[themeId];
 const addToast = (text, icon = "🔔") => {
   const id = Date.now().toString();
@@ -2465,6 +2993,7 @@ if (key === "pass_xp")      setPassXP(value);
 if (key === "pass_premium") setPassPremium(value);
 if (key === "pass_claimed") setPassClaimed(value);
 if (key === "pass_tokens")  setPassTokens(value);
+      if (key === "pass_active_boosts") setPassActiveBoosts(value);
     });
      return () => { unsub(); clearInterval(hbInterval); };
   }, [currentPlayer]);
@@ -2473,8 +3002,8 @@ if (key === "pass_tokens")  setPassTokens(value);
 
 const loadSharedData=async(pid)=>{
     setLoading(true);
-    const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk]=await Promise.all([
-  storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),storeGet("bets"),storeGet("pass_xp"),storeGet("pass_premium"),storeGet("pass_claimed"),storeGet("pass_tokens"),
+   const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab]=await Promise.all([
+storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),storeGet("bets"),storeGet("pass_xp"),storeGet("pass_premium"),storeGet("pass_claimed"),storeGet("pass_tokens"),storeGet("pass_active_boosts"),
 ]);
     if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
@@ -2486,12 +3015,16 @@ const loadSharedData=async(pid)=>{
     if (sts) setStats(sts);
     if (prs) setPresence(prs);
     if (pngs) setPings(pngs);
-    if (pts) setPoints(pts);  
+if (pts) setPoints(pts);  
 if (bts) setBets(bts);
 if (pxp) setPassXP(pxp);
 if (ppm) setPassPremium(ppm);
 if (pcl) setPassClaimed(pcl);
 if (ptk) setPassTokens(ptk);
+if (pab) setPassActiveBoosts(pab);
+const savedLastSeen = await storeGet(`lastSeen:${pid}`);
+if (savedLastSeen) setLastSeen(savedLastSeen);
+else setLastSeen({social:0, chat:0, training:0});
     const profiles={};
     for (const p of PLAYERS) { const profile=await getMMR(p.id); if(profile) profiles[p.id]=profile; }
     setMmrProfiles(profiles);
@@ -2521,12 +3054,15 @@ setMmrProfiles(prev => ({...prev}));
   })();
 
 const touchStartY = useRef(0);
+  const scrollContainerRef = useRef(null);
   const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
   const handleTouchEnd = (e) => {
+    if (tab !== "home") return; // only allow pull-to-refresh on the home tab
+    const el = scrollContainerRef.current;
+    if (el && el.scrollTop > 4) return; // only when already scrolled to the very top
     const diff = e.changedTouches[0].clientY - touchStartY.current;
-    if (diff > 150) loadSharedData(currentPlayer);
+    if (diff > 220) loadSharedData(currentPlayer); // raised threshold, much less sensitive
   };
-
   if (authStage==="select") return <><GlobalStyles/><NameSelectScreen onSelect={selectName}/></>;
   const selectedPlayer=PLAYERS.find((p)=>p.id===selectedPlayerId);
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
@@ -2535,12 +3071,11 @@ const touchStartY = useRef(0);
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const isAdmin=currentPlayer===ADMIN_ID;
-  const TABS=[
+const TABS=[
     {id:"home",icon:Home,label:"home"},
     {id:"bracket",icon:Trophy,label:"bracket"},
     {id:"training",icon:Dumbbell,label:"training"},
     {id:"social",icon:ImageIcon,label:"social"},
-    {id:"chat",icon:MessageCircle,label:"chat"},
     {id:"stream",icon:Tv,label:"stream"},
       {id:"stats",icon:BarChart2,label:"stats"},
 {id:"presence",icon:Circle,label:"squad"},
@@ -2591,6 +3126,14 @@ const badges = {
   <span style={s.youName}>{playerObj.name}</span>
 </div>
 <div style={s.topBarRight}>
+  <button onClick={()=>setChatOpen(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
+    <MessageCircle size={16}/>
+    {Math.max(0, messages.length - lastSeen.chat) > 0 && (
+      <div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>
+        {Math.max(0, messages.length - lastSeen.chat)}
+      </div>
+    )}
+  </button>
   <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button>
   <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
     {Object.values(THEMES).map(t=>(
@@ -2602,26 +3145,43 @@ const badges = {
 </div>
 </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
-      <div style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-       {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions}/>}
+      <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+{tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
        {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
-{tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP}/>}
+{tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)}/>}
  {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>}       
 {tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens}/>}
-{tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed}/>}
-    {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
+{tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
+   {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
+      {chatOpen && (
+        <div style={{position:"fixed",inset:0,zIndex:500,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease"}}>
+          <div style={{animation:"chatSlideIn .32s cubic-bezier(.2,.8,.2,1)",flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+              <button onClick={()=>{
+                setChatOpen(false);
+                const upd={...lastSeen,chat:messages.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd);
+              }} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                <ChevronLeft size={18}/>
+              </button>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team chat</div>
+            </div>
+            <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
+              <ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>
+            </div>
+          </div>
+        </div>
+      )}
    <div style={s.tabBar}>
         {TABS.map((t)=>(
-          <button key={t.id} onClick={()=>{
+        <button key={t.id} onClick={()=>{
             setTab(t.id);
-            if (t.id==="social") setLastSeen(p=>({...p,social:posts.length}));
-            if (t.id==="chat") setLastSeen(p=>({...p,chat:messages.length}));
-            if (t.id==="training") setLastSeen(p=>({...p,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}));
+            if (t.id==="social") { const upd={...lastSeen,social:posts.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
+            if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
           }} className="bb-pressable" style={s.tabBtn}>
             <div style={{position:"relative",display:"inline-flex"}}>
               <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"} style={tab===t.id?{filter:`drop-shadow(0 0 6px ${t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"})`}:{}}/>
