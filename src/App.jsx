@@ -1269,7 +1269,6 @@ export default function App() {
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
-   useEffect(() => {
     if (!currentPlayer) return;
     const heartbeat = async () => {
       const upd = { ...presence, [currentPlayer]: new Date().toISOString() };
