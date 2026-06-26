@@ -1331,14 +1331,37 @@ const upd = [...myUpd, ...others];
                         {item.cost}pts
                       </button>
                     )}
-                  </div>
+</div>
                 );
               })}
 </div>
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>TITLES</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {SHOP_ITEMS.filter(i=>i.type==="title").map(item=>{
+                const isOwned=owned.includes(item.id);
+                const isEquipped=equipped[item.id];
+                const canAfford=myPoints>=item.cost;
+                return (
+                  <div key={item.id} style={{background:isEquipped?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",border:`1px solid ${isEquipped?"rgba(184,255,77,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,textAlign:"center"}}>
+                    <div style={{fontSize:22,marginBottom:4}}>{item.emoji}</div>
+                    <div style={{fontSize:11,fontWeight:700,color:isOwned?"#B8FF4D":"#E8ECF4",marginBottom:2}}>{item.label}</div>
+                    <div style={{fontSize:9,color:"#4A5066",marginBottom:8}}>{item.value}</div>
+                    {isOwned?(
+                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                        {isEquipped?"✓ equipped":"equip"}
+                      </button>
+                    ):(
+                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
+                        {item.cost} pts
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
-
       {/* Online now */}
 
       {/* Online now */}
