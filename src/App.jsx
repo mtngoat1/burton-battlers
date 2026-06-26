@@ -113,7 +113,7 @@ function GlobalStyles() {
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
-      .bb-pressable { transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .2s, border-color .2s, background .2s; }
+      .bb-pressable { transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .2s, border-color .2s, background .2s; outline:none; -webkit-tap-highlight-color:transparent; }
       .bb-pressable:active { transform:scale(0.97); }
       @media (hover:hover) {
         .bb-pressable:hover { transform:translateY(-1px); }
@@ -275,7 +275,7 @@ function ReminderBanner({ incompleteDays, onJump, onDismiss }) {
     </div>
   );
 }
-const CHALLENGE_FIELDS = ["goals","assists","saves","demos","shots"];
+const CHALLENGE_FIELDS = ["goals","assists","saves","shots"];
 
 const ALL_CHALLENGES = [
   // 3v3
@@ -340,120 +340,114 @@ function getChallengeProgress(challenge, stats, playerId) {
 function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, setCompletions }) {
   const playerIdx = PLAYERS.findIndex(p => p.id === currentPlayer);
   const weekNum = Math.floor(Date.now() / (WEEK_MS));
-  
-  // Pick a deterministic but varied challenge per player per week
-  const seed = weekNum * 31 + playerIdx * 7;
-  const challengeIdx = seed % ALL_CHALLENGES.length;
-  const challenge = ALL_CHALLENGES[challengeIdx];
 
-  // For 3v3 avg challenges find a rival
+  const modes = ["3v3", "2v2", "1v1"];
+  const challenges = modes.map((mode, mi) => {
+    const modeChallenges = ALL_CHALLENGES.filter(c => c.mode === mode);
+    const seed = weekNum * 31 + playerIdx * 7 + mi * 13;
+    return { challenge: modeChallenges[seed % modeChallenges.length], mode };
+  });
+
   const rivals = PLAYERS.filter(p => p.id !== currentPlayer);
-  const rival = rivals[seed % rivals.length];
-  const rivalGames = stats.filter(g => g.playerId === rival.id && g.mode === "3v3");
-  const rivalAvg = challenge.field && rivalGames.length
-    ? (rivalGames.reduce((s,g) => s+(g[challenge.field]||0),0)/rivalGames.length).toFixed(1)
-    : null;
-
-  const adjustedTarget = challenge.type === "avg" && rivalAvg
-    ? Math.max(Number(rivalAvg)+0.1, challenge.target)
-    : challenge.target;
-
-  const progress = getChallengeProgress({...challenge, target: adjustedTarget}, stats, currentPlayer);
-  const claimKey = `challenge_${currentPlayer}_${weekNum}_${challengeIdx}`;
-  const claimed = !!completions[claimKey];
-
-  const claimXP = async () => {
-    if (!progress.done || claimed) return;
-    const upd = {...completions, [claimKey]: true};
-    setCompletions(upd);
-    await storeSet("completions", upd);
-    const pxp = await storeGet("pass_xp") || {};
-    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+50};
-    setPassXP(updXP);
-    await storeSet("pass_xp", updXP);
-  };
-
-  const modeLabel = { "3v3":"3V3","2v2":"2V2","1v1":"1V1" }[challenge.mode];
-  const color = challenge.color;
-  const progressPct = Math.min(1, progress.current / adjustedTarget);
-
-  const descText = challenge.mode === "3v3" && rivalAvg
-    ? challenge.desc(adjustedTarget.toFixed(1), rival.name)
-    : challenge.desc(adjustedTarget);
+  const seed0 = weekNum * 31 + playerIdx * 7;
+  const rival = rivals[seed0 % rivals.length];
 
   return (
     <div style={{marginBottom:20}}>
-      <div style={{...s.sectionLabel,marginBottom:10}}>weekly challenge</div>
-      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${color}22`,marginBottom:8}}>
-        
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-          <div style={{fontSize:10,color:color,fontWeight:700,letterSpacing:0.8}}>
-            {modeLabel} CHALLENGE
-          </div>
-          <div style={{width:6,height:6,borderRadius:99,background:color}}/>
-        </div>
+      <div style={{...s.sectionLabel,marginBottom:10}}>weekly challenges</div>
+      {challenges.map(({ challenge, mode }, ci) => {
+        const rivalGames = stats.filter(g => g.playerId === rival.id && g.mode === "3v3");
+        const rivalAvg = mode === "3v3" && challenge.field && rivalGames.length
+          ? (rivalGames.reduce((s,g) => s+(g[challenge.field]||0),0)/rivalGames.length).toFixed(1)
+          : null;
+        const adjustedTarget = mode === "3v3" && challenge.type === "avg" && rivalAvg
+          ? Math.max(Number(rivalAvg)+0.1, challenge.target)
+          : challenge.target;
+        const progress = getChallengeProgress({...challenge, target: adjustedTarget}, stats, currentPlayer);
+        const claimKey = `challenge_${currentPlayer}_${weekNum}_${mode}`;
+        const claimed = !!completions[claimKey];
 
-        <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{descText}</div>
+        const claimXP = async () => {
+          if (!progress.done || claimed) return;
+          const upd = {...completions, [claimKey]: true};
+          setCompletions(upd);
+          await storeSet("completions", upd);
+          const pxp = await storeGet("pass_xp") || {};
+          const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+50};
+          setPassXP(updXP);
+          await storeSet("pass_xp", updXP);
+        };
 
-        <div style={{marginBottom:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
-            <span>progress: <span style={{color,fontWeight:700}}>{progress.display}</span></span>
-            <span>target: <span style={{color:"#E8ECF4",fontWeight:700}}>{challenge.type==="winrate"?"60%":adjustedTarget}</span></span>
-          </div>
-          <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
-            <div style={{height:"100%",width:`${progressPct*100}%`,background:progress.done?"#7CFFB2":color,borderRadius:99,transition:"width .4s ease",boxShadow:progress.done?`0 0 8px #7CFFB299`:`0 0 8px ${color}88`}}/>
-          </div>
-        </div>
+        const modeLabel = { "3v3":"3V3","2v2":"2V2","1v1":"1V1" }[mode];
+        const color = challenge.color;
+        const progressPct = Math.min(1, progress.current / adjustedTarget);
+        const descText = mode === "3v3" && rivalAvg
+          ? challenge.desc(adjustedTarget.toFixed(1), rival.name)
+          : challenge.desc(adjustedTarget);
 
-        {progress.done && !claimed && (
-          <button onClick={claimXP} className="bb-pressable bb-glow-lime"
-            style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
-            🏆 claim +50 pass xp
-          </button>
-        )}
-        {claimed && (
-          <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +50 xp claimed this week</div>
-        )}
-
-        <div style={{fontSize:11,color:"#4A5066"}}>resets weekly · logs from {challenge.mode} games only</div>
-      </div>
-
-      {/* Mini leaderboard — only for 3v3 avg challenges */}
-      {challenge.mode === "3v3" && challenge.type === "avg" && (
-        <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
-          <div style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:8}}>
-            <div/>
-            {CHALLENGE_FIELDS.map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
-          </div>
-          {PLAYERS.map(p=>{
-            const pg = stats.filter(g => g.playerId===p.id && g.mode==="3v3");
-            const avg = (field) => pg.length ? (pg.reduce((s,g)=>s+(g[field]||0),0)/pg.length).toFixed(1) : "—";
-            return (
-              <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
-                <div style={{display:"flex",alignItems:"center",gap:5}}>
-                  <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
-                  <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
-                </div>
-                {CHALLENGE_FIELDS.map(f=>(
-                  <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(f)}</div>
-                ))}
+        return (
+          <div key={mode} style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${color}22`,marginBottom:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{fontSize:10,color,fontWeight:700,letterSpacing:0.8}}>{modeLabel} CHALLENGE</div>
+              <div style={{width:6,height:6,borderRadius:99,background:color}}/>
+            </div>
+            <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{descText}</div>
+            <div style={{marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
+                <span>progress: <span style={{color,fontWeight:700}}>{progress.display}</span></span>
+                <span>target: <span style={{color:"#E8ECF4",fontWeight:700}}>{challenge.type==="winrate"?"60%":adjustedTarget}</span></span>
               </div>
-            );
-          })}
+              <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${progressPct*100}%`,background:progress.done?"#7CFFB2":color,borderRadius:99,transition:"width .4s ease",boxShadow:progress.done?`0 0 8px #7CFFB299`:`0 0 8px ${color}88`}}/>
+              </div>
+            </div>
+            {progress.done && !claimed && (
+              <button onClick={claimXP} className="bb-pressable bb-glow-lime"
+                style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
+                🏆 claim +50 pass xp
+              </button>
+            )}
+            {claimed && <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +50 xp claimed this week</div>}
+            <div style={{fontSize:11,color:"#4A5066"}}>resets weekly · {mode} games only</div>
+          </div>
+        );
+      })}
+
+      {/* 3v3 mini leaderboard */}
+      <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+        <div style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:8}}>
+          <div/>
+          {CHALLENGE_FIELDS.map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
         </div>
-      )}
+        {PLAYERS.map(p=>{
+          const pg = stats.filter(g => g.playerId===p.id && g.mode==="3v3");
+          const avg = (field) => pg.length ? (pg.reduce((s,g)=>s+(g[field]||0),0)/pg.length).toFixed(1) : "—";
+          return (
+            <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
+                <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
+              </div>
+              {CHALLENGE_FIELDS.map(f=>(
+                <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(f)}</div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
             // ===================== Coach Note =====================
 function getCoachNote(stats, playerId) {
-  const yesterday = new Date(todayAtMidnight().getTime() - DAY_MS);
-  const ydKey = dateKey(yesterday);
-  const lastNightGames = stats.filter(g =>
-    g.playerId === playerId &&
-    g.mode === "3v3" &&
-    dateKey(new Date(g.ts)) === ydKey
-  );
+  const todayKey = dateKey(todayAtMidnight());
+  const playerGames = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
+  if (!playerGames.length) return null;
+  // find the most recent day that has games, that isn't today
+  const dayKeys = [...new Set(playerGames.map(g => dateKey(new Date(g.ts))))].filter(dk => dk < todayKey).sort().reverse();
+  if (!dayKeys.length) return null;
+  const lastNightKey = dayKeys[0];
+  const lastNightGames = playerGames.filter(g => dateKey(new Date(g.ts)) === lastNightKey);
   if (!lastNightGames.length) return null;
 
   const avg = (field) => lastNightGames.reduce((s, g) => s + (g[field] || 0), 0) / lastNightGames.length;
@@ -490,7 +484,7 @@ function getCoachNote(stats, playerId) {
     note = { text: "solid session last night — keep building on it today.", emoji: "📈" };
   }
 
-  return { ...note, date: ydKey, games: lastNightGames };
+ return { ...note, date: lastNightKey, games: lastNightGames };
 }
 
 function CoachNoteCard({ stats, currentPlayer, onJumpToLog }) {
@@ -541,14 +535,14 @@ function getNightStreaks(stats) {
         consecutive++;
         streakGames.push({ ts, games: gamesAtTime });
       } else {
-        if (consecutive >= 3) {
+        if (consecutive >= 4) {
           streaks.push({ dk, games: streakGames, peak: consecutive });
         }
         consecutive = 0;
         streakGames = [];
       }
     });
-    if (consecutive >= 3) {
+    if (consecutive >= 4) {
       streaks.push({ dk, games: streakGames, peak: consecutive });
     }
   });
@@ -557,10 +551,10 @@ function getNightStreaks(stats) {
 }
 
 function heatMultiplier(wins) {
-  if (wins >= 6) return 10;
-  if (wins >= 5) return 7;
-  if (wins >= 4) return 4;
-  if (wins >= 3) return 2;
+  if (wins >= 7) return 10;
+  if (wins >= 6) return 7;
+  if (wins >= 5) return 4;
+  if (wins >= 4) return 2;
   return 1;
 }
 
@@ -668,13 +662,106 @@ function HeatStreakCard({ stats, currentPlayer }) {
     </div>
   );
 }
-            
+      function TimePlayedTracker({ stats, currentPlayer, timeLogs, setTimeLogs }) {
+  const [logging, setLogging] = useState(false);
+  const [hours1v1, setHours1v1] = useState("");
+  const [hours2v2, setHours2v2] = useState("");
+  const [hours3v3, setHours3v3] = useState("");
+  const [hoursPractice, setHoursPractice] = useState("");
+
+  const weekStart = getWeekStart();
+  const weekKey = dateKey(weekStart);
+  const weekNum = Math.max(0, Math.floor((weekStart - TRAINING_START) / WEEK_MS));
+  const weeklyGoal = TIME_GOALS_BY_WEEK[Math.min(weekNum, TIME_GOALS_BY_WEEK.length - 1)];
+
+  const myLogs = (timeLogs || []).filter(l => l.playerId === currentPlayer && l.weekKey === weekKey);
+  const totalHours = myLogs.reduce((s, l) => s + (l.total || 0), 0);
+  const pct = Math.min(1, totalHours / weeklyGoal);
+
+  const breakdown = { "1v1": 0, "2v2": 0, "3v3": 0, practice: 0 };
+  myLogs.forEach(l => {
+    breakdown["1v1"] += l.h1v1 || 0;
+    breakdown["2v2"] += l.h2v2 || 0;
+    breakdown["3v3"] += l.h3v3 || 0;
+    breakdown.practice += l.hPractice || 0;
+  });
+
+  const submit = async () => {
+    const h1 = parseFloat(hours1v1) || 0;
+    const h2 = parseFloat(hours2v2) || 0;
+    const h3 = parseFloat(hours3v3) || 0;
+    const hp = parseFloat(hoursPractice) || 0;
+    const total = h1 + h2 + h3 + hp;
+    if (total <= 0) return;
+    const entry = {
+      id: Date.now().toString(),
+      playerId: currentPlayer,
+      weekKey,
+      h1v1: h1, h2v2: h2, h3v3: h3, hPractice: hp,
+      total,
+      loggedAt: new Date().toISOString(),
+    };
+    const upd = [...(timeLogs || []), entry];
+    setTimeLogs(upd);
+    await storeSet("time_logs", upd);
+    setHours1v1(""); setHours2v2(""); setHours3v3(""); setHoursPractice("");
+    setLogging(false);
+  };
+
+  const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
+  const remaining = Math.max(0, weeklyGoal - totalHours);
+
+  return (
+    <div style={{marginBottom:20}}>
+      <div style={{...s.sectionLabel,marginBottom:10}}>time played this week</div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${playerColor}22`,marginBottom:logging?10:0}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:700,color:playerColor}}>{totalHours.toFixed(1)}<span style={{fontSize:13,color:"#4A5066",marginLeft:4}}>/ {weeklyGoal}h</span></div>
+            <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{remaining > 0 ? `${remaining.toFixed(1)}h to go this week` : "weekly goal hit 🎉"}</div>
+          </div>
+          <button onClick={() => setLogging(v => !v)} className="bb-pressable bb-glow-lime"
+            style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 14px",fontSize:11.5,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>
+            + log time
+          </button>
+        </div>
+        <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden",marginBottom:10}}>
+          <div style={{height:"100%",width:`${pct*100}%`,background:pct>=1?"#7CFFB2":playerColor,borderRadius:99,transition:"width .4s ease",boxShadow:`0 0 8px ${playerColor}88`}}/>
+        </div>
+        <div style={{display:"flex",gap:12}}>
+          {[["1v1",breakdown["1v1"],"#4D9EFF"],["2v2",breakdown["2v2"],"#FF61C1"],["3v3",breakdown["3v3"],"#B8FF4D"],["practice",breakdown.practice,"#A78BFA"]].map(([label,val,col])=>(
+            <div key={label} style={{flex:1,textAlign:"center"}}>
+              <div style={{fontSize:9,color:"#4A5066",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:3}}>{label}</div>
+              <div style={{fontSize:14,fontWeight:700,color:col}}>{val.toFixed(1)}h</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {logging && (
+        <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:12}}>LOG SESSION — HOURS PLAYED</div>
+          {[["1v1 ranked",hours1v1,setHours1v1],["2v2 ranked",hours2v2,setHours2v2],["3v3 ranked",hours3v3,setHours3v3],["free play / practice",hoursPractice,setHoursPractice]].map(([label,val,setter])=>(
+            <div key={label} style={{marginBottom:10}}>
+              <div style={{fontSize:11,color:"#8B92A8",marginBottom:4}}>{label}</div>
+              <input type="number" step="0.25" min="0" max="12" value={val} onChange={e=>setter(e.target.value)}
+                placeholder="0" style={{...s.modalInput,textAlign:"center"}}/>
+            </div>
+          ))}
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:10}}>total: {(parseFloat(hours1v1)||0)+(parseFloat(hours2v2)||0)+(parseFloat(hours3v3)||0)+(parseFloat(hoursPractice)||0)}h</div>
+          <button onClick={submit} className="bb-pressable bb-glow-lime" style={s.primaryBtn}>save session</button>
+        </div>
+      )}
+    </div>
+  );
+}      
 // ===================== Home Tab =====================
 function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
   const record = schedule.league.reduce((acc,m)=>{
+function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
     if (!m.result) return acc;
     if (m.result.status==="win"||m.result.status==="forfeit_win"||m.result.status==="bye") acc.w++; else acc.l++;
     acc.gf += m.result.ours||0; acc.ga += m.result.theirs||0;
@@ -707,6 +794,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
       </div>
 <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
 <HeatStreakCard stats={stats} currentPlayer={currentPlayer} />
+<TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
 <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
@@ -1275,7 +1363,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
 }
 // ===================== Stats Tab =====================
 const STAT_MODES = ["3v3","2v2","1v1"];
-const STAT_FIELDS = ["goals","assists","saves","demos","shots","score"];
+const STAT_FIELDS = ["goals","assists","saves","shots","score"];
 
 function StatsTrendLine({ games, field, color }) {
   if (games.length < 2) return null;
@@ -1672,6 +1760,7 @@ const PASS_WEEKLY_FIELDS = ["goals", "assists", "saves", "demos", "shots"];
 function getWeeklyPassChallenge(playerId, stats) {
   const idx = PLAYERS.findIndex(p => p.id === playerId);
   const weekNum = Math.floor(Date.now() / WEEK_MS);
+const TIME_GOALS_BY_WEEK = [6, 7, 8, 9, 10, 11, 12, 13]; // hours, ramps up each week toward tournament
   const field = PASS_WEEKLY_FIELDS[(weekNum + idx) % PASS_WEEKLY_FIELDS.length];
   const pg = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
   const avg = pg.length ? pg.reduce((s,g) => s+(g[field]||0), 0)/pg.length : 0;
@@ -2421,6 +2510,7 @@ function StarfieldBg() {
 const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
+const RT_KEYS = [..., "time_logs"];
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -2901,6 +2991,7 @@ const [themeId, setThemeId] = useState("default");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const [showAllGames, setShowAllGames] = useState(false);
 const [statsJumpDate, setStatsJumpDate] = useState(null);
+const [timeLogs, setTimeLogs] = useState([]);
 const [chatOpen, setChatOpen] = useState(false);
 const theme = THEMES[themeId];
 const addToast = (text, icon = "🔔") => {
@@ -2922,6 +3013,7 @@ heartbeat();
       if (key === "chat")           setMessages(value);
       if (key === "posts")          setPosts(value);
       if (key === "completions")    setCompletions(value);
+if (key === "time_logs") setTimeLogs(value);
       if (key === "training")       setTrainingData(value);
       if (key === "schedule")       setSchedule(value);
       if (key === "comments")       setComments(value);
@@ -2947,6 +3039,8 @@ const loadSharedData=async(pid)=>{
    const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab]=await Promise.all([
 storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),storeGet("bets"),storeGet("pass_xp"),storeGet("pass_premium"),storeGet("pass_claimed"),storeGet("pass_tokens"),storeGet("pass_active_boosts"),
 ]);
+
+storeGet("time_logs"),
     if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
     if (comp) setCompletions(comp);
@@ -3089,6 +3183,7 @@ const badges = {
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
 {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP}/>}
+{tab==="home"&&<HomeTab ... timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
        {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast}/>}
@@ -3126,7 +3221,7 @@ const badges = {
             if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
           }} className="bb-pressable" style={s.tabBtn}>
             <div style={{position:"relative",display:"inline-flex"}}>
-              <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"} style={tab===t.id?{filter:`drop-shadow(0 0 6px ${t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"})`}:{}}/>
+              <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"}style={{filter:tab===t.id?`drop-shadow(0 0 6px ${t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"})`:"drop-shadow(0 0 0px transparent)",transition:"filter .2s ease"}}/>
               {badges[t.id]>0&&<div style={{position:"absolute",top:-4,right:-6,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
             </div>
             <span style={{color:tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066",fontSize:9,fontWeight:600}}>{t.label}</span>
@@ -3150,7 +3245,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:8,WebkitOverflowScrolling:"touch",minHeight:0},
   tabContent:{padding:"16px 16px 24px"},
 tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,0px)"},
-  tabBtn:{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 2px 8px",cursor:"pointer",minWidth:0,overflow:"hidden"},
+ tabBtn:{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 2px 8px",cursor:"pointer",minWidth:0,overflow:"hidden",outline:"none",WebkitTapHighlightColor:"transparent"},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
   reminderTitle:{fontSize:12.5,fontWeight:700,color:"#FF5C8A"},
