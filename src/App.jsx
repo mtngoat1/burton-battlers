@@ -1106,21 +1106,13 @@ const THEMES = {
     sub: "#8B92A8", muted: "#4A5066", tabBg: "#0A0C16",
     swatch: "linear-gradient(135deg,#06070D 50%,#B8FF4D 50%)",
   },
-  starfield: {
+starfield: {
     id: "starfield",
     bg: "#040818", card: "#0B1230", border: "rgba(100,140,255,0.15)",
     accent: "#7EB8FF", accentText: "#040818", text: "#D8E8FF",
     sub: "#7A90B8", muted: "#3A4E72", tabBg: "#060C1E",
     swatch: "radial-gradient(circle at 30% 40%,#7EB8FF 0%,#040818 70%)",
   },
-{ id:"title_demogod",   label:"Demo God",           desc:"demo god",           cost:60,  type:"title", value:"demo god",           emoji:"💥" },
-  { id:"title_petty",     label:"Petty Player",        desc:"petty player",       cost:60,  type:"title", value:"petty player",       emoji:"😤" },
-  { id:"title_scallions", label:"Scanlons Scallions",  desc:"scanlons scallions", cost:80,  type:"title", value:"scanlons scallions", emoji:"🧅" },
-  { id:"title_lonely",    label:"The Lonely Girl",     desc:"the lonely girl",    cost:70,  type:"title", value:"the lonely girl",    emoji:"🥀" },
-  { id:"title_powershot", label:"Powershot Pimp",      desc:"powershot pimp",     cost:75,  type:"title", value:"powershot pimp",     emoji:"💥" },
-  { id:"title_saved",     label:"Saved The Day",       desc:"saved the day",      cost:65,  type:"title", value:"saved the day",      emoji:"🧤" },
-  { id:"title_rule69",    label:"Rule 69",             desc:"rule 69",            cost:69,  type:"title", value:"rule 69",            emoji:"😏" },
-];
 };
 const SHOP_ITEMS = [
   { id:"lime_name",   label:"Lime",   desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
@@ -1133,6 +1125,13 @@ const SHOP_ITEMS = [
   { id:"icon_goat",   label:"GOAT",   desc:"greatest of all time",   cost:80,  type:"icon",  value:"🐐",     emoji:"🐐" },
   { id:"icon_bolt",   label:"Bolt",   desc:"fastest on the team",    cost:70,  type:"icon",  value:"⚡",     emoji:"⚡" },
   { id:"icon_alien",  label:"Alien",  desc:"not of this world",      cost:90,  type:"icon",  value:"👾",     emoji:"👾" },
+  { id:"title_demogod",   label:"Demo God",          cost:60,  type:"title", value:"demo god",           emoji:"💥" },
+  { id:"title_petty",     label:"Petty Player",      cost:60,  type:"title", value:"petty player",       emoji:"😤" },
+  { id:"title_scallions", label:"Scanlons Scallions", cost:80, type:"title", value:"scanlons scallions", emoji:"🧅" },
+  { id:"title_lonely",    label:"The Lonely Girl",   cost:70,  type:"title", value:"the lonely girl",    emoji:"🥀" },
+  { id:"title_powershot", label:"Powershot Pimp",    cost:75,  type:"title", value:"powershot pimp",     emoji:"💥" },
+  { id:"title_saved",     label:"Saved The Day",     cost:65,  type:"title", value:"saved the day",      emoji:"🧤" },
+  { id:"title_rule69",    label:"Rule 69",           cost:69,  type:"title", value:"rule 69",            emoji:"😏" },
 ];
 function isOnline(ts) {
   if (!ts) return false;
@@ -1155,29 +1154,6 @@ function PlayerNameDisplay({ playerId, points }) {
       <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>
       {title && <span style={{fontSize:9.5,color:"#8B92A8",fontWeight:600,letterSpacing:0.5}}>{title}</span>}
     </div>
-<div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>TITLES</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {SHOP_ITEMS.filter(i=>i.type==="title").map(item=>{
-                const isOwned=owned.includes(item.id);
-                const isEquipped=equipped[item.id];
-                const canAfford=myPoints>=item.cost;
-                return (
-                  <div key={item.id} style={{background:isEquipped?"rgba(167,139,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",border:`1px solid ${isEquipped?"rgba(167,139,250,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,position:"relative"}}>
-                    <div style={{fontSize:20,marginBottom:4}}>{item.emoji}</div>
-                    <div style={{fontSize:12,fontWeight:700,color:isOwned?"#A78BFA":"#E8ECF4",marginBottom:2}}>{item.label}</div>
-                    <div style={{fontSize:9.5,color:"#4A5066",marginBottom:8}}>"{item.value}"</div>
-                    {isOwned?(
-                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?"#A78BFA":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                        {isEquipped?"✓ equipped":"equip"}
-                      </button>
-                    ):(
-                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(167,139,250,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(167,139,250,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?"#A78BFA":"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                        {item.cost} pts
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
             </div>
   );
 }
@@ -1621,8 +1597,15 @@ const badges = {
       <div style={s.topBar}>
     <div style={s.topBarTitle}>
 </div>
-        <div style={s.topBarRight}>
-  const sub = await registerPush();
+<div style={s.topBarRight}>
+  <button onClick={async()=>{ const sub = await registerPush();
+  if (sub) {
+    setPushSub(sub);
+    storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
+    alert('notifications enabled!');
+  } else {
+    alert('notifications blocked or not supported');
+  }
   if (sub) {
     setPushSub(sub);
     storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
