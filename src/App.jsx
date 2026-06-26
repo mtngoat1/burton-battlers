@@ -1153,8 +1153,7 @@ function PlayerNameDisplay({ playerId, points }) {
     <div style={{display:"flex",flexDirection:"column",gap:1}}>
       <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>
       {title && <span style={{fontSize:9.5,color:"#8B92A8",fontWeight:600,letterSpacing:0.5}}>{title}</span>}
-    </div>
-            </div>
+</div>
   );
 }
 function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats }) {
