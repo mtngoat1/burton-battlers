@@ -107,6 +107,8 @@ function GlobalStyles() {
       @keyframes chatFadeIn { from { opacity:0; } to { opacity:1; } }
       @keyframes heartPop { 0%{transform:scale(1)} 40%{transform:scale(1.35)} 100%{transform:scale(1)} }
       @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+@keyframes scaleFadeIn { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
+@keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
       * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
       html, body { margin:0; padding:0; height:100%; overflow:hidden; }
       #root { height:100%; }
@@ -755,7 +757,101 @@ function HeatStreakCard({ stats, currentPlayer }) {
       )}
     </div>
   );
-}      
+}    
+            function ExpandedStatModal({ stat, record, schedule, onClose }) {
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+          <ChevronLeft size={18}/>
+        </button>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>{stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"}</div>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+        {stat === "record" && (
+          <>
+            <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:"1px solid rgba(184,255,77,0.15)"}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:"#B8FF4D"}}>{record.w}-{record.l}</div>
+              <div style={{fontSize:12,color:"#4A5066",letterSpacing:1,marginTop:4}}>SERIES RECORD</div>
+            </div>
+            <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>MATCH HISTORY</div>
+            {schedule.league.filter(m=>m.result).map(m=>{
+              const won = m.result.status==="win"||m.result.status==="forfeit_win"||m.result.status==="bye";
+              return (
+                <div key={m.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,marginBottom:2}}>{m.label}</div>
+                    <div style={{fontSize:14,fontWeight:600}}>{m.opponent||"tbd"}</div>
+                    <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{m.dateRange}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    {m.result.ours!==undefined&&<div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,marginBottom:4}}>{m.result.ours}–{m.result.theirs}</div>}
+                    <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",border:`1px solid ${won?"rgba(124,255,178,0.4)":"rgba(255,92,138,0.4)"}`,borderRadius:99,padding:"2px 8px"}}>{m.result.status.replace("_"," ")}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {schedule.league.filter(m=>m.result).length===0&&<div style={{color:"#4A5066",textAlign:"center",marginTop:40,fontSize:13}}>no matches played yet</div>}
+          </>
+        )}
+        {stat === "diff" && (
+          <>
+            <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:"1px solid rgba(184,255,77,0.15)"}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:record.gf-record.ga>=0?"#7CFFB2":"#FF5C8A"}}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div>
+              <div style={{fontSize:12,color:"#4A5066",letterSpacing:1,marginTop:4}}>GOAL DIFFERENTIAL</div>
+            </div>
+            <div style={{display:"flex",gap:12,marginBottom:20}}>
+              <div style={{flex:1,background:"#11131F",borderRadius:14,padding:"16px",textAlign:"center",border:"1px solid rgba(124,255,178,0.15)"}}>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:32,fontWeight:700,color:"#7CFFB2"}}>{record.gf}</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:4}}>GOALS FOR</div>
+              </div>
+              <div style={{flex:1,background:"#11131F",borderRadius:14,padding:"16px",textAlign:"center",border:"1px solid rgba(255,92,138,0.1)"}}>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:32,fontWeight:700,color:"#FF5C8A"}}>{record.ga}</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:4}}>GOALS AGAINST</div>
+              </div>
+            </div>
+            <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>BY MATCH</div>
+            {schedule.league.filter(m=>m.result&&m.result.ours!==undefined).map(m=>{
+              const diff = m.result.ours - m.result.theirs;
+              return (
+                <div key={m.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:"1px solid rgba(255,255,255,0.05)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,marginBottom:2}}>{m.label}</div>
+                    <div style={{fontSize:13,color:"#8B92A8"}}>{m.opponent||"tbd"}</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700}}>{m.result.ours}–{m.result.theirs}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:diff>=0?"#7CFFB2":"#FF5C8A"}}>{diff>=0?"+":""}{diff}</div>
+                  </div>
+                </div>
+              );
+            })}
+            {schedule.league.filter(m=>m.result&&m.result.ours!==undefined).length===0&&<div style={{color:"#4A5066",textAlign:"center",marginTop:40,fontSize:13}}>no matches played yet</div>}
+          </>
+        )}
+        {stat === "gf" && (
+          <>
+            <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:"1px solid rgba(184,255,77,0.15)"}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:"#B8FF4D"}}>{record.gf}</div>
+              <div style={{fontSize:12,color:"#4A5066",letterSpacing:1,marginTop:4}}>TOTAL GOALS FOR</div>
+            </div>
+            <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>BY MATCH</div>
+            {schedule.league.filter(m=>m.result&&m.result.ours!==undefined).map(m=>(
+              <div key={m.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:"1px solid rgba(255,255,255,0.05)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,marginBottom:2}}>{m.label}</div>
+                  <div style={{fontSize:13,color:"#8B92A8"}}>{m.opponent||"tbd"}</div>
+                </div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#B8FF4D"}}>{m.result.ours} goals</div>
+              </div>
+            ))}
+            {schedule.league.filter(m=>m.result&&m.result.ours!==undefined).length===0&&<div style={{color:"#4A5066",textAlign:"center",marginTop:40,fontSize:13}}>no matches played yet</div>}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 // ===================== Home Tab =====================
 function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
@@ -787,11 +883,20 @@ return (
         ) : <div style={s.heroMatchup}><div style={s.heroTeamName}>gg. see you next circuit.</div></div>}
       </div>
 
-      <div style={s.recordRow}>
-        <div style={s.recordBox}><div style={s.recordNum}>{record.w}-{record.l}</div><div style={s.recordLabel}>series record</div></div>
-        <div style={s.recordBox}><div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div><div style={s.recordLabel}>goal diff</div></div>
-        <div style={s.recordBox}><div style={s.recordNum}>{record.gf}</div><div style={s.recordLabel}>goals for</div></div>
-      </div>
+<div style={s.recordRow}>
+  <div onClick={()=>setExpandedStat("record")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
+    <div style={s.recordNum}>{record.w}-{record.l}</div>
+    <div style={s.recordLabel}>series record</div>
+  </div>
+  <div onClick={()=>setExpandedStat("diff")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
+    <div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div>
+    <div style={s.recordLabel}>goal diff</div>
+  </div>
+  <div onClick={()=>setExpandedStat("gf")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
+    <div style={s.recordNum}>{record.gf}</div>
+    <div style={s.recordLabel}>goals for</div>
+  </div>
+</div>
 
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
@@ -1374,7 +1479,63 @@ function StatsTrendLine({ games, field, color }) {
 }
 
 function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
-  return null;
+  const [ourScore, setOurScore] = useState("");
+  const [theirScore, setTheirScore] = useState("");
+  const [goals, setGoals] = useState("");
+  const [assists, setAssists] = useState("");
+  const [saves, setSaves] = useState("");
+  const [shots, setShots] = useState("");
+  const [score, setScore] = useState("");
+  const [demos, setDemos] = useState("");
+
+  const submit = () => {
+    if (ourScore === "" || theirScore === "") return;
+    const entry = {
+      id: Date.now().toString(),
+      playerId: currentPlayer,
+      mode,
+      ourScore: Number(ourScore),
+      theirScore: Number(theirScore),
+      goals: Number(goals) || 0,
+      assists: Number(assists) || 0,
+      saves: Number(saves) || 0,
+      shots: Number(shots) || 0,
+      score: Number(score) || 0,
+      demos: Number(demos) || 0,
+      ts: new Date().toISOString(),
+    };
+    onSave(entry);
+    onClose();
+  };
+
+  return (
+    <div style={s.modalOverlay} onClick={onClose}>
+      <div style={s.modalBox} onClick={(e) => e.stopPropagation()}>
+        <div style={s.modalHeader}>
+          <div style={s.modalTitle}>log {mode} game</div>
+          <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
+        </div>
+        <div style={s.modalLabel}>score</div>
+        <div style={s.modalScoreRow}>
+          <div style={{flex:1}}><div style={s.modalLabel}>us</div><input type="number" value={ourScore} onChange={e=>setOurScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
+          <div style={{flex:1}}><div style={s.modalLabel}>them</div><input type="number" value={theirScore} onChange={e=>setTheirScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
+        </div>
+        <div style={s.modalLabel}>your stats</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {[["goals",goals,setGoals],["assists",assists,setAssists],["saves",saves,setSaves],["shots",shots,setShots],["score",score,setScore],["demos",demos,setDemos]].map(([label,val,setter])=>(
+            <div key={label}>
+              <div style={s.modalLabel}>{label}</div>
+              <input type="number" value={val} onChange={e=>setter(e.target.value)} placeholder="0" style={s.modalInput}/>
+            </div>
+          ))}
+        </div>
+        <button onClick={submit} disabled={ourScore===""||theirScore===""} className="bb-pressable bb-glow-lime"
+          style={{...s.primaryBtn,opacity:ourScore===""||theirScore===""?0.4:1,marginTop:16}}>
+          save game
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled }) {
@@ -1886,7 +2047,7 @@ const upd = [...myUpd, ...others];
             <Bell size={14}/> {notifs.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#FF61C1",borderRadius:99,width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}}>{notifs.length}</span>}
           </button>
           <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
-<button onClick={()=>setTab("garage")} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
+<button onClick={()=>{ if(passPremium?.[currentPlayer]) setTab("garage"); else setShowPass(v=>!v); }} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
           <button onClick={()=>setShowRecap(v=>!v)} className="bb-pressable" style={{background:"rgba(255,209,102,0.1)",border:"1px solid rgba(255,209,102,0.3)",borderRadius:10,padding:"8px 12px",color:"#FFD166",fontSize:12,fontWeight:700,cursor:"pointer"}}>📊 recap</button>
         </div>
       </div>
@@ -1963,14 +2124,16 @@ const upd = [...myUpd, ...others];
                   </div>
                 ) : (
                   <button
-                    onClick={async ()=>{
-                      const myPoints = points?.[currentPlayer] || 0;
-                      if (myPoints < PASS_PREMIUM_COST) return;
-                      const updPoints = {...points, [currentPlayer]: myPoints - PASS_PREMIUM_COST};
-                      setPoints(updPoints); await storeSet("points", updPoints);
-                      const updPremium = {...passPremium, [currentPlayer]: true};
-                      setPassPremium(updPremium); await storeSet("pass_premium", updPremium);
-                    }}
+                   onClick={async ()=>{
+  const myPoints = points?.[currentPlayer] || 0;
+  if (myPoints < PASS_PREMIUM_COST) return;
+  const updPoints = {...points, [currentPlayer]: myPoints - PASS_PREMIUM_COST};
+  setPoints(updPoints); await storeSet("points", updPoints);
+  const updPremium = {...passPremium, [currentPlayer]: true};
+  setPassPremium(updPremium); await storeSet("pass_premium", updPremium);
+  setShowPass(false);
+  setTab("garage");
+}}
                     disabled={(points?.[currentPlayer]||0) < PASS_PREMIUM_COST}
                     className="bb-pressable bb-glow-violet"
                     style={{width:"100%",background:(points?.[currentPlayer]||0)>=PASS_PREMIUM_COST?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"12px 0",fontSize:12.5,fontWeight:700,color:(points?.[currentPlayer]||0)>=PASS_PREMIUM_COST?"#06070D":"#4A5066",cursor:(points?.[currentPlayer]||0)>=PASS_PREMIUM_COST?"pointer":"default",marginTop:4}}>
@@ -3128,7 +3291,7 @@ const badges = {
   };
 
   return (
-<div style={{...s.appShell, background:theme.bg, color:theme.text}}>
+<div style={{...s.appShell, background:theme.bg, color:theme.text, animation:"scaleFadeIn .4s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
 {theme.id==="starfield" && <StarfieldBg/>}
 {toasts.length > 0 && (
