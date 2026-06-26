@@ -705,7 +705,7 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
   ? file?.type?.startsWith("video/")
     ? <video src={previewUrl} style={s.imagePreview} controls muted playsInline/>
     : <img src={previewUrl} alt="preview" style={s.imagePreview}/>
-  : <><ImageIcon size={22} color="#4A5066"/><span style={{color:"#4A5066",fontSize:13,marginTop:6}}>tap to add a photo or video</span></>}:<><ImageIcon size={22} color="#4A5066"/><span style={{color:"#4A5066",fontSize:13,marginTop:6}}>tap to add a photo</span></>}
+ : <><ImageIcon size={22} color="#4A5066"/><span style={{color:"#4A5066",fontSize:13,marginTop:6}}>tap to add a photo or video</span></>}
       </button>
       <div style={s.modalLabel}>caption</div>
       <textarea value={caption} onChange={(e)=>setCaption(e.target.value)} placeholder="what happened..." style={{...s.modalInput,minHeight:70,resize:"vertical"}}/>
