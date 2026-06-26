@@ -1329,11 +1329,7 @@ export default function App() {
       await storeSet("presence", upd);
     };
     heartbeat();
-    registerPush().then(sub => {
-  if (sub) {
-    setPushSub(sub);
-    storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
-  }
+
 });
   
     const hbInterval = setInterval(heartbeat, 30000);
@@ -1433,6 +1429,18 @@ const touchStartY = useRef(0);
       <div style={s.topBar}>
         <div style={s.topBarTitle}>burton battlers</div>
         <div style={s.topBarRight}>
+<button onClick={async () => {
+  const sub = await registerPush();
+  if (sub) {
+    setPushSub(sub);
+    storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
+    alert('notifications enabled!');
+  } else {
+    alert('notifications blocked or not supported');
+  }
+}} className="bb-pressable" style={{background:"none",border:"none",color:"#B8FF4D",fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px"}}>
+  enable notifs
+</button>
           {isAdmin&&<Shield size={13} color="#FF5C8A" style={{marginRight:2}}/>}
           <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
           <span style={s.youName}>{playerObj.name}</span>
