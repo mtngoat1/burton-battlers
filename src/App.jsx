@@ -273,9 +273,76 @@ function ReminderBanner({ incompleteDays, onJump, onDismiss }) {
     </div>
   );
 }
+            const CHALLENGES = [
+  (me, rival, field) => `score ${Math.max(1,Math.ceil(rival[field]-me[field]+1))} more ${field} per game to surpass ${rival.name}`,
+  (me, rival, field) => `avg ${(me[field]+0.5).toFixed(1)} ${field}/game for 3 games — earn 10 pts`,
+  (me, rival, field) => `beat ${rival.name}'s ${field} average (${rival[field]}) twice this week`,
+  (me, rival, field) => `hit ${Math.ceil(me[field]*1.2)} ${field} in your next game for a streak bonus`,
+  (me, rival, field) => `post ${Math.ceil(rival[field]+1)} ${field} and claim the ${field} crown from ${rival.name}`,
+];
+const CHALLENGE_FIELDS = ["goals","assists","saves","demos","shots"];
+
+function StatChallenges({ stats, currentPlayer, completions, setCompletions }) {
+  const myGames = stats.filter(g => g.playerId === currentPlayer);
+  const avg = (pid, field) => {
+    const pg = stats.filter(g => g.playerId === pid);
+    return pg.length ? pg.reduce((s,g) => s+(g[field]||0), 0)/pg.length : 0;
+  };
+  const rivals = PLAYERS.filter(p => p.id !== currentPlayer);
+  const [challengeIdx, setChallengeIdx] = useState(() => Math.floor(Math.random()*CHALLENGES.length));
+  const [fieldIdx, setFieldIdx] = useState(() => Math.floor(Math.random()*CHALLENGE_FIELDS.length));
+  const [rivalIdx, setRivalIdx] = useState(0);
+  const [completed, setCompleted] = useState([]);
+
+  const field = CHALLENGE_FIELDS[fieldIdx];
+  const rival = rivals[rivalIdx % rivals.length];
+  const me = { name: PLAYERS.find(p=>p.id===currentPlayer)?.name, [field]: avg(currentPlayer, field) };
+  const rivalStats = { name: rival.name, [field]: avg(rival.id, field) };
+  const challengeText = CHALLENGES[challengeIdx](me, rivalStats, field);
+
+  const completeChallenge = () => {
+    setCompleted(prev => [...prev, challengeIdx]);
+    setChallengeIdx(Math.floor(Math.random()*CHALLENGES.length));
+    setFieldIdx(Math.floor(Math.random()*CHALLENGE_FIELDS.length));
+    setRivalIdx(r => r+1);
+  };
+
+  const playerColor = PLAYERS.find(p=>p.id===currentPlayer)?.color || "#B8FF4D";
+
+  return (
+    <div style={{marginBottom:20}}>
+      <div style={{...s.sectionLabel,marginBottom:10}}>stat challenges</div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${playerColor}22`,marginBottom:12}}>
+        <div style={{fontSize:11,color:playerColor,fontWeight:700,letterSpacing:0.8,marginBottom:8}}>CURRENT CHALLENGE</div>
+        <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{challengeText}</div>
+        <button onClick={completeChallenge} className="bb-pressable bb-glow-lime" style={{background:playerColor,color:"#06070D",border:"none",borderRadius:10,padding:"9px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+          mark complete → next challenge
+        </button>
+      </div>
+      <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+        <div style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:8}}>
+          <div/>
+          {CHALLENGE_FIELDS.map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
+        </div>
+        {PLAYERS.map(p=>(
+          <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(5,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:5}}>
+              <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
+              <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
+            </div>
+            {CHALLENGE_FIELDS.map(f=>{
+              const val = avg(p.id, f);
+              return <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{val>0?val.toFixed(1):"—"}</div>;
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ===================== Home Tab =====================
-function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining }) {
+function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
@@ -310,7 +377,9 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
         <div style={s.recordBox}><div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div><div style={s.recordLabel}>goal diff</div></div>
         <div style={s.recordBox}><div style={s.recordNum}>{record.gf}</div><div style={s.recordLabel}>goals for</div></div>
       </div>
-
+<StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions}/>
+          <div style={s.sectionRowHeader}>
+        <div style={s.sectionLabel}>next 5 days · your training</div>
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
         <button onClick={onGotoTraining} className="bb-pressable" style={s.viewAllBtn}>view all <ChevronRight size={12}/></button>
@@ -1044,6 +1113,14 @@ const THEMES = {
     sub: "#7A90B8", muted: "#3A4E72", tabBg: "#060C1E",
     swatch: "radial-gradient(circle at 30% 40%,#7EB8FF 0%,#040818 70%)",
   },
+{ id:"title_demogod",   label:"Demo God",           desc:"demo god",           cost:60,  type:"title", value:"demo god",           emoji:"💥" },
+  { id:"title_petty",     label:"Petty Player",        desc:"petty player",       cost:60,  type:"title", value:"petty player",       emoji:"😤" },
+  { id:"title_scallions", label:"Scanlons Scallions",  desc:"scanlons scallions", cost:80,  type:"title", value:"scanlons scallions", emoji:"🧅" },
+  { id:"title_lonely",    label:"The Lonely Girl",     desc:"the lonely girl",    cost:70,  type:"title", value:"the lonely girl",    emoji:"🥀" },
+  { id:"title_powershot", label:"Powershot Pimp",      desc:"powershot pimp",     cost:75,  type:"title", value:"powershot pimp",     emoji:"💥" },
+  { id:"title_saved",     label:"Saved The Day",       desc:"saved the day",      cost:65,  type:"title", value:"saved the day",      emoji:"🧤" },
+  { id:"title_rule69",    label:"Rule 69",             desc:"rule 69",            cost:69,  type:"title", value:"rule 69",            emoji:"😏" },
+];
 };
 const SHOP_ITEMS = [
   { id:"lime_name",   label:"Lime",   desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
@@ -1069,11 +1146,41 @@ function PlayerNameDisplay({ playerId, points }) {
   const equipped = points?.[playerId + "_equipped"] || {};
   const colorItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "color"); return it && equipped[id]; });
   const iconItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "icon"); return it && equipped[id]; });
+  const titleItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "title"); return it && equipped[id]; });
   const color = colorItem ? SHOP_ITEMS.find(i => i.id === colorItem)?.value : player.color;
   const icon = iconItem ? SHOP_ITEMS.find(i => i.id === iconItem)?.value : null;
-  return <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>;
+  const title = titleItem ? SHOP_ITEMS.find(i => i.id === titleItem)?.value : null;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:1}}>
+      <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>
+      {title && <span style={{fontSize:9.5,color:"#8B92A8",fontWeight:600,letterSpacing:0.5}}>{title}</span>}
+    </div>
+<div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>TITLES</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {SHOP_ITEMS.filter(i=>i.type==="title").map(item=>{
+                const isOwned=owned.includes(item.id);
+                const isEquipped=equipped[item.id];
+                const canAfford=myPoints>=item.cost;
+                return (
+                  <div key={item.id} style={{background:isEquipped?"rgba(167,139,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",border:`1px solid ${isEquipped?"rgba(167,139,250,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,position:"relative"}}>
+                    <div style={{fontSize:20,marginBottom:4}}>{item.emoji}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:isOwned?"#A78BFA":"#E8ECF4",marginBottom:2}}>{item.label}</div>
+                    <div style={{fontSize:9.5,color:"#4A5066",marginBottom:8}}>"{item.value}"</div>
+                    {isOwned?(
+                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?"#A78BFA":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                        {isEquipped?"✓ equipped":"equip"}
+                      </button>
+                    ):(
+                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(167,139,250,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(167,139,250,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?"#A78BFA":"#4A5066",cursor:canAfford?"pointer":"default"}}>
+                        {item.cost} pts
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+  );
 }
-
 function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
@@ -1512,9 +1619,9 @@ const badges = {
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
       {commentDay&&<CommentsModal dayKey={commentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setCommentDay(null)}/>}
       <div style={s.topBar}>
-        <div style={s.topBarTitle}>burton battlers</div>
+    <div style={s.topBarTitle}>
+</div>
         <div style={s.topBarRight}>
-<button onClick={async () => {
   const sub = await registerPush();
   if (sub) {
     setPushSub(sub);
@@ -1541,7 +1648,7 @@ const badges = {
       </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-        {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")}/>}
+       {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
        {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast}/>}
