@@ -1213,9 +1213,12 @@ const upd = [...myUpd, ...others];
                   </div>
                 );
               })}
-            </div>
+</div>
+          </div>
         </div>
       )}
+
+      {/* Online now */}
 
       {/* Online now */}
       <div style={{...s.sectionLabel,marginBottom:10}}>online now</div>
