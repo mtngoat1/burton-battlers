@@ -699,9 +699,13 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
   return (
     <div style={s.modalOverlay} onClick={onClose}><div style={s.modalBox} onClick={(e)=>e.stopPropagation()}>
       <div style={s.modalHeader}><div style={s.modalTitle}>new post</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
-      <input ref={fileRef} type="file" accept="image/*" onChange={pickFile} style={{display:"none"}}/>
+      <input ref={fileRef} type="file" accept="image/*,video/*" onChange={pickFile} style={{display:"none"}}/>
       <button onClick={()=>fileRef.current?.click()} className="bb-pressable" style={s.imagePickBtn}>
-        {previewUrl?<img src={previewUrl} alt="preview" style={s.imagePreview}/>:<><ImageIcon size={22} color="#4A5066"/><span style={{color:"#4A5066",fontSize:13,marginTop:6}}>tap to add a photo</span></>}
+        {previewUrl
+  ? file?.type?.startsWith("video/")
+    ? <video src={previewUrl} style={s.imagePreview} controls muted playsInline/>
+    : <img src={previewUrl} alt="preview" style={s.imagePreview}/>
+  : <><ImageIcon size={22} color="#4A5066"/><span style={{color:"#4A5066",fontSize:13,marginTop:6}}>tap to add a photo or video</span></>}:<><ImageIcon size={22} color="#4A5066"/><span style={{color:"#4A5066",fontSize:13,marginTop:6}}>tap to add a photo</span></>}
       </button>
       <div style={s.modalLabel}>caption</div>
       <textarea value={caption} onChange={(e)=>setCaption(e.target.value)} placeholder="what happened..." style={{...s.modalInput,minHeight:70,resize:"vertical"}}/>
@@ -723,7 +727,9 @@ function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments }) {
         <span style={{fontWeight:700,fontSize:13.5}}>{player?.name}</span>
         <span style={s.postTime}>{fmtRelTime(post.ts)}</span>
       </div>
-      {post.image&&<img src={post.image} alt="post" style={s.postImage}/>}
+      {post.image&&(post.isVideo
+  ? <video src={post.image} style={s.postImage} controls muted playsInline loop/>
+  : <img src={post.image} alt="post" style={s.postImage}/>)}
       {post.caption&&<div style={s.postCaption}>{post.caption}</div>}
       <div style={s.postActions}>
         <button onClick={heartClick} className="bb-pressable" style={s.postActionBtn}>
@@ -754,8 +760,9 @@ function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
 }
 function SocialTab({ posts, setPosts, currentPlayer, addToast }) {
   const [composing,setComposing]=useState(false); const [commentingOn,setCommentingOn]=useState(null);
-  const addPost=async(data)=>{ let img=null; if(data.file) img=await uploadPostImage(data.file); const post={id:Date.now().toString(),playerId:currentPlayer,caption:data.caption,image:img,ts:new Date().toISOString(),hearts:[],comments:[]}; const upd=[post,...posts]; setPosts(upd); await storeSet("posts",upd);
+  const addPost=async(data)=>{ let img=null; if(data.file) img=await uploadPostImage(data.file); const post={id:Date.now().toString(),playerId:currentPlayer,caption:data.caption,image:img,isVideo:data.file?.type?.startsWith("video/"),ts:new Date().toISOString(),hearts:[],comments:[]}; const upd=[post,...posts]; setPosts(upd); await storeSet("posts",upd);
 addToast?.(`${PLAYERS.find(pl=>pl.id===currentPlayer)?.name} posted something`, "📸");
+  };
   };
   const toggleHeart=async(postId)=>{ const upd=posts.map((p)=>{if(p.id!==postId)return p; const hearts=p.hearts||[]; return {...p,hearts:hearts.includes(currentPlayer)?hearts.filter((id)=>id!==currentPlayer):[...hearts,currentPlayer]}; }); setPosts(upd); await storeSet("posts",upd); };
   const addComment=async(postId,text)=>{ const comment={id:Date.now().toString(),playerId:currentPlayer,text,ts:new Date().toISOString()}; const upd=posts.map((p)=>p.id===postId?{...p,comments:[...(p.comments||[]),comment]}:p); setPosts(upd); await storeSet("posts",upd); setCommentingOn((prev)=>prev?upd.find((p)=>p.id===prev.id):prev); };
@@ -1022,6 +1029,36 @@ function StatsTab({ stats, setStats, currentPlayer }) {
   );
 }
 // ===================== Presence + Ping + Notifications + Weekly Recap + Shop =====================
+const THEMES = {
+  default: {
+    id: "default",
+    bg: "#06070D", card: "#11131F", border: "rgba(255,255,255,0.06)",
+    accent: "#B8FF4D", accentText: "#06070D", text: "#E8ECF4",
+    sub: "#8B92A8", muted: "#4A5066", tabBg: "#0A0C16",
+    swatch: "linear-gradient(135deg,#06070D 50%,#B8FF4D 50%)",
+  },
+  inverse: {
+    id: "inverse",
+    bg: "#F0F2F5", card: "#FFFFFF", border: "rgba(0,0,0,0.08)",
+    accent: "#1A1D2E", accentText: "#F0F2F5", text: "#0A0C16",
+    sub: "#555E72", muted: "#9AA0B0", tabBg: "#E4E7ED",
+    swatch: "linear-gradient(135deg,#F0F2F5 50%,#1A1D2E 50%)",
+  },
+  starfield: {
+    id: "starfield",
+    bg: "#040818", card: "#0B1230", border: "rgba(100,140,255,0.15)",
+    accent: "#7EB8FF", accentText: "#040818", text: "#D8E8FF",
+    sub: "#7A90B8", muted: "#3A4E72", tabBg: "#060C1E",
+    swatch: "radial-gradient(circle at 30% 40%,#7EB8FF 0%,#040818 70%)",
+  },
+  pop: {
+    id: "pop",
+    bg: "#0F1210", card: "#171E18", border: "rgba(255,255,255,0.07)",
+    accent: "#39FF6A", accentText: "#0F1210", text: "#F0F5F1",
+    sub: "#8AAF90", muted: "#3D5C44", tabBg: "#0A0F0B",
+    swatch: "linear-gradient(135deg,#39FF6A 0%,#FF6B35 50%,#3D9BFF 100%)",
+  },
+};
 const SHOP_ITEMS = [
   { id:"lime_name",   label:"Lime",   desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
   { id:"pink_name",   label:"Pink",   desc:"hot pink name glow",     cost:50,  type:"color", value:"#FF61C1", emoji:"🩷" },
@@ -1276,7 +1313,22 @@ const upd = [...myUpd, ...others];
       </div>
     </div>
   );
-}          
+}    
+function StarfieldBg() {
+  const stars = Array.from({length:80},(_,i)=>({
+    x: (i*137.5)%100, y: (i*97.3)%100,
+    r: i%5===0?1.5:i%3===0?1:0.6,
+    op: 0.3+((i*73)%100)/200,
+    dur: 2+(i%4),
+  }));
+  return (
+    <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0,overflow:"hidden"}}>
+      {stars.map((st,i)=>(
+        <div key={i} style={{position:"absolute",left:`${st.x}%`,top:`${st.y}%`,width:st.r*2,height:st.r*2,borderRadius:"50%",background:"#7EB8FF",opacity:st.op,animation:`livePulse ${st.dur}s ease-in-out infinite`,animationDelay:`${(i*0.3)%3}s`}}/>
+      ))}
+    </div>
+  );
+}
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
 const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points"];
@@ -1345,6 +1397,8 @@ const [toasts, setToasts] = useState([]);
   const [jumpKey,setJumpKey]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
+const [themeId, setThemeId] = useState("default");
+const theme = THEMES[themeId];
 const addToast = (text, icon = "🔔") => {
   const id = Date.now().toString();
   setToasts(prev => [...prev, { id, text, icon }]);
@@ -1450,8 +1504,9 @@ const touchStartY = useRef(0);
   ];
 
   return (
-    <div style={s.appShell}>
+<div style={{...s.appShell, background:theme.bg, color:theme.text}}>
       <GlobalStyles/>
+{theme.id==="starfield" && <StarfieldBg/>}
 {toasts.length > 0 && (
   <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,display:"flex",flexDirection:"column",gap:8,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"none"}}>
     {toasts.map(t=>(
@@ -1482,11 +1537,24 @@ const touchStartY = useRef(0);
           {isAdmin&&<Shield size={13} color="#FF5C8A" style={{marginRight:2}}/>}
           <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
           <span style={s.youName}>{playerObj.name}</span>
-          <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button>
+          <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button> <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
+  {Object.values(THEMES).map(t=>(
+    <button key={t.id} onClick={()=>setThemeId(t.id)}
+      style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
+    />
+  ))}
+</div>
+<div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
+  {Object.values(THEMES).map(t=>(
+    <button key={t.id} onClick={()=>setThemeId(t.id)}
+      style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
+    />
+  ))}
+</div>
         </div>
       </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
-      <div style={s.tabBody} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
         {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
