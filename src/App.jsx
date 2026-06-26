@@ -1489,9 +1489,10 @@ async function sendPush(subscription, title, body) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ subscription, title, body }),
     });
-  } catch (e) {
+} catch (e) {
     console.error('Push send failed', e);
   }
+}
 // ===================== Boost Tab =====================
 const WHEEL_SEGMENTS = [
   { label: "GOAL 🎯", mult: 2.0, color: "#B8FF4D", prob: 0.22 },
