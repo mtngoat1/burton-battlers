@@ -1141,13 +1141,13 @@ const SHOP_ITEMS = [
   { id:"icon_goat",   label:"GOAT",   desc:"greatest of all time",   cost:80,  type:"icon",  value:"🐐",     emoji:"🐐" },
   { id:"icon_bolt",   label:"Bolt",   desc:"fastest on the team",    cost:70,  type:"icon",  value:"⚡",     emoji:"⚡" },
   { id:"icon_alien",  label:"Alien",  desc:"not of this world",      cost:90,  type:"icon",  value:"👾",     emoji:"👾" },
-  { id:"title_demogod",   label:"Demo God",          cost:60,  type:"title", value:"demo god",           emoji:"💥" },
-  { id:"title_petty",     label:"Petty Player",      cost:60,  type:"title", value:"petty player",       emoji:"😤" },
-  { id:"title_scallions", label:"Scanlons Scallions", cost:80, type:"title", value:"scanlons scallions", emoji:"🧅" },
-  { id:"title_lonely",    label:"The Lonely Girl",   cost:70,  type:"title", value:"the lonely girl",    emoji:"🥀" },
-  { id:"title_powershot", label:"Powershot Pimp",    cost:75,  type:"title", value:"powershot pimp",     emoji:"💥" },
-  { id:"title_saved",     label:"Saved The Day",     cost:65,  type:"title", value:"saved the day",      emoji:"🧤" },
-  { id:"title_rule69",    label:"Rule 69",           cost:69,  type:"title", value:"rule 69",            emoji:"😏" },
+  { id:"title_demogod",            cost:60,  type:"title", value:"demo god",            },
+  { id:"title_petty",         cost:60,  type:"title", value:"petty player",        },
+  { id:"title_scallions",  cost:80, type:"title", value:"scanlons scallions",  },
+  { id:"title_lonely",       cost:70,  type:"title", value:"the lonely girl",     },
+  { id:"title_powershot",     cost:75,  type:"title", value:"powershot pimp",      },
+  { id:"title_saved",          cost:65,  type:"title", value:"saved the day",       },
+  { id:"title_rule69",          cost:69,  type:"title", value:"rule 69",             },
 ];
 function isOnline(ts) {
   if (!ts) return false;
