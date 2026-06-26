@@ -10,7 +10,7 @@ import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti }
 const ADMIN_ID = "p1";
 const PLAYERS = [
   { id: "p1", name: "maglvxx",  color: "#B8FF4D", twitch: "" },
-  { id: "p2", name: "Apcards5", color: "#A78BFA", twitch: "" },
+ { id: "p2", name: "Apcards5", color: "#4D9EFF", twitch: "" },
   { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "" },
 ];
 
@@ -517,7 +517,10 @@ function VerificationTab({ trainingData, completions, setCompletions }) {
   const decide=async(key,decision)=>{
     const note=noteDraft[key]||"";
     const upd={...completions,[key]:{...completions[key],status:decision,note:decision==="rejected"?note:undefined,reviewedAt:new Date().toISOString()}};
-     setCompletions(upd); await storeSet("completions",upd);
+    setCompletions(upd); await storeSet("completions",upd);
+    const notifPid = key.split("__")[1];
+    const subStr = await storeGet(`push_sub:${notifPid}`);
+    if (subStr) await sendPush(JSON.parse(subStr), decision === 'approved' ? 'training approved ✅' : 'training needs redo ❌', decision === 'approved' ? 'captain approved your session — +15 pts' : `captain says: ${note||'check the app'}`);
     if (decision==="approved") {
       const pts=await storeGet("points")||{};
       const pid=key.split("__")[1];
@@ -669,8 +672,13 @@ function ChatTab({ messages, setMessages, currentPlayer }) {
   const send=async()=>{
     if (!text.trim()) return;
     const msg={id:Date.now().toString(),playerId:currentPlayer,text:text.trim(),ts:new Date().toISOString()};
-    const upd=[...messages,msg];
+   const upd=[...messages,msg];
     setMessages(upd); await storeSet("chat",upd); setText("");
+    for (const p of PLAYERS) {
+      if (p.id === currentPlayer) continue;
+      const subStr = await storeGet(`push_sub:${p.id}`);
+      if (subStr) await sendPush(JSON.parse(subStr), 'new message 💬', `${PLAYERS.find(pl=>pl.id===currentPlayer)?.name}: ${text.trim()}`);
+    }
   };
   return (
     <div className="bb-tab-content" style={s.chatTabWrap}>
@@ -752,7 +760,12 @@ function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
 }
 function SocialTab({ posts, setPosts, currentPlayer }) {
   const [composing,setComposing]=useState(false); const [commentingOn,setCommentingOn]=useState(null);
-  const addPost=async(data)=>{ let img=null; if(data.file) img=await uploadPostImage(data.file); const post={id:Date.now().toString(),playerId:currentPlayer,caption:data.caption,image:img,ts:new Date().toISOString(),hearts:[],comments:[]}; const upd=[post,...posts]; setPosts(upd); await storeSet("posts",upd); };
+  const addPost=async(data)=>{ let img=null; if(data.file) img=await uploadPostImage(data.file); const post={id:Date.now().toString(),playerId:currentPlayer,caption:data.caption,image:img,ts:new Date().toISOString(),hearts:[],comments:[]}; const upd=[post,...posts]; setPosts(upd); await storeSet("posts",upd);
+    for (const p of PLAYERS) {
+      if (p.id === currentPlayer) continue;
+      const subStr = await storeGet(`push_sub:${p.id}`);
+      if (subStr) await sendPush(JSON.parse(subStr), 'new post 📸', `${PLAYERS.find(pl=>pl.id===currentPlayer)?.name} posted something`);
+    }};
   const toggleHeart=async(postId)=>{ const upd=posts.map((p)=>{ if(p.id!==postId)return p; const hearts=p.hearts||[]; return {...p,hearts:hearts.includes(currentPlayer)?hearts.filter((id)=>id!==currentPlayer):[...hearts,currentPlayer]}; }); setPosts(upd); await storeSet("posts",upd); };
   const addComment=async(postId,text)=>{ const comment={id:Date.now().toString(),playerId:currentPlayer,text,ts:new Date().toISOString()}; const upd=posts.map((p)=>p.id===postId?{...p,comments:[...(p.comments||[]),comment]}:p); setPosts(upd); await storeSet("posts",upd); setCommentingOn((prev)=>prev?upd.find((p)=>p.id===prev.id):prev); };
   return (
@@ -821,7 +834,9 @@ function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles }
   const totalDays=Math.ceil((PLAYOFF_END-TRAINING_START)/DAY_MS);
   const startIdx=Math.max(0,Math.floor((today-TRAINING_START)/DAY_MS)-1);
   const days=Array.from({length:Math.min(totalDays-startIdx,21)},(_,i)=>{ const date=new Date(TRAINING_START.getTime()+(startIdx+i)*DAY_MS); return {key:dateKey(date),date}; });
-  const saveTraining=async(dk,pid,data)=>{ const upd={...trainingData,[tKey(dk,pid)]:data}; setTrainingData(upd); await storeSet("training",upd); };
+  const saveTraining=async(dk,pid,data)=>{ const upd={...trainingData,[tKey(dk,pid)]:data}; setTrainingData(upd); await storeSet("training",upd);
+    const subStr = await storeGet(`push_sub:${pid}`);
+    if (subStr) await sendPush(JSON.parse(subStr), 'new training assigned 🏋️', `captain assigned you a new session`);};
   const saveMmr=async(pid,profile)=>{ const upd={...mmrProfiles,[pid]:profile}; setMmrProfiles(upd); await setMMR(pid,profile); };
   const activePlayer=PLAYERS.find((p)=>p.id===activePlayerTab);
   return (
@@ -1241,7 +1256,45 @@ function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoin
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
 const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points"];
+// ===================== Push Notifications =====================
+const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+}
+
+async function registerPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  try {
+    const reg = await navigator.serviceWorker.register('/service-worker.js');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return null;
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+    return sub;
+  } catch (e) {
+    console.error('Push registration failed', e);
+    return null;
+  }
+}
+
+async function sendPush(subscription, title, body) {
+  if (!subscription) return;
+  try {
+    await fetch('/api/send-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription, title, body }),
+    });
+  } catch (e) {
+    console.error('Push send failed', e);
+  }
+}
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
@@ -1266,6 +1319,7 @@ export default function App() {
   const [commentDay,setCommentDay]=useState(null);
   const [jumpKey,setJumpKey]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
+  const [pushSub, setPushSub] = useState(null);
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
@@ -1275,6 +1329,13 @@ export default function App() {
       await storeSet("presence", upd);
     };
     heartbeat();
+    registerPush().then(sub => {
+  if (sub) {
+    setPushSub(sub);
+    storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
+  }
+});
+  
     const hbInterval = setInterval(heartbeat, 30000);
     const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
       if (key === "chat")           setMessages(value);
