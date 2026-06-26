@@ -536,14 +536,14 @@ function getNightStreaks(stats) {
         consecutive++;
         streakGames.push({ ts, games: gamesAtTime });
       } else {
-        if (consecutive >= 4) {
+        if (consecutive >= 3) {
           streaks.push({ dk, games: streakGames, peak: consecutive });
         }
         consecutive = 0;
         streakGames = [];
       }
     });
-    if (consecutive >= 4) {
+    if (consecutive >= 3) {
       streaks.push({ dk, games: streakGames, peak: consecutive });
     }
   });
@@ -771,7 +771,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
   const today = todayAtMidnight();
   const previewDays = Array.from({length:5},(_,i)=>{ const date=new Date(today.getTime()+i*DAY_MS); const key=dateKey(date); return {key,date,training:trainingData[tKey(key,currentPlayer)]||null}; });
 
-  return (
+return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={s.heroCard}>
         <div style={s.heroEyebrow}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
@@ -792,10 +792,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
         <div style={s.recordBox}><div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div><div style={s.recordLabel}>goal diff</div></div>
         <div style={s.recordBox}><div style={s.recordNum}>{record.gf}</div><div style={s.recordLabel}>goals for</div></div>
       </div>
-<CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
-<HeatStreakCard stats={stats} currentPlayer={currentPlayer} />
-<TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
-<StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
+
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
         <button onClick={onGotoTraining} className="bb-pressable" style={s.viewAllBtn}>view all <ChevronRight size={12}/></button>
@@ -821,8 +818,13 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
           );
         })}
       </div>
-    </div>      
-  );
+
+      <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
+      <HeatStreakCard stats={stats} currentPlayer={currentPlayer} />
+      <TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
+      <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
+    </div>
+);
 }
 
 // ===================== Bracket Tab =====================
@@ -1422,7 +1424,7 @@ for (let i = allTodayGames.length - 1; i >= 0; i--) {
 }
 const heatMult = heatMultiplier(streak);
 const finalMult = mult * heatMult;
-const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+15*finalMult};
+const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
   setPassXP(updXP); await storeSet("pass_xp",updXP);
 };
   const modeGames=stats.filter(g=>g.mode===mode);
@@ -1609,7 +1611,7 @@ const FREE_PASS_REWARDS = {
   33: { type:"icon",   value:"🌙", label:"night owl icon" },
   34: { type:"coins",  value:35,  label:"+35 pts" },
   35: { type:"title",  value:"on the come up", label:"on the come up" },
-  36: { type:"color",  value:"#FF8C42", label:"burnt orange glow" },
+  36: { type:"color",  value:"#BBF2D9", label:"mint green" },
   37: { type:"coins",  value:40,  label:"+40 pts" },
   38: { type:"icon",   value:"🦅", label:"eagle icon" },
   39: { type:"title",  value:"veteran", label:"veteran" },
@@ -1623,7 +1625,7 @@ const FREE_PASS_REWARDS = {
   47: { type:"title",  value:"almost there", label:"almost there" },
   48: { type:"icon",   value:"👾", label:"alien icon" },
   49: { type:"coins",  value:60,  label:"+60 pts" },
-  50: { type:"title",  value:"burton battler", label:"burton battler" },
+  50: { type:"title",  value:"", label:"" },
 };
 
 const PREMIUM_PASS_REWARDS = {
@@ -1815,7 +1817,7 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
     </div>
   );
 }
-function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens }) {
+function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
@@ -1884,7 +1886,7 @@ const upd = [...myUpd, ...others];
             <Bell size={14}/> {notifs.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#FF61C1",borderRadius:99,width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}}>{notifs.length}</span>}
           </button>
           <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
-<button onClick={()=>setShowPass(v=>!v)} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
+<button onClick={()=>setTab("garage")} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
           <button onClick={()=>setShowRecap(v=>!v)} className="bb-pressable" style={{background:"rgba(255,209,102,0.1)",border:"1px solid rgba(255,209,102,0.3)",borderRadius:10,padding:"8px 12px",color:"#FFD166",fontSize:12,fontWeight:700,cursor:"pointer"}}>📊 recap</button>
         </div>
       </div>
@@ -2186,7 +2188,7 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
     }
 
     setClaimResult({ tier, reward });
-    setTimeout(() => setClaimResult(null), 2500);
+    setTimeout(() => setClaimResult(null), 3000);
   };
 
 const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ tier: Number(tier), reward })).sort((a, b) => a.tier - b.tier);
@@ -2197,7 +2199,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       {claimResult && (
-        <div style={{ position: "fixed", top: 80, left: 0, right: 0, margin: "0 auto", width: 220, zIndex: 300, background: "#1A1D2E", border: "1px solid rgba(184,255,77,0.4)", borderRadius: 14, padding: "14px 20px", textAlign: "center", animation: "dropDown .3s cubic-bezier(.2,.8,.2,1)" }}>
+        <div style={{ position: "fixed", top: 80, left: 0, right: 0, margin: "0 auto", width: 220, zIndex: 300, background: "#1A1D2E", border: "1px solid rgba(184,255,77,0.4)", borderRadius: 14, padding: "14px 20px", textAlign: "center", animation: "dropDown .3s cubic-bezier(.2,.8,.2,1), dropDown .3s cubic-bezier(.2,.8,.2,1) 2.5s reverse forwards" }}>
           <div style={{ fontSize: 22, marginBottom: 4 }}>🎁</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#B8FF4D" }}>tier {claimResult.tier} claimed!</div>
           <div style={{ fontSize: 12, color: "#8B92A8", marginTop: 2 }}>{claimResult.reward.label || claimResult.reward.value}</div>
@@ -2969,7 +2971,7 @@ const [passActiveBoosts, setPassActiveBoosts] = useState({}); // { [playerId]: {
   const [jumpKey,setJumpKey]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
-const [themeId, setThemeId] = useState("default");
+const [themeId, setThemeId] = useState("starfield");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const [showAllGames, setShowAllGames] = useState(false);
 const [statsJumpDate, setStatsJumpDate] = useState(null);
@@ -3190,7 +3192,7 @@ const badges = {
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
 {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)}/>}
  {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>}       
-{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens}/>}
+{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab}/>}
 {tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
    {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
