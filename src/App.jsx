@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   Home, Lock, Check, ChevronRight, Send, X, Plus, Minus, Trophy, Dumbbell,
   MessageCircle, LogOut, Shield, Edit3, ChevronLeft, Image as ImageIcon,
-  Heart, ClipboardCheck, Bell, ThumbsDown, ThumbsUp, Clock, Tv, Circle, BarChart2,
+  Heart, ClipboardCheck, Bell, ThumbsDown, ThumbsUp, Clock, Tv, Circle, BarChart2, Dice5,
 } from "lucide-react";
 import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti } from "./lib/storage";
 
@@ -1012,12 +1012,26 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
 function StatsTab({ stats, setStats, currentPlayer }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
-   const saveGame=async(entry)=>{
-    const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd);
-    const pts=await storeGet("points")||{};
-    const cur=pts[currentPlayer]||0;
-    await storeSet("points",{...pts,[currentPlayer]:cur+10});
-  };
+const saveGame=async(entry)=>{
+  const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd);
+  const pts=await storeGet("points")||{};
+  let cur=pts[currentPlayer]||0;
+  cur+=10;
+  const allBets=await storeGet("bets")||[];
+  const resolvedBets=allBets.map(bet=>{
+    if(bet.status!=="open") return bet;
+    if(bet.playerId!==currentPlayer) return bet;
+    if(new Date(bet.placedAt)>new Date(entry.ts)) return bet;
+    const actual=entry[bet.field]||0;
+    const won=bet.side==="over"?actual>bet.line:actual<bet.line;
+    if(won){
+      pts[bet.bettorId]=(pts[bet.bettorId]||0)+bet.payout;
+    }
+    return {...bet,status:won?"won":"lost",settledAt:new Date().toISOString(),actual};
+  });
+  await storeSet("bets",resolvedBets);
+  await storeSet("points",{...pts,[currentPlayer]:cur});
+};
   const modeGames=stats.filter(g=>g.mode===mode);
   const myGames=modeGames.filter(g=>g.playerId===currentPlayer).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
   const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+g[field],0)/arr.length).toFixed(1):"—";
@@ -1143,11 +1157,12 @@ const SHOP_ITEMS = [
   { id:"icon_alien",  label:"Alien",  desc:"not of this world",      cost:90,  type:"icon",  value:"👾",     emoji:"👾" },
   { id:"title_demogod",            cost:60,  type:"title", value:"demo god",            },
   { id:"title_petty",         cost:60,  type:"title", value:"petty player",        },
-  { id:"title_scallions",  cost:80, type:"title", value:"scanlons scallions",  },
+  { id:"title_scallions",  cost:100, type:"title", value:"scanlons scallions",  },
   { id:"title_lonely",       cost:70,  type:"title", value:"the lonely girl",     },
   { id:"title_powershot",     cost:75,  type:"title", value:"powershot pimp",      },
   { id:"title_saved",          cost:65,  type:"title", value:"saved the day",       },
   { id:"title_rule69",          cost:69,  type:"title", value:"rule 69",             },
+{ id:"title_buffalo",          cost:200,  type:"title", value:"buffalo burton",             },
 ];
 function isOnline(ts) {
   if (!ts) return false;
@@ -1438,7 +1453,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -1477,6 +1492,362 @@ async function sendPush(subscription, title, body) {
   } catch (e) {
     console.error('Push send failed', e);
   }
+// ===================== Boost Tab =====================
+const WHEEL_SEGMENTS = [
+  { label: "GOAL 🎯", mult: 2.0, color: "#B8FF4D", prob: 0.22 },
+  { label: "SAVE 🧤", mult: 1.5, color: "#7EB8FF", prob: 0.20 },
+  { label: "ASSIST 🍀", mult: 1.75, color: "#A78BFA", prob: 0.18 },
+  { label: "EPIC SAVE ⭐", mult: 3.0, color: "#FFD166", prob: 0.08 },
+  { label: "HAT TRICK 🪖", mult: 4.0, color: "#FF5C8A", prob: 0.05 },
+  { label: "DEMO 💥", mult: 0.0, color: "#FF8C42", prob: 0.12 },
+  { label: "OWN GOAL 😬", mult: 0.5, color: "#8B92A8", prob: 0.10 },
+  { label: "FORFEIT ❌", mult: 0.0, color: "#4A5066", prob: 0.05 },
+];
+
+function pickSegment() {
+  const r = Math.random();
+  let cum = 0;
+  for (const seg of WHEEL_SEGMENTS) {
+    cum += seg.prob;
+    if (r <= cum) return seg;
+  }
+  return WHEEL_SEGMENTS[0];
+}
+
+function calcOdds(pct) {
+  if (pct >= 0.5) {
+    return { favorite: true, american: `-${Math.round((pct / (1 - pct)) * 100)}`, decimal: (1 / pct).toFixed(2) };
+  } else {
+    return { favorite: false, american: `+${Math.round(((1 - pct) / pct) * 100)}`, decimal: (1 / pct).toFixed(2) };
+  }
+}
+
+function calcPayout(wager, decimalOdds) {
+  return Math.round(wager * parseFloat(decimalOdds));
+}
+
+function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
+  const [section, setSection] = useState("wheel");
+  const [wager, setWager] = useState(10);
+  const [spinning, setSpinning] = useState(false);
+  const [spinResult, setSpinResult] = useState(null);
+  const [rotation, setRotation] = useState(0);
+  const [propWager, setPropWager] = useState(10);
+  const [selectedProp, setSelectedProp] = useState(null);
+  const [propSide, setPropSide] = useState(null);
+
+  const myPoints = points?.[currentPlayer] || 0;
+  const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
+
+  // Build player props from stats
+  const buildProps = () => {
+    const props = [];
+    const lines = [
+      { field: "goals", lines: [0.5, 1.5, 2.5] },
+      { field: "assists", lines: [0.5, 1.5] },
+      { field: "saves", lines: [0.5, 1.5, 2.5] },
+      { field: "shots", lines: [1.5, 2.5, 3.5] },
+      { field: "demos", lines: [0.5, 1.5] },
+    ];
+    PLAYERS.filter(p => p.id !== currentPlayer).forEach(player => {
+      const pg = stats.filter(g => g.playerId === player.id && g.mode === "3v3");
+      if (pg.length < 1) return;
+      lines.forEach(({ field, lines: lineVals }) => {
+        const avg = pg.reduce((s, g) => s + (g[field] || 0), 0) / pg.length;
+        lineVals.forEach(line => {
+          const overCount = pg.filter(g => (g[field] || 0) > line).length;
+          const overPct = pg.length > 0 ? overCount / pg.length : 0.5;
+          const underPct = 1 - overPct;
+          const overOdds = calcOdds(Math.max(0.1, Math.min(0.9, overPct)));
+          const underOdds = calcOdds(Math.max(0.1, Math.min(0.9, underPct)));
+          props.push({
+            id: `${player.id}_${field}_${line}`,
+            playerId: player.id,
+            playerName: player.name,
+            playerColor: player.color,
+            field,
+            line,
+            avg: avg.toFixed(1),
+            overPct,
+            underPct,
+            overOdds,
+            underOdds,
+          });
+        });
+      });
+    });
+    return props;
+  };
+
+  const props = buildProps();
+  const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
+  const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
+
+  const spinWheel = async () => {
+    if (spinning || wager < 1 || myPoints < wager) return;
+    setSpinning(true);
+    setSpinResult(null);
+    const seg = pickSegment();
+    const spins = 5 + Math.random() * 3;
+    const segIdx = WHEEL_SEGMENTS.indexOf(seg);
+    const segAngle = 360 / WHEEL_SEGMENTS.length;
+    const targetAngle = spins * 360 + segIdx * segAngle + Math.random() * segAngle;
+    setRotation(prev => prev + targetAngle);
+    setTimeout(async () => {
+      const payout = Math.round(wager * seg.mult);
+      const net = payout - wager;
+      const newPts = Math.max(0, myPoints - wager + payout);
+      const upd = { ...points, [currentPlayer]: newPts };
+      setPoints(upd);
+      await storeSet("points", upd);
+      setSpinResult({ seg, wager, payout, net });
+      setSpinning(false);
+    }, 3000);
+  };
+
+  const placeBet = async () => {
+    if (!selectedProp || !propSide || propWager < 1 || myPoints < propWager) return;
+    const prop = props.find(p => p.id === selectedProp);
+    if (!prop) return;
+    const odds = propSide === "over" ? prop.overOdds : prop.underOdds;
+    const payout = calcPayout(propWager, odds.decimal);
+    const bet = {
+      id: Date.now().toString(),
+      bettorId: currentPlayer,
+      playerId: prop.playerId,
+      playerName: prop.playerName,
+      field: prop.field,
+      line: prop.line,
+      side: propSide,
+      wager: propWager,
+      payout,
+      odds: odds.american,
+      status: "open",
+      placedAt: new Date().toISOString(),
+    };
+    const newPts = myPoints - propWager;
+    const upd = { ...points, [currentPlayer]: newPts };
+    setPoints(upd);
+    await storeSet("points", upd);
+    const updBets = [...(bets || []), bet];
+    setBets(updBets);
+    await storeSet("bets", updBets);
+    setSelectedProp(null);
+    setPropSide(null);
+    setPropWager(10);
+  };
+
+  const segAngle = 360 / WHEEL_SEGMENTS.length;
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      {/* Header */}
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
+        </div>
+        <div style={{fontSize:11,color:"#4A5066",textAlign:"right"}}>
+          <div style={{color:"#FFD166",fontWeight:700,fontSize:13}}>{myOpenBets.length} open bets</div>
+          <div style={{marginTop:2}}>{mySettledBets.length} settled</div>
+        </div>
+      </div>
+
+      {/* Section tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        {[{id:"wheel",label:"🎡 wheel"},{id:"props",label:"📊 props"},{id:"mybets",label:"🎟 my bets"}].map(sec=>(
+          <button key={sec.id} onClick={()=>setSection(sec.id)} className="bb-pressable"
+            style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
+            {sec.label}
+          </button>
+        ))}
+      </div>
+
+      {/* WHEEL */}
+      {section==="wheel"&&(
+        <div>
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>spin the rocket wheel — instant payout. bet your coins, take your chances.</div>
+
+          {/* Wheel visual */}
+          <div style={{position:"relative",width:260,height:260,margin:"0 auto 24px"}}>
+            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:10,width:32,height:32,background:"#06070D",borderRadius:"50%",border:"2px solid #B8FF4D",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>▼</div>
+            <div style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",borderRadius:"50%",overflow:"hidden",border:"3px solid rgba(184,255,77,0.3)",transition:spinning?"transform 3s cubic-bezier(0.17,0.67,0.12,0.99)":"none",transform:`rotate(${rotation}deg)`}}>
+              {WHEEL_SEGMENTS.map((seg, i) => {
+                const angle = i * segAngle;
+                return (
+                  <div key={i} style={{position:"absolute",top:"50%",left:"50%",width:"50%",height:2,transformOrigin:"left center",transform:`rotate(${angle}deg)`,background:seg.color,opacity:0.6}}/>
+                );
+              })}
+              <svg viewBox="0 0 200 200" style={{width:"100%",height:"100%"}}>
+                {WHEEL_SEGMENTS.map((seg, i) => {
+                  const startAngle = (i * segAngle - 90) * Math.PI / 180;
+                  const endAngle = ((i + 1) * segAngle - 90) * Math.PI / 180;
+                  const x1 = 100 + 100 * Math.cos(startAngle);
+                  const y1 = 100 + 100 * Math.sin(startAngle);
+                  const x2 = 100 + 100 * Math.cos(endAngle);
+                  const y2 = 100 + 100 * Math.sin(endAngle);
+                  const midAngle = ((i + 0.5) * segAngle - 90) * Math.PI / 180;
+                  const tx = 100 + 65 * Math.cos(midAngle);
+                  const ty = 100 + 65 * Math.sin(midAngle);
+                  return (
+                    <g key={i}>
+                      <path d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`} fill={seg.color} opacity="0.85"/>
+                      <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill="#06070D" fontWeight="bold" transform={`rotate(${(i+0.5)*segAngle}, ${tx}, ${ty})`}>{seg.mult}x</text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
+          </div>
+
+          {/* Wager input */}
+          <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+            <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:10}}>YOUR WAGER</div>
+            <div style={{display:"flex",gap:8,marginBottom:10}}>
+              {[5,10,25,50,100].map(amt=>(
+                <button key={amt} onClick={()=>setWager(amt)} className="bb-pressable"
+                  style={{flex:1,background:wager===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"7px 0",fontSize:11,fontWeight:700,color:wager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  {amt}
+                </button>
+              ))}
+            </div>
+            <input type="number" value={wager} onChange={e=>setWager(Math.max(1,Number(e.target.value)))} style={{...s.modalInput,textAlign:"center",fontSize:18,fontFamily:"'Oswald',sans-serif"}}/>
+          </div>
+
+          {spinResult&&(
+            <div style={{background:spinResult.net>=0?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)",border:`1px solid ${spinResult.net>=0?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`,borderRadius:14,padding:14,marginBottom:14,textAlign:"center"}}>
+              <div style={{fontSize:22,marginBottom:4}}>{spinResult.seg.label}</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:spinResult.net>=0?"#7CFFB2":"#FF5C8A"}}>{spinResult.net>=0?"+":""}{spinResult.net} pts</div>
+              <div style={{fontSize:11,color:"#4A5066",marginTop:4}}>{spinResult.seg.mult}x · wagered {spinResult.wager} · got {spinResult.payout}</div>
+            </div>
+          )}
+
+          <button onClick={spinWheel} disabled={spinning||myPoints<wager||wager<1} className="bb-pressable bb-glow-lime"
+            style={{...s.primaryBtn,opacity:spinning||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:16,letterSpacing:1}}>
+            {spinning?"spinning…":"spin"}
+          </button>
+
+          {/* Odds table */}
+          <div style={{marginTop:20,background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+            <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:10}}>PAYOUT TABLE</div>
+            {WHEEL_SEGMENTS.map(seg=>(
+              <div key={seg.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                <div style={{fontSize:13}}>{seg.label}</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:700,color:seg.mult>=2?"#7CFFB2":seg.mult>0?"#B8FF4D":"#FF5C8A"}}>{seg.mult}x</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* PROPS */}
+      {section==="props"&&(
+        <div>
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>bet on your teammates' stats. odds are based on their actual averages. resolves when they log a 3v3 game.</div>
+          {props.length===0&&<div style={s.emptyQueue}>not enough game data yet — props unlock after teammates log 3v3 games.</div>}
+          {props.map(prop=>{
+            const isSelected = selectedProp===prop.id;
+            return (
+              <div key={prop.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${isSelected?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.05)"}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                  <div style={{width:8,height:8,borderRadius:99,background:prop.playerColor}}/>
+                  <span style={{fontWeight:700,fontSize:13,color:prop.playerColor}}>{prop.playerName}</span>
+                  <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>avg: {prop.avg}</span>
+                </div>
+                <div style={{fontSize:15,fontWeight:700,marginBottom:12}}>{prop.line} {prop.field}</div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>{setSelectedProp(prop.id);setPropSide("over");}} className="bb-pressable"
+                    style={{flex:1,background:isSelected&&propSide==="over"?"#7CFFB2":"rgba(124,255,178,0.08)",border:`1px solid ${isSelected&&propSide==="over"?"#7CFFB2":"rgba(124,255,178,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer"}}>
+                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>OVER</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="over"?"#06070D":"#7CFFB2"}}>{prop.overOdds.american}</div>
+                  </button>
+                  <button onClick={()=>{setSelectedProp(prop.id);setPropSide("under");}} className="bb-pressable"
+                    style={{flex:1,background:isSelected&&propSide==="under"?"#FF5C8A":"rgba(255,92,138,0.08)",border:`1px solid ${isSelected&&propSide==="under"?"#FF5C8A":"rgba(255,92,138,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer"}}>
+                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>UNDER</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="under"?"#06070D":"#FF5C8A"}}>{prop.underOdds.american}</div>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {selectedProp&&propSide&&(
+            <div style={{position:"sticky",bottom:0,background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
+              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT</div>
+              <div style={{display:"flex",gap:8,marginBottom:10}}>
+                {[5,10,25,50].map(amt=>(
+                  <button key={amt} onClick={()=>setPropWager(amt)} className="bb-pressable"
+                    style={{flex:1,background:propWager===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"7px 0",fontSize:11,fontWeight:700,color:propWager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                    {amt}
+                  </button>
+                ))}
+              </div>
+              {(() => {
+                const prop = props.find(p => p.id === selectedProp);
+                const odds = propSide === "over" ? prop?.overOdds : prop?.underOdds;
+                const payout = odds ? calcPayout(propWager, odds.decimal) : 0;
+                return (
+                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                    <div style={{flex:1,background:"rgba(184,255,77,0.06)",borderRadius:10,padding:"10px 12px",border:"1px solid rgba(184,255,77,0.15)"}}>
+                      <div style={{fontSize:10,color:"#4A5066",marginBottom:2}}>TO WIN</div>
+                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#B8FF4D"}}>{payout} pts</div>
+                    </div>
+                    <button onClick={placeBet} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
+                      style={{flex:1,background:"#B8FF4D",border:"none",borderRadius:10,padding:"14px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",opacity:myPoints<propWager?0.4:1}}>
+                      place bet
+                    </button>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MY BETS */}
+      {section==="mybets"&&(
+        <div>
+          {myOpenBets.length===0&&mySettledBets.length===0&&<div style={s.emptyQueue}>no bets yet — head to props or spin the wheel.</div>}
+          {myOpenBets.length>0&&(
+            <>
+              <div style={{...s.sectionLabel,marginBottom:10}}>open bets</div>
+              {myOpenBets.map(bet=>(
+                <div key={bet.id} style={{background:"#11131F",borderRadius:13,padding:14,marginBottom:8,border:"1px solid rgba(255,209,102,0.2)"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                    <span style={{fontSize:13,fontWeight:700,color:"#FFD166"}}>{bet.playerName} {bet.side} {bet.line} {bet.field}</span>
+                    <span style={{fontSize:11,color:"#4A5066"}}>{bet.odds}</span>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between"}}>
+                    <span style={{fontSize:12,color:"#8B92A8"}}>wagered {bet.wager} pts</span>
+                    <span style={{fontSize:12,color:"#B8FF4D",fontWeight:700}}>win {bet.payout} pts</span>
+                  </div>
+                  <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>waiting for {bet.playerName} to log a 3v3 game</div>
+                </div>
+              ))}
+            </>
+          )}
+          {mySettledBets.length>0&&(
+            <>
+              <div style={{...s.sectionLabel,marginBottom:10,marginTop:16}}>settled</div>
+              {mySettledBets.map(bet=>{
+                const won = bet.status==="won";
+                return (
+                  <div key={bet.id} style={{background:"#11131F",borderRadius:13,padding:14,marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{fontSize:13,fontWeight:700}}>{bet.playerName} {bet.side} {bet.line} {bet.field}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A"}}>{won?"WON":"LOST"}</span>
+                    </div>
+                    <div style={{fontSize:12,color:"#8B92A8"}}>wagered {bet.wager} · {won?`+${bet.payout-bet.wager} profit`:`-${bet.wager} loss`}</div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 }
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
@@ -1497,6 +1868,7 @@ const [toasts, setToasts] = useState([]);
   const [presence,setPresence]=useState({});
   const [pings,setPings]=useState([]);
   const [points,setPoints]=useState({});
+const [bets,setBets]=useState([]);
   const [resyncingId,setResyncingId]=useState(null);
   const [resyncOverlay,setResyncOverlay]=useState(false);
   const [pendingResyncPlayer,setPendingResyncPlayer]=useState(null);
@@ -1534,6 +1906,7 @@ heartbeat();
       if (key === "presence")        setPresence(value);
       if (key === "pings")           setPings(value);
       if (key === "points")          setPoints(value);
+if (key === "bets")            setBets(value);
     });
      return () => { unsub(); clearInterval(hbInterval); };
   }, [currentPlayer]);
@@ -1542,9 +1915,9 @@ heartbeat();
 
   const loadSharedData=async(pid)=>{
     setLoading(true);
-      const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts]=await Promise.all([
-      storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),
-    ]);
+    const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts]=await Promise.all([
+  storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),storeGet("bets"),
+]);
     if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
     if (comp) setCompletions(comp);
@@ -1556,6 +1929,7 @@ heartbeat();
     if (prs) setPresence(prs);
     if (pngs) setPings(pngs);
     if (pts) setPoints(pts);  
+if (bts) setBets(bts);
     const profiles={};
     for (const p of PLAYERS) { const profile=await getMMR(p.id); if(profile) profiles[p.id]=profile; }
     setMmrProfiles(profiles);
@@ -1607,7 +1981,8 @@ const touchStartY = useRef(0);
     {id:"chat",icon:MessageCircle,label:"chat"},
     {id:"stream",icon:Tv,label:"stream"},
       {id:"stats",icon:BarChart2,label:"stats"},
-    {id:"presence",icon:Circle,label:"squad"},
+{id:"presence",icon:Circle,label:"squad"},
+{id:"boost",icon:Dice5,label:"boost"},
     ...(isAdmin?[{id:"verify",icon:ClipboardCheck,label:"verify"},{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
 const badges = {
@@ -1672,7 +2047,8 @@ const badges = {
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
  {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer}/>}
-        {tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats}/>}
+ {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>}       
+{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats}/>}
        {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast}/>}
       {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast}/>}
       </div>
