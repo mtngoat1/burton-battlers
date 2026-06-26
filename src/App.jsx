@@ -270,10 +270,10 @@ function ReminderBanner({ incompleteDays, onJump, onDismiss }) {
         <ChevronRight size={15} color="#8B92A8"/>
       </button>
       <button onClick={onDismiss} style={s.reminderClose} className="bb-pressable"><X size={13}/></button>
-    </div>
+</div>
   );
 }
-            const CHALLENGES = [
+const CHALLENGES = [
   (me, rival, field) => `score ${Math.max(1,Math.ceil(rival[field]-me[field]+1))} more ${field} per game to surpass ${rival.name}`,
   (me, rival, field) => `avg ${(me[field]+0.5).toFixed(1)} ${field}/game for 3 games — earn 10 pts`,
   (me, rival, field) => `beat ${rival.name}'s ${field} average (${rival[field]}) twice this week`,
@@ -378,8 +378,6 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
         <div style={s.recordBox}><div style={s.recordNum}>{record.gf}</div><div style={s.recordLabel}>goals for</div></div>
       </div>
 <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions}/>
-          <div style={s.sectionRowHeader}>
-        <div style={s.sectionLabel}>next 5 days · your training</div>
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
         <button onClick={onGotoTraining} className="bb-pressable" style={s.viewAllBtn}>view all <ChevronRight size={12}/></button>
