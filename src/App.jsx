@@ -1849,7 +1849,6 @@ function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
     </div>
   );
 }
-}
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
