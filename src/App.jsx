@@ -592,7 +592,7 @@ function TrainingTab({ trainingData, completions, setCompletions, currentPlayer,
 }
 
 // ===================== Verification Tab =====================
-function VerificationTab({ trainingData, completions, setCompletions, addToast }) {
+function VerificationTab({ trainingData, completions, setCompletions, addToast, passXP, setPassXP }) {
   const [noteDraft,setNoteDraft]=useState({});
   const pendingByPlayer=PLAYERS.map((p)=>{
     const items=Object.entries(completions).filter(([k,v])=>k.endsWith(`__${p.id}`)&&v.status==="pending").map(([k,v])=>{ const dk=k.split("__")[0]; return {key:k,dayKey:dk,training:trainingData[tKey(dk,p.id)],completion:v}; }).sort((a,b)=>a.dayKey.localeCompare(b.dayKey));
@@ -608,6 +608,14 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast }
       const pts=await storeGet("points")||{};
       const pid=key.split("__")[1];
       await storeSet("points",{...pts,[pid]:(pts[pid]||0)+15});
+    }
+      if (decision==="approved") {
+      const pts=await storeGet("points")||{};
+      const pid=key.split("__")[1];
+      await storeSet("points",{...pts,[pid]:(pts[pid]||0)+15});
+      const pxp=await storeGet("pass_xp")||{};
+      const updXP={...pxp,[pid]:(pxp[pid]||0)+20};
+      setPassXP(updXP); await storeSet("pass_xp",updXP);
     }
     setNoteDraft((d)=>{ const n={...d}; delete n[key]; return n; });
   };
@@ -1009,7 +1017,7 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   );
 }
 
-function StatsTab({ stats, setStats, currentPlayer }) {
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
 const saveGame=async(entry)=>{
@@ -1030,7 +1038,10 @@ const saveGame=async(entry)=>{
     return {...bet,status:won?"won":"lost",settledAt:new Date().toISOString(),actual};
   });
   await storeSet("bets",resolvedBets);
-  await storeSet("points",{...pts,[currentPlayer]:cur});
+await storeSet("points",{...pts,[currentPlayer]:cur});
+  const pxp=await storeGet("pass_xp")||{};
+  const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+15};
+  setPassXP(updXP); await storeSet("pass_xp",updXP);
 };
   const modeGames=stats.filter(g=>g.mode===mode);
   const myGames=modeGames.filter(g=>g.playerId===currentPlayer).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
@@ -1164,6 +1175,65 @@ const SHOP_ITEMS = [
   { id:"title_rule69",          cost:69,  type:"title", value:"rule 69",             },
 { id:"title_buffalo",          cost:200,  type:"title", value:"buffalo burton",             },
 ];
+const PASS_PREMIUM_COST = 150;
+const PASS_PREMIUM_HEAD_START = 10;
+const FREE_TIER_COUNT = 50;
+const PREMIUM_TIER_COUNT = 200;
+const XP_PER_TIER = 100;
+function xpForTier(tier) { return tier * XP_PER_TIER; }
+
+const FREE_PASS_REWARDS = {
+  5:  { type: "title", value: "grinder" },
+  10: { type: "coins", value: 25 },
+  15: { type: "title", value: "consistent" },
+  20: { type: "icon",  value: "📈" },
+  25: { type: "coins", value: 50 },
+  30: { type: "token", value: "training_skip", label: "training skip token" },
+  35: { type: "title", value: "on the come up" },
+  40: { type: "color", value: "#FF8C42", label: "burnt orange" },
+  45: { type: "icon",  value: "🎪" },
+  50: { type: "title", value: "burton battler" },
+};
+
+const PREMIUM_PASS_REWARDS = {
+  5:   { type: "title", value: "certified demon" },
+  10:  { type: "token", value: "double_xp", label: "double xp token" },
+  20:  { type: "icon",  value: "⚔️" },
+  30:  { type: "title", value: "the menace" },
+  40:  { type: "token", value: "coaching_session", label: "coaching session token" },
+  50:  { type: "color", value: "#FF61C1", label: "prismatic glow", animated: true },
+  60:  { type: "title", value: "ghost protocol" },
+  70:  { type: "icon",  value: "🎭" },
+  80:  { type: "token", value: "training_skip", label: "training skip token" },
+  90:  { type: "title", value: "circuit royale" },
+  100: { type: "title", value: "century club" },
+  110: { type: "icon",  value: "👾" },
+  120: { type: "token", value: "double_xp", label: "double xp token" },
+  130: { type: "title", value: "untouchable" },
+  140: { type: "color", value: "#00FFD0", label: "neon teal glow" },
+  150: { type: "title", value: "the algorithm" },
+  160: { type: "token", value: "coaching_session", label: "coaching session token" },
+  170: { type: "icon",  value: "🛰️" },
+  180: { type: "title", value: "built in a lab" },
+  190: { type: "title", value: "season one legend" },
+  200: { type: "car",   value: "🏎️", label: "burton legend car", bonusTitle: "burton legend" },
+};
+
+const PASS_WEEKLY_FIELDS = ["goals", "assists", "saves", "demos", "shots"];
+function getWeeklyPassChallenge(playerId, stats) {
+  const idx = PLAYERS.findIndex(p => p.id === playerId);
+  const weekNum = Math.floor(Date.now() / WEEK_MS);
+  const field = PASS_WEEKLY_FIELDS[(weekNum + idx) % PASS_WEEKLY_FIELDS.length];
+  const pg = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
+  const avg = pg.length ? pg.reduce((s,g) => s+(g[field]||0), 0)/pg.length : 0;
+  const target = Math.round((avg + 1) * 10) / 10;
+  return { field, target, weekNum };
+}
+function tierFromXP(xp, cap) {
+  const tier = Math.min(cap, Math.floor(xp / XP_PER_TIER));
+  const xpIntoTier = xp - tier * XP_PER_TIER;
+  return { tier, xpIntoTier, xpForNext: XP_PER_TIER };
+}
 function isOnline(ts) {
   if (!ts) return false;
   return Date.now() - new Date(ts).getTime() < 90000;
@@ -1187,10 +1257,11 @@ function PlayerNameDisplay({ playerId, points }) {
     </div>
   );
 }
-function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats }) {
+function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
+const [showPass, setShowPass] = useState(false);
 
   const sendPing = async (toId) => {
     const ping = { id: Date.now().toString(), from: currentPlayer, to: toId, ts: new Date().toISOString(), type: "2s" };
@@ -1255,6 +1326,7 @@ const upd = [...myUpd, ...others];
             <Bell size={14}/> {notifs.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#FF61C1",borderRadius:99,width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}}>{notifs.length}</span>}
           </button>
           <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
+<button onClick={()=>setShowPass(v=>!v)} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
           <button onClick={()=>setShowRecap(v=>!v)} className="bb-pressable" style={{background:"rgba(255,209,102,0.1)",border:"1px solid rgba(255,209,102,0.3)",borderRadius:10,padding:"8px 12px",color:"#FFD166",fontSize:12,fontWeight:700,cursor:"pointer"}}>📊 recap</button>
         </div>
       </div>
@@ -1294,7 +1366,62 @@ const upd = [...myUpd, ...others];
           <div style={{fontSize:11,color:"#4A5066",marginTop:8}}>jackpot: +50 pts awarded sunday night to each category leader</div>
         </div>
       )}
+{/* Burton Pass */}
+      {showPass && (
+        <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(167,139,250,0.2)"}}>
+          <div style={{fontSize:12,color:"#A78BFA",fontWeight:700,letterSpacing:0.5,marginBottom:4}}>BURTON PASS</div>
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:14}}>earn pass xp from training approvals (+20) and logged games (+15). view your tiers in the garage tab.</div>
 
+          {(() => {
+            const myXP = passXP?.[currentPlayer] || 0;
+            const isPremium = !!passPremium?.[currentPlayer];
+            const freeProgress = tierFromXP(myXP, FREE_TIER_COUNT);
+            const premiumXP = isPremium ? myXP + (PASS_PREMIUM_HEAD_START * XP_PER_TIER) : 0;
+            const premiumProgress = tierFromXP(premiumXP, PREMIUM_TIER_COUNT);
+
+            return (
+              <>
+                <div style={{marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
+                    <span>free track</span>
+                    <span style={{color:"#B8FF4D",fontWeight:700}}>tier {freeProgress.tier} / {FREE_TIER_COUNT}</span>
+                  </div>
+                  <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${(freeProgress.xpIntoTier/freeProgress.xpForNext)*100}%`,background:"#B8FF4D",borderRadius:99}}/>
+                  </div>
+                </div>
+
+                {isPremium ? (
+                  <div style={{marginBottom:6}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
+                      <span>premium track</span>
+                      <span style={{color:"#A78BFA",fontWeight:700}}>tier {premiumProgress.tier} / {PREMIUM_TIER_COUNT}</span>
+                    </div>
+                    <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${(premiumProgress.xpIntoTier/premiumProgress.xpForNext)*100}%`,background:"#A78BFA",borderRadius:99}}/>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={async ()=>{
+                      const myPoints = points?.[currentPlayer] || 0;
+                      if (myPoints < PASS_PREMIUM_COST) return;
+                      const updPoints = {...points, [currentPlayer]: myPoints - PASS_PREMIUM_COST};
+                      setPoints(updPoints); await storeSet("points", updPoints);
+                      const updPremium = {...passPremium, [currentPlayer]: true};
+                      setPassPremium(updPremium); await storeSet("pass_premium", updPremium);
+                    }}
+                    disabled={(points?.[currentPlayer]||0) < PASS_PREMIUM_COST}
+                    className="bb-pressable bb-glow-violet"
+                    style={{width:"100%",background:(points?.[currentPlayer]||0)>=PASS_PREMIUM_COST?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"12px 0",fontSize:12.5,fontWeight:700,color:(points?.[currentPlayer]||0)>=PASS_PREMIUM_COST?"#06070D":"#4A5066",cursor:(points?.[currentPlayer]||0)>=PASS_PREMIUM_COST?"pointer":"default",marginTop:4}}>
+                    unlock premium — {PASS_PREMIUM_COST} pts (instant +{PASS_PREMIUM_HEAD_START} tiers)
+                  </button>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
       {/* Shop */}
       {showShop && (
         <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(184,255,77,0.15)"}}>
@@ -1436,6 +1563,203 @@ const upd = [...myUpd, ...others];
     </div>
   );
 }    
+// ===================== Garage Tab =====================
+function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed }) {
+  const [track, setTrack] = useState("free");
+  const [claimResult, setClaimResult] = useState(null);
+
+  const myXP = passXP?.[currentPlayer] || 0;
+  const isPremium = !!passPremium?.[currentPlayer];
+  const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
+
+  const freeProgress = tierFromXP(myXP, FREE_TIER_COUNT);
+  const premiumXP = isPremium ? myXP + (PASS_PREMIUM_HEAD_START * XP_PER_TIER) : 0;
+  const premiumProgress = tierFromXP(premiumXP, PREMIUM_TIER_COUNT);
+
+  const currentProgress = track === "free" ? freeProgress : premiumProgress;
+  const currentCap = track === "free" ? FREE_TIER_COUNT : PREMIUM_TIER_COUNT;
+  const currentRewards = track === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
+
+  const claimKey = (t, tier) => `${currentPlayer}_${t}_${tier}`;
+  const isClaimed = (t, tier) => !!(passClaimed?.[claimKey(t, tier)]);
+
+  const claimReward = async (tier, reward) => {
+    const t = track;
+    const key = claimKey(t, tier);
+    if (isClaimed(t, tier)) return;
+    if (currentProgress.tier < tier) return;
+
+    const updClaimed = { ...passClaimed, [key]: true };
+    setPassClaimed(updClaimed);
+    await storeSet("pass_claimed", updClaimed);
+
+    if (reward.type === "coins") {
+      const pts = await storeGet("points") || {};
+      const upd = { ...pts, [currentPlayer]: (pts[currentPlayer] || 0) + reward.value };
+      setPoints(upd);
+      await storeSet("points", upd);
+    }
+
+    if (reward.type === "token") {
+      const existing = passTokens?.[currentPlayer] || [];
+      const newToken = { id: Date.now().toString(), type: reward.value, label: reward.label, earnedAt: new Date().toISOString() };
+      const updTokens = { ...passTokens, [currentPlayer]: [...existing, newToken] };
+      setPassTokens(updTokens);
+      await storeSet("pass_tokens", updTokens);
+    }
+
+    if (reward.type === "color" || reward.type === "icon" || reward.type === "title") {
+      const owned = points?.[currentPlayer + "_owned"] || [];
+      const itemId = `pass_${t}_${tier}`;
+      if (!owned.includes(itemId)) {
+        const upd = { ...points, [currentPlayer + "_owned"]: [...owned, itemId] };
+        setPoints(upd);
+        await storeSet("points", upd);
+      }
+    }
+
+    setClaimResult({ tier, reward });
+    setTimeout(() => setClaimResult(null), 2500);
+  };
+
+  const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ tier: Number(tier), reward })).sort((a, b) => a.tier - b.tier);
+  const myTokens = passTokens?.[currentPlayer] || [];
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      {claimResult && (
+        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", zIndex: 300, background: "#1A1D2E", border: "1px solid rgba(184,255,77,0.4)", borderRadius: 14, padding: "14px 20px", textAlign: "center", animation: "dropDown .3s cubic-bezier(.2,.8,.2,1)", minWidth: 220 }}>
+          <div style={{ fontSize: 22, marginBottom: 4 }}>🎁</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#B8FF4D" }}>tier {claimResult.tier} claimed!</div>
+          <div style={{ fontSize: 12, color: "#8B92A8", marginTop: 2 }}>{claimResult.reward.label || claimResult.reward.value}</div>
+        </div>
+      )}
+
+      {/* XP summary */}
+      <div style={{ background: "linear-gradient(135deg,#11131F,#0C0E18)", border: "1px solid rgba(167,139,250,0.2)", borderRadius: 16, padding: "16px", marginBottom: 16 }}>
+        <div style={{ fontSize: 10, color: "#A78BFA", fontWeight: 700, letterSpacing: 0.8, marginBottom: 8 }}>BURTON PASS · SEASON 1</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div>
+            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 26, fontWeight: 600, color: playerColor }}>{myXP}<span style={{ fontSize: 12, color: "#4A5066", marginLeft: 4 }}>xp</span></div>
+            <div style={{ fontSize: 11, color: "#4A5066", marginTop: 2 }}>+20 per training approval · +15 per game logged</div>
+          </div>
+          {!isPremium && (
+            <div style={{ fontSize: 11, color: "#4A5066", textAlign: "right" }}>
+              <div style={{ color: "#A78BFA", fontWeight: 700 }}>free track</div>
+              <div>premium locked</div>
+            </div>
+          )}
+          {isPremium && (
+            <div style={{ fontSize: 11, color: "#A78BFA", fontWeight: 700, textAlign: "right" }}>
+              <div>✓ premium</div>
+              <div style={{ color: "#4A5066", fontWeight: 400 }}>both tracks active</div>
+            </div>
+          )}
+        </div>
+
+        {/* Free track bar */}
+        <div style={{ marginBottom: isPremium ? 10 : 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8B92A8", marginBottom: 4 }}>
+            <span>free · tier {freeProgress.tier}/{FREE_TIER_COUNT}</span>
+            <span style={{ color: "#B8FF4D" }}>{freeProgress.xpIntoTier}/{freeProgress.xpForNext} xp</span>
+          </div>
+          <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 99, overflow: "hidden" }}>
+            <div style={{ height: "100%", width: `${(freeProgress.xpIntoTier / freeProgress.xpForNext) * 100}%`, background: "#B8FF4D", borderRadius: 99 }} />
+          </div>
+        </div>
+
+        {/* Premium track bar */}
+        {isPremium && (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8B92A8", marginBottom: 4 }}>
+              <span>premium · tier {premiumProgress.tier}/{PREMIUM_TIER_COUNT}</span>
+              <span style={{ color: "#A78BFA" }}>{premiumProgress.xpIntoTier}/{premiumProgress.xpForNext} xp</span>
+            </div>
+            <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 99, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${(premiumProgress.xpIntoTier / premiumProgress.xpForNext) * 100}%`, background: "#A78BFA", borderRadius: 99 }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Track selector */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setTrack("free")} className="bb-pressable"
+          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: track === "free" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: track === "free" ? "#06070D" : "#8B92A8" }}>
+          free track
+        </button>
+        <button onClick={() => isPremium && setTrack("premium")} className="bb-pressable"
+          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: isPremium ? "pointer" : "default", background: track === "premium" ? "#A78BFA" : "rgba(255,255,255,0.05)", color: track === "premium" ? "#06070D" : isPremium ? "#A78BFA" : "#4A5066", opacity: isPremium ? 1 : 0.5 }}>
+          {isPremium ? "premium track" : "🔒 premium"}
+        </button>
+      </div>
+
+      {/* Tier reward list */}
+      <div style={{ ...s.sectionLabel, marginBottom: 12 }}>tier rewards</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {rewardTiers.map(({ tier, reward }) => {
+          const unlocked = currentProgress.tier >= tier;
+          const claimed = isClaimed(track, tier);
+          const isNext = !unlocked && currentProgress.tier === tier - 1;
+
+          let rewardLabel = reward.label || reward.value;
+          let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📛" : reward.type === "car" ? "🏎️" : "🎁";
+
+          return (
+            <div key={tier} style={{ background: claimed ? "rgba(184,255,77,0.05)" : unlocked ? "#11131F" : "rgba(255,255,255,0.02)", borderRadius: 13, padding: "12px 14px", border: `1px solid ${claimed ? "rgba(184,255,77,0.2)" : isNext ? "rgba(167,139,250,0.3)" : unlocked ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"}`, display: "flex", alignItems: "center", gap: 12 }}>
+              {/* Tier number */}
+              <div style={{ width: 38, textAlign: "center", flexShrink: 0 }}>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, color: unlocked ? (track === "free" ? "#B8FF4D" : "#A78BFA") : "#4A5066" }}>{tier}</div>
+                <div style={{ fontSize: 9, color: "#4A5066", fontWeight: 700 }}>TIER</div>
+              </div>
+
+              {/* Reward info */}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 16 }}>{rewardEmoji}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: unlocked ? "#E8ECF4" : "#4A5066" }}>{rewardLabel}</span>
+                </div>
+                <div style={{ fontSize: 10, color: "#4A5066", marginTop: 2, textTransform: "uppercase", letterSpacing: 0.5 }}>{reward.type}{reward.type === "coins" ? ` · +${reward.value} pts` : ""}</div>
+              </div>
+
+              {/* Claim button */}
+              <div style={{ flexShrink: 0 }}>
+                {claimed ? (
+                  <div style={{ fontSize: 11, color: "#7CFFB2", fontWeight: 700 }}>✓ claimed</div>
+                ) : unlocked ? (
+                  <button onClick={() => claimReward(tier, reward)} className="bb-pressable bb-glow-lime"
+                    style={{ background: track === "free" ? "#B8FF4D" : "#A78BFA", border: "none", borderRadius: 9, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, color: "#06070D", cursor: "pointer" }}>
+                    claim
+                  </button>
+                ) : (
+                  <div style={{ fontSize: 10, color: "#4A5066", fontWeight: 700 }}>{tier - currentProgress.tier} tier{tier - currentProgress.tier !== 1 ? "s" : ""} away</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Token inventory */}
+      {myTokens.length > 0 && (
+        <div style={{ marginTop: 24 }}>
+          <div style={{ ...s.sectionLabel, marginBottom: 10 }}>your tokens</div>
+          <div style={{ background: "#11131F", borderRadius: 14, padding: 14, border: "1px solid rgba(255,255,255,0.05)" }}>
+            {myTokens.map((tok, i) => (
+              <div key={tok.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: i < myTokens.length - 1 ? 10 : 0, paddingBottom: i < myTokens.length - 1 ? 10 : 0, borderBottom: i < myTokens.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
+                <span style={{ fontSize: 18 }}>🎟</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{tok.label}</div>
+                  <div style={{ fontSize: 10, color: "#4A5066", marginTop: 1 }}>earned {fmtRelTime(tok.earnedAt)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 function StarfieldBg() {
   const stars = Array.from({length:80},(_,i)=>({
     x: (i*137.5)%100, y: (i*97.3)%100,
@@ -1453,7 +1777,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -1870,6 +2194,10 @@ const [toasts, setToasts] = useState([]);
   const [points,setPoints]=useState({});
 const [bets,setBets]=useState([]);
   const [resyncingId,setResyncingId]=useState(null);
+const [passXP, setPassXP] = useState({});       // { [playerId]: number }
+const [passPremium, setPassPremium] = useState({}); // { [playerId]: true }
+const [passClaimed, setPassClaimed] = useState({}); // { [playerId+"_"+track+"_"+tier]: true }
+const [passTokens, setPassTokens] = useState({});   // { [playerId]: [{id,type,label,earnedAt}] }
   const [resyncOverlay,setResyncOverlay]=useState(false);
   const [pendingResyncPlayer,setPendingResyncPlayer]=useState(null);
   const [commentDay,setCommentDay]=useState(null);
@@ -1907,16 +2235,21 @@ heartbeat();
       if (key === "pings")           setPings(value);
       if (key === "points")          setPoints(value);
 if (key === "bets")            setBets(value);
+if (key === "pass_xp")      setPassXP(value);
+if (key === "pass_premium") setPassPremium(value);
+if (key === "pass_claimed") setPassClaimed(value);
+if (key === "pass_tokens")  setPassTokens(value);
+    });
     });
      return () => { unsub(); clearInterval(hbInterval); };
   }, [currentPlayer]);
 
   const selectName=async(pid)=>{ setSelectedPlayerId(pid); const auth=await storeGet(`auth:${pid}`); setAuthStage(auth?"enter":"create"); };
 
-  const loadSharedData=async(pid)=>{
+const loadSharedData=async(pid)=>{
     setLoading(true);
-    const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts]=await Promise.all([
-  storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),storeGet("bets"),
+    const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk]=await Promise.all([
+  storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),storeGet("bets"),storeGet("pass_xp"),storeGet("pass_premium"),storeGet("pass_claimed"),storeGet("pass_tokens"),
 ]);
     if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
@@ -1930,6 +2263,10 @@ if (key === "bets")            setBets(value);
     if (pngs) setPings(pngs);
     if (pts) setPoints(pts);  
 if (bts) setBets(bts);
+if (pxp) setPassXP(pxp);
+if (ppm) setPassPremium(ppm);
+if (pcl) setPassClaimed(pcl);
+if (ptk) setPassTokens(ptk);
     const profiles={};
     for (const p of PLAYERS) { const profile=await getMMR(p.id); if(profile) profiles[p.id]=profile; }
     setMmrProfiles(profiles);
@@ -1983,6 +2320,7 @@ const touchStartY = useRef(0);
       {id:"stats",icon:BarChart2,label:"stats"},
 {id:"presence",icon:Circle,label:"squad"},
 {id:"boost",icon:Dice5,label:"boost"},
+{id:"garage",icon:Trophy,label:"garage"},
     ...(isAdmin?[{id:"verify",icon:ClipboardCheck,label:"verify"},{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
 const badges = {
@@ -2046,10 +2384,11 @@ const badges = {
        {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
- {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer}/>}
+{tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP}/>}
  {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>}       
-{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats}/>}
-       {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast}/>}
+{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens}/>}
+{tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed}/>}
+   {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP}/>}
       {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast}/>}
       </div>
    <div style={s.tabBar}>
