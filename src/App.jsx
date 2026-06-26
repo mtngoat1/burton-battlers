@@ -269,9 +269,11 @@ function ReminderBanner({ incompleteDays, onJump, onDismiss }) {
         </div>
         <ChevronRight size={15} color="#8B92A8"/>
       </button>
-      <button onClick={onDismiss} style={s.reminderClose} className="bb-pressable"><X size={13}/></button>
-</div>
+    <button onClick={onDismiss} style={s.reminderClose} className="bb-pressable"><X size={13}/></button>
+    </div>
   );
+}
+const CHALLENGE_FIELDS = ["goals","assists","saves","demos","shots"];
 }
 function StatChallenges({ stats, currentPlayer, completions, setCompletions }) {
   const avg = (pid, field) => {
