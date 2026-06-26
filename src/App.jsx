@@ -1455,11 +1455,7 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+15*finalMult};
     </div>
   );
 }
-</button>
-      )}
-    </div>
-  );
-}
+
 
 // ===================== Presence + Ping + Notifications + Weekly Recap + Shop =====================
 const THEMES = {
@@ -2759,7 +2755,9 @@ const placeBet = async (chosenLine) => {
                     value={lineIdx}
                     onChange={(e)=>{
                       const idx=Number(e.target.value);
-                      setLineIndexByProp(p=>({...p,[card.id]:idx}));
+                  setLineIndexByProp(p => ({ ...p,
+  [card.id]: idx,
+}));
                       if (isSelected) setPropSide(null); // force re-pick of side when line changes mid-selection
                     }}
                     style={{width:"100%",accentColor:card.playerColor}}
@@ -2822,38 +2820,6 @@ const placeBet = async (chosenLine) => {
         </div>
       )}
 
-          {selectedProp&&propSide&&(
-            <div style={{position:"sticky",bottom:0,background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
-              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT</div>
-              <div style={{display:"flex",gap:8,marginBottom:10}}>
-                {[5,10,25,50].map(amt=>(
-                  <button key={amt} onClick={()=>setPropWager(amt)} className="bb-pressable"
-                    style={{flex:1,background:propWager===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"7px 0",fontSize:11,fontWeight:700,color:propWager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                    {amt}
-                  </button>
-                ))}
-              </div>
-              {(() => {
-                const prop = props.find(p => p.id === selectedProp);
-                const odds = propSide === "over" ? prop?.overOdds : prop?.underOdds;
-                const payout = odds ? calcPayout(propWager, odds.decimal) : 0;
-                return (
-                  <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                    <div style={{flex:1,background:"rgba(184,255,77,0.06)",borderRadius:10,padding:"10px 12px",border:"1px solid rgba(184,255,77,0.15)"}}>
-                      <div style={{fontSize:10,color:"#4A5066",marginBottom:2}}>TO WIN</div>
-                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#B8FF4D"}}>{payout} pts</div>
-                    </div>
-                    <button onClick={placeBet} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
-                      style={{flex:1,background:"#B8FF4D",border:"none",borderRadius:10,padding:"14px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",opacity:myPoints<propWager?0.4:1}}>
-                      place bet
-                    </button>
-                  </div>
-                );
-              })()}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* MY BETS */}
       {section==="mybets"&&(
