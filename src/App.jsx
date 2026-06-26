@@ -1085,7 +1085,7 @@ const s = {
   matchRowStatus:{fontSize:9.5,fontWeight:700,border:"1px solid",borderRadius:99,padding:"3px 8px",letterSpacing:0.5},
   hintText:{fontSize:12,color:"#4A5066",textAlign:"center",marginTop:16},
   modalOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200},
-  modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.06)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(20px, env(safe-area-inset-bottom))"},
+modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.06)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(80px, calc(env(safe-area-inset-bottom) + 60px))"},
   modalHeader:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16},
   modalTitle:{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:600},
   modalClose:{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"},
