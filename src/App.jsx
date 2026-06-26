@@ -1384,6 +1384,12 @@ const [toasts, setToasts] = useState([]);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
 const [themeId, setThemeId] = useState("default");
+const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
+const [bannerDismissed,setBannerDismissed]=useState(false);
+const [pushSub, setPushSub] = useState(null);
+const [themeId, setThemeId] = useState("default");
+const theme = THEMES[themeId];
+const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const theme = THEMES[themeId];
 const addToast = (text, icon = "🔔") => {
   const id = Date.now().toString();
@@ -1488,7 +1494,14 @@ const touchStartY = useRef(0);
     {id:"presence",icon:Circle,label:"squad"},
     ...(isAdmin?[{id:"verify",icon:ClipboardCheck,label:"verify"},{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
+const badges = {
+    social: Math.max(0, posts.length - lastSeen.social),
+    chat: Math.max(0, messages.length - lastSeen.chat),
+    training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
+  };
 
+  return (
+<div style={{...s.appShell, background:theme.bg, color:theme.text}}>
   return (
 <div style={{...s.appShell, background:theme.bg, color:theme.text}}>
       <GlobalStyles/>
@@ -1546,10 +1559,18 @@ const touchStartY = useRef(0);
        {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast}/>}
       {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast}/>}
       </div>
-      <div style={s.tabBar}>
+   <div style={s.tabBar}>
         {TABS.map((t)=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} className="bb-pressable" style={s.tabBtn}>
-            <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"} style={tab===t.id?{filter:`drop-shadow(0 0 6px ${t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"})`}:{}}/>
+          <button key={t.id} onClick={()=>{
+            setTab(t.id);
+            if (t.id==="social") setLastSeen(p=>({...p,social:posts.length}));
+            if (t.id==="chat") setLastSeen(p=>({...p,chat:messages.length}));
+            if (t.id==="training") setLastSeen(p=>({...p,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}));
+          }} className="bb-pressable" style={s.tabBtn}>
+            <div style={{position:"relative",display:"inline-flex"}}>
+              <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"} style={tab===t.id?{filter:`drop-shadow(0 0 6px ${t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"})`}:{}}/>
+              {badges[t.id]>0&&<div style={{position:"absolute",top:-4,right:-6,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
+            </div>
             <span style={{color:tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066",fontSize:9,fontWeight:600}}>{t.label}</span>
           </button>
         ))}
