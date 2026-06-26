@@ -274,7 +274,6 @@ function ReminderBanner({ incompleteDays, onJump, onDismiss }) {
   );
 }
 const CHALLENGE_FIELDS = ["goals","assists","saves","demos","shots"];
-}
 function StatChallenges({ stats, currentPlayer, completions, setCompletions }) {
   const avg = (pid, field) => {
     const pg = stats.filter(g => g.playerId === pid && g.mode === "3v3");
@@ -1169,8 +1168,8 @@ function PlayerNameDisplay({ playerId, points }) {
   return (
     <div style={{display:"flex",flexDirection:"column",gap:1}}>
       <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>
-      {title && <span style={{fontSize:9.5,color:"#8B92A8",fontWeight:600,letterSpacing:0.5}}>{title}</span>}
-</div>
+{title && <span style={{fontSize:9.5,color:"#8B92A8",fontWeight:600,letterSpacing:0.5}}>{title}</span>}
+    </div>
   );
 }
 function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats }) {
