@@ -1,8 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
-
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON);
 
 // ─── Generic KV ───────────────────────────────────────────────────────────────
@@ -15,7 +13,6 @@ export async function storeGet(key) {
   if (error || !data) return null;
   return data.value;
 }
-
 export async function storeSet(key, value) {
   const { error } = await supabase
     .from('kv')
@@ -32,7 +29,6 @@ export async function getMMR(playerId) {
     .maybeSingle();
   return data?.data ?? null;
 }
-
 export async function setMMR(playerId, profile) {
   const { error } = await supabase
     .from('mmr_profiles')
@@ -52,7 +48,7 @@ export async function uploadPostImage(file) {
   return data.publicUrl;
 }
 
-// ─── Realtime subscription ────────────────────────────────────────────────────
+// ─── Realtime subscription for a single KV key ────────────────────────────────
 export function subscribeKV(key, callback) {
   const channel = supabase
     .channel(`kv:${key}`)
@@ -65,6 +61,24 @@ export function subscribeKV(key, callback) {
       }
     )
     .subscribe();
+  return () => { supabase.removeChannel(channel); };
+}
 
+// ─── Realtime subscription for multiple KV keys ───────────────────────────────
+// callback receives { key, value } so the caller knows which key changed
+export function subscribeKVMulti(keys, callback) {
+  const channel = supabase
+    .channel(`kv:multi:${keys.join(',')}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kv' },
+      (payload) => {
+        const row = payload.new;
+        if (row?.key && keys.includes(row.key) && row.value !== undefined) {
+          callback({ key: row.key, value: row.value });
+        }
+      }
+    )
+    .subscribe();
   return () => { supabase.removeChannel(channel); };
 }

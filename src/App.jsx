@@ -4,7 +4,7 @@ import {
   MessageCircle, LogOut, Shield, Edit3, ChevronLeft, Image as ImageIcon,
   Heart, ClipboardCheck, Bell, ThumbsDown, ThumbsUp, Clock, Tv, Circle,
 } from "lucide-react";
-import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKV } from "./lib/storage";
+import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti } from "./lib/storage";
 
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
@@ -105,8 +105,9 @@ function GlobalStyles() {
       @keyframes dropDown { from { transform:translateY(-100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
       @keyframes heartPop { 0%{transform:scale(1)} 40%{transform:scale(1.35)} 100%{transform:scale(1)} }
       @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-      * { box-sizing:border-box; }
-      html,body,#root { margin:0; padding:0; height:100%; }
+      * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+      html, body { margin:0; padding:0; height:100%; overflow:hidden; }
+      #root { height:100%; }
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
@@ -522,7 +523,7 @@ function VerificationTab({ trainingData, completions, setCompletions }) {
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={s.adminHeader}><ClipboardCheck size={16} color="#FF5C8A"/><span style={s.adminHeaderText}>verification queue</span></div>
-      <div style={s.sectionSubLabel}>{totalPending===0?"nothing waiting":"${totalPending} submission(s) waiting for review"}</div>
+      <div style={s.sectionSubLabel}>{totalPending===0?"nothing waiting":`${totalPending} submission(s) waiting for review`}</div>
       {pendingByPlayer.length===0&&<div style={s.emptyQueue}>all caught up. submissions will show up here.</div>}
       {pendingByPlayer.map((group)=>(
         <div key={group.player.id} style={{marginBottom:22}}>
@@ -848,6 +849,9 @@ function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles }
 }
 
 // ===================== Main App =====================
+// Keys to subscribe to for real-time updates
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles"];
+
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
@@ -869,12 +873,20 @@ export default function App() {
   const [jumpKey,setJumpKey]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
 
-  // Realtime chat subscription
-  useEffect(()=>{
+  // ── Real-time: subscribe to all shared KV keys once logged in ──
+  useEffect(() => {
     if (!currentPlayer) return;
-    const unsub = subscribeKV("chat",(val)=>setMessages(val));
+    const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
+      if (key === "chat")           setMessages(value);
+      if (key === "posts")          setPosts(value);
+      if (key === "completions")    setCompletions(value);
+      if (key === "training")       setTrainingData(value);
+      if (key === "schedule")       setSchedule(value);
+      if (key === "comments")       setComments(value);
+      if (key === "stream_profiles") setStreamProfiles(value);
+    });
     return unsub;
-  },[currentPlayer]);
+  }, [currentPlayer]);
 
   const selectName=async(pid)=>{ setSelectedPlayerId(pid); const auth=await storeGet(`auth:${pid}`); setAuthStage(auth?"enter":"create"); };
 
@@ -975,24 +987,24 @@ export default function App() {
 
 // ===================== Styles =====================
 const s = {
-  appShell:{display:"flex",flexDirection:"column",height:"100vh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",maxWidth:480,margin:"0 auto",position:"relative",overflow:"hidden"},
-  screen:{minHeight:"100vh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
-  topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px 14px",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
+  appShell:{display:"flex",flexDirection:"column",height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",maxWidth:480,margin:"0 auto",position:"relative",overflow:"hidden"},
+  screen:{height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
+  topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
   topBarRight:{display:"flex",alignItems:"center",gap:8},
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",paddingBottom:8},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:8,WebkitOverflowScrolling:"touch",minHeight:0},
   tabContent:{padding:"16px 16px 24px"},
-  tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,0px)"},
-  tabBtn:{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 0 8px",cursor:"pointer",minWidth:0},
+  tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,16px)"},
+  tabBtn:{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 2px 8px",cursor:"pointer",minWidth:0,overflow:"hidden"},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
   reminderTitle:{fontSize:12.5,fontWeight:700,color:"#FF5C8A"},
   reminderSub:{fontSize:11.5,color:"#8B92A8",marginTop:1},
   reminderClose:{background:"none",border:"none",color:"#8B92A8",padding:4,cursor:"pointer",flexShrink:0},
-  loginScreen:{minHeight:"100vh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"},
+  loginScreen:{height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",position:"relative",overflow:"hidden"},
   loginGlow:{position:"absolute",top:"-15%",left:"50%",transform:"translateX(-50%)",width:520,height:520,background:"radial-gradient(circle,rgba(184,255,77,0.10),rgba(167,139,250,0.06) 50%,transparent 75%)",pointerEvents:"none"},
   loginContent:{position:"relative",zIndex:1,padding:"32px 28px",width:"100%",maxWidth:420,textAlign:"center"},
   backBtn:{position:"absolute",top:18,left:18,background:"none",border:"none",color:"#8B92A8",fontSize:12.5,display:"flex",alignItems:"center",gap:2,cursor:"pointer"},
@@ -1000,7 +1012,7 @@ const s = {
   loginTitle:{fontFamily:"'Oswald',sans-serif",fontSize:36,fontWeight:600,lineHeight:1.08,letterSpacing:0.5,marginBottom:8,textTransform:"lowercase"},
   loginSub:{color:"#8B92A8",fontSize:14,marginBottom:28},
   loginPlayerGrid:{display:"flex",flexDirection:"column",gap:10},
-  loginPlayerBtn:{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"#11131F",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,color:"#E8ECF4",fontSize:15,fontWeight:600,cursor:"pointer"},
+  loginPlayerBtn:{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",background:"#11131F",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,color:"#E8ECF4",fontSize:15,fontWeight:600,cursor:"pointer",width:"100%"},
   loginPlayerDot:{width:10,height:10,borderRadius:99},
   loginCodeWrap:{marginTop:20,display:"flex",flexDirection:"column",gap:10},
   loginInput:{background:"#11131F",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"14px 16px",color:"#E8ECF4",fontSize:16,textAlign:"center",letterSpacing:4,outline:"none",width:"100%"},
@@ -1036,7 +1048,7 @@ const s = {
   sectionLabel:{fontSize:12,letterSpacing:1,color:"#4A5066",fontWeight:700,marginBottom:4},
   sectionSubLabel:{fontSize:12,color:"#4A5066",marginBottom:14},
   viewAllBtn:{background:"none",border:"none",color:"#A78BFA",fontSize:11.5,fontWeight:600,display:"flex",alignItems:"center",gap:2,cursor:"pointer"},
-  dashTrainingScroll:{display:"flex",gap:10,overflowX:"auto",paddingBottom:6,marginBottom:4},
+  dashTrainingScroll:{display:"flex",gap:10,overflowX:"auto",paddingBottom:6,marginBottom:4,WebkitOverflowScrolling:"touch"},
   dashTrainingCard:{minWidth:122,background:"#11131F",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"12px 12px",cursor:"pointer",flexShrink:0},
   dashTrainingDay:{fontSize:10.5,color:"#A78BFA",fontWeight:700,textTransform:"lowercase",marginBottom:6},
   dashTrainingTitle:{fontSize:12.5,fontWeight:600,lineHeight:1.3,marginBottom:8,minHeight:32},
@@ -1067,7 +1079,7 @@ const s = {
   matchRowStatus:{fontSize:9.5,fontWeight:700,border:"1px solid",borderRadius:99,padding:"3px 8px",letterSpacing:0.5},
   hintText:{fontSize:12,color:"#4A5066",textAlign:"center",marginTop:16},
   modalOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200},
-  modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.06)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto"},
+  modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.06)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(20px, env(safe-area-inset-bottom))"},
   modalHeader:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16},
   modalTitle:{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:600},
   modalClose:{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"},
@@ -1100,15 +1112,15 @@ const s = {
   counterBtn:{width:36,height:36,borderRadius:99,background:"rgba(255,255,255,0.07)",border:"none",color:"#E8ECF4",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"},
   counterVal:{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:600,minWidth:50,textAlign:"center"},
   chatTabWrap:{display:"flex",flexDirection:"column",height:"100%"},
-  chatHeader:{padding:"16px 16px 8px"},
-  chatScroll:{flex:1,overflowY:"auto",padding:"0 16px"},
+  chatHeader:{padding:"16px 16px 8px",flexShrink:0},
+  chatScroll:{flex:1,overflowY:"auto",padding:"0 16px",WebkitOverflowScrolling:"touch"},
   chatEmpty:{textAlign:"center",color:"#4A5066",fontSize:13,marginTop:40},
   chatMsgRow:{display:"flex",marginBottom:10},
   chatBubble:{maxWidth:"78%",borderRadius:15,padding:"9px 13px"},
   chatAuthor:{fontSize:11,fontWeight:700,marginBottom:3},
   chatText:{fontSize:14.5,lineHeight:1.4},
   chatTime:{fontSize:10,marginTop:4,textAlign:"right"},
-  chatInputRow:{display:"flex",gap:8,padding:"12px 16px",borderTop:"1px solid rgba(255,255,255,0.06)"},
+  chatInputRow:{display:"flex",gap:8,padding:"12px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
   chatInput:{flex:1,background:"#11131F",border:"1px solid rgba(255,255,255,0.1)",borderRadius:99,padding:"11px 16px",color:"#E8ECF4",fontSize:14,outline:"none"},
   chatSendBtn:{width:42,height:42,background:"#B8FF4D",border:"none",borderRadius:99,color:"#06070D",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0},
   commentItem:{display:"flex",gap:8,marginBottom:14},
@@ -1143,7 +1155,6 @@ const s = {
   verifyActionsRow:{display:"flex",gap:8},
   rejectBtn:{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",color:"#FF5C8A",borderRadius:10,padding:"10px 0",fontSize:12.5,fontWeight:700,cursor:"pointer"},
   approveBtn:{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"#B8FF4D",border:"none",color:"#06070D",borderRadius:10,padding:"10px 0",fontSize:12.5,fontWeight:700,cursor:"pointer"},
-  // Stream tab
   streamEmbed:{width:"100%",aspectRatio:"16/9",background:"#000",borderRadius:14,overflow:"hidden",marginBottom:12},
   streamBelowEmbed:{textAlign:"right",marginBottom:16},
   twitchLink:{color:"#9146FF",fontSize:12.5,fontWeight:700,textDecoration:"none"},
