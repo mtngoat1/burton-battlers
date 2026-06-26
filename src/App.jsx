@@ -919,7 +919,7 @@ function AdminSetMMR({ player, existing, onSave, onClose }) {
     </div></div>
   );
 }
-function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast }) {
+function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP }) {
   const [assigning,setAssigning]=useState(null); const [settingMmrFor,setSettingMmrFor]=useState(null); const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
   const today=todayAtMidnight();
   const totalDays=Math.ceil((PLAYOFF_END-TRAINING_START)/DAY_MS);
@@ -934,6 +934,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
     <div className="bb-tab-content" style={s.tabContent}>
       {assigning&&<AdminAssignTraining dateKeyStr={assigning.dateKeyStr} player={PLAYERS.find((p)=>p.id===assigning.playerId)} existing={trainingData[tKey(assigning.dateKeyStr,assigning.playerId)]} onSave={(data)=>saveTraining(assigning.dateKeyStr,assigning.playerId,data)} onClose={()=>setAssigning(null)}/>}
       {settingMmrFor&&<AdminSetMMR player={PLAYERS.find((p)=>p.id===settingMmrFor)} existing={mmrProfiles[settingMmrFor]} onSave={(profile)=>saveMmr(settingMmrFor,profile)} onClose={()=>setSettingMmrFor(null)}/>}
+  <VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP}/>
       <div style={s.adminHeader}><Shield size={16} color="#FF5C8A"/><span style={s.adminHeaderText}>captain controls</span></div>
       <div style={s.sectionLabel}>set teammate mmr</div>
       <div style={s.sectionSubLabel}>overrides synced data — captain-verified</div>
@@ -1183,42 +1184,172 @@ const XP_PER_TIER = 100;
 function xpForTier(tier) { return tier * XP_PER_TIER; }
 
 const FREE_PASS_REWARDS = {
-  5:  { type: "title", value: "grinder" },
-  10: { type: "coins", value: 25 },
-  15: { type: "title", value: "consistent" },
-  20: { type: "icon",  value: "📈" },
-  25: { type: "coins", value: 50 },
-  30: { type: "token", value: "training_skip", label: "training skip token" },
-  35: { type: "title", value: "on the come up" },
-  40: { type: "color", value: "#FF8C42", label: "burnt orange" },
-  45: { type: "icon",  value: "🎪" },
-  50: { type: "title", value: "burton battler" },
+  1:  { type:"coins",  value:10,  label:"+10 pts" },
+  2:  { type:"icon",   value:"🎯", label:"bullseye icon" },
+  3:  { type:"coins",  value:15,  label:"+15 pts" },
+  4:  { type:"title",  value:"warming up", label:"warming up" },
+  5:  { type:"coins",  value:20,  label:"+20 pts" },
+  6:  { type:"icon",   value:"💨", label:"speed icon" },
+  7:  { type:"coins",  value:15,  label:"+15 pts" },
+  8:  { type:"title",  value:"grinder", label:"grinder" },
+  9:  { type:"coins",  value:20,  label:"+20 pts" },
+  10: { type:"icon",   value:"📈", label:"trending icon" },
+  11: { type:"coins",  value:25,  label:"+25 pts" },
+  12: { type:"title",  value:"consistent", label:"consistent" },
+  13: { type:"icon",   value:"🧠", label:"big brain icon" },
+  14: { type:"coins",  value:20,  label:"+20 pts" },
+  15: { type:"title",  value:"on the grind", label:"on the grind" },
+  16: { type:"coins",  value:25,  label:"+25 pts" },
+  17: { type:"icon",   value:"🎪", label:"showman icon" },
+  18: { type:"coins",  value:30,  label:"+30 pts" },
+  19: { type:"title",  value:"up and coming", label:"up and coming" },
+  20: { type:"token",  value:"training_skip", label:"training skip token" },
+  21: { type:"coins",  value:25,  label:"+25 pts" },
+  22: { type:"icon",   value:"🔥", label:"fire icon" },
+  23: { type:"coins",  value:30,  label:"+30 pts" },
+  24: { type:"title",  value:"on the come up", label:"on the come up" },
+  25: { type:"coins",  value:50,  label:"+50 pts" },
+  26: { type:"icon",   value:"⚡", label:"bolt icon" },
+  27: { type:"coins",  value:30,  label:"+30 pts" },
+  28: { type:"title",  value:"locked in", label:"locked in" },
+  29: { type:"icon",   value:"🎖️", label:"medal icon" },
+  30: { type:"token",  value:"training_skip", label:"training skip token" },
+  31: { type:"coins",  value:35,  label:"+35 pts" },
+  32: { type:"title",  value:"no days off", label:"no days off" },
+  33: { type:"icon",   value:"🌙", label:"night owl icon" },
+  34: { type:"coins",  value:35,  label:"+35 pts" },
+  35: { type:"title",  value:"on the come up", label:"on the come up" },
+  36: { type:"color",  value:"#FF8C42", label:"burnt orange glow" },
+  37: { type:"coins",  value:40,  label:"+40 pts" },
+  38: { type:"icon",   value:"🦅", label:"eagle icon" },
+  39: { type:"title",  value:"veteran", label:"veteran" },
+  40: { type:"coins",  value:75,  label:"+75 pts" },
+  41: { type:"icon",   value:"🎭", label:"mask icon" },
+  42: { type:"coins",  value:40,  label:"+40 pts" },
+  43: { type:"title",  value:"circuit tested", label:"circuit tested" },
+  44: { type:"icon",   value:"🧬", label:"dna icon" },
+  45: { type:"token",  value:"training_skip", label:"training skip token" },
+  46: { type:"coins",  value:50,  label:"+50 pts" },
+  47: { type:"title",  value:"almost there", label:"almost there" },
+  48: { type:"icon",   value:"👾", label:"alien icon" },
+  49: { type:"coins",  value:60,  label:"+60 pts" },
+  50: { type:"title",  value:"burton battler", label:"burton battler" },
 };
 
 const PREMIUM_PASS_REWARDS = {
-  5:   { type: "title", value: "certified demon" },
-  10:  { type: "token", value: "double_xp", label: "double xp token" },
-  20:  { type: "icon",  value: "⚔️" },
-  30:  { type: "title", value: "the menace" },
-  40:  { type: "token", value: "coaching_session", label: "coaching session token" },
-  50:  { type: "color", value: "#FF61C1", label: "prismatic glow", animated: true },
-  60:  { type: "title", value: "ghost protocol" },
-  70:  { type: "icon",  value: "🎭" },
-  80:  { type: "token", value: "training_skip", label: "training skip token" },
-  90:  { type: "title", value: "circuit royale" },
-  100: { type: "title", value: "century club" },
-  110: { type: "icon",  value: "👾" },
-  120: { type: "token", value: "double_xp", label: "double xp token" },
-  130: { type: "title", value: "untouchable" },
-  140: { type: "color", value: "#00FFD0", label: "neon teal glow" },
-  150: { type: "title", value: "the algorithm" },
-  160: { type: "token", value: "coaching_session", label: "coaching session token" },
-  170: { type: "icon",  value: "🛰️" },
-  180: { type: "title", value: "built in a lab" },
-  190: { type: "title", value: "season one legend" },
-  200: { type: "car",   value: "🏎️", label: "burton legend car", bonusTitle: "burton legend" },
+  1:  { type:"coins",  value:20,  label:"+20 pts" },
+  2:  { type:"icon",   value:"⚔️", label:"swords icon" },
+  3:  { type:"title",  value:"certified demon", label:"certified demon" },
+  4:  { type:"coins",  value:25,  label:"+25 pts" },
+  5:  { type:"icon",   value:"🌀", label:"vortex icon" },
+  6:  { type:"title",  value:"the menace", label:"the menace" },
+  7:  { type:"coins",  value:30,  label:"+30 pts" },
+  8:  { type:"token",  value:"double_xp", label:"double xp token" },
+  9:  { type:"icon",   value:"🎯", label:"target icon" },
+  10: { type:"title",  value:"heat seeker", label:"heat seeker" },
+  11: { type:"coins",  value:35,  label:"+35 pts" },
+  12: { type:"icon",   value:"🛸", label:"ufo icon" },
+  13: { type:"title",  value:"ghost protocol", label:"ghost protocol" },
+  14: { type:"coins",  value:35,  label:"+35 pts" },
+  15: { type:"color",  value:"#FF61C1", label:"hot pink glow" },
+  16: { type:"icon",   value:"🦾", label:"cyborg icon" },
+  17: { type:"title",  value:"built different", label:"built different" },
+  18: { type:"coins",  value:40,  label:"+40 pts" },
+  19: { type:"icon",   value:"🌊", label:"wave icon" },
+  20: { type:"token",  value:"coaching_session", label:"coaching session token" },
+  21: { type:"title",  value:"unstoppable", label:"unstoppable" },
+  22: { type:"coins",  value:40,  label:"+40 pts" },
+  23: { type:"icon",   value:"🏹", label:"archer icon" },
+  24: { type:"title",  value:"calculated", label:"calculated" },
+  25: { type:"coins",  value:75,  label:"+75 pts" },
+  26: { type:"icon",   value:"🧲", label:"magnet icon" },
+  27: { type:"title",  value:"the algorithm", label:"the algorithm" },
+  28: { type:"coins",  value:50,  label:"+50 pts" },
+  29: { type:"color",  value:"#00FFD0", label:"neon teal glow" },
+  30: { type:"token",  value:"training_skip", label:"training skip token" },
+  31: { type:"title",  value:"circuit royale", label:"circuit royale" },
+  32: { type:"icon",   value:"🔮", label:"crystal ball icon" },
+  33: { type:"coins",  value:50,  label:"+50 pts" },
+  34: { type:"title",  value:"untouchable", label:"untouchable" },
+  35: { type:"icon",   value:"🛡️", label:"shield icon" },
+  36: { type:"coins",  value:60,  label:"+60 pts" },
+  37: { type:"title",  value:"the operator", label:"the operator" },
+  38: { type:"token",  value:"double_xp", label:"double xp token" },
+  39: { type:"icon",   value:"🌠", label:"shooting star icon" },
+  40: { type:"coins",  value:100, label:"+100 pts" },
+  41: { type:"title",  value:"century club", label:"century club" },
+  42: { type:"icon",   value:"🎪", label:"big top icon" },
+  43: { type:"coins",  value:60,  label:"+60 pts" },
+  44: { type:"title",  value:"built in a lab", label:"built in a lab" },
+  45: { type:"color",  value:"#FFD166", label:"gold glow" },
+  46: { type:"token",  value:"coaching_session", label:"coaching session token" },
+  47: { type:"icon",   value:"🛰️", label:"satellite icon" },
+  48: { type:"title",  value:"season one legend", label:"season one legend" },
+  49: { type:"coins",  value:100, label:"+100 pts" },
+  50: { type:"title",  value:"half way there", label:"half way there" },
+  51: { type:"icon",   value:"🏔️", label:"mountain icon" },
+  52: { type:"coins",  value:60,  label:"+60 pts" },
+  53: { type:"title",  value:"the grind never stops", label:"the grind never stops" },
+  54: { type:"icon",   value:"⚙️", label:"gear icon" },
+  55: { type:"token",  value:"training_skip", label:"training skip token" },
+  56: { type:"coins",  value:70,  label:"+70 pts" },
+  57: { type:"title",  value:"machine", label:"machine" },
+  58: { type:"icon",   value:"🌋", label:"volcano icon" },
+  59: { type:"coins",  value:70,  label:"+70 pts" },
+  60: { type:"token",  value:"double_xp", label:"double xp token" },
+  61: { type:"title",  value:"relentless", label:"relentless" },
+  62: { type:"icon",   value:"🎲", label:"dice icon" },
+  63: { type:"coins",  value:75,  label:"+75 pts" },
+  64: { type:"title",  value:"no cap", label:"no cap" },
+  65: { type:"color",  value:"#A78BFA", label:"violet glow" },
+  66: { type:"icon",   value:"🦁", label:"lion icon" },
+  67: { type:"coins",  value:75,  label:"+75 pts" },
+  68: { type:"title",  value:"apex", label:"apex" },
+  69: { type:"title",  value:"rule 69", label:"rule 69" },
+  70: { type:"token",  value:"coaching_session", label:"coaching session token" },
+  71: { type:"icon",   value:"🐉", label:"dragon icon" },
+  72: { type:"coins",  value:80,  label:"+80 pts" },
+  73: { type:"title",  value:"elite", label:"elite" },
+  74: { type:"icon",   value:"🌌", label:"galaxy icon" },
+  75: { type:"coins",  value:150, label:"+150 pts" },
+  76: { type:"title",  value:"three quarters", label:"three quarters" },
+  77: { type:"icon",   value:"🦊", label:"fox icon" },
+  78: { type:"coins",  value:80,  label:"+80 pts" },
+  79: { type:"title",  value:"nearly mythic", label:"nearly mythic" },
+  80: { type:"token",  value:"double_xp", label:"double xp token" },
+  81: { type:"icon",   value:"🏆", label:"trophy icon" },
+  82: { type:"coins",  value:90,  label:"+90 pts" },
+  83: { type:"title",  value:"the real deal", label:"the real deal" },
+  84: { type:"icon",   value:"💀", label:"skull icon" },
+  85: { type:"color",  value:"#FF5C8A", label:"hot red glow" },
+  86: { type:"coins",  value:90,  label:"+90 pts" },
+  87: { type:"title",  value:"mythic", label:"mythic" },
+  88: { type:"icon",   value:"🌟", label:"star icon" },
+  89: { type:"coins",  value:100, label:"+100 pts" },
+  90: { type:"token",  value:"coaching_session", label:"coaching session token" },
+  91: { type:"title",  value:"penultimate", label:"penultimate" },
+  92: { type:"icon",   value:"🔱", label:"trident icon" },
+  93: { type:"coins",  value:100, label:"+100 pts" },
+  94: { type:"title",  value:"final form", label:"final form" },
+  95: { type:"color",  value:"#00FF94", label:"neon green glow" },
+  96: { type:"icon",   value:"👑", label:"crown icon" },
+  97: { type:"coins",  value:150, label:"+150 pts" },
+  98: { type:"title",  value:"burton legend", label:"burton legend" },
+  99: { type:"token",  value:"training_skip", label:"training skip token" },
+  100:{ type:"title",  value:"century club", label:"century club" },
+  // tiers 101-200 continue the grind
+  110:{ type:"coins",  value:100, label:"+100 pts" },
+  120:{ type:"token",  value:"double_xp", label:"double xp token" },
+  125:{ type:"coins",  value:200, label:"+200 pts" },
+  130:{ type:"title",  value:"untouchable", label:"untouchable" },
+  140:{ type:"color",  value:"#FF8C42", label:"burnt orange glow" },
+  150:{ type:"coins",  value:250, label:"+250 pts" },
+  160:{ type:"token",  value:"coaching_session", label:"coaching session token" },
+  170:{ type:"icon",   value:"🛰️", label:"satellite icon" },
+  180:{ type:"title",  value:"built in a lab", label:"built in a lab" },
+  190:{ type:"title",  value:"season one legend", label:"season one legend" },
+  200:{ type:"car",    value:"🏎️", label:"burton legend car" },
 };
-
 const PASS_WEEKLY_FIELDS = ["goals", "assists", "saves", "demos", "shots"];
 function getWeeklyPassChallenge(playerId, stats) {
   const idx = PLAYERS.findIndex(p => p.id === playerId);
@@ -1739,7 +1870,69 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
           );
         })}
       </div>
+{/* Owned items from pass */}
+      {(() => {
+        const owned = points?.[currentPlayer + "_owned"] || [];
+        const equipped = points?.[currentPlayer + "_equipped"] || {};
+        const passOwned = owned.filter(id => id.startsWith("pass_"));
+        if (passOwned.length === 0) return null;
 
+        const toggleEquip = async (itemId, type) => {
+          const newEquipped = { ...equipped };
+          // unequip others of same type
+          owned.filter(id => {
+            const shopItem = SHOP_ITEMS.find(i => i.id === id);
+            return shopItem?.type === type;
+          }).forEach(id => delete newEquipped[id]);
+          // also unequip other pass items of same type
+          passOwned.forEach(id => {
+            const r = getPassRewardForOwnedId(id);
+            if (r?.type === type) delete newEquipped[id];
+          });
+          if (!equipped[itemId]) newEquipped[itemId] = true;
+          const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
+          setPoints(upd);
+          await storeSet("points", upd);
+        };
+
+        const getPassRewardForOwnedId = (ownedId) => {
+          // format: pass_free_5 or pass_premium_15
+          const parts = ownedId.split("_");
+          const t = parts[1];
+          const tier = Number(parts[2]);
+          const rewards = t === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
+          return rewards[tier] || null;
+        };
+
+        return (
+          <div style={{ marginTop: 24 }}>
+            <div style={{ ...s.sectionLabel, marginBottom: 10 }}>owned from pass</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {passOwned.map(ownedId => {
+                const reward = getPassRewardForOwnedId(ownedId);
+                if (!reward) return null;
+                const isEquipped = !!equipped[ownedId];
+                const emoji = reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📛" : "🎁";
+                return (
+                  <div key={ownedId} style={{ background: isEquipped ? "rgba(184,255,77,0.06)" : "#11131F", borderRadius: 13, padding: "12px 14px", border: `1px solid ${isEquipped ? "rgba(184,255,77,0.25)" : "rgba(255,255,255,0.06)"}`, display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 20 }}>{emoji}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: isEquipped ? "#B8FF4D" : "#E8ECF4" }}>{reward.label}</div>
+                      <div style={{ fontSize: 10, color: "#4A5066", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 2 }}>{reward.type}</div>
+                    </div>
+                    {(reward.type === "color" || reward.type === "icon" || reward.type === "title") && (
+                      <button onClick={() => toggleEquip(ownedId, reward.type)} className="bb-pressable"
+                        style={{ background: isEquipped ? "#B8FF4D" : "rgba(255,255,255,0.06)", border: "none", borderRadius: 9, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, color: isEquipped ? "#06070D" : "#8B92A8", cursor: "pointer" }}>
+                        {isEquipped ? "✓ on" : "equip"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
       {/* Token inventory */}
       {myTokens.length > 0 && (
         <div style={{ marginTop: 24 }}>
@@ -2320,7 +2513,7 @@ const touchStartY = useRef(0);
 {id:"presence",icon:Circle,label:"squad"},
 {id:"boost",icon:Dice5,label:"boost"},
 {id:"garage",icon:Trophy,label:"garage"},
-    ...(isAdmin?[{id:"verify",icon:ClipboardCheck,label:"verify"},{id:"admin",icon:Shield,label:"admin"}]:[]),
+ ...(isAdmin?[{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
 const badges = {
     social: Math.max(0, posts.length - lastSeen.social),
@@ -2387,8 +2580,7 @@ const badges = {
  {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>}       
 {tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens}/>}
 {tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed}/>}
-   {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP}/>}
-      {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast}/>}
+    {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
    <div style={s.tabBar}>
         {TABS.map((t)=>(
