@@ -847,7 +847,164 @@ function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles }
     </div>
   );
 }
+// ===================== Stats Tab =====================
+const STAT_MODES = ["3v3","2v2","1v1"];
+const STAT_FIELDS = ["goals","assists","saves","demos"];
 
+function StatsTrendLine({ games, field, color }) {
+  if (games.length < 2) return null;
+  const vals = games.slice(-10).map(g => Number(g[field]) || 0);
+  const max = Math.max(...vals, 1);
+  const w = 120, h = 36, pad = 4;
+  const pts = vals.map((v, i) => {
+    const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
+    const y = h - pad - (v / max) * (h - pad * 2);
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <svg width={w} height={h} style={{display:"block"}}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.8"/>
+      {vals.map((v,i)=>{
+        const x = pad+(i/(vals.length-1))*(w-pad*2);
+        const y = h-pad-(v/max)*(h-pad*2);
+        return <circle key={i} cx={x} cy={y} r="2.5" fill={color}/>;
+      })}
+    </svg>
+  );
+}
+
+function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
+  const [ourScore,setOurScore]=useState("");
+  const [theirScore,setTheirScore]=useState("");
+  const [fields,setFields]=useState({goals:"",assists:"",saves:"",demos:""});
+  const set=(f,v)=>setFields(p=>({...p,[f]:v}));
+  const save=()=>{
+    if(ourScore===""||theirScore==="")return;
+    onSave({id:Date.now().toString(),playerId:currentPlayer,mode,ourScore:Number(ourScore),theirScore:Number(theirScore),goals:Number(fields.goals)||0,assists:Number(fields.assists)||0,saves:Number(fields.saves)||0,demos:Number(fields.demos)||0,ts:new Date().toISOString()});
+    onClose();
+  };
+  return (
+    <div style={s.modalOverlay} onClick={onClose}><div style={s.modalBox} onClick={e=>e.stopPropagation()}>
+      <div style={s.modalHeader}><div style={s.modalTitle}>log {mode} game</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
+      <div style={s.modalLabel}>final score</div>
+      <div style={s.modalScoreRow}>
+        <div style={{flex:1}}><div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,marginBottom:6}}>us</div><input type="number" value={ourScore} onChange={e=>setOurScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
+        <div style={{alignSelf:"flex-end",paddingBottom:12,color:"#4A5066",fontWeight:700,fontSize:18,padding:"0 8px"}}>–</div>
+        <div style={{flex:1}}><div style={{fontSize:11,color:"#FF5C8A",fontWeight:700,marginBottom:6}}>them</div><input type="number" value={theirScore} onChange={e=>setTheirScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
+      </div>
+      <div style={s.modalLabel}>your stats</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+        {STAT_FIELDS.map(f=>(
+          <div key={f}>
+            <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:4,textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>
+            <input type="number" value={fields[f]} onChange={e=>set(f,e.target.value)} placeholder="0" style={s.modalInput}/>
+          </div>
+        ))}
+      </div>
+      <button onClick={save} disabled={ourScore===""||theirScore===""} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:16,opacity:ourScore===""||theirScore===""?0.4:1}}>save game</button>
+    </div></div>
+  );
+}
+
+function StatsTab({ stats, setStats, currentPlayer }) {
+  const [mode,setMode]=useState("3v3");
+  const [logging,setLogging]=useState(false);
+  const saveGame=async(entry)=>{ const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd); };
+  const modeGames=stats.filter(g=>g.mode===mode);
+  const myGames=modeGames.filter(g=>g.playerId===currentPlayer).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+  const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+g[field],0)/arr.length).toFixed(1):"—";
+  const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>g.ourScore>g.theirScore).length/arr.length)*100)+"%"; };
+  const playerColor=PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      {logging&&<LogGameModal mode={mode} currentPlayer={currentPlayer} onSave={saveGame} onClose={()=>setLogging(false)}/>}
+      <div style={s.sectionRowHeader}>
+        <div style={s.sectionLabel}>stats tracker</div>
+        <button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}><Plus size={14}/> log game</button>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        {STAT_MODES.map(m=>(
+          <button key={m} onClick={()=>setMode(m)} className="bb-pressable"
+            style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:mode===m?"#B8FF4D":"rgba(255,255,255,0.05)",color:mode===m?"#06070D":"#8B92A8"}}>
+            {m}
+          </button>
+        ))}
+      </div>
+      <div style={{...s.sectionLabel,marginBottom:10}}>your averages · {myGames.length} games</div>
+      {myGames.length===0 ? (
+        <div style={s.emptyQueue}>no {mode} games logged yet — tap log game to add one.</div>
+      ) : (
+        <>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+            {STAT_FIELDS.map(f=>(
+              <div key={f} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(255,255,255,0.05)"}}>
+                <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:6,textTransform:"uppercase"}}>{f}</div>
+                <div style={{fontSize:22,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:playerColor,marginBottom:6}}>{avg(myGames,f)}</div>
+                <StatsTrendLine games={myGames} field={f} color={playerColor}/>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:20}}>
+            <div style={{flex:1,background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(255,255,255,0.05)",textAlign:"center"}}>
+              <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:4}}>WIN RATE</div>
+              <div style={{fontSize:20,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:"#7CFFB2"}}>{winRate(myGames)}</div>
+            </div>
+            <div style={{flex:1,background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(255,255,255,0.05)",textAlign:"center"}}>
+              <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:4}}>GAMES</div>
+              <div style={{fontSize:20,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:"#E8ECF4"}}>{myGames.length}</div>
+            </div>
+          </div>
+        </>
+      )}
+      {mode==="3v3"&&(
+        <>
+          <div style={{...s.sectionLabel,marginBottom:10}}>team comparison</div>
+          <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)",marginBottom:20}}>
+            <div style={{display:"grid",gridTemplateColumns:`80px repeat(4,1fr)`,gap:4,marginBottom:8}}>
+              <div/>
+              {STAT_FIELDS.map(f=><div key={f} style={{fontSize:9.5,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
+            </div>
+            {PLAYERS.map(p=>{
+              const pg=modeGames.filter(g=>g.playerId===p.id);
+              return (
+                <div key={p.id} style={{display:"grid",gridTemplateColumns:`80px repeat(4,1fr)`,gap:4,marginBottom:8,alignItems:"center"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:7,height:7,borderRadius:99,background:p.color,flexShrink:0}}/>
+                    <span style={{fontSize:11,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
+                  </div>
+                  {STAT_FIELDS.map(f=><div key={f} style={{fontSize:13,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(pg,f)}</div>)}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+      <div style={{...s.sectionLabel,marginBottom:10}}>your game log</div>
+      {[...myGames].reverse().map(g=>{
+        const won=g.ourScore>g.theirScore;
+        return (
+          <div key={g.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700}}>{g.ourScore} – {g.theirScore}</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",background:won?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.1)",padding:"3px 8px",borderRadius:99}}>{won?"WIN":"LOSS"}</div>
+                <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(g.ts)}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:12}}>
+              {STAT_FIELDS.map(f=>(
+                <div key={f} style={{textAlign:"center"}}>
+                  <div style={{fontSize:9.5,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:playerColor}}>{g[f]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
 const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles"];
@@ -955,6 +1112,7 @@ const touchStartY = useRef(0);
     {id:"social",icon:ImageIcon,label:"social"},
     {id:"chat",icon:MessageCircle,label:"chat"},
     {id:"stream",icon:Tv,label:"stream"},
+    {id:"stats",icon:BarChart2,label:"stats"},
     ...(isAdmin?[{id:"verify",icon:ClipboardCheck,label:"verify"},{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
 
@@ -980,6 +1138,7 @@ const touchStartY = useRef(0);
         {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer}/>}
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
+          {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer}/>}
         {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions}/>}
         {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles}/>}
       </div>
