@@ -1375,12 +1375,39 @@ function PlayerNameDisplay({ playerId, points }) {
   if (!player) return null;
   const owned = (points?.[playerId + "_owned"]) || [];
   const equipped = points?.[playerId + "_equipped"] || {};
-  const colorItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "color"); return it && equipped[id]; });
-  const iconItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "icon"); return it && equipped[id]; });
-  const titleItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "title"); return it && equipped[id]; });
-  const color = colorItem ? SHOP_ITEMS.find(i => i.id === colorItem)?.value : player.color;
-  const icon = iconItem ? SHOP_ITEMS.find(i => i.id === iconItem)?.value : null;
-  const title = titleItem ? SHOP_ITEMS.find(i => i.id === titleItem)?.value : null;
+function getPassRewardValue(ownedId) {
+  const parts = ownedId.split("_");
+  const t = parts[1]; const tier = Number(parts[2]);
+  const rewards = t === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
+  return rewards[tier] || null;
+}
+const colorItem = owned.find(id => {
+  if (equipped[id]) {
+    const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "color");
+    if (shop) return true;
+    if (id.startsWith("pass_")) { const r = getPassRewardValue(id); return r?.type === "color"; }
+  }
+  return false;
+});
+const iconItem = owned.find(id => {
+  if (equipped[id]) {
+    const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "icon");
+    if (shop) return true;
+    if (id.startsWith("pass_")) { const r = getPassRewardValue(id); return r?.type === "icon"; }
+  }
+  return false;
+});
+const titleItem = owned.find(id => {
+  if (equipped[id]) {
+    const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "title");
+    if (shop) return true;
+    if (id.startsWith("pass_")) { const r = getPassRewardValue(id); return r?.type === "title"; }
+  }
+  return false;
+});
+const color = colorItem ? (SHOP_ITEMS.find(i => i.id === colorItem)?.value || (colorItem.startsWith("pass_") ? getPassRewardValue(colorItem)?.value : null) || player.color) : player.color;
+const icon = iconItem ? (SHOP_ITEMS.find(i => i.id === iconItem)?.value || (iconItem.startsWith("pass_") ? getPassRewardValue(iconItem)?.value : null)) : null;
+const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (titleItem.startsWith("pass_") ? getPassRewardValue(titleItem)?.value : null)) : null;
   return (
     <div style={{display:"flex",flexDirection:"column",gap:1}}>
       <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>
@@ -1753,13 +1780,15 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
     setTimeout(() => setClaimResult(null), 2500);
   };
 
-  const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ tier: Number(tier), reward })).sort((a, b) => a.tier - b.tier);
+const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ tier: Number(tier), reward })).sort((a, b) => a.tier - b.tier);
+const [tiersExpanded, setTiersExpanded] = useState(false);
+const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
   const myTokens = passTokens?.[currentPlayer] || [];
 
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       {claimResult && (
-        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", zIndex: 300, background: "#1A1D2E", border: "1px solid rgba(184,255,77,0.4)", borderRadius: 14, padding: "14px 20px", textAlign: "center", animation: "dropDown .3s cubic-bezier(.2,.8,.2,1)", minWidth: 220 }}>
+        <div style={{ position: "fixed", top: 80, left: 0, right: 0, margin: "0 auto", width: 220, zIndex: 300, background: "#1A1D2E", border: "1px solid rgba(184,255,77,0.4)", borderRadius: 14, padding: "14px 20px", textAlign: "center", animation: "dropDown .3s cubic-bezier(.2,.8,.2,1)" }}>
           <div style={{ fontSize: 22, marginBottom: 4 }}>🎁</div>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#B8FF4D" }}>tier {claimResult.tier} claimed!</div>
           <div style={{ fontSize: 12, color: "#8B92A8", marginTop: 2 }}>{claimResult.reward.label || claimResult.reward.value}</div>
@@ -1828,7 +1857,7 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
       {/* Tier reward list */}
       <div style={{ ...s.sectionLabel, marginBottom: 12 }}>tier rewards</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {rewardTiers.map(({ tier, reward }) => {
+        {visibleTiers.map(({ tier, reward }) => {
           const unlocked = currentProgress.tier >= tier;
           const claimed = isClaimed(track, tier);
           const isNext = !unlocked && currentProgress.tier === tier - 1;
@@ -1869,7 +1898,11 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
             </div>
           );
         })}
+<button onClick={() => setTiersExpanded(v => !v)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer",marginTop:8}}>
+  {tiersExpanded ? "▲ collapse tiers" : `▼ show all ${rewardTiers.length} tiers`}
+</button>
       </div>
+
 {/* Owned items from pass */}
       {(() => {
         const owned = points?.[currentPlayer + "_owned"] || [];
