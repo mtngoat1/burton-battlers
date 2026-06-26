@@ -1300,10 +1300,10 @@ function StatsTrendLine({ games, field, color }) {
 }
 
 function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
-  const [ourScore,setOurScore]=useState("");
-  const [theirScore,setTheirScore]=useState("");
-    const [fields,setFields]=useState({goals:"",assists:"",saves:"",demos:"",shots:"",score:""});
-  const set=(f,v)=>setFields(p=>({...p,[f]:v}));
+  return null;
+}
+
+function StatsTab({
 function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
@@ -1456,35 +1456,12 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+15*finalMult};
     </div>
   );
 }
-        </button>
+</button>
       )}
-    </>
-  );
-})()}
-        const won=g.ourScore>g.theirScore;
-        return (
-          <div key={g.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700}}>{g.ourScore} – {g.theirScore}</div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",background:won?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.1)",padding:"3px 8px",borderRadius:99}}>{won?"WIN":"LOSS"}</div>
-                <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(g.ts)}</div>
-              </div>
-            </div>
-            <div style={{display:"flex",gap:12}}>
-              {STAT_FIELDS.map(f=>(
-                <div key={f} style={{textAlign:"center"}}>
-                  <div style={{fontSize:9.5,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f}</div>
-                  <div style={{fontSize:14,fontWeight:700,color:playerColor}}>{g[f]}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
+
 // ===================== Presence + Ping + Notifications + Weekly Recap + Shop =====================
 const THEMES = {
   default: {
