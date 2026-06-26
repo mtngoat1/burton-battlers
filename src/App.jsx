@@ -929,20 +929,19 @@ export default function App() {
     return out.sort((a,b)=>a.date-b.date);
   })();
 
+const touchStartY = useRef(0);
+  const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
+  const handleTouchEnd = (e) => {
+    const diff = e.changedTouches[0].clientY - touchStartY.current;
+    if (diff > 80) loadSharedData(currentPlayer);
+  };
+
   if (authStage==="select") return <><GlobalStyles/><NameSelectScreen onSelect={selectName}/></>;
   const selectedPlayer=PLAYERS.find((p)=>p.id===selectedPlayerId);
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")}/></>;
   if (loading) return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center"}}><div style={{color:"#4A5066",fontSize:13,letterSpacing:1}}>loading team data…</div></div></>;
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
-
-const touchStartY = useRef(0);
-const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
-const handleTouchEnd = (e) => {
-  const diff = e.changedTouches[0].clientY - touchStartY.current;
-  if (diff > 80) loadSharedData(currentPlayer);
-};
-
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const isAdmin=currentPlayer===ADMIN_ID;
   const TABS=[
