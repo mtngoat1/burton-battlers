@@ -3054,13 +3054,10 @@ const loadSharedData = async (pid) => {
     storeGet("pass_claimed"),
     storeGet("pass_tokens"),
     storeGet("pass_active_boosts"),
-    storeGet("time_logs"),
+storeGet("time_logs"),
   ]);
 
-  // rest of your function...
-};
-
-if (sched) setSchedule(sched);
+  if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
     if (comp) setCompletions(comp);
     if (chat) setMessages(chat);
