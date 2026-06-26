@@ -762,7 +762,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast }) {
   const [composing,setComposing]=useState(false); const [commentingOn,setCommentingOn]=useState(null);
   const addPost=async(data)=>{ let img=null; if(data.file) img=await uploadPostImage(data.file); const post={id:Date.now().toString(),playerId:currentPlayer,caption:data.caption,image:img,isVideo:data.file?.type?.startsWith("video/"),ts:new Date().toISOString(),hearts:[],comments:[]}; const upd=[post,...posts]; setPosts(upd); await storeSet("posts",upd);
 addToast?.(`${PLAYERS.find(pl=>pl.id===currentPlayer)?.name} posted something`, "📸");
-  };
+
   };
   const toggleHeart=async(postId)=>{ const upd=posts.map((p)=>{if(p.id!==postId)return p; const hearts=p.hearts||[]; return {...p,hearts:hearts.includes(currentPlayer)?hearts.filter((id)=>id!==currentPlayer):[...hearts,currentPlayer]}; }); setPosts(upd); await storeSet("posts",upd); };
   const addComment=async(postId,text)=>{ const comment={id:Date.now().toString(),playerId:currentPlayer,text,ts:new Date().toISOString()}; const upd=posts.map((p)=>p.id===postId?{...p,comments:[...(p.comments||[]),comment]}:p); setPosts(upd); await storeSet("posts",upd); setCommentingOn((prev)=>prev?upd.find((p)=>p.id===prev.id):prev); };
