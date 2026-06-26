@@ -1303,7 +1303,6 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   return null;
 }
 
-function StatsTab({
 function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
