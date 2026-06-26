@@ -1613,14 +1613,8 @@ const badges = {
     <div style={s.topBarTitle}>
 </div>
 <div style={s.topBarRight}>
-  <button onClick={async()=>{ const sub = await registerPush();
-  if (sub) {
-    setPushSub(sub);
-    storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
-    alert('notifications enabled!');
-  } else {
-    alert('notifications blocked or not supported');
-  }
+<button onClick={async()=>{ 
+  const sub = await registerPush();
   if (sub) {
     setPushSub(sub);
     storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
