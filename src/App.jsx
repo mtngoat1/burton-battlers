@@ -507,7 +507,7 @@ function TrainingTab({ trainingData, completions, setCompletions, currentPlayer,
 }
 
 // ===================== Verification Tab =====================
-function VerificationTab({ trainingData, completions, setCompletions }) {
+function VerificationTab({ trainingData, completions, setCompletions, addToast }) {
   const [noteDraft,setNoteDraft]=useState({});
   const pendingByPlayer=PLAYERS.map((p)=>{
     const items=Object.entries(completions).filter(([k,v])=>k.endsWith(`__${p.id}`)&&v.status==="pending").map(([k,v])=>{ const dk=k.split("__")[0]; return {key:k,dayKey:dk,training:trainingData[tKey(dk,p.id)],completion:v}; }).sort((a,b)=>a.dayKey.localeCompare(b.dayKey));
@@ -518,9 +518,7 @@ function VerificationTab({ trainingData, completions, setCompletions }) {
     const note=noteDraft[key]||"";
     const upd={...completions,[key]:{...completions[key],status:decision,note:decision==="rejected"?note:undefined,reviewedAt:new Date().toISOString()}};
     setCompletions(upd); await storeSet("completions",upd);
-    const notifPid = key.split("__")[1];
-    const subStr = await storeGet(`push_sub:${notifPid}`);
-    if (subStr) await sendPush(JSON.parse(subStr), decision === 'approved' ? 'training approved ✅' : 'training needs redo ❌', decision === 'approved' ? 'captain approved your session — +15 pts' : `captain says: ${note||'check the app'}`);
+   addToast?.(decision==="approved"?"training approved — +15 pts":`needs redo: ${note||"check the app"}`, decision==="approved"?"✅":"❌");
     if (decision==="approved") {
       const pts=await storeGet("points")||{};
       const pid=key.split("__")[1];
@@ -665,7 +663,7 @@ function ChatMessage({ msg, isMe }) {
     </div>
   );
 }
-function ChatTab({ messages, setMessages, currentPlayer }) {
+function ChatTab({ messages, setMessages, currentPlayer, addToast }) {
   const [text,setText]=useState("");
   const scrollRef=useRef(null);
   useEffect(()=>{ scrollRef.current?.scrollIntoView({behavior:"smooth"}); },[messages.length]);
@@ -674,11 +672,7 @@ function ChatTab({ messages, setMessages, currentPlayer }) {
     const msg={id:Date.now().toString(),playerId:currentPlayer,text:text.trim(),ts:new Date().toISOString()};
    const upd=[...messages,msg];
     setMessages(upd); await storeSet("chat",upd); setText("");
-    for (const p of PLAYERS) {
-      if (p.id === currentPlayer) continue;
-      const subStr = await storeGet(`push_sub:${p.id}`);
-      if (subStr) await sendPush(JSON.parse(subStr), 'new message 💬', `${PLAYERS.find(pl=>pl.id===currentPlayer)?.name}: ${text.trim()}`);
-    }
+addToast?.(`${PLAYERS.find(pl=>pl.id===currentPlayer)?.name}: ${text.trim()}`, "💬");
   };
   return (
     <div className="bb-tab-content" style={s.chatTabWrap}>
@@ -758,15 +752,12 @@ function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
     </div></div>
   );
 }
-function SocialTab({ posts, setPosts, currentPlayer }) {
+function SocialTab({ posts, setPosts, currentPlayer, addToast }) {
   const [composing,setComposing]=useState(false); const [commentingOn,setCommentingOn]=useState(null);
   const addPost=async(data)=>{ let img=null; if(data.file) img=await uploadPostImage(data.file); const post={id:Date.now().toString(),playerId:currentPlayer,caption:data.caption,image:img,ts:new Date().toISOString(),hearts:[],comments:[]}; const upd=[post,...posts]; setPosts(upd); await storeSet("posts",upd);
-    for (const p of PLAYERS) {
-      if (p.id === currentPlayer) continue;
-      const subStr = await storeGet(`push_sub:${p.id}`);
-      if (subStr) await sendPush(JSON.parse(subStr), 'new post 📸', `${PLAYERS.find(pl=>pl.id===currentPlayer)?.name} posted something`);
-    }};
-  const toggleHeart=async(postId)=>{ const upd=posts.map((p)=>{ if(p.id!==postId)return p; const hearts=p.hearts||[]; return {...p,hearts:hearts.includes(currentPlayer)?hearts.filter((id)=>id!==currentPlayer):[...hearts,currentPlayer]}; }); setPosts(upd); await storeSet("posts",upd); };
+addToast?.(`${PLAYERS.find(pl=>pl.id===currentPlayer)?.name} posted something`, "📸");
+  };
+  const toggleHeart=async(postId)=>{ const upd=posts.map((p)=>{if(p.id!==postId)return p; const hearts=p.hearts||[]; return {...p,hearts:hearts.includes(currentPlayer)?hearts.filter((id)=>id!==currentPlayer):[...hearts,currentPlayer]}; }); setPosts(upd); await storeSet("posts",upd); };
   const addComment=async(postId,text)=>{ const comment={id:Date.now().toString(),playerId:currentPlayer,text,ts:new Date().toISOString()}; const upd=posts.map((p)=>p.id===postId?{...p,comments:[...(p.comments||[]),comment]}:p); setPosts(upd); await storeSet("posts",upd); setCommentingOn((prev)=>prev?upd.find((p)=>p.id===prev.id):prev); };
   return (
     <div className="bb-tab-content" style={s.tabContent}>
@@ -828,16 +819,16 @@ function AdminSetMMR({ player, existing, onSave, onClose }) {
     </div></div>
   );
 }
-function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles }) {
+function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast }) {
   const [assigning,setAssigning]=useState(null); const [settingMmrFor,setSettingMmrFor]=useState(null); const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
   const today=todayAtMidnight();
   const totalDays=Math.ceil((PLAYOFF_END-TRAINING_START)/DAY_MS);
   const startIdx=Math.max(0,Math.floor((today-TRAINING_START)/DAY_MS)-1);
   const days=Array.from({length:Math.min(totalDays-startIdx,21)},(_,i)=>{ const date=new Date(TRAINING_START.getTime()+(startIdx+i)*DAY_MS); return {key:dateKey(date),date}; });
   const saveTraining=async(dk,pid,data)=>{ const upd={...trainingData,[tKey(dk,pid)]:data}; setTrainingData(upd); await storeSet("training",upd);
-    const subStr = await storeGet(`push_sub:${pid}`);
-    if (subStr) await sendPush(JSON.parse(subStr), 'new training assigned 🏋️', `captain assigned you a new session`);};
-  const saveMmr=async(pid,profile)=>{ const upd={...mmrProfiles,[pid]:profile}; setMmrProfiles(upd); await setMMR(pid,profile); };
+addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️");
+  };
+ const saveMmr=async(pid,profile)=>{ const upd={...mmrProfiles,[pid]:profile}; setMmrProfiles(upd); await setMMR(pid,profile); };
   const activePlayer=PLAYERS.find((p)=>p.id===activePlayerTab);
   return (
     <div className="bb-tab-content" style={s.tabContent}>
@@ -1032,16 +1023,17 @@ function StatsTab({ stats, setStats, currentPlayer }) {
 }
 // ===================== Presence + Ping + Notifications + Weekly Recap + Shop =====================
 const SHOP_ITEMS = [
-  { id:"lime_name", label:"Lime Name", desc:"your name glows lime green", cost:50, type:"color", value:"#B8FF4D" },
-  { id:"pink_name", label:"Pink Name", desc:"your name glows hot pink", cost:50, type:"color", value:"#FF61C1" },
-  { id:"violet_name", label:"Violet Name", desc:"your name glows violet", cost:50, type:"color", value:"#A78BFA" },
-  { id:"gold_name", label:"Gold Name", desc:"your name glows gold", cost:75, type:"color", value:"#FFD166" },
-  { id:"icon_rocket", label:"🚀 Rocket", desc:"rocket icon next to your name", cost:60, type:"icon", value:"🚀" },
-  { id:"icon_fire", label:"🔥 Fire", desc:"fire icon next to your name", cost:60, type:"icon", value:"🔥" },
-  { id:"icon_crown", label:"👑 Crown", desc:"crown icon — for winners only", cost:100, type:"icon", value:"👑" },
-  { id:"icon_skull", label:"💀 Skull", desc:"skull icon — intimidation factor", cost:80, type:"icon", value:"💀" },
+  { id:"lime_name",   label:"Lime",   desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
+  { id:"pink_name",   label:"Pink",   desc:"hot pink name glow",     cost:50,  type:"color", value:"#FF61C1", emoji:"🩷" },
+  { id:"violet_name", label:"Violet", desc:"violet name glow",       cost:50,  type:"color", value:"#A78BFA", emoji:"💜" },
+  { id:"gold_name",   label:"Gold",   desc:"gold name glow",         cost:75,  type:"color", value:"#FFD166", emoji:"🌟" },
+  { id:"icon_car",    label:"Car",    desc:"rocket car by your name", cost:60,  type:"icon",  value:"🏎️",     emoji:"🏎️" },
+  { id:"icon_fire",   label:"Fire",   desc:"you're on fire",         cost:60,  type:"icon",  value:"🔥",     emoji:"🔥" },
+  { id:"icon_crown",  label:"Crown",  desc:"for winners only",       cost:100, type:"icon",  value:"👑",     emoji:"👑" },
+  { id:"icon_goat",   label:"GOAT",   desc:"greatest of all time",   cost:80,  type:"icon",  value:"🐐",     emoji:"🐐" },
+  { id:"icon_bolt",   label:"Bolt",   desc:"fastest on the team",    cost:70,  type:"icon",  value:"⚡",     emoji:"⚡" },
+  { id:"icon_alien",  label:"Alien",  desc:"not of this world",      cost:90,  type:"icon",  value:"👾",     emoji:"👾" },
 ];
-
 function isOnline(ts) {
   if (!ts) return false;
   return Date.now() - new Date(ts).getTime() < 90000;
@@ -1066,7 +1058,10 @@ function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoin
 
   const sendPing = async (toId) => {
     const ping = { id: Date.now().toString(), from: currentPlayer, to: toId, ts: new Date().toISOString(), type: "2s" };
-    const upd = [ping, ...(pings || []).slice(0, 49)];
+const myExisting = (pings || []).filter(p => p.to === toId);
+const others = (pings || []).filter(p => p.to !== toId);
+const myUpd = [ping, ...myExisting].slice(0, 2);
+const upd = [...myUpd, ...others];
     setPings(upd);
     await storeSet("pings", upd);
   };
@@ -1169,30 +1164,56 @@ function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoin
         <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(184,255,77,0.15)"}}>
           <div style={{fontSize:12,color:"#B8FF4D",fontWeight:700,letterSpacing:0.5,marginBottom:4}}>SHOP</div>
           <div style={{fontSize:11,color:"#4A5066",marginBottom:12}}>earn pts by logging games (+10) and getting training approved (+15). weekly stat leaders get +50 jackpot.</div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {SHOP_ITEMS.map(item=>{
-              const isOwned = owned.includes(item.id);
-              const isEquipped = equipped[item.id];
-              const canAfford = myPoints >= item.cost;
-              return (
-                <div key={item.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"rgba(255,255,255,0.03)",borderRadius:11,border:`1px solid ${isOwned?"rgba(184,255,77,0.2)":"rgba(255,255,255,0.06)"}`}}>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:13,fontWeight:700,color:isOwned?"#B8FF4D":"#E8ECF4"}}>{item.label}</div>
-                    <div style={{fontSize:11,color:"#4A5066",marginTop:1}}>{item.desc}</div>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8}}>NAME COLORS</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
+              {SHOP_ITEMS.filter(i=>i.type==="color").map(item=>{
+                const isOwned=owned.includes(item.id);
+                const isEquipped=equipped[item.id];
+                const canAfford=myPoints>=item.cost;
+                return (
+                  <div key={item.id} style={{background:isEquipped?`${item.value}15`:"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",border:`1px solid ${isEquipped?item.value:isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,position:"relative"}}>
+                    {isEquipped&&<div style={{position:"absolute",top:8,right:8,width:6,height:6,borderRadius:99,background:item.value}}/>}
+                    <div style={{fontSize:22,marginBottom:6}}>{item.emoji}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:isOwned?item.value:"#E8ECF4",marginBottom:2}}>{item.label}</div>
+                    <div style={{fontSize:10,color:"#4A5066",marginBottom:10}}>{item.desc}</div>
+                    {isOwned?(
+                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?item.value:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                        {isEquipped?"✓ equipped":"equip"}
+                      </button>
+                    ):(
+                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
+                        {item.cost} pts
+                      </button>
+                    )}
                   </div>
-                  {isOwned ? (
-                    <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{background:isEquipped?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                      {isEquipped?"on":"off"}
-                    </button>
-                  ) : (
-                    <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{background:canAfford?"rgba(184,255,77,0.12)":"rgba(255,255,255,0.04)",border:`1px solid ${canAfford?"rgba(184,255,77,0.4)":"rgba(255,255,255,0.08)"}`,borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                      {item.cost}pts
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8}}>ICONS</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {SHOP_ITEMS.filter(i=>i.type==="icon").map(item=>{
+                const isOwned=owned.includes(item.id);
+                const isEquipped=equipped[item.id];
+                const canAfford=myPoints>=item.cost;
+                return (
+                  <div key={item.id} style={{background:isEquipped?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px 8px",border:`1px solid ${isEquipped?"rgba(184,255,77,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,textAlign:"center"}}>
+                    <div style={{fontSize:26,marginBottom:4}}>{item.emoji}</div>
+                    <div style={{fontSize:11,fontWeight:700,color:isOwned?"#B8FF4D":"#E8ECF4",marginBottom:2}}>{item.label}</div>
+                    <div style={{fontSize:9,color:"#4A5066",marginBottom:8}}>{item.desc}</div>
+                    {isOwned?(
+                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:7,padding:"5px 0",fontSize:10,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                        {isEquipped?"✓":"equip"}
+                      </button>
+                    ):(
+                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:7,padding:"5px 0",fontSize:10,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
+                        {item.cost}pts
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
         </div>
       )}
 
@@ -1299,6 +1320,7 @@ export default function App() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
   const [currentPlayer,setCurrentPlayer]=useState(null);
+const [toasts, setToasts] = useState([]);
   const [loading,setLoading]=useState(false);
   const [tab,setTab]=useState("home");
   const [schedule,setSchedule]=useState({league:buildLeagueWeeks(),playoffs:buildPlayoffRounds()});
@@ -1320,6 +1342,11 @@ export default function App() {
   const [jumpKey,setJumpKey]=useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
+const addToast = (text, icon = "🔔") => {
+  const id = Date.now().toString();
+  setToasts(prev => [...prev, { id, text, icon }]);
+  setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+};
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
@@ -1328,10 +1355,7 @@ export default function App() {
       const upd = { ...presence, [currentPlayer]: new Date().toISOString() };
       await storeSet("presence", upd);
     };
-    heartbeat();
-
-});
-  
+heartbeat();
     const hbInterval = setInterval(heartbeat, 30000);
     const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
       if (key === "chat")           setMessages(value);
@@ -1371,6 +1395,7 @@ export default function App() {
     for (const p of PLAYERS) { const profile=await getMMR(p.id); if(profile) profiles[p.id]=profile; }
     setMmrProfiles(profiles);
       setCurrentPlayer(pid);
+setMmrProfiles(prev => ({...prev}));
     if (!profiles[pid]) setAuthStage("tracker"); else setAuthStage("app");
     setLoading(false);
   };
@@ -1424,6 +1449,16 @@ const touchStartY = useRef(0);
   return (
     <div style={s.appShell}>
       <GlobalStyles/>
+{toasts.length > 0 && (
+  <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,display:"flex",flexDirection:"column",gap:8,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"none"}}>
+    {toasts.map(t=>(
+      <div key={t.id} style={{background:"#1A1D2E",border:"1px solid rgba(184,255,77,0.25)",borderRadius:13,padding:"12px 16px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,0.4)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)"}}>
+        <span style={{fontSize:18}}>{t.icon}</span>
+        <span style={{fontSize:13,fontWeight:600,color:"#E8ECF4"}}>{t.text}</span>
+      </div>
+    ))}
+  </div>
+)}
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
       {commentDay&&<CommentsModal dayKey={commentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setCommentDay(null)}/>}
       <div style={s.topBar}>
@@ -1452,13 +1487,13 @@ const touchStartY = useRef(0);
         {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-        {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer}/>}
-        {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer}/>}
+       {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast}/>}
+        {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
  {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer}/>}
         {tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats}/>}
-        {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions}/>}
-        {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles}/>}
+       {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast}/>}
+      {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast}/>}
       </div>
       <div style={s.tabBar}>
         {TABS.map((t)=>(
