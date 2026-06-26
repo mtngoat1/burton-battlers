@@ -11,7 +11,7 @@ const ADMIN_ID = "p1";
 const PLAYERS = [
   { id: "p1", name: "maglvxx",  color: "#B8FF4D", twitch: "" },
   { id: "p2", name: "Apcards5", color: "#A78BFA", twitch: "" },
-  { id: "p3", name: "tqr11le",  color: "#FF5C8A", twitch: "" },
+  { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "" },
 ];
 
 const TRAINING_START = new Date("2026-07-01T00:00:00");
@@ -517,7 +517,12 @@ function VerificationTab({ trainingData, completions, setCompletions }) {
   const decide=async(key,decision)=>{
     const note=noteDraft[key]||"";
     const upd={...completions,[key]:{...completions[key],status:decision,note:decision==="rejected"?note:undefined,reviewedAt:new Date().toISOString()}};
-    setCompletions(upd); await storeSet("completions",upd);
+     setCompletions(upd); await storeSet("completions",upd);
+    if (decision==="approved") {
+      const pts=await storeGet("points")||{};
+      const pid=key.split("__")[1];
+      await storeSet("points",{...pts,[pid]:(pts[pid]||0)+15});
+    }
     setNoteDraft((d)=>{ const n={...d}; delete n[key]; return n; });
   };
   return (
@@ -849,7 +854,7 @@ function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles }
 }
 // ===================== Stats Tab =====================
 const STAT_MODES = ["3v3","2v2","1v1"];
-const STAT_FIELDS = ["goals","assists","saves","demos"];
+const STAT_FIELDS = ["goals","assists","saves","demos","shots","score"];
 
 function StatsTrendLine({ games, field, color }) {
   if (games.length < 2) return null;
@@ -876,11 +881,11 @@ function StatsTrendLine({ games, field, color }) {
 function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   const [ourScore,setOurScore]=useState("");
   const [theirScore,setTheirScore]=useState("");
-  const [fields,setFields]=useState({goals:"",assists:"",saves:"",demos:""});
+    const [fields,setFields]=useState({goals:"",assists:"",saves:"",demos:"",shots:"",score:""});
   const set=(f,v)=>setFields(p=>({...p,[f]:v}));
   const save=()=>{
     if(ourScore===""||theirScore==="")return;
-    onSave({id:Date.now().toString(),playerId:currentPlayer,mode,ourScore:Number(ourScore),theirScore:Number(theirScore),goals:Number(fields.goals)||0,assists:Number(fields.assists)||0,saves:Number(fields.saves)||0,demos:Number(fields.demos)||0,ts:new Date().toISOString()});
+       onSave({id:Date.now().toString(),playerId:currentPlayer,mode,ourScore:Number(ourScore),theirScore:Number(theirScore),goals:Number(fields.goals)||0,assists:Number(fields.assists)||0,saves:Number(fields.saves)||0,demos:Number(fields.demos)||0,shots:Number(fields.shots)||0,score:Number(fields.score)||0,ts:new Date().toISOString()});
     onClose();
   };
   return (
@@ -909,7 +914,12 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
 function StatsTab({ stats, setStats, currentPlayer }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
-  const saveGame=async(entry)=>{ const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd); };
+   const saveGame=async(entry)=>{
+    const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd);
+    const pts=await storeGet("points")||{};
+    const cur=pts[currentPlayer]||0;
+    await storeSet("points",{...pts,[currentPlayer]:cur+10});
+  };
   const modeGames=stats.filter(g=>g.mode===mode);
   const myGames=modeGames.filter(g=>g.playerId===currentPlayer).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
   const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+g[field],0)/arr.length).toFixed(1):"—";
@@ -960,14 +970,14 @@ function StatsTab({ stats, setStats, currentPlayer }) {
         <>
           <div style={{...s.sectionLabel,marginBottom:10}}>team comparison</div>
           <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)",marginBottom:20}}>
-            <div style={{display:"grid",gridTemplateColumns:`80px repeat(4,1fr)`,gap:4,marginBottom:8}}>
+            <div style={{display:"grid",gridTemplateColumns:`70px repeat(6,1fr)`,gap:4,marginBottom:8}}>
               <div/>
               {STAT_FIELDS.map(f=><div key={f} style={{fontSize:9.5,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
             </div>
             {PLAYERS.map(p=>{
               const pg=modeGames.filter(g=>g.playerId===p.id);
               return (
-                <div key={p.id} style={{display:"grid",gridTemplateColumns:`80px repeat(4,1fr)`,gap:4,marginBottom:8,alignItems:"center"}}>
+                <div key={p.id} style={{display:"grid",gridTemplateColumns:`70px repeat(6,1fr)`,gap:4,marginBottom:8,alignItems:"center"}}>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <div style={{width:7,height:7,borderRadius:99,background:p.color,flexShrink:0}}/>
                     <span style={{fontSize:11,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
@@ -1005,9 +1015,232 @@ function StatsTab({ stats, setStats, currentPlayer }) {
     </div>
   );
 }
+// ===================== Presence + Ping + Notifications + Weekly Recap + Shop =====================
+const SHOP_ITEMS = [
+  { id:"lime_name", label:"Lime Name", desc:"your name glows lime green", cost:50, type:"color", value:"#B8FF4D" },
+  { id:"pink_name", label:"Pink Name", desc:"your name glows hot pink", cost:50, type:"color", value:"#FF61C1" },
+  { id:"violet_name", label:"Violet Name", desc:"your name glows violet", cost:50, type:"color", value:"#A78BFA" },
+  { id:"gold_name", label:"Gold Name", desc:"your name glows gold", cost:75, type:"color", value:"#FFD166" },
+  { id:"icon_rocket", label:"🚀 Rocket", desc:"rocket icon next to your name", cost:60, type:"icon", value:"🚀" },
+  { id:"icon_fire", label:"🔥 Fire", desc:"fire icon next to your name", cost:60, type:"icon", value:"🔥" },
+  { id:"icon_crown", label:"👑 Crown", desc:"crown icon — for winners only", cost:100, type:"icon", value:"👑" },
+  { id:"icon_skull", label:"💀 Skull", desc:"skull icon — intimidation factor", cost:80, type:"icon", value:"💀" },
+];
+
+function isOnline(ts) {
+  if (!ts) return false;
+  return Date.now() - new Date(ts).getTime() < 90000;
+}
+
+function PlayerNameDisplay({ playerId, points }) {
+  const player = PLAYERS.find(p => p.id === playerId);
+  if (!player) return null;
+  const owned = (points?.[playerId + "_owned"]) || [];
+  const equipped = points?.[playerId + "_equipped"] || {};
+  const colorItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "color"); return it && equipped[id]; });
+  const iconItem = owned.find(id => { const it = SHOP_ITEMS.find(i => i.id === id && i.type === "icon"); return it && equipped[id]; });
+  const color = colorItem ? SHOP_ITEMS.find(i => i.id === colorItem)?.value : player.color;
+  const icon = iconItem ? SHOP_ITEMS.find(i => i.id === iconItem)?.value : null;
+  return <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>;
+}
+
+function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats }) {
+  const [showNotifs, setShowNotifs] = useState(false);
+  const [showShop, setShowShop] = useState(false);
+  const [showRecap, setShowRecap] = useState(false);
+
+  const sendPing = async (toId) => {
+    const ping = { id: Date.now().toString(), from: currentPlayer, to: toId, ts: new Date().toISOString(), type: "2s" };
+    const upd = [ping, ...(pings || []).slice(0, 49)];
+    setPings(upd);
+    await storeSet("pings", upd);
+  };
+
+  const myPings = (pings || []).filter(p => p.to === currentPlayer && Date.now() - new Date(p.ts).getTime() < 3600000);
+  const myPoints = points?.[currentPlayer] || 0;
+  const owned = points?.[currentPlayer + "_owned"] || [];
+  const equipped = points?.[currentPlayer + "_equipped"] || {};
+
+  const buyItem = async (item) => {
+    if (myPoints < item.cost) return;
+    if (owned.includes(item.id)) return;
+    const upd = { ...points, [currentPlayer]: myPoints - item.cost, [currentPlayer + "_owned"]: [...owned, item.id] };
+    setPoints(upd); await storeSet("points", upd);
+  };
+
+  const toggleEquip = async (itemId) => {
+    const item = SHOP_ITEMS.find(i => i.id === itemId);
+    const newEquipped = { ...equipped };
+    // unequip others of same type
+    SHOP_ITEMS.filter(i => i.type === item.type).forEach(i => { delete newEquipped[i.id]; });
+    if (!equipped[itemId]) newEquipped[itemId] = true;
+    const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
+    setPoints(upd); await storeSet("points", upd);
+  };
+
+  // Weekly recap
+  const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay()); weekStart.setHours(0,0,0,0);
+  const weekStats = PLAYERS.map(p => {
+    const pg = stats.filter(g => g.playerId === p.id && new Date(g.ts) >= weekStart);
+    const avg = (f) => pg.length ? (pg.reduce((s,g) => s+(g[f]||0), 0)/pg.length).toFixed(1) : 0;
+    return { player: p, games: pg.length, goals: avg("goals"), assists: avg("assists"), saves: avg("saves"), demos: avg("demos"), shots: avg("shots") };
+  });
+  const leaders = ["goals","assists","saves","demos","shots"].map(f => {
+    const sorted = [...weekStats].sort((a,b) => Number(b[f]) - Number(a[f]));
+    return { field: f, leader: sorted[0] };
+  });
+
+  // Notifications feed
+  const notifs = [
+    ...(pings||[]).filter(p => p.to === currentPlayer).map(p => ({ id:p.id, ts:p.ts, text:`${PLAYERS.find(pl=>pl.id===p.from)?.name} wants to run 2s`, icon:"🎮" })),
+    ...(Object.entries(completions||{})).filter(([k,v]) => v.status==="approved" && k.endsWith(`__${currentPlayer}`)).map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt, text:`training approved — +15 pts`, icon:"✅" })),
+  ].sort((a,b) => new Date(b.ts) - new Date(a.ts)).slice(0, 20);
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      {/* Points bar */}
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR POINTS</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={()=>setShowNotifs(v=>!v)} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer",position:"relative"}}>
+            <Bell size={14}/> {notifs.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#FF61C1",borderRadius:99,width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}}>{notifs.length}</span>}
+          </button>
+          <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
+          <button onClick={()=>setShowRecap(v=>!v)} className="bb-pressable" style={{background:"rgba(255,209,102,0.1)",border:"1px solid rgba(255,209,102,0.3)",borderRadius:10,padding:"8px 12px",color:"#FFD166",fontSize:12,fontWeight:700,cursor:"pointer"}}>📊 recap</button>
+        </div>
+      </div>
+
+      {/* Notification center */}
+      {showNotifs && (
+        <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(167,139,250,0.2)"}}>
+          <div style={{fontSize:12,color:"#A78BFA",fontWeight:700,letterSpacing:0.5,marginBottom:12}}>NOTIFICATIONS</div>
+          {notifs.length===0 && <div style={{color:"#4A5066",fontSize:13}}>nothing yet</div>}
+          {notifs.map(n=>(
+            <div key={n.id} style={{display:"flex",gap:10,alignItems:"flex-start",marginBottom:10,paddingBottom:10,borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+              <span style={{fontSize:16}}>{n.icon}</span>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,color:"#E8ECF4"}}>{n.text}</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(n.ts)}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Weekly recap */}
+      {showRecap && (
+        <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(255,209,102,0.2)"}}>
+          <div style={{fontSize:12,color:"#FFD166",fontWeight:700,letterSpacing:0.5,marginBottom:12}}>THIS WEEK'S LEADERS</div>
+          {leaders.map(({field,leader})=>(
+            <div key={field} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,paddingBottom:10,borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,width:60}}>{field}</div>
+              <div style={{display:"flex",alignItems:"center",gap:6,flex:1}}>
+                <div style={{width:7,height:7,borderRadius:99,background:leader.player.color}}/>
+                <span style={{fontSize:13,fontWeight:700,color:leader.player.color}}>{leader.player.name}</span>
+              </div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:"#FFD166"}}>{leader[field]}</div>
+              <span style={{fontSize:14,marginLeft:6}}>🏆</span>
+            </div>
+          ))}
+          <div style={{fontSize:11,color:"#4A5066",marginTop:8}}>jackpot: +50 pts awarded sunday night to each category leader</div>
+        </div>
+      )}
+
+      {/* Shop */}
+      {showShop && (
+        <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(184,255,77,0.15)"}}>
+          <div style={{fontSize:12,color:"#B8FF4D",fontWeight:700,letterSpacing:0.5,marginBottom:4}}>SHOP</div>
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:12}}>earn pts by logging games (+10) and getting training approved (+15). weekly stat leaders get +50 jackpot.</div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {SHOP_ITEMS.map(item=>{
+              const isOwned = owned.includes(item.id);
+              const isEquipped = equipped[item.id];
+              const canAfford = myPoints >= item.cost;
+              return (
+                <div key={item.id} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:"rgba(255,255,255,0.03)",borderRadius:11,border:`1px solid ${isOwned?"rgba(184,255,77,0.2)":"rgba(255,255,255,0.06)"}`}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:isOwned?"#B8FF4D":"#E8ECF4"}}>{item.label}</div>
+                    <div style={{fontSize:11,color:"#4A5066",marginTop:1}}>{item.desc}</div>
+                  </div>
+                  {isOwned ? (
+                    <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{background:isEquipped?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                      {isEquipped?"on":"off"}
+                    </button>
+                  ) : (
+                    <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{background:canAfford?"rgba(184,255,77,0.12)":"rgba(255,255,255,0.04)",border:`1px solid ${canAfford?"rgba(184,255,77,0.4)":"rgba(255,255,255,0.08)"}`,borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
+                      {item.cost}pts
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Online now */}
+      <div style={{...s.sectionLabel,marginBottom:10}}>online now</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+        {PLAYERS.map(p=>{
+          const online = isOnline(presence?.[p.id]);
+          const isMe = p.id === currentPlayer;
+          return (
+            <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:10,height:10,borderRadius:99,background:online?"#7CFFB2":"#2E3346",boxShadow:online?"0 0 8px #7CFFB299":""}}/>
+              <div style={{flex:1}}>
+                <PlayerNameDisplay playerId={p.id} points={points}/>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:1}}>{online?"online now":presence?.[p.id]?`last seen ${fmtRelTime(presence[p.id])}`:"offline"}</div>
+              </div>
+              {!isMe && online && (
+                <button onClick={()=>sendPing(p.id)} className="bb-pressable bb-glow-lime" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>
+                  🎮 run 2s?
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Incoming pings */}
+      {myPings.length > 0 && (
+        <>
+          <div style={{...s.sectionLabel,marginBottom:10}}>squad pings</div>
+          {myPings.map(p=>{
+            const from = PLAYERS.find(pl=>pl.id===p.from);
+            return (
+              <div key={p.id} style={{background:"rgba(184,255,77,0.06)",border:"1px solid rgba(184,255,77,0.2)",borderRadius:13,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>🎮</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#B8FF4D"}}>{from?.name} wants to run 2s</div>
+                  <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(p.ts)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+
+      {/* Team points leaderboard */}
+      <div style={{...s.sectionLabel,marginBottom:10}}>points leaderboard</div>
+      <div style={{background:"#11131F",borderRadius:13,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+        {[...PLAYERS].sort((a,b)=>(points?.[b.id]||0)-(points?.[a.id]||0)).map((p,i)=>(
+          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:i<PLAYERS.length-1?10:0,paddingBottom:i<PLAYERS.length-1?10:0,borderBottom:i<PLAYERS.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:600,color:i===0?"#FFD166":"#4A5066",width:20}}>{i+1}</div>
+            <div style={{width:8,height:8,borderRadius:99,background:p.color}}/>
+            <div style={{flex:1,fontSize:13,fontWeight:700}}><PlayerNameDisplay playerId={p.id} points={points}/></div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:p.color}}>{points?.[p.id]||0}<span style={{fontSize:10,color:"#4A5066",marginLeft:3}}>pts</span></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}          
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points"];
 
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
@@ -1015,7 +1248,6 @@ export default function App() {
   const [currentPlayer,setCurrentPlayer]=useState(null);
   const [loading,setLoading]=useState(false);
   const [tab,setTab]=useState("home");
-  const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats"];
   const [schedule,setSchedule]=useState({league:buildLeagueWeeks(),playoffs:buildPlayoffRounds()});
   const [mmrProfiles,setMmrProfiles]=useState({});
   const [trainingData,setTrainingData]=useState({});
@@ -1025,6 +1257,9 @@ export default function App() {
   const [posts,setPosts]=useState([]);
   const [streamProfiles,setStreamProfiles]=useState({});
   const [stats,setStats]=useState([]);
+  const [presence,setPresence]=useState({});
+  const [pings,setPings]=useState([]);
+  const [points,setPoints]=useState({});
   const [resyncingId,setResyncingId]=useState(null);
   const [resyncOverlay,setResyncOverlay]=useState(false);
   const [pendingResyncPlayer,setPendingResyncPlayer]=useState(null);
@@ -1034,7 +1269,14 @@ export default function App() {
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
+   useEffect(() => {
     if (!currentPlayer) return;
+    const heartbeat = async () => {
+      const upd = { ...presence, [currentPlayer]: new Date().toISOString() };
+      await storeSet("presence", upd);
+    };
+    heartbeat();
+    const hbInterval = setInterval(heartbeat, 30000);
     const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
       if (key === "chat")           setMessages(value);
       if (key === "posts")          setPosts(value);
@@ -1043,17 +1285,20 @@ export default function App() {
       if (key === "schedule")       setSchedule(value);
       if (key === "comments")       setComments(value);
       if (key === "stream_profiles") setStreamProfiles(value);
-      if (key === "stats")           setStats(value);
+       if (key === "stats")           setStats(value);
+      if (key === "presence")        setPresence(value);
+      if (key === "pings")           setPings(value);
+      if (key === "points")          setPoints(value);
     });
-    return unsub;
+     return () => { unsub(); clearInterval(hbInterval); };
   }, [currentPlayer]);
 
   const selectName=async(pid)=>{ setSelectedPlayerId(pid); const auth=await storeGet(`auth:${pid}`); setAuthStage(auth?"enter":"create"); };
 
   const loadSharedData=async(pid)=>{
     setLoading(true);
-       const [sched,training,comp,chat,cmts,pst,strm,sts]=await Promise.all([
-      storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),
+      const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts]=await Promise.all([
+      storeGet("schedule"),storeGet("training"),storeGet("completions"),storeGet("chat"),storeGet("comments"),storeGet("posts"),storeGet("stream_profiles"),storeGet("stats"),storeGet("presence"),storeGet("pings"),storeGet("points"),
     ]);
     if (sched) setSchedule(sched);
     if (training) setTrainingData(training);
@@ -1063,10 +1308,13 @@ export default function App() {
     if (pst) setPosts(pst);
     if (strm) setStreamProfiles(strm);
     if (sts) setStats(sts);
+    if (prs) setPresence(prs);
+    if (pngs) setPings(pngs);
+    if (pts) setPoints(pts);  
     const profiles={};
     for (const p of PLAYERS) { const profile=await getMMR(p.id); if(profile) profiles[p.id]=profile; }
     setMmrProfiles(profiles);
-    setCurrentPlayer(pid);
+      setCurrentPlayer(pid);
     if (!profiles[pid]) setAuthStage("tracker"); else setAuthStage("app");
     setLoading(false);
   };
@@ -1094,7 +1342,7 @@ const touchStartY = useRef(0);
   const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
   const handleTouchEnd = (e) => {
     const diff = e.changedTouches[0].clientY - touchStartY.current;
-    if (diff > 80) loadSharedData(currentPlayer);
+    if (diff > 150) loadSharedData(currentPlayer);
   };
 
   if (authStage==="select") return <><GlobalStyles/><NameSelectScreen onSelect={selectName}/></>;
@@ -1112,7 +1360,8 @@ const touchStartY = useRef(0);
     {id:"social",icon:ImageIcon,label:"social"},
     {id:"chat",icon:MessageCircle,label:"chat"},
     {id:"stream",icon:Tv,label:"stream"},
-    {id:"stats",icon:BarChart2,label:"stats"},
+      {id:"stats",icon:BarChart2,label:"stats"},
+    {id:"presence",icon:Circle,label:"squad"},
     ...(isAdmin?[{id:"verify",icon:ClipboardCheck,label:"verify"},{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
 
@@ -1138,7 +1387,8 @@ const touchStartY = useRef(0);
         {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer}/>}
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
-          {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer}/>}
+ {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer}/>}
+        {tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats}/>}
         {tab==="verify"&&isAdmin&&<VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions}/>}
         {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles}/>}
       </div>
