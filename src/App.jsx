@@ -1609,23 +1609,23 @@ const badges = {
 )}
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
       {commentDay&&<CommentsModal dayKey={commentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setCommentDay(null)}/>}
-      <div style={s.topBar}>
-    <div style={s.topBarTitle}>
-</div>
-<div style={s.topBarRight}>
-<button onClick={async()=>{ 
-  const sub = await registerPush();
-  if (sub) {
-    setPushSub(sub);
-    storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
-    alert('notifications enabled!');
-  } else {
-    alert('notifications blocked or not supported');
-  }
-}} className="bb-pressable" style={{background:"none",border:"none",color:"#B8FF4D",fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px"}}>
-  enable notifs
-</button>
-{isAdmin&&<Shield size={13} color="#FF5C8A" style={{marginRight:2}}/>}
+ <div style={s.topBar}>
+  <div style={s.topBarTitle}>
+    <button onClick={async()=>{ 
+      const sub = await registerPush();
+      if (sub) {
+        setPushSub(sub);
+        storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
+        alert('notifications enabled!');
+      } else {
+        alert('notifications blocked or not supported');
+      }
+    }} className="bb-pressable" style={{background:"none",border:"none",color:"#B8FF4D",fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px"}}>
+      enable notifs
+    </button>
+  </div>
+  <div style={s.topBarRight}>
+    {isAdmin&&<Shield size={13} color="#FF5C8A" style={{marginRight:2}}/>}
           <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
           <span style={s.youName}>{playerObj.name}</span>
           <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button>
