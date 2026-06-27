@@ -143,6 +143,8 @@ function GlobalStyles() {
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
+      * { scrollbar-width:none; -ms-overflow-style:none; }
+
       .bb-pressable { transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .2s, border-color .2s, background .2s; outline:none; -webkit-tap-highlight-color:transparent; }
       .bb-pressable:active { transform:scale(0.97); }
       @media (hover:hover) {
@@ -1051,6 +1053,7 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
           <ChevronLeft size={18}/>
         </button>
         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>team comparison · 3v3</div>
+<button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",marginLeft:"auto"}}><X size={20}/></button>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {PLAYERS.map(p => {
@@ -4977,7 +4980,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:8,WebkitOverflowScrolling:"touch",minHeight:0},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:8,WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
 tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,0px)"},
 tabBtn:{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"8px 1px 6px",cursor:"pointer",minWidth:0,overflow:"hidden",outline:"none",WebkitTapHighlightColor:"transparent"},
