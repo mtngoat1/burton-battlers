@@ -454,6 +454,57 @@ function getWeekStart() {
   return d;
 }
 
+            function getSessionGroups(stats) {
+  const groups = {};
+  stats.forEach(g => {
+    if (!g.sessionCode) return;
+    if (g.mode !== "2v2" && g.mode !== "3v3") return;
+    const key = `${g.sessionCode}__${g.mode}`;
+    if (!groups[key]) groups[key] = { code: g.sessionCode, mode: g.mode, games: [], ts: g.ts };
+    groups[key].games.push(g);
+    if (new Date(g.ts) > new Date(groups[key].ts)) groups[key].ts = g.ts;
+  });
+  return Object.values(groups).sort((a,b) => new Date(b.ts) - new Date(a.ts));
+}
+            
+  function SessionGroupCard({ session }) {
+  const rep = session.games[0];
+  const won = rep.ourScore > rep.theirScore;
+  return (
+    <div style={{background:"#11131F",borderRadius:14,padding:"14px 16px",marginBottom:10,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>SESSION · {session.code.toUpperCase()}</div>
+          <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session.mode} · {fmtRelTime(session.ts)} · {session.games.length} player{session.games.length!==1?"s":""} logged</div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>{rep.ourScore}–{rep.theirScore}</div>
+          <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A"}}>{won?"WIN":"LOSS"}</div>
+        </div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:6}}>
+        {session.games.map(g => {
+          const p = PLAYERS.find(pl => pl.id === g.playerId);
+          return (
+            <div key={g.id} style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:7,height:7,borderRadius:99,background:p?.color,flexShrink:0}}/>
+              <span style={{fontSize:12,fontWeight:700,color:p?.color,minWidth:64}}>{p?.name}</span>
+              <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
+                {["goals","assists","saves","shots","demos"].map(f => (
+                  <div key={f} style={{textAlign:"center"}}>
+                    <div style={{fontSize:8,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
+                    <div style={{fontSize:12,fontWeight:700,color:"#E8ECF4"}}>{g[f]||0}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}          
+            
 function getChallengeProgress(challenge, stats, playerId) {
   const weekStart = getWeekStart();
   const games = stats.filter(g =>
@@ -2686,16 +2737,27 @@ return (
         <div style={s.sectionLabel}>stats tracker</div>
         <button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}><Plus size={14}/> log game</button>
       </div>
-      <div style={{display:"flex",gap:8,marginBottom:18}}>
-        {[{id:"tracker",label:"📊 stats"},{id:"tourney",label:"📸 tournament"}].map(sub=>(
+<div style={{display:"flex",gap:8,marginBottom:18}}>
+        {[{id:"tracker",label:"📊 stats"},{id:"sessions",label:"🎮 sessions"},{id:"tourney",label:"📸 tournament"}].map(sub=>(
           <button key={sub.id} onClick={()=>setStatsSubTab(sub.id)} className="bb-pressable"
             style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:statsSubTab===sub.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:statsSubTab===sub.id?"#06070D":"#8B92A8"}}>
             {sub.label}
           </button>
         ))}
       </div>
-      {statsSubTab==="tourney" ? (
+{statsSubTab==="tourney" ? (
         <TournamentOCRTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>
+      ) : statsSubTab==="sessions" ? (
+        <div>
+          <div style={{ fontSize:11, color:"#4A5066", marginBottom:16, lineHeight:1.5 }}>
+            games are grouped by session code — everyone who logged a 2v2 or 3v3 with the same code shows up together here.
+          </div>
+          {(() => {
+            const groups = getSessionGroups(stats);
+            if (groups.length === 0) return <div style={s.emptyQueue}>no session-coded games yet — use the generate button when logging a 2v2 or 3v3 to link your stats together.</div>;
+            return groups.map(grp => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp}/>);
+          })()}
+        </div>
       ) : (
       <>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
@@ -5977,15 +6039,11 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
 
   // Compute chemistry from this week's shared games
 const getSharedGames = (pid1, pid2, allTime = false) => {
-    const p1Games = stats.filter(g => g.playerId === pid1 && g.mode === "3v3" && (allTime || new Date(g.ts) >= weekStart));
-    const p2Games = stats.filter(g => g.playerId === pid2 && g.mode === "3v3" && (allTime || new Date(g.ts) >= weekStart));
+    const p1Games = stats.filter(g => g.playerId === pid1 && (g.mode === "3v3" || g.mode === "2v2") && g.sessionCode && (allTime || new Date(g.ts) >= weekStart));
+    const p2Games = stats.filter(g => g.playerId === pid2 && (g.mode === "3v3" || g.mode === "2v2") && g.sessionCode && (allTime || new Date(g.ts) >= weekStart));
     const linked = [];
     p1Games.forEach(g1 => {
-      const match = p2Games.find(g2 => {
-        if (g1.sessionCode && g2.sessionCode && g1.sessionCode === g2.sessionCode) return true;
-        const timeDiff = Math.abs(new Date(g1.ts) - new Date(g2.ts));
-        return timeDiff < 2 * 60 * 60 * 1000 && g1.ourScore === g2.ourScore && g1.theirScore === g2.theirScore;
-      });
+      const match = p2Games.find(g2 => g2.sessionCode === g1.sessionCode && g2.mode === g1.mode);
       if (match) linked.push({ p1game: g1, p2game: match });
     });
     return linked;
