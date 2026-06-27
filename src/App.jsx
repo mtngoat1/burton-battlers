@@ -391,7 +391,7 @@ const ALL_CHALLENGES = [
   // 2v2
   { mode:"2v2", type:"cumulative", field:"assists", target:10, desc:(t)=>`get ${t} total assists across your 2v2 games this week`, color:"#FF61C1" },
   { mode:"2v2", type:"cumulative", field:"saves",   target:15, desc:(t)=>`rack up ${t} saves in 2v2 this week`, color:"#FF61C1" },
-  { mode:"2v2", type:"avg",        field:"goals",   target:2.0, desc:(t)=>`average ${t}+ goals per game in 2v2 this week`, color:"#FF61C1" },
+  { mode:"2v2", type:"avg",        field:"goals",   target:2.0, desc:(t)=>`average ${t}+ assists per game in 2v2 this week`, color:"#FF61C1" },
   { mode:"2v2", type:"winrate",    field:null,      target:0.6, desc:()=>`win more than 60% of your 2v2 games this week`, color:"#FF61C1" },
   { mode:"2v2", type:"cumulative", field:"demos",   target:8,  desc:(t)=>`land ${t} demos in 2v2 this week`, color:"#FF61C1" },
   { mode:"2v2", type:"avg",        field:"shots",   target:3.0, desc:(t)=>`average ${t}+ shots per game in 2v2 this week`, color:"#FF61C1" },
@@ -400,8 +400,8 @@ const ALL_CHALLENGES = [
   { mode:"1v1", type:"avg",        field:"goals",   target:3.0, desc:(t)=>`average ${t}+ goals per game in 1v1 this week`, color:"#4D9EFF" },
   { mode:"1v1", type:"cumulative", field:"shots",   target:20, desc:(t)=>`take ${t} total shots in 1v1 this week`, color:"#4D9EFF" },
   { mode:"1v1", type:"avg",        field:"saves",   target:2.0, desc:(t)=>`average ${t}+ saves per game in 1v1`, color:"#4D9EFF" },
-  { mode:"1v1", type:"streak",     field:null,      target:3,  desc:()=>`score first in 3 consecutive 1v1 games`, color:"#4D9EFF" },
-  { mode:"1v1", type:"cumulative", field:"assists", target:5,  desc:(t)=>`get ${t} total assists in 1v1 this week`, color:"#4D9EFF" },
+  { mode:"1v1", type:"streak",     field:null,      target:3,  desc:()=>`score 2 goals in 3 consecutive 1v1 games`, color:"#4D9EFF" },
+  { mode:"1v1", type:"cumulative", field:"assists", target:5,  desc:(t)=>`get ${t} total saves in 1v1 this week`, color:"#4D9EFF" },
 ];
 function getWeekStart() {
   const d = new Date();
@@ -455,6 +455,7 @@ function ChallengeCompactRow({ challenge, mode, idxInMode, stats, currentPlayer,
   const claimKey = `challenge_${currentPlayer}_${Math.floor(Date.now()/WEEK_MS)}_${mode}_${idxInMode}`;
   const claimed = !!completions[claimKey];
   const grantsBonusSpin = idxInMode === 0 || idxInMode === 3;
+const grantsPassTier = idxInMode === 0 || idxInMode === 2; // 1st and 3rd challenge per mode grant a pass tier
   const color = challenge.color;
   const progressPct = Math.min(1, progress.current / adjustedTarget);
   const descText = mode === "3v3" && rivalAvg
@@ -477,7 +478,7 @@ function ChallengeCompactRow({ challenge, mode, idxInMode, stats, currentPlayer,
         {claimed ? (
           <span style={{fontSize:10,color:"#7CFFB2",fontWeight:700,flexShrink:0}}>✓ claimed</span>
         ) : progress.done ? (
-          <button onClick={()=>onClaim(claimKey, grantsBonusSpin)} className="bb-pressable bb-glow-lime"
+          <button onClick={()=>onClaim(claimKey, grantsBonusSpin, idxInMode===0||idxInMode===2)} className="bb-pressable bb-glow-lime"
             style={{flexShrink:0,background:color,border:"none",borderRadius:7,padding:"4px 9px",fontSize:9.5,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
             claim
           </button>
@@ -543,15 +544,17 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
   const seed0 = weekNum * 31 + playerIdx * 7;
   const rival = rivals[seed0 % rivals.length];
 
-  const XP_PER_CHALLENGE = 17;
+const XP_PER_CHALLENGE = 17;
+  const PASS_TIERS_PER_CHALLENGE = 1; // tiers awarded for first two challenges
 
-  const claimXP = async (claimKey, grantsBonusSpin) => {
+  const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
     if (completions[claimKey]) return;
     const upd = {...completions, [claimKey]: true};
     setCompletions(upd);
     await storeSet("completions", upd);
     const pxp = await storeGet("pass_xp") || {};
-    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+XP_PER_CHALLENGE};
+    const tierBonus = grantsPassTier ? PASS_TIERS_PER_CHALLENGE * 100 : 0; // 100 XP = 1 tier
+    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+XP_PER_CHALLENGE+tierBonus};
     setPassXP(updXP);
     await storeSet("pass_xp", updXP);
     if (grantsBonusSpin) {
@@ -621,9 +624,9 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
               </div>
             </div>
             {progress.done && !claimed && (
-              <button onClick={()=>claimXP(claimKey, grantsBonusSpin)} className="bb-pressable bb-glow-lime"
+              <button onClick={()=>claimXP(claimKey, grantsBonusSpin, grantsPassTier)} className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
-                🏆 claim +{XP_PER_CHALLENGE} pass xp{grantsBonusSpin?" + spin":""}
+                🏆 claim +{XP_PER_CHALLENGE} xp{grantsBonusSpin?" + 🎡":"+"}{grantsPassTier?"⬆️ tier":""}
               </button>
             )}
             {claimed && <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +{XP_PER_CHALLENGE} xp claimed this week</div>}
@@ -1000,7 +1003,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
             function ExpandedStatModal({ stat, record, schedule, onClose }) {
   return (
     <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+  <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 56px)",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><ChevronLeft size={18}/></button>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>{stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"}</div>
@@ -1093,13 +1096,46 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
   );
 }
 function TeamComparisonModal({ stats, currentPlayer, onClose }) {
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+
+  const handleTouchStart = (e) => {
+    swipeStartX.current = e.touches[0].clientX;
+    swipeStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchMove = (e) => {
+    const dx = e.touches[0].clientX - swipeStartX.current;
+    const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
+    if (dx > 0 && dx > dy) setSwipeOffset(dx);
+  };
+  const handleTouchEnd = () => {
+    if (swipeOffset > 80) {
+      onClose();
+      setSwipeOffset(0);
+    } else {
+      setSwipeOffset(0);
+    }
+  };
+
   const modeGames = stats.filter(g => g.mode === "3v3");
   const avg = (arr, field) => arr.length ? (arr.reduce((s,g) => s+(g[field]||0),0)/arr.length).toFixed(1) : "—";
   const winRate = (arr) => arr.length ? Math.round((arr.filter(g=>g.ourScore>g.theirScore).length/arr.length)*100)+"%" : "—";
   const ALL_FIELDS = ["goals","assists","saves","shots","score","demos"];
 
   return (
-    <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
+   <div
+  onTouchStart={handleTouchStart}
+  onTouchMove={handleTouchMove}
+  onTouchEnd={handleTouchEnd}
+  style={{
+    position:"fixed", inset:0, zIndex:500, background:"#040818",
+    display:"flex", flexDirection:"column",
+    animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",
+    transform:`translateX(${swipeOffset}px)`,
+    opacity: Math.max(0, 1 - swipeOffset / 280),
+    transition: swipeOffset === 0 ? "transform .25s ease, opacity .25s ease" : "none",
+  }}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
           <ChevronLeft size={18}/>
@@ -1246,7 +1282,7 @@ return (
   {heatOpen && <HeatStreakCard stats={stats} currentPlayer={currentPlayer} />}
 </div>
       <TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
-      <button onClick={()=>setShowTeamComparison(true)} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
+     <button onClick={()=>{ setShowTeamComparison(true); }} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
     <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1}}>TEAM COMPARISON · 3V3</div>
     <ChevronRight size={14} color="#4A5066"/>
@@ -2193,6 +2229,7 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   const [shots, setShots] = useState("");
   const [score, setScore] = useState("");
   const [demos, setDemos] = useState("");
+  const [sessionCode, setSessionCode] = useState("");
 
   const submit = () => {
     if (ourScore === "" || theirScore === "") return;
@@ -2209,6 +2246,7 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
       score: Number(score) || 0,
       demos: Number(demos) || 0,
       ts: new Date().toISOString(),
+      sessionCode: sessionCode.trim().toLowerCase() || null,
     };
     onSave(entry);
     onClose();
@@ -2235,11 +2273,70 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
             </div>
           ))}
         </div>
+        {(mode === "3v3" || mode === "2v2") && (
+          <div>
+            <div style={s.modalLabel}>session code — optional</div>
+            <input
+              value={sessionCode}
+              onChange={e => setSessionCode(e.target.value)}
+              placeholder="e.g. tuesday or gg1 — share with teammates"
+              style={s.modalInput}
+            />
+            <div style={{fontSize:10,color:"#4A5066",marginTop:6,lineHeight:1.5}}>
+              all three of you enter the same code when logging games from the same session — this links your stats for chemistry and team comparisons.
+            </div>
+          </div>
+        )}
         <button onClick={submit} disabled={ourScore===""||theirScore===""} className="bb-pressable bb-glow-lime"
           style={{...s.primaryBtn,opacity:ourScore===""||theirScore===""?0.4:1,marginTop:16}}>
           save game
         </button>
       </div>
+    </div>
+  );
+}
+
+function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS }) {
+  const [open, setOpen] = useState(dk === jumpDate || false);
+  const date = new Date(dk + "T00:00:00");
+  const wins = games.filter(g => g.ourScore > g.theirScore).length;
+  const isJump = dk === jumpDate;
+  useEffect(() => { if (isJump) setOpen(true); }, [isJump]);
+  return (
+    <div id={`gamelog-${dk}`} style={{marginBottom:10}}>
+      <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
+        style={{width:"100%",background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${isJump?"rgba(167,139,250,0.4)":"rgba(255,255,255,0.06)"}`,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:open?6:0}}>
+        <div style={{textAlign:"left"}}>
+          <div style={{fontSize:12,fontWeight:700,color:playerColor}}>{fmtDay(date)}</div>
+          <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{games.length} game{games.length!==1?"s":""} · {wins}W {games.length-wins}L</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:11,fontWeight:700,color:wins>games.length-wins?"#7CFFB2":"#FF5C8A"}}>{wins}/{games.length}</span>
+          <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
+        </div>
+      </button>
+      {open && games.map(g => {
+        const won = g.ourScore > g.theirScore;
+        return (
+          <div key={g.id} style={{background:"rgba(255,255,255,0.02)",borderRadius:11,padding:"11px 13px",marginBottom:6,border:`1px solid ${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:700}}>{g.ourScore} – {g.theirScore}</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",background:won?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.1)",padding:"3px 8px",borderRadius:99}}>{won?"WIN":"LOSS"}</div>
+                <div style={{fontSize:10,color:"#4A5066"}}>{fmtRelTime(g.ts)}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              {STAT_FIELDS.map(f=>(
+                <div key={f} style={{textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:playerColor}}>{g[f]}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2264,7 +2361,7 @@ const saveGame=async(entry)=>{
   const pts=await storeGet("points")||{};
   let cur=pts[currentPlayer]||0;
   const pointsMult = isEventActive("double_points") ? 2 : 1;
-  cur+=10*pointsMult;
+  cur+=2*pointsMult;
   const allBets=await storeGet("bets")||[];
   const resolvedBets=allBets.map(bet=>{
     if(bet.status!=="open") return bet;
@@ -2368,34 +2465,33 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
           </div>
         </>
       )}
-      <div style={{...s.sectionLabel,marginBottom:10}}>your game log</div>
-     {[...myGames].reverse().slice(0, showAllGames ? undefined : 5).map(g=>{
-  const gdk = dateKey(new Date(g.ts));
-        const won=g.ourScore>g.theirScore;
-        return (
-        <div key={g.id} id={`gamelog-${gdk}`} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700}}>{g.ourScore} – {g.theirScore}</div>
-              <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",background:won?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.1)",padding:"3px 8px",borderRadius:99}}>{won?"WIN":"LOSS"}</div>
-                <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(g.ts)}</div>
-              </div>
-            </div>
-            <div style={{display:"flex",gap:12}}>
-              {STAT_FIELDS.map(f=>(
-                <div key={f} style={{textAlign:"center"}}>
-                  <div style={{fontSize:9.5,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f}</div>
-                  <div style={{fontSize:14,fontWeight:700,color:playerColor}}>{g[f]}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })}
-      {myGames.length > 5 && (
+     <div style={{...s.sectionLabel,marginBottom:10}}>your game log</div>
+      {(()=>{
+        const sorted = [...myGames].reverse();
+        const byDay = [];
+        const seen = {};
+        sorted.forEach(g => {
+          const gdk = dateKey(new Date(g.ts));
+          if (!seen[gdk]) { seen[gdk] = true; byDay.push({ dk: gdk, games: [] }); }
+          byDay[byDay.length-1].games.push(g);
+        });
+        // fix: group properly
+        const dayMap = {};
+        sorted.forEach(g => {
+          const gdk = dateKey(new Date(g.ts));
+          if (!dayMap[gdk]) dayMap[gdk] = [];
+          dayMap[gdk].push(g);
+        });
+        const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
+        const visibleDays = showAllGames ? days : days.slice(0,3);
+        return visibleDays.map(([dk, dayGames]) => (
+          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={STAT_FIELDS}/>
+        ));
+      })()}
+      {Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
         <button onClick={()=>setShowAllGames(v=>!v)} className="bb-pressable"
           style={{width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer",marginTop:4}}>
-          {showAllGames ? `▲ show less` : `▼ show all ${myGames.length} games`}
+          {showAllGames ? `▲ show less` : `▼ show all days`}
         </button>
       )}
     </div>
@@ -2746,7 +2842,7 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
     </div>
   );
 }
-function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers }) {
+function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
@@ -2812,8 +2908,12 @@ const toggleEquip = async (itemId) => {
   });
 
   // Notifications feed
-  const notifs = [
-    ...(pings||[]).filter(p => p.to === currentPlayer).map(p => ({ id:p.id, ts:p.ts, text:`${PLAYERS.find(pl=>pl.id===p.from)?.name} wants to run 2s`, icon:"🎮" })),
+ const notifs = [
+    ...(pings||[]).filter(p => p.to === currentPlayer).map(p => ({ 
+      id:p.id, ts:p.ts, 
+      text: p.type==="flower" ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} sent you ${p.emoji} (+${p.xp} xp)` : `${PLAYERS.find(pl=>pl.id===p.from)?.name} wants to run 2s`, 
+      icon: p.type==="flower" ? "🌸" : "🎮" 
+    })),
     ...(Object.entries(completions||{})).filter(([k,v]) => v.status==="approved" && k.endsWith(`__${currentPlayer}`)).map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt, text:`training approved — +15 pts`, icon:"✅" })),
   ].sort((a,b) => new Date(b.ts) - new Date(a.ts)).slice(0, 20);
 
@@ -2823,11 +2923,11 @@ const toggleEquip = async (itemId) => {
       <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
           <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR POINTS</div>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
+         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}</div>
         </div>
-        <div style={{display:"flex",gap:8}}>
-          <button onClick={()=>setShowNotifs(v=>!v)} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer",position:"relative"}}>
-            <Bell size={14}/> {notifs.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#FF61C1",borderRadius:99,width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}}>{notifs.length}</span>}
+<div style={{display:"flex",gap:8,overflowX:"scroll",WebkitOverflowScrolling:"touch",paddingBottom:4,paddingTop:8,paddingRight:8,scrollbarWidth:"none",msOverflowStyle:"none"}}>
+          <button onClick={()=>setShowNotifs(v=>!v)} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer",position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1}}>
+            <Bell size={14}/><span style={{fontSize:12}}>notifs</span>{notifs.length>0&&<span style={{position:"absolute",top:-4,right:-4,background:"#FF61C1",borderRadius:99,width:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff"}}>{notifs.length}</span>}
           </button>
           <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
 <button onClick={()=>{ if(passPremium?.[currentPlayer]) setTab("garage"); else setShowPass(v=>!v); }} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
@@ -2899,26 +2999,31 @@ const toggleEquip = async (itemId) => {
         </div>
         {selectedFlower && (() => {
           const flower = FLOWER_TYPES.find(f => f.id === selectedFlower);
-          const myXP = passXP?.[currentPlayer] || 0;
-          const canAfford = myXP >= flower.xp;
+        const myXP = passXP?.[currentPlayer] || 0;
+const myPtsCheck = points?.[currentPlayer] || 0;
+const canAfford = myPtsCheck >= flower.xp;
           return (
             <button onClick={async () => {
               if (!canAfford) return;
-              const updXP = {
-                ...passXP,
-                [currentPlayer]: myXP - flower.xp,
-                [flowerTarget]: (passXP?.[flowerTarget] || 0) + flower.xp,
-              };
-              setPassXP(updXP);
-              await storeSet("pass_xp", updXP);
+          const myPts = points?.[currentPlayer] || 0;
+const updPts = {
+  ...points,
+  [currentPlayer]: myPts - flower.xp,
+  [flowerTarget]: (points?.[flowerTarget] || 0) + flower.xp,
+};
+setPoints(updPts);
+await storeSet("points", updPts);
               const updFlowers = [...(flowers || []), { id: Date.now().toString(), from: currentPlayer, to: flowerTarget, flower: flower.id, emoji: flower.emoji, xp: flower.xp, ts: new Date().toISOString() }];
               setFlowers(updFlowers);
               await storeSet("flowers", updFlowers);
-              addToast?.(`${flower.emoji} sent ${flower.label} to ${PLAYERS.find(p => p.id === flowerTarget)?.name} — ${flower.xp} xp`, "🌸");
+const pingUpd2 = [...(pings||[]), {id:(Date.now()+2).toString(), from:currentPlayer, to:flowerTarget, ts:new Date().toISOString(), type:"flower", emoji:flower.emoji, xp:flower.xp}];
+setPings(pingUpd2);
+await storeSet("pings", pingUpd2);
+              addToast?.(`${flower.emoji} sent ${flower.label} to ${PLAYERS.find(p => p.id === flowerTarget)?.name} — ${flower.xp} pts`, "🌸");
               setSelectedFlower(null); setFlowerTarget(null);
             }} disabled={!canAfford} className="bb-pressable bb-glow-lime"
               style={{ width: "100%", background: canAfford ? "#FF61C1" : "rgba(255,255,255,0.04)", border: "none", borderRadius: 10, padding: "12px 0", fontSize: 12.5, fontWeight: 700, color: canAfford ? "#06070D" : "#4A5066", cursor: canAfford ? "pointer" : "default" }}>
-              {canAfford ? `send ${flower.emoji} — costs you ${flower.xp} xp` : `not enough xp (need ${flower.xp})`}
+              {canAfford ? `send ${flower.emoji} — costs you ${flower.xp} pts` : `not enough pts (need ${flower.xp})`}
             </button>
           );
         })()}
@@ -2932,7 +3037,7 @@ const toggleEquip = async (itemId) => {
             <span style={{ fontSize: 18 }}>{f.emoji}</span>
             <span style={{ color: "#E8ECF4", fontWeight: 700 }}>{PLAYERS.find(p => p.id === f.from)?.name}</span>
             <span>sent you a {FLOWER_TYPES.find(fl => fl.id === f.flower)?.label}</span>
-            <span style={{ marginLeft: "auto", color: "#FF61C1", fontWeight: 700 }}>+{f.xp} xp</span>
+            <span style={{ marginLeft: "auto", color: "#FF61C1", fontWeight: 700 }}>+{f.xp} pts</span>
           </div>
         ))}
       </div>
@@ -3089,6 +3194,7 @@ const toggleEquip = async (itemId) => {
                 { id:"bg_aurora",   label:"Aurora",        desc:"shifting northern lights",     cost:100,  value:"aurora"   },
                 { id:"bg_midnight", label:"Midnight Oil",  desc:"deep navy shimmer",            cost:100,  value:"midnight" },
                 { id:"bg_custom",   label:"Ultimate BG",   desc:"upload your own image",        cost:5000, value:"custom"   },
+
               ].map(item => {
                 const isOwned = owned.includes(item.id);
                 const isEquipped = equipped[item.id];
@@ -3166,24 +3272,24 @@ const toggleEquip = async (itemId) => {
         })}
       </div>
 
-      {/* Incoming pings */}
-      {myPings.length > 0 && (
-        <>
-          <div style={{...s.sectionLabel,marginBottom:10}}>squad pings</div>
-          {myPings.map(p=>{
-            const from = PLAYERS.find(pl=>pl.id===p.from);
-            return (
-              <div key={p.id} style={{background:"rgba(184,255,77,0.06)",border:"1px solid rgba(184,255,77,0.2)",borderRadius:13,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:18}}>🎮</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:13,fontWeight:700,color:"#B8FF4D"}}>{from?.name} wants to run 2s</div>
-                  <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(p.ts)}</div>
-                </div>
-              </div>
-            );
-          })}
-        </>
-      )}
+ {/* Incoming pings */}
+{myPings.filter(p => p.type !== "flower").length > 0 && (
+  <>
+    <div style={{...s.sectionLabel,marginBottom:10}}>squad pings</div>
+    {myPings.filter(p => p.type !== "flower").map(p=>{
+      const from = PLAYERS.find(pl=>pl.id===p.from);
+      return (
+        <div key={p.id} style={{background:"rgba(184,255,77,0.06)",border:"1px solid rgba(184,255,77,0.2)",borderRadius:13,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:18}}>🎮</span>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:700,color:"#B8FF4D"}}>{from?.name} wants to run 2s</div>
+            <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(p.ts)}</div>
+          </div>
+        </div>
+      );
+    })}
+  </>
+)}
 
       {/* Team points leaderboard */}
       <div style={{...s.sectionLabel,marginBottom:10}}>points leaderboard</div>
@@ -3289,7 +3395,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <div>
             <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 26, fontWeight: 600, color: playerColor }}>{myXP}<span style={{ fontSize: 12, color: "#4A5066", marginLeft: 4 }}>xp</span></div>
-            <div style={{ fontSize: 11, color: "#4A5066", marginTop: 2 }}>+20 per training approval · +15 per game logged</div>
+            <div style={{ fontSize: 11, color: "#4A5066", marginTop: 2 }}>+20 per training approval · +2 per game logged</div>
           </div>
           {!isPremium && (
             <div style={{ fontSize: 11, color: "#4A5066", textAlign: "right" }}>
@@ -3397,25 +3503,15 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
         const equipped = points?.[currentPlayer + "_equipped"] || {};
         const passOwned = owned.filter(id => id.startsWith("pass_"));
         if (passOwned.length === 0) return null;
-
         const toggleEquip = async (itemId, type) => {
           const newEquipped = { ...equipped };
-          // unequip others of same type
-          owned.filter(id => {
-            const shopItem = SHOP_ITEMS.find(i => i.id === id);
-            return shopItem?.type === type;
-          }).forEach(id => delete newEquipped[id]);
-          // also unequip other pass items of same type
-          passOwned.forEach(id => {
-            const r = getPassRewardForOwnedId(id);
-            if (r?.type === type) delete newEquipped[id];
-          });
+          owned.filter(id => { const shopItem = SHOP_ITEMS.find(i => i.id === id); return shopItem?.type === type; }).forEach(id => delete newEquipped[id]);
+          passOwned.forEach(id => { const r = getPassRewardForOwnedId(id); if (r?.type === type) delete newEquipped[id]; });
           if (!equipped[itemId]) newEquipped[itemId] = true;
           const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
           setPoints(upd);
           await storeSet("points", upd);
         };
-
         return (
           <div style={{ marginTop: 24 }}>
             <div style={{ ...s.sectionLabel, marginBottom: 10 }}>owned from pass</div>
@@ -3445,8 +3541,56 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
           </div>
         );
       })()}
+
+      {/* Owned items from shop */}
+      {(() => {
+        const owned = points?.[currentPlayer + "_owned"] || [];
+        const equipped = points?.[currentPlayer + "_equipped"] || {};
+        const shopOwned = owned.filter(id => SHOP_ITEMS.find(i => i.id === id));
+        if (shopOwned.length === 0) return null;
+        const toggleEquipShop = async (itemId, type) => {
+          const newEquipped = { ...equipped };
+          SHOP_ITEMS.filter(i => i.type === type).forEach(i => { delete newEquipped[i.id]; });
+          owned.filter(id => id.startsWith("pass_")).forEach(id => {
+            const r = getPassRewardForOwnedId(id);
+            if (r?.type === type) delete newEquipped[id];
+          });
+          if (!equipped[itemId]) newEquipped[itemId] = true;
+          const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
+          setPoints(upd);
+          await storeSet("points", upd);
+        };
+        return (
+          <div style={{ marginTop: 24 }}>
+            <div style={{ ...s.sectionLabel, marginBottom: 10 }}>owned from shop</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {shopOwned.map(ownedId => {
+                const item = SHOP_ITEMS.find(i => i.id === ownedId);
+                if (!item) return null;
+                const isEquipped = !!equipped[ownedId];
+                const emoji = item.type === "color" ? item.emoji : item.type === "icon" ? item.value : item.type === "title" ? "📝" : "🎁";
+                return (
+                  <div key={ownedId} style={{ background: isEquipped ? "rgba(184,255,77,0.06)" : "#11131F", borderRadius: 13, padding: "12px 14px", border: `1px solid ${isEquipped ? "rgba(184,255,77,0.25)" : "rgba(255,255,255,0.06)"}`, display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 20 }}>{emoji}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: isEquipped ? "#B8FF4D" : "#E8ECF4" }}>{item.label || item.value}</div>
+                      <div style={{ fontSize: 10, color: "#4A5066", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 2 }}>{item.type}{item.type === "color" ? ` · ${item.desc}` : ""}</div>
+                    </div>
+                    {(item.type === "color" || item.type === "icon" || item.type === "title") && (
+                      <button onClick={() => toggleEquipShop(ownedId, item.type)} className="bb-pressable"
+                        style={{ background: isEquipped ? "#B8FF4D" : "rgba(255,255,255,0.06)", border: "none", borderRadius: 9, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, color: isEquipped ? "#06070D" : "#8B92A8", cursor: "pointer" }}>
+                        {isEquipped ? "✓ on" : "equip"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Token inventory */}
-{/* Token inventory */}
       {myTokens.length > 0 && (
         <div style={{ marginTop: 24 }}>
           <div style={{ ...s.sectionLabel, marginBottom: 10 }}>your tokens</div>
@@ -3569,7 +3713,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers", "chemistry"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -4031,16 +4175,17 @@ function RLCSTrivia({ currentPlayer, points, setPoints }) {
           
           // ===================== Boost Grab =====================
 const BOOST_PADS = [
-  { color:"#B8FF4D", label:"Small",  mult:1.5,  prob:0.30, emoji:"🟢" },
-  { color:"#4D9EFF", label:"Medium", mult:2.0,  prob:0.25, emoji:"🔵" },
-  { color:"#A78BFA", label:"Big",    mult:3.0,  prob:0.20, emoji:"🟣" },
-  { color:"#FFD166", label:"Full",   mult:4.0,  prob:0.12, emoji:"🟡" },
-  { color:"#FF8C42", label:"Mega",   mult:6.0,  prob:0.07, emoji:"🟠" },
-  { color:"#7CFFB2", label:"Super",  mult:8.0,  prob:0.04, emoji:"🩵" },
-  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.15, emoji:"🔴", isDead:true },
-  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.07, isDead:true, emoji:"🔴" },
+  { color:"#B8FF4D", label:"Small",  mult:1.5,  prob:0.14, emoji:"🟢" },
+  { color:"#4D9EFF", label:"Medium", mult:2.0,  prob:0.11, emoji:"🔵" },
+  { color:"#A78BFA", label:"Big",    mult:3.0,  prob:0.08, emoji:"🟣" },
+  { color:"#FFD166", label:"Full",   mult:4.0,  prob:0.05, emoji:"🟡" },
+  { color:"#FF8C42", label:"Mega",   mult:6.0,  prob:0.02, emoji:"🟠" },
+  { color:"#7CFFB2", label:"Super",  mult:8.0,  prob:0.01, emoji:"🩵" },
+  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.20, isDead:true, emoji:"🔴" },
+  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.18, isDead:true, emoji:"🔴" },
+  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.13, isDead:true, emoji:"🔴" },
+  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.08, isDead:true, emoji:"🔴" },
 ];
-
 function generateGrid() {
   return Array.from({ length: 12 }, (_, i) => {
     const r = Math.random();
@@ -4507,7 +4652,7 @@ const noBettingWeek = isEventActive("no_betting");
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       {/* Header */}
-      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+     <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
           <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
@@ -5076,54 +5221,119 @@ const noBettingWeek = isEventActive("no_betting");
 }
                   
 // ===================== Coin Flip Duel =====================
-function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips }) {
+function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips, flipChallenges, setFlipChallenges, pings, setPings, addToast }) {
   const [selectedOpponent, setSelectedOpponent] = useState(null);
   const [wager, setWager] = useState(10);
   const [flipping, setFlipping] = useState(false);
   const [result, setResult] = useState(null);
   const myPoints = points?.[currentPlayer] || 0;
   const weekStart = getWeekStart();
-const weekFlipKey = `coinflips_used_${currentPlayer}_${dateKey(weekStart)}`;
-const flipsUsedThisWeek = points?.[weekFlipKey] || 0;
-const WEEKLY_FLIP_LIMIT = 3;
-const flipsLeft = Math.max(0, WEEKLY_FLIP_LIMIT - flipsUsedThisWeek);
-
+  const weekFlipKey = `coinflips_used_${currentPlayer}_${dateKey(weekStart)}`;
+  const flipsUsedThisWeek = points?.[weekFlipKey] || 0;
+  const WEEKLY_FLIP_LIMIT = 3;
+  const flipsLeft = Math.max(0, WEEKLY_FLIP_LIMIT - flipsUsedThisWeek);
   const opponents = PLAYERS.filter(p => p.id !== currentPlayer);
 
- const flip = async () => {
-    if (!selectedOpponent || myPoints < wager || flipping || flipsLeft <= 0) return;
+  const incomingChallenges = (flipChallenges||[]).filter(c =>
+    c.to === currentPlayer && c.status === "pending" &&
+    Date.now() - new Date(c.ts).getTime() < 3600000
+  );
+  const outgoingChallenge = (flipChallenges||[]).find(c =>
+    c.from === currentPlayer && c.status === "pending" &&
+    Date.now() - new Date(c.ts).getTime() < 3600000
+  );
+
+  const sendChallenge = async () => {
+    if (!selectedOpponent || myPoints < wager || flipsLeft <= 0) return;
+    const challenge = {
+      id: Date.now().toString(),
+      from: currentPlayer,
+      to: selectedOpponent,
+      wager,
+      status: "pending",
+      ts: new Date().toISOString(),
+    };
+    const filtered = (flipChallenges||[]).filter(c => !(c.from === currentPlayer && c.status === "pending"));
+    const upd = [...filtered, challenge];
+    setFlipChallenges(upd);
+    await storeSet("flip_challenges", upd);
+    const pingEntry = {
+      id: (Date.now()+1).toString(),
+      from: currentPlayer,
+      to: selectedOpponent,
+      ts: new Date().toISOString(),
+      type: "coinflip",
+      wager,
+    };
+    const pingUpd = [...(pings||[]), pingEntry];
+    setPings(pingUpd);
+    await storeSet("pings", pingUpd);
+    addToast?.(`challenge sent to ${PLAYERS.find(p => p.id === selectedOpponent)?.name}!`, "🪙");
+  };
+
+  const acceptChallenge = async (challenge) => {
+    const opponentPts = points?.[challenge.from] || 0;
+    if (myPoints < challenge.wager || opponentPts < challenge.wager) return;
     setFlipping(true);
     setResult(null);
     await new Promise(r => setTimeout(r, 1800));
-    const won = Math.random() < 0.5;
+    const iWin = Math.random() < 0.5;
+    const winner = iWin ? currentPlayer : challenge.from;
+    const loser = iWin ? challenge.from : currentPlayer;
     const outcome = {
       id: Date.now().toString(),
-      challenger: currentPlayer,
-      opponent: selectedOpponent,
-      wager,
-      won,
+      challenger: challenge.from,
+      opponent: currentPlayer,
+      wager: challenge.wager,
+      winner,
       ts: new Date().toISOString(),
     };
-    const newPts = won ? myPoints + wager : myPoints - wager;
-    const upd = { ...points, [currentPlayer]: Math.max(0, newPts) };
-    setPoints(upd);
-    await storeSet("points", upd);
-    const updFlips = [...(coinFlips || []), outcome];
+    const newPts = {
+      ...points,
+      [winner]: (points?.[winner] || 0) + challenge.wager,
+      [loser]: Math.max(0, (points?.[loser] || 0) - challenge.wager),
+      [weekFlipKey]: flipsUsedThisWeek + 1,
+    };
+    setPoints(newPts);
+    await storeSet("points", newPts);
+    const updFlips = [...(coinFlips||[]), outcome];
     setCoinFlips(updFlips);
     await storeSet("coin_flips", updFlips);
-    const updPts2 = { ...upd, [weekFlipKey]: flipsUsedThisWeek + 1 };
-setPoints(updPts2);
-await storeSet("points", updPts2);                  
-    setResult(outcome);
+    const updChallenges = (flipChallenges||[]).map(c =>
+      c.id === challenge.id ? { ...c, status: "settled", winner } : c
+    );
+    setFlipChallenges(updChallenges);
+    await storeSet("flip_challenges", updChallenges);
+    setResult({ ...outcome, won: winner === currentPlayer });
     setFlipping(false);
   };
 
-  const myHistory = (coinFlips || []).filter(f => f.challenger === currentPlayer).slice(-10).reverse();
+  const declineChallenge = async (challenge) => {
+    const upd = (flipChallenges||[]).map(c =>
+      c.id === challenge.id ? { ...c, status: "declined" } : c
+    );
+    setFlipChallenges(upd);
+    await storeSet("flip_challenges", upd);
+  };
+
+  const cancelOutgoing = async () => {
+    if (!outgoingChallenge) return;
+    const upd = (flipChallenges||[]).map(c =>
+      c.id === outgoingChallenge.id ? { ...c, status: "cancelled" } : c
+    );
+    setFlipChallenges(upd);
+    await storeSet("flip_challenges", upd);
+  };
+
+  const myHistory = (coinFlips||[])
+    .filter(f => f.challenger === currentPlayer || f.opponent === currentPlayer)
+    .slice(-10)
+    .reverse();
 
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>
-        challenge a teammate to a coin flip. winner takes the wager. loser cries.
+        challenge a teammate. they get a notification and must accept. winner takes the pts.
       </div>
 
       {/* Balance */}
@@ -5132,71 +5342,160 @@ await storeSet("points", updPts2);
           <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#FFD166"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
         </div>
-        <div style={{fontSize:36}}>🪙</div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:36}}>🪙</div>
+          <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>{flipsLeft} flips left this week</div>
+        </div>
       </div>
 
-      {/* Pick opponent */}
-      <div style={{...s.sectionLabel,marginBottom:10}}>challenge</div>
-      <div style={{display:"flex",gap:8,marginBottom:16}}>
-        {opponents.map(p => (
-          <button key={p.id} onClick={() => setSelectedOpponent(p.id)} className="bb-pressable"
-            style={{flex:1,background:selectedOpponent===p.id?p.color:"rgba(255,255,255,0.05)",border:`1px solid ${selectedOpponent===p.id?p.color:"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"12px 0",fontSize:12,fontWeight:700,color:selectedOpponent===p.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
-            {p.name}
-          </button>
-        ))}
-      </div>
+      {/* Incoming challenges */}
+      {incomingChallenges.length > 0 && (
+        <div style={{marginBottom:16}}>
+          <div style={{...s.sectionLabel,marginBottom:8}}>⚡ incoming challenges</div>
+          {incomingChallenges.map(c => {
+            const challenger = PLAYERS.find(p => p.id === c.from);
+            const canAfford = myPoints >= c.wager && (points?.[c.from] || 0) >= c.wager;
+            return (
+              <div key={c.id} style={{background:"rgba(255,209,102,0.08)",border:"1px solid rgba(255,209,102,0.35)",borderRadius:16,padding:"16px",marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                  <span style={{fontSize:26}}>🪙</span>
+                  <div>
+                    <div style={{fontSize:14,fontWeight:700,color:"#FFD166"}}>{challenger?.name} challenges you!</div>
+                    <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>wager: <span style={{color:"#FFD166",fontWeight:700}}>{c.wager} pts</span> · {fmtRelTime(c.ts)}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={() => declineChallenge(c)} className="bb-pressable"
+                    style={{flex:1,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"11px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
+                    decline
+                  </button>
+                  <button
+                    onClick={() => acceptChallenge(c)}
+                    disabled={!canAfford || flipping}
+                    className="bb-pressable bb-glow-lime"
+                    style={{flex:2,background:canAfford&&!flipping?"#FFD166":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"11px 0",fontSize:12,fontWeight:700,color:canAfford&&!flipping?"#06070D":"#4A5066",cursor:canAfford&&!flipping?"pointer":"default"}}>
+                    {flipping ? "flipping…" : canAfford ? `accept — ${c.wager} pts` : "can't afford"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
-      {/* Wager */}
-      <div style={{...s.sectionLabel,marginBottom:10}}>wager</div>
-      <div style={{display:"flex",gap:8,marginBottom:16}}>
-        {[10,25,50,100,250].map(amt => (
-          <button key={amt} onClick={() => setWager(amt)} className="bb-pressable"
-            style={{flex:1,background:wager===amt?"#FFD166":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"8px 0",fontSize:11,fontWeight:700,color:wager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
-            {amt}
+      {/* Outgoing pending */}
+      {outgoingChallenge && (
+        <div style={{background:"rgba(167,139,250,0.08)",border:"1px solid rgba(167,139,250,0.25)",borderRadius:14,padding:14,marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#A78BFA",marginBottom:4}}>⏳ waiting for response</div>
+          <div style={{fontSize:12,color:"#8B92A8",marginBottom:10}}>
+            you challenged <span style={{color:"#E8ECF4",fontWeight:700}}>{PLAYERS.find(p => p.id === outgoingChallenge.to)?.name}</span> for <span style={{color:"#FFD166",fontWeight:700}}>{outgoingChallenge.wager} pts</span>
+          </div>
+          <button onClick={cancelOutgoing} className="bb-pressable"
+            style={{background:"none",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"6px 14px",fontSize:11,color:"#4A5066",cursor:"pointer"}}>
+            cancel challenge
           </button>
-        ))}
-      </div>
+        </div>
+      )}
 
       {/* Coin animation */}
-      <div style={{textAlign:"center",marginBottom:20}}>
-        <div style={{fontSize:flipping?64:56,transition:"font-size .2s",display:"inline-block",animation:flipping?"spin 0.3s linear infinite":"none",filter:result?(result.won?"drop-shadow(0 0 16px #FFD166)":"drop-shadow(0 0 16px #FF5C8A)"):"none"}}>
+      <div style={{textAlign:"center",marginBottom:20,marginTop:4}}>
+        <div style={{
+          fontSize: flipping ? 72 : 60,
+          transition: "font-size .2s",
+          display: "inline-block",
+          animation: flipping ? "spin 0.35s linear infinite" : "none",
+          filter: result
+            ? result.won
+              ? "drop-shadow(0 0 20px #FFD166)"
+              : "drop-shadow(0 0 20px #FF5C8A)"
+            : "none",
+        }}>
           🪙
         </div>
       </div>
 
       {/* Result */}
       {result && !flipping && (
-        <div style={{background:result.won?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)",border:`1px solid ${result.won?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`,borderRadius:16,padding:"18px",marginBottom:16,textAlign:"center"}}>
-          <div style={{fontSize:28,marginBottom:6}}>{result.won?"🎉":"💀"}</div>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:result.won?"#7CFFB2":"#FF5C8A",marginBottom:4}}>
-            {result.won?"you win!":"you lose"}
+        <div style={{background:result.won?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)",border:`1px solid ${result.won?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`,borderRadius:16,padding:"20px",marginBottom:16,textAlign:"center",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
+          <div style={{fontSize:32,marginBottom:8}}>{result.won ? "🎉" : "💀"}</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:700,color:result.won?"#7CFFB2":"#FF5C8A",marginBottom:4}}>
+            {result.won ? "you win!" : "you lose"}
           </div>
           <div style={{fontSize:13,color:"#8B92A8"}}>
-            {result.won?`+${result.wager} pts`:`-${result.wager} pts`} vs {PLAYERS.find(p=>p.id===result.opponent)?.name}
+            {result.won ? `+${result.wager} pts` : `-${result.wager} pts`} vs {PLAYERS.find(p => p.id === (result.challenger === currentPlayer ? result.opponent : result.challenger))?.name}
           </div>
         </div>
       )}
 
-      {/* Flip button */}
-      <button onClick={flip} disabled={!selectedOpponent || myPoints < wager || flipping || flipsLeft <= 0}className="bb-pressable bb-glow-lime"
-        style={{...s.primaryBtn,background:!selectedOpponent||myPoints<wager||flipping?"rgba(255,255,255,0.05)":"#FFD166",color:!selectedOpponent||myPoints<wager||flipping?"#4A5066":"#06070D",opacity:!selectedOpponent||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:16,letterSpacing:1,marginBottom:24}}>
-        {flipping ? "flipping…" : flipsLeft <= 0 ? "no flips left this week" : `flip for ${wager} pts — ${flipsLeft} left`}
-      </button>
+      {/* Send challenge form — only show if no outgoing pending */}
+      {!outgoingChallenge && (
+        <>
+          <div style={{...s.sectionLabel,marginBottom:10}}>send a challenge</div>
+
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            {opponents.map(p => (
+              <button key={p.id} onClick={() => setSelectedOpponent(p.id)} className="bb-pressable"
+                style={{flex:1,background:selectedOpponent===p.id?p.color:"rgba(255,255,255,0.05)",border:`1px solid ${selectedOpponent===p.id?p.color:"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"12px 0",fontSize:12,fontWeight:700,color:selectedOpponent===p.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                {p.name}
+              </button>
+            ))}
+          </div>
+
+          <div style={{...s.sectionLabel,marginBottom:8}}>wager</div>
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            {[10, 25, 50, 100, 250].map(amt => (
+              <button key={amt} onClick={() => setWager(amt)} className="bb-pressable"
+                style={{flex:1,background:wager===amt?"#FFD166":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"8px 0",fontSize:11,fontWeight:700,color:wager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                {amt}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={sendChallenge}
+            disabled={!selectedOpponent || myPoints < wager || flipsLeft <= 0}
+            className="bb-pressable bb-glow-lime"
+            style={{
+              ...s.primaryBtn,
+              background: !selectedOpponent || myPoints < wager || flipsLeft <= 0
+                ? "rgba(255,255,255,0.05)"
+                : "#FFD166",
+              color: !selectedOpponent || myPoints < wager || flipsLeft <= 0
+                ? "#4A5066"
+                : "#06070D",
+              fontFamily: "'Oswald',sans-serif",
+              fontSize: 16,
+              letterSpacing: 1,
+            }}>
+            {flipsLeft <= 0
+              ? "no flips left this week"
+              : !selectedOpponent
+              ? "pick an opponent first"
+              : myPoints < wager
+              ? "not enough pts"
+              : `send challenge — ${wager} pts · ${flipsLeft} left`}
+          </button>
+        </>
+      )}
 
       {/* History */}
       {myHistory.length > 0 && (
         <>
-          <div style={{...s.sectionLabel,marginBottom:10}}>recent flips</div>
+          <div style={{...s.sectionLabel,marginBottom:10,marginTop:24}}>recent flips</div>
           {myHistory.map(f => {
-            const opp = PLAYERS.find(p => p.id === f.opponent);
+            const iWon = f.winner === currentPlayer;
+            const otherId = f.challenger === currentPlayer ? f.opponent : f.challenger;
+            const other = PLAYERS.find(p => p.id === otherId);
             return (
-              <div key={f.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${f.won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div key={f.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${iWon?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontSize:13,fontWeight:700,color:f.won?"#7CFFB2":"#FF5C8A"}}>{f.won?"won":"lost"} vs {opp?.name}</div>
+                  <div style={{fontSize:13,fontWeight:700,color:iWon?"#7CFFB2":"#FF5C8A"}}>
+                    {iWon ? "won" : "lost"} vs {other?.name}
+                  </div>
                   <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(f.ts)}</div>
                 </div>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:f.won?"#7CFFB2":"#FF5C8A"}}>
-                  {f.won?"+":"-"}{f.wager} pts
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:iWon?"#7CFFB2":"#FF5C8A"}}>
+                  {iWon ? "+" : "-"}{f.wager} pts
                 </div>
               </div>
             );
@@ -5343,6 +5642,27 @@ const endRace = async () => {
 function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, setChemistry }) {
   const weekStart = getWeekStart();
   const [selectedDuo, setSelectedDuo] = useState(null);
+  const [duoSwipeOffset, setDuoSwipeOffset] = useState(0);
+  const duoSwipeStartX = useRef(0);
+  const duoSwipeStartY = useRef(0);
+
+  const handleDuoTouchStart = (e) => {
+    duoSwipeStartX.current = e.touches[0].clientX;
+    duoSwipeStartY.current = e.touches[0].clientY;
+  };
+  const handleDuoTouchMove = (e) => {
+    const dx = e.touches[0].clientX - duoSwipeStartX.current;
+    const dy = Math.abs(e.touches[0].clientY - duoSwipeStartY.current);
+    if (dx > 0 && dx > dy) setDuoSwipeOffset(dx);
+  };
+  const handleDuoTouchEnd = () => {
+    if (duoSwipeOffset > 80) {
+      setSelectedDuo(null);
+      setDuoSwipeOffset(0);
+    } else {
+      setDuoSwipeOffset(0);
+    }
+  };
 
   // award chemistry XP for assists to teammates this week
   const awardChemXP = async (pid1, pid2, xp) => {
@@ -5356,11 +5676,19 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
   const myPairs = CHEMISTRY_PAIRS.filter(pair => pair.includes(currentPlayer));
 
   // Compute chemistry from this week's shared games
-  const getSharedGames = (pid1, pid2) => {
+const getSharedGames = (pid1, pid2) => {
     const p1Games = stats.filter(g => g.playerId === pid1 && g.mode === "3v3" && new Date(g.ts) >= weekStart);
     const p2Games = stats.filter(g => g.playerId === pid2 && g.mode === "3v3" && new Date(g.ts) >= weekStart);
-    const p1Times = new Set(p1Games.map(g => g.ts));
-    return p2Games.filter(g => p1Times.has(g.ts));
+    const linked = [];
+    p1Games.forEach(g1 => {
+      const match = p2Games.find(g2 => {
+        if (g1.sessionCode && g2.sessionCode && g1.sessionCode === g2.sessionCode) return true;
+        const timeDiff = Math.abs(new Date(g1.ts) - new Date(g2.ts));
+        return timeDiff < 2 * 60 * 60 * 1000 && g1.ourScore === g2.ourScore && g1.theirScore === g2.theirScore;
+      });
+      if (match) linked.push({ p1game: g1, p2game: match });
+    });
+    return linked;
   };
 
   return (
@@ -5377,7 +5705,7 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
         const p1 = PLAYERS.find(p => p.id === pid1);
         const p2 = PLAYERS.find(p => p.id === pid2);
         const shared = getSharedGames(pid1, pid2);
-        const sharedWins = shared.filter(g => g.ourScore > g.theirScore).length;
+        const sharedWins = shared.filter(p => p.p1game.ourScore > p.p1game.theirScore).length;
         const isMyPair = pid1 === currentPlayer || pid2 === currentPlayer;
         const nextLvlXP = [10,60,150,300,500,999][lvl.level];
         const prevLvlXP = [0,10,60,150,300,500][lvl.level];
@@ -5477,10 +5805,21 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
         const p1 = PLAYERS.find(p => p.id === pid1);
         const p2 = PLAYERS.find(p => p.id === pid2);
         const shared = getSharedGames(pid1, pid2);
-        const sortedShared = [...shared].sort((a,b) => new Date(b.ts) - new Date(a.ts));
+        const sortedShared = [...shared].sort((a,b) => new Date(b.p1game.ts) - new Date(a.p1game.ts));
 
         return (
-          <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
+        <div
+          onTouchStart={handleDuoTouchStart}
+          onTouchMove={handleDuoTouchMove}
+          onTouchEnd={handleDuoTouchEnd}
+          style={{
+            position:"fixed", inset:0, zIndex:400, background:"#040818",
+            display:"flex", flexDirection:"column",
+            animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",
+            transform:`translateX(${duoSwipeOffset}px)`,
+            opacity: Math.max(0, 1 - duoSwipeOffset / 280),
+            transition: duoSwipeOffset === 0 ? "transform .25s ease, opacity .25s ease" : "none",
+          }}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={()=>setSelectedDuo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
                 <ChevronLeft size={18}/>
@@ -5497,13 +5836,13 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
 
               <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>SHARED GAME HISTORY · {sortedShared.length} GAMES</div>
               {sortedShared.length === 0 && <div style={{color:"#4A5066",textAlign:"center",marginTop:30,fontSize:13}}>no shared games logged this week yet</div>}
-              {sortedShared.map(g => {
-                const won = g.ourScore > g.theirScore;
+{sortedShared.map(({p1game, p2game}, i) => {
+                const won = p1game.ourScore > p1game.theirScore;
                 return (
-                  <div key={g.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div key={p1game.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <div>
-                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{g.ourScore}–{g.theirScore}</div>
-                      <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(g.ts)}</div>
+                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{p1game.ourScore}–{p1game.theirScore}</div>
+                      <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(p1game.ts)}{p1game.sessionCode ? ` · ${p1game.sessionCode}` : ""}</div>
                     </div>
                     <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",border:`1px solid ${won?"rgba(124,255,178,0.4)":"rgba(255,92,138,0.4)"}`,borderRadius:99,padding:"3px 9px"}}>
                       {won?"WIN":"LOSS"}
@@ -5561,10 +5900,13 @@ const [statsJumpDate, setStatsJumpDate] = useState(null);
 const [stocks, setStocks] = useState({});
 const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
-const [chemistry, setChemistry] = useState({});                      
+const [chemistry, setChemistry] = useState({});   
+const [flipChallenges, setFlipChallenges] = useState([]);                      
 const [chatOpen, setChatOpen] = useState(false);
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
+const lastActiveRef = useRef(Date.now());
+const AUTO_LOCK_MS = 10 * 60 * 1000;
 const addToast = useCallback((text, icon = "🔔") => {
   const id = Date.now().toString();
   setToasts(prev => [...prev, { id, text, icon }]);
@@ -5580,7 +5922,11 @@ const heartbeat = async () => {
       setPresence(upd);
       await storeSet("presence", upd);
     };
-heartbeat();
+heartbeat(); const updateActive = () => { lastActiveRef.current = Date.now(); };
+window.addEventListener("focus", updateActive);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) updateActive();
+});
     const hbInterval = setInterval(heartbeat, 30000);
     const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
       if (key === "chat") {
@@ -5596,6 +5942,7 @@ heartbeat();
       if (key === "posts")          setPosts(Array.isArray(value) ? value : []);
       if (key === "completions")    setCompletions(value);
 if (key === "time_logs") setTimeLogs(value);
+if (key === "flip_challenges") setFlipChallenges(Array.isArray(value) ? value : []);
 if (key === "stocks") setStocks(value);
 if (key === "flowers") setFlowers(Array.isArray(value) ? value : []);
 if (key === "chemistry") setChemistry(value || {});
@@ -5633,16 +5980,34 @@ if (key === "pass_claimed") setPassClaimed(value);
 if (key === "pass_tokens")  setPassTokens(value);
 if (key === "pass_active_boosts") setPassActiveBoosts(value);
 if (key === "typing") setTypingStatus(value || {});
-    });
-     return () => { unsub(); clearInterval(hbInterval); };
+});
   }, [currentPlayer]);
+
+  useEffect(() => {
+  if (!currentPlayer) return;
+  const checkLock = () => {
+    if (document.hidden) return;
+    const timeSinceActive = Date.now() - lastActiveRef.current;
+    if (timeSinceActive > AUTO_LOCK_MS) {
+      setCurrentPlayer(null);
+      setAuthStage("select");
+      setSelectedPlayerId(null);
+      setTab("home");
+    } else {
+      lastActiveRef.current = Date.now();
+    }
+  };
+  document.addEventListener("visibilitychange", checkLock);
+  return () => document.removeEventListener("visibilitychange", checkLock);
+}, [currentPlayer]);
+
 
   const selectName=async(pid)=>{ setSelectedPlayerId(pid); const auth=await storeGet(`auth:${pid}`); setAuthStage(auth?"enter":"create"); };
 
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem] = await Promise.all([
+const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc] = await Promise.all([
     storeGet("schedule"),
     storeGet("training"),
     storeGet("completions"),
@@ -5665,6 +6030,7 @@ const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,p
     storeGet("coin_flips"),
     storeGet("active_race"),
     storeGet("chemistry"),
+    storeGet("flip_challenges"),
   ]);
 
   if (sched) setSchedule(sched);
@@ -5689,6 +6055,7 @@ if (stks) setStocks(stks);
 if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
 if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.startedAt); }
 if (chem) setChemistry(chem);
+if (fc) setFlipChallenges(Array.isArray(fc) ? fc : []);
 
 const savedLastSeen = await storeGet(`lastSeen:${pid}`);
 if (savedLastSeen) setLastSeen(savedLastSeen);
@@ -5723,6 +6090,7 @@ setMmrProfiles(prev => ({...prev}));
 
 const touchStartY = useRef(0);
   const scrollContainerRef = useRef(null);
+const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
   const handleTouchEnd = (e) => {
     if (tab !== "home") return; // only allow pull-to-refresh on the home tab
@@ -5837,7 +6205,7 @@ const TABS=[
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
 {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)}/>}
  {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
-{tab==="coinflip"&&<CoinFlipTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips}/>}
+{tab==="coinflip"&&<CoinFlipTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
 {tab==="race"&&<RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
 {tab==="stocks"&&<StockMarketTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
 {tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast}/>}
