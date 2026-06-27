@@ -1048,13 +1048,12 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
 
   return (
     <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
-<div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
           <ChevronLeft size={18}/>
         </button>
         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>team comparison · 3v3</div>
-        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",marginLeft:"auto"}}><X size={20}/></button>
-<button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",marginLeft:"auto"}}><X size={20}/></button>
+        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {PLAYERS.map(p => {
@@ -3415,7 +3414,7 @@ function calcOdds(pct) {
 }
 
 function calcPayout(wager, decimalOdds) {
-  return Math.round(wager * parseFloat(decimalOdds));
+  return Math.round(wager * Math.min(parseFloat(decimalOdds), 5));
 }
 
 function StockTrendLine({ priceHistory, color, width = 260, height = 70 }) {
@@ -3677,6 +3676,9 @@ const [propWager, setPropWager] = useState(10);
   const [selectedProp, setSelectedProp] = useState(null);
   const [propSide, setPropSide] = useState(null);
   const [lineIndexByProp, setLineIndexByProp] = useState({}); // { [propId]: index into lineOptions }
+const [predWager, setPredWager] = useState(10);
+const [selectedPred, setSelectedPred] = useState(null);
+const [predSide, setPredSide] = useState(null);
 
   const myPoints = points?.[currentPlayer] || 0;
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
@@ -4131,11 +4133,11 @@ const noBettingWeek = isEventActive("no_betting");
                   </div>
                 ))}
                 {(()=>{
-                  const mult = parlayLegs.reduce((m,leg)=>{
-                    const dec = parseFloat(leg.odds?.replace("+","") || "100");
-                    const od = leg.odds?.startsWith("+")?(dec/100)+1:(100/Math.abs(dec))+1;
-                    return m*od;
-                  },1);
+                 const mult = parlayLegs.reduce((m,leg)=>{
+  const dec = parseFloat(leg.odds?.replace("+","") || "100");
+  const od = Math.min(leg.odds?.startsWith("+")?(dec/100)+1:(100/Math.abs(dec))+1, 3);
+  return m*od;
+},1);
                   const payout = Math.round(parlayWager*mult);
                   return (
                     <>
@@ -4271,11 +4273,7 @@ const noBettingWeek = isEventActive("no_betting");
     const updBets = [...(bets||[]), bet];
     setBets(updBets); await storeSet("bets", updBets);
   };
-
-  const [predWager, setPredWager] = useState(10);
-  const [selectedPred, setSelectedPred] = useState(null);
-  const [predSide, setPredSide] = useState(null);
-
+    
   return (
     <div>
       <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>predict what happens in upcoming games. live odds based on real stats. all predictions resolve at end of week.</div>
