@@ -765,8 +765,13 @@ function HeatStreakCard({ stats, currentPlayer }) {
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
           <ChevronLeft size={18}/>
         </button>
-        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>{stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"}</div>
-      </div>
+  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+  <div style={{display:"flex",alignItems:"center",gap:12}}>
+    <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><ChevronLeft size={18}/></button>
+    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>{stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"}</div>
+  </div>
+  <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
+</div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {stat === "record" && (
           <>
@@ -2364,15 +2369,19 @@ const upd = [...myUpd, ...others];
     setPoints(upd); await storeSet("points", upd);
   };
 
-  const toggleEquip = async (itemId) => {
-    const item = SHOP_ITEMS.find(i => i.id === itemId);
-    const newEquipped = { ...equipped };
-    // unequip others of same type
+const toggleEquip = async (itemId) => {
+  const item = SHOP_ITEMS.find(i => i.id === itemId);
+  const newEquipped = { ...equipped };
+  if (item) {
     SHOP_ITEMS.filter(i => i.type === item.type).forEach(i => { delete newEquipped[i.id]; });
-    if (!equipped[itemId]) newEquipped[itemId] = true;
-    const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
-    setPoints(upd); await storeSet("points", upd);
-  };
+  } else {
+    // background item — unequip all other backgrounds
+    ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_custom"].forEach(id => { delete newEquipped[id]; });
+  }
+  if (!equipped[itemId]) newEquipped[itemId] = true;
+  const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
+  setPoints(upd); await storeSet("points", upd);
+};
 
   // Weekly recap
   const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay()); weekStart.setHours(0,0,0,0);
