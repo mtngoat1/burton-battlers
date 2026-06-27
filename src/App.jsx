@@ -57,6 +57,39 @@ function getChemistryBonus(xp) {
   };
 }
 
+// ===================== Duo Badges =====================
+const DUO_BADGE_DEFS = [
+  { id:"first_win",     label:"First Blood",     emoji:"🩸", desc:"won your first game together",        check:(d)=>d.totalWins>=1 },
+  { id:"win_streak_3",  label:"Hot Streak",       emoji:"🔥", desc:"won 3 games in a row together",       check:(d)=>d.bestStreak>=3 },
+  { id:"win_streak_5",  label:"On Fire",          emoji:"🌋", desc:"won 5 games in a row together",       check:(d)=>d.bestStreak>=5 },
+  { id:"win_streak_10", label:"Unbeatable",       emoji:"☄️", desc:"won 10 games in a row together",      check:(d)=>d.bestStreak>=10 },
+  { id:"wins_10",       label:"Dynamic Duo",      emoji:"🏆", desc:"10 wins together",                    check:(d)=>d.totalWins>=10 },
+  { id:"wins_25",       label:"Battle Tested",    emoji:"🛡️", desc:"25 wins together",                   check:(d)=>d.totalWins>=25 },
+  { id:"wins_50",       label:"Legends",          emoji:"👑", desc:"50 wins together",                    check:(d)=>d.totalWins>=50 },
+  { id:"grinders_20",   label:"Grinders",         emoji:"⚡", desc:"20 games played together",            check:(d)=>d.totalGames>=20 },
+  { id:"grinders_50",   label:"Iron Bond",        emoji:"⚙️", desc:"50 games played together",            check:(d)=>d.totalGames>=50 },
+  { id:"max_chem",       label:"Soulmates",        emoji:"💞", desc:"reached max chemistry level",         check:(d)=>d.chemLevel>=5 },
+];
+
+function getDuoBadgeStats(sharedGames) {
+  const totalGames = sharedGames.length;
+  const totalWins = sharedGames.filter(g => g.p1game.ourScore > g.p1game.theirScore).length;
+  let bestStreak = 0, curStreak = 0;
+  // chronological order
+  const sorted = [...sharedGames].sort((a,b) => new Date(a.p1game.ts) - new Date(b.p1game.ts));
+  sorted.forEach(g => {
+    if (g.p1game.ourScore > g.p1game.theirScore) { curStreak++; bestStreak = Math.max(bestStreak, curStreak); }
+    else curStreak = 0;
+  });
+  return { totalGames, totalWins, bestStreak };
+}
+
+function getEarnedDuoBadges(sharedGames, chemLevel) {
+  const stat = getDuoBadgeStats(sharedGames);
+  const data = { ...stat, chemLevel };
+  return DUO_BADGE_DEFS.filter(b => b.check(data));
+}
+
 
 const FORCED_EVENT_ID = "double_xp"; // set to null to go back to random weekly rotation
 
@@ -153,6 +186,17 @@ function SyncOverlay({ onDone, label }) {
 }
 
 // ===================== Global CSS =====================
+function loadTesseract() {
+  return new Promise((resolve, reject) => {
+    if (window.Tesseract) return resolve(window.Tesseract);
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js";
+    script.onload = () => resolve(window.Tesseract);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
 function GlobalStyles() {
   return (
     <style>{`
@@ -1136,12 +1180,11 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
     opacity: Math.max(0, 1 - swipeOffset / 280),
     transition: swipeOffset === 0 ? "transform .25s ease, opacity .25s ease" : "none",
   }}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+     <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
           <ChevronLeft size={18}/>
         </button>
         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>team comparison · 3v3</div>
-        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {PLAYERS.map(p => {
@@ -1771,7 +1814,7 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
     </div></div>
   );
 }
-function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments }) {
+function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments, onExpand }) {
   const player=PLAYERS.find((p)=>p.id===post.playerId);
   const hearted=(post.hearts||[]).includes(currentPlayer);
   const [popped,setPopped]=useState(false);
@@ -1783,10 +1826,12 @@ function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments }) {
         <span style={{fontWeight:700,fontSize:13.5}}>{player?.name}</span>
         <span style={s.postTime}>{fmtRelTime(post.ts)}</span>
       </div>
-      {post.image&&(post.isVideo
+      <div onClick={()=>onExpand(post)} style={{cursor:"pointer"}}>
+        {post.image&&(post.isVideo
   ? <video src={post.image} style={s.postImage} controls muted playsInline loop/>
   : <img src={post.image} alt="post" style={s.postImage}/>)}
-      {post.caption&&<div style={s.postCaption}>{post.caption}</div>}
+        {post.caption&&<div style={s.postCaption}>{post.caption}</div>}
+      </div>
       <div style={s.postActions}>
         <button onClick={heartClick} className="bb-pressable" style={s.postActionBtn}>
           <Heart size={18} className={popped?"bb-heart-pop":""} color={hearted?"#FF5C8A":"#4A5066"} fill={hearted?"#FF5C8A":"none"}/>
@@ -1800,6 +1845,73 @@ function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments }) {
     </div>
   );
 }
+
+function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
+  const player = PLAYERS.find((p) => p.id === post.playerId);
+  const hearted = (post.hearts || []).includes(currentPlayer);
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
+
+  const handleTouchStart = (e) => {
+    swipeStartX.current = e.touches[0].clientX;
+    swipeStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchMove = (e) => {
+    const dx = e.touches[0].clientX - swipeStartX.current;
+    const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
+    if (dx > 0 && dx > dy) setSwipeOffset(dx);
+  };
+  const handleTouchEnd = () => {
+    if (swipeOffset > 80) {
+      onClose();
+      setSwipeOffset(0);
+    } else {
+      setSwipeOffset(0);
+    }
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{
+        position:"fixed", inset:0, zIndex:600, background:"#000",
+        display:"flex", flexDirection:"column",
+        animation:"chatFadeIn .2s ease",
+        transform:`translateX(${swipeOffset}px)`,
+        opacity: Math.max(0, 1 - swipeOffset / 280),
+        transition: swipeOffset === 0 ? "transform .25s ease, opacity .25s ease" : "none",
+      }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10, padding:"16px 16px", paddingTop:"max(16px, env(safe-area-inset-top))", flexShrink:0 }}>
+        <div style={{ width:8, height:8, borderRadius:99, background:player?.color, boxShadow:`0 0 8px ${player?.color}99` }}/>
+        <span style={{ fontWeight:700, fontSize:14, color:"#fff" }}>{player?.name}</span>
+        <span style={{ fontSize:11.5, color:"#8B92A8" }}>{fmtRelTime(post.ts)}</span>
+        <button onClick={onClose} className="bb-pressable" style={{ marginLeft:"auto", background:"rgba(255,255,255,0.1)", border:"none", borderRadius:99, width:34, height:34, color:"#fff", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <X size={18}/>
+        </button>
+      </div>
+      <div onClick={(e)=>e.stopPropagation()} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
+        {post.image && (post.isVideo
+          ? <video src={post.image} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }} controls muted playsInline loop autoPlay/>
+          : <img src={post.image} alt="post" style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }}/>)}
+      </div>
+      {post.caption && (
+        <div onClick={(e)=>e.stopPropagation()} style={{ padding:"14px 16px", paddingBottom:"max(14px, env(safe-area-inset-bottom))", flexShrink:0 }}>
+          <div style={{ fontSize:14, color:"#E8ECF4", lineHeight:1.5, marginBottom:10 }}>{post.caption}</div>
+          <button onClick={()=>onToggleHeart(post.id)} className="bb-pressable" style={{ background:"none", border:"none", display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
+            <Heart size={20} color={hearted?"#FF5C8A":"#8B92A8"} fill={hearted?"#FF5C8A":"none"}/>
+            <span style={{ color:hearted?"#FF5C8A":"#8B92A8", fontSize:13, fontWeight:700 }}>{(post.hearts||[]).length}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
   const [text,setText]=useState("");
   const submit=()=>{ if(!text.trim())return; onAddComment(post.id,text.trim()); setText(""); };
@@ -1817,6 +1929,7 @@ function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
 function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats }) {
   const [composing, setComposing] = useState(false);
   const [commentingOn, setCommentingOn] = useState(null);
+  const [expandedPost, setExpandedPost] = useState(null);
   const [subTab, setSubTab] = useState("feed");
   const [copiedBet, setCopiedBet] = useState(null);
   const [parlayLegs, setParlayLegs] = useState([]);
@@ -1930,8 +2043,9 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
 
   return (
     <div className="bb-tab-content" style={s.tabContent}>
-      {composing && <SocialComposer currentPlayer={currentPlayer} onPost={addPost} onClose={() => setComposing(false)} />}
+   {composing && <SocialComposer currentPlayer={currentPlayer} onPost={addPost} onClose={() => setComposing(false)} />}
       {commentingOn && <PostCommentsModal post={commentingOn} onAddComment={addComment} currentPlayer={currentPlayer} onClose={() => setCommentingOn(null)} />}
+      {expandedPost && <PostFullscreenModal post={posts.find(p=>p.id===expandedPost.id)||expandedPost} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onClose={() => setExpandedPost(null)} />}
 
       {/* Copied bet modal */}
       {copiedBet && (
@@ -1981,7 +2095,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
             <button onClick={() => setComposing(true)} className="bb-pressable bb-glow-violet" style={s.newPostBtn}><Plus size={14} /> post</button>
           </div>
           {posts.length === 0 && <div style={s.emptyQueue}>no posts yet — share a clip or a funny moment.</div>}
-          {posts.map(post => <PostCard key={post.id} post={post} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onOpenComments={setCommentingOn} />)}
+         {posts.map(post => <PostCard key={post.id} post={post} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onOpenComments={setCommentingOn} onExpand={setExpandedPost} />)}
         </>
       )}
 
@@ -2230,6 +2344,24 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   const [score, setScore] = useState("");
   const [demos, setDemos] = useState("");
   const [sessionCode, setSessionCode] = useState("");
+  const [generating, setGenerating] = useState(false);
+
+  useEffect(() => {
+    // pick up a shared session code generated within the last 5 minutes
+    storeGet("session_code_pool").then(pool => {
+      if (pool && pool.code && Date.now() - new Date(pool.createdAt).getTime() < 5*60*1000) {
+        setSessionCode(pool.code);
+      }
+    }).catch(()=>{});
+  }, []);
+
+  const generateCode = async () => {
+    setGenerating(true);
+    const code = Math.random().toString(36).slice(2,8);
+    setSessionCode(code);
+    await storeSet("session_code_pool", { code, createdAt: new Date().toISOString(), createdBy: currentPlayer });
+    setGenerating(false);
+  };
 
   const submit = () => {
     if (ourScore === "" || theirScore === "") return;
@@ -2273,17 +2405,23 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
             </div>
           ))}
         </div>
-        {(mode === "3v3" || mode === "2v2") && (
+  {(mode === "3v3" || mode === "2v2") && (
           <div>
             <div style={s.modalLabel}>session code — optional</div>
-            <input
-              value={sessionCode}
-              onChange={e => setSessionCode(e.target.value)}
-              placeholder="e.g. tuesday or gg1 — share with teammates"
-              style={s.modalInput}
-            />
+            <div style={{display:"flex",gap:8}}>
+              <input
+                value={sessionCode}
+                onChange={e => setSessionCode(e.target.value)}
+                placeholder="e.g. tuesday or gg1"
+                style={{...s.modalInput,flex:1}}
+              />
+              <button onClick={generateCode} disabled={generating} className="bb-pressable bb-glow-lime"
+                style={{flexShrink:0,background:"#B8FF4D",border:"none",borderRadius:9,padding:"0 14px",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
+                {generating?"…":"generate"}
+              </button>
+            </div>
             <div style={{fontSize:10,color:"#4A5066",marginTop:6,lineHeight:1.5}}>
-              all three of you enter the same code when logging games from the same session — this links your stats for chemistry and team comparisons.
+              tap generate — your teammate's "log game" screen will auto-fill the same code within 5 minutes. or just type any shared word yourselves.
             </div>
           </div>
         )}
@@ -2341,10 +2479,150 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS }) {
   );
 }
 
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled }) {
+
+function TournamentOCRTab({ schedule, setSchedule, currentPlayer }) {
+  const [image, setImage] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
+  const [scanning, setScanning] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [rawText, setRawText] = useState("");
+  const [parsed, setParsed] = useState(null); // {opponent, ourScore, theirScore, matchLabel}
+  const fileRef = useRef(null);
+  const isCaptain = currentPlayer === ADMIN_ID;
+
+  const pickFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setImageFile(f);
+    setImage(URL.createObjectURL(f));
+    setParsed(null);
+    setRawText("");
+  };
+
+  const parseOcrText = (text) => {
+    const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+    // look for a score pattern like "3 - 1" or "3:1" or "3–1"
+    let ourScore = null, theirScore = null, opponent = "";
+    const scoreLine = lines.find(l => /\d+\s*[-–:]\s*\d+/.test(l));
+    if (scoreLine) {
+      const m = scoreLine.match(/(\d+)\s*[-–:]\s*(\d+)/);
+      if (m) { ourScore = Number(m[1]); theirScore = Number(m[2]); }
+    }
+    // best guess for opponent name: longest non-numeric line that isn't the score line
+    const nameCandidates = lines.filter(l => l !== scoreLine && /[A-Za-z]{3,}/.test(l) && !/^\d+$/.test(l));
+    opponent = nameCandidates.sort((a,b) => b.length - a.length)[0] || "";
+    return { opponent, ourScore, theirScore };
+  };
+
+  const runScan = async () => {
+    if (!imageFile) return;
+    setScanning(true);
+    setProgress(0);
+    try {
+      const Tesseract = await loadTesseract();
+      const result = await Tesseract.recognize(imageFile, "eng", {
+        logger: (m) => { if (m.status === "recognizing text") setProgress(Math.round((m.progress||0)*100)); },
+      });
+      const text = result.data.text || "";
+      setRawText(text);
+      setParsed(parseOcrText(text));
+    } catch (e) {
+      setRawText("scan failed — try a clearer screenshot.");
+    }
+    setScanning(false);
+  };
+
+  const applyToMatch = async (matchId) => {
+    if (!parsed) return;
+    const isPlayoff = matchId.startsWith("po");
+    const key = isPlayoff ? "playoffs" : "league";
+    const updated = schedule[key].map(m => m.id === matchId ? {
+      ...m,
+      opponent: parsed.opponent || m.opponent,
+      result: (parsed.ourScore!=null && parsed.theirScore!=null) ? {
+        status: parsed.ourScore > parsed.theirScore ? "win" : "loss",
+        ours: parsed.ourScore,
+        theirs: parsed.theirScore,
+      } : m.result,
+    } : m);
+    const next = { ...schedule, [key]: updated };
+    setSchedule(next);
+    await storeSet("schedule", next);
+    setParsed(null); setImage(null); setImageFile(null); setRawText("");
+  };
+
+  const upcomingMatches = [...schedule.league, ...schedule.playoffs].filter(m => !m.result);
+
+  return (
+    <div>
+      <div style={{ fontSize:11, color:"#4A5066", marginBottom:16, lineHeight:1.5 }}>
+        screenshot the rocket league postgame or bracket screen — this reads the score and opponent name automatically so you don't have to type it in.
+      </div>
+
+      <input ref={fileRef} type="file" accept="image/*" onChange={pickFile} style={{ display:"none" }}/>
+      <button onClick={() => fileRef.current?.click()} className="bb-pressable"
+        style={{ width:"100%", minHeight:160, background:"rgba(255,255,255,0.03)", border:"1px dashed rgba(255,255,255,0.15)", borderRadius:14, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:"pointer", overflow:"hidden", marginBottom:14 }}>
+        {image ? <img src={image} alt="screenshot" style={{ width:"100%", maxHeight:260, objectFit:"contain" }}/> : (
+          <>
+            <ImageIcon size={26} color="#4A5066"/>
+            <span style={{ color:"#4A5066", fontSize:13, marginTop:8 }}>tap to upload a screenshot</span>
+          </>
+        )}
+      </button>
+
+      {image && !parsed && (
+        <button onClick={runScan} disabled={scanning} className="bb-pressable bb-glow-lime"
+          style={{ ...s.primaryBtn, opacity: scanning ? 0.6 : 1 }}>
+          {scanning ? `scanning… ${progress}%` : "scan screenshot"}
+        </button>
+      )}
+
+      {parsed && (
+        <div style={{ background:"#11131F", borderRadius:14, padding:14, marginTop:14, border:"1px solid rgba(184,255,77,0.2)" }}>
+          <div style={{ fontSize:11, color:"#B8FF4D", fontWeight:700, letterSpacing:0.8, marginBottom:10 }}>DETECTED RESULT</div>
+          <div style={{ marginBottom:8 }}>
+            <div style={s.modalLabel}>opponent</div>
+            <input value={parsed.opponent} onChange={e=>setParsed(p=>({...p,opponent:e.target.value}))} style={s.modalInput}/>
+          </div>
+          <div style={s.modalScoreRow}>
+            <div style={{flex:1}}><div style={s.modalLabel}>us</div><input type="number" value={parsed.ourScore??""} onChange={e=>setParsed(p=>({...p,ourScore:Number(e.target.value)}))} style={s.modalInput}/></div>
+            <div style={{flex:1}}><div style={s.modalLabel}>them</div><input type="number" value={parsed.theirScore??""} onChange={e=>setParsed(p=>({...p,theirScore:Number(e.target.value)}))} style={s.modalInput}/></div>
+          </div>
+
+          {isCaptain ? (
+            <>
+              <div style={s.modalLabel}>apply to which match?</div>
+              {upcomingMatches.length === 0 && <div style={{ fontSize:12, color:"#4A5066", marginTop:6 }}>no upcoming matches to apply this to.</div>}
+              {upcomingMatches.map(m => (
+                <button key={m.id} onClick={()=>applyToMatch(m.id)} className="bb-pressable bb-glow-lime"
+                  style={{ width:"100%", textAlign:"left", background:"rgba(184,255,77,0.08)", border:"1px solid rgba(184,255,77,0.25)", borderRadius:10, padding:"10px 12px", marginTop:8, cursor:"pointer", color:"#E8ECF4", fontSize:12.5 }}>
+                  {m.label} — {m.opponent || "tbd"}
+                </button>
+              ))}
+            </>
+          ) : (
+            <div style={{ fontSize:12, color:"#4A5066", marginTop:10 }}>only the captain can apply this to the bracket.</div>
+          )}
+
+          <button onClick={()=>{setParsed(null);setImage(null);setImageFile(null);setRawText("");}} className="bb-pressable"
+            style={{ width:"100%", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:10, padding:"9px 0", fontSize:11.5, color:"#8B92A8", cursor:"pointer", marginTop:10 }}>
+            scan another
+          </button>
+        </div>
+      )}
+
+      {rawText && !parsed?.opponent && (
+        <div style={{ fontSize:10.5, color:"#3A4256", marginTop:14, fontFamily:"monospace", whiteSpace:"pre-wrap" }}>{rawText.slice(0,300)}</div>
+      )}
+    </div>
+  );
+}
+
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
   const [showAllGames, setShowAllGames]=useState(false);
+  const [statsSubTab, setStatsSubTab] = useState("tracker");
 useEffect(() => {
   if (jumpDate) {
     setMode("3v3");
@@ -2401,13 +2679,25 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
   const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+g[field],0)/arr.length).toFixed(1):"—";
   const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>g.ourScore>g.theirScore).length/arr.length)*100)+"%"; };
   const playerColor=PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
-  return (
+return (
     <div className="bb-tab-content" style={s.tabContent}>
       {logging&&<LogGameModal mode={mode} currentPlayer={currentPlayer} onSave={saveGame} onClose={()=>setLogging(false)}/>}
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>stats tracker</div>
         <button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}><Plus size={14}/> log game</button>
       </div>
+      <div style={{display:"flex",gap:8,marginBottom:18}}>
+        {[{id:"tracker",label:"📊 stats"},{id:"tourney",label:"📸 tournament"}].map(sub=>(
+          <button key={sub.id} onClick={()=>setStatsSubTab(sub.id)} className="bb-pressable"
+            style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:statsSubTab===sub.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:statsSubTab===sub.id?"#06070D":"#8B92A8"}}>
+            {sub.label}
+          </button>
+        ))}
+      </div>
+      {statsSubTab==="tourney" ? (
+        <TournamentOCRTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>
+      ) : (
+      <>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
         {STAT_MODES.map(m=>(
           <button key={m} onClick={()=>setMode(m)} className="bb-pressable"
@@ -2488,11 +2778,13 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
           <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={STAT_FIELDS}/>
         ));
       })()}
-      {Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
+{Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
         <button onClick={()=>setShowAllGames(v=>!v)} className="bb-pressable"
           style={{width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer",marginTop:4}}>
           {showAllGames ? `▲ show less` : `▼ show all days`}
         </button>
+      )}
+      </>
       )}
     </div>
   );
@@ -5642,6 +5934,7 @@ const endRace = async () => {
 function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, setChemistry }) {
   const weekStart = getWeekStart();
   const [selectedDuo, setSelectedDuo] = useState(null);
+  const getSyncedCountKey = (key) => `${key}_syncedCount`;
   const [duoSwipeOffset, setDuoSwipeOffset] = useState(0);
   const duoSwipeStartX = useRef(0);
   const duoSwipeStartY = useRef(0);
@@ -5665,20 +5958,27 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
   };
 
   // award chemistry XP for assists to teammates this week
-  const awardChemXP = async (pid1, pid2, xp) => {
+// award chemistry XP — only pays out for shared games not already counted (no more spam-clicking)
+  const syncChemXP = async (pid1, pid2, sharedGamesList) => {
     const key = getChemistryKey(pid1, pid2);
+    const countKey = getSyncedCountKey(key);
+    const alreadySynced = chemistry?.[countKey] || 0;
+    const newGamesCount = sharedGamesList.length - alreadySynced;
+    if (newGamesCount <= 0) return; // nothing new to sync
+    const newGames = sharedGamesList.slice(alreadySynced);
+    const newWins = newGames.filter(p => p.p1game.ourScore > p.p1game.theirScore).length;
+    const xpGain = newWins * 5 + newGamesCount * 2;
     const current = chemistry?.[key] || 0;
-    const upd = { ...chemistry, [key]: current + xp };
+    const upd = { ...chemistry, [key]: current + xpGain, [countKey]: sharedGamesList.length };
     setChemistry(upd);
     await storeSet("chemistry", upd);
   };
-
   const myPairs = CHEMISTRY_PAIRS.filter(pair => pair.includes(currentPlayer));
 
   // Compute chemistry from this week's shared games
-const getSharedGames = (pid1, pid2) => {
-    const p1Games = stats.filter(g => g.playerId === pid1 && g.mode === "3v3" && new Date(g.ts) >= weekStart);
-    const p2Games = stats.filter(g => g.playerId === pid2 && g.mode === "3v3" && new Date(g.ts) >= weekStart);
+const getSharedGames = (pid1, pid2, allTime = false) => {
+    const p1Games = stats.filter(g => g.playerId === pid1 && g.mode === "3v3" && (allTime || new Date(g.ts) >= weekStart));
+    const p2Games = stats.filter(g => g.playerId === pid2 && g.mode === "3v3" && (allTime || new Date(g.ts) >= weekStart));
     const linked = [];
     p1Games.forEach(g1 => {
       const match = p2Games.find(g2 => {
@@ -5704,8 +6004,10 @@ const getSharedGames = (pid1, pid2) => {
         const bonus = getChemistryBonus(chemXP);
         const p1 = PLAYERS.find(p => p.id === pid1);
         const p2 = PLAYERS.find(p => p.id === pid2);
-        const shared = getSharedGames(pid1, pid2);
+   const shared = getSharedGames(pid1, pid2);
+        const sharedAllTime = getSharedGames(pid1, pid2, true);
         const sharedWins = shared.filter(p => p.p1game.ourScore > p.p1game.theirScore).length;
+        const earnedBadges = getEarnedDuoBadges(sharedAllTime, lvl.level);
         const isMyPair = pid1 === currentPlayer || pid2 === currentPlayer;
         const nextLvlXP = [10,60,150,300,500,999][lvl.level];
         const prevLvlXP = [0,10,60,150,300,500][lvl.level];
@@ -5759,22 +6061,30 @@ const getSharedGames = (pid1, pid2) => {
               </div>
             </div>
 
-            {/* Badges */}
+ {/* Duo badges — unique achievements earned together, all-time */}
             <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              {sharedWins >= 5 && <div style={{ fontSize:10, fontWeight:700, color:"#FFD166", background:"rgba(255,209,102,0.1)", padding:"3px 8px", borderRadius:99 }}>🏆 5-win duo</div>}
-              {sharedWins >= 10 && <div style={{ fontSize:10, fontWeight:700, color:"#FF61C1", background:"rgba(255,97,193,0.1)", padding:"3px 8px", borderRadius:99 }}>💎 10-win duo</div>}
-              {shared.length >= 20 && <div style={{ fontSize:10, fontWeight:700, color:"#A78BFA", background:"rgba(167,139,250,0.1)", padding:"3px 8px", borderRadius:99 }}>⚡ grinders</div>}
-              {lvl.level >= 4 && <div style={{ fontSize:10, fontWeight:700, color:lvl.color, background:`${lvl.color}18`, padding:"3px 8px", borderRadius:99 }}>{lvl.emoji} {lvl.label} duo</div>}
-              {lvl.level === 0 && <div style={{ fontSize:10, color:"#4A5066" }}>play together to start building chemistry</div>}
+              {earnedBadges.length === 0 && <div style={{ fontSize:10, color:"#4A5066" }}>play together to earn your first duo badge</div>}
+              {earnedBadges.map(b => (
+                <div key={b.id} title={b.desc} style={{ fontSize:10, fontWeight:700, color:lvl.color, background:`${lvl.color}18`, padding:"3px 8px", borderRadius:99 }}>
+                  {b.emoji} {b.label}
+                </div>
+              ))}
             </div>
 
-            {/* Boost chemistry button (award XP manually based on this week's wins) */}
-            {isMyPair && shared.length > 0 && (
-              <button onClick={(e) => { e.stopPropagation(); awardChemXP(pid1, pid2, sharedWins * 5 + shared.length * 2); }} className="bb-pressable bb-glow-lime"
-                style={{ width:"100%", background:`${lvl.color}18`, border:`1px solid ${lvl.color}44`, borderRadius:10, padding:"10px 0", fontSize:12, fontWeight:700, color:lvl.color, cursor:"pointer", marginTop:12 }}>
-                sync week's chemistry (+{sharedWins*5 + shared.length*2} xp)
-              </button>
-            )}
+      {/* Sync chemistry — only pays out for NEW shared games since last sync */}
+            {isMyPair && shared.length > 0 && (() => {
+              const countKey = getSyncedCountKey(key);
+              const alreadySynced = chemistry?.[countKey] || 0;
+              const newCount = shared.length - alreadySynced;
+              const isSynced = newCount <= 0;
+              return (
+                <button onClick={(e) => { e.stopPropagation(); if (!isSynced) syncChemXP(pid1, pid2, shared); }} className="bb-pressable bb-glow-lime"
+                  disabled={isSynced}
+                  style={{ width:"100%", background: isSynced ? "rgba(255,255,255,0.04)" : `${lvl.color}18`, border:`1px solid ${isSynced ? "rgba(255,255,255,0.08)" : lvl.color+"44"}`, borderRadius:10, padding:"10px 0", fontSize:12, fontWeight:700, color: isSynced ? "#4A5066" : lvl.color, cursor: isSynced ? "default" : "pointer", marginTop:12 }}>
+                  {isSynced ? "✓ synced — up to date" : `sync chemistry (+${(() => { const newGames = shared.slice(alreadySynced); const newWins = newGames.filter(p => p.p1game.ourScore > p.p1game.theirScore).length; return newWins*5 + newCount*2; })()} xp from ${newCount} new game${newCount!==1?"s":""})`}
+                </button>
+              );
+            })()}
           </div>
         );
       })}
@@ -5828,11 +6138,31 @@ const getSharedGames = (pid1, pid2) => {
               <button onClick={()=>setSelectedDuo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
-              <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:`1px solid ${lvl.color}33`}}>
+         <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:`1px solid ${lvl.color}33`}}>
                 <div style={{fontSize:40,marginBottom:6}}>{lvl.emoji}</div>
                 <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:lvl.color}}>{lvl.label}</div>
                 <div style={{fontSize:12,color:"#4A5066",marginTop:4}}>{chemXP} xp · Lvl {lvl.level}</div>
               </div>
+
+              {(() => {
+                const allTimeShared = getSharedGames(pid1, pid2, true);
+                const badges = getEarnedDuoBadges(allTimeShared, lvl.level);
+                return (
+                  <div style={{ marginBottom:20 }}>
+                    <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:10}}>DUO BADGES · {badges.length}/{DUO_BADGE_DEFS.length}</div>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                      {badges.length === 0 && <div style={{fontSize:12,color:"#4A5066"}}>no badges earned yet</div>}
+                      {badges.map(b => (
+                        <div key={b.id} style={{ background:"#11131F", border:`1px solid ${lvl.color}33`, borderRadius:12, padding:"10px 12px", minWidth:100, textAlign:"center" }}>
+                          <div style={{fontSize:22,marginBottom:4}}>{b.emoji}</div>
+                          <div style={{fontSize:11,fontWeight:700,color:"#E8ECF4"}}>{b.label}</div>
+                          <div style={{fontSize:9,color:"#4A5066",marginTop:3,lineHeight:1.3}}>{b.desc}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>SHARED GAME HISTORY · {sortedShared.length} GAMES</div>
               {sortedShared.length === 0 && <div style={{color:"#4A5066",textAlign:"center",marginTop:30,fontSize:13}}>no shared games logged this week yet</div>}
@@ -6203,7 +6533,7 @@ const TABS=[
       {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
-{tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)}/>}
+{tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule}/>}
  {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
 {tab==="coinflip"&&<CoinFlipTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
 {tab==="race"&&<RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
