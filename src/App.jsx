@@ -569,7 +569,7 @@ function HeatStreakCard({ stats, currentPlayer }) {
   const [expanded, setExpanded] = useState(null);
 
   const mult = todayStreak ? heatMultiplier(todayStreak.peak) : 1;
-  const flames = ["🔥","🔥🔥","🔥🔥🔥","🔥🔥🔥🔥"];
+  const flames = ["♨","♨♨","♨♨♨","♨♨♨♨"];
   const flameIdx = Math.min(3, Math.max(0, todayStreak ? todayStreak.peak - 3 : 0));
 
   return (
@@ -1313,15 +1313,6 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
               );
             })}
           </div>
-
-          <div style={s.streamNote}>
-            <div style={{fontWeight:700,color:"#A78BFA",fontSize:12,marginBottom:4}}>how to stream from console</div>
-            <div style={{fontSize:12.5,color:"#8B92A8",lineHeight:1.5}}>
-              <b style={{color:"#E8ECF4"}}>PS4:</b> share button → broadcast gameplay → twitch → sign in<br/>
-              <b style={{color:"#E8ECF4"}}>Xbox:</b> xbox button → capture & share → stream → twitch → sign in<br/>
-              once you're live, your teammates can watch here without leaving the app.
-            </div>
-          </div>
         </>
       )}
     </div>
@@ -1436,24 +1427,307 @@ function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
     </div></div>
   );
 }
-function SocialTab({ posts, setPosts, currentPlayer, addToast }) {
-  const [composing,setComposing]=useState(false); const [commentingOn,setCommentingOn]=useState(null);
-  const addPost=async(data)=>{ let img=null; if(data.file) img=await uploadPostImage(data.file); const post={id:Date.now().toString(),playerId:currentPlayer,caption:data.caption,image:img,isVideo:data.file?.type?.startsWith("video/"),ts:new Date().toISOString(),hearts:[],comments:[]}; const upd=[post,...posts]; setPosts(upd); await storeSet("posts",upd);
-addToast?.(`${PLAYERS.find(pl=>pl.id===currentPlayer)?.name} posted something`, "📸");
+function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats }) {
+  const [composing, setComposing] = useState(false);
+  const [commentingOn, setCommentingOn] = useState(null);
+  const [subTab, setSubTab] = useState("feed");
+  const [copiedBet, setCopiedBet] = useState(null);
+  const [parlayLegs, setParlayLegs] = useState([]);
+  const [parlayWager, setParlayWager] = useState(10);
+  const [showParlay, setShowParlay] = useState(false);
 
+  const addPost = async (data) => {
+    let img = null;
+    if (data.file) img = await uploadPostImage(data.file);
+    const post = { id: Date.now().toString(), playerId: currentPlayer, caption: data.caption, image: img, isVideo: data.file?.type?.startsWith("video/"), ts: new Date().toISOString(), hearts: [], comments: [] };
+    const upd = [post, ...posts];
+    setPosts(upd);
+    await storeSet("posts", upd);
+    addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name} posted something`, "📸");
   };
-  const toggleHeart=async(postId)=>{ const upd=posts.map((p)=>{if(p.id!==postId)return p; const hearts=p.hearts||[]; return {...p,hearts:hearts.includes(currentPlayer)?hearts.filter((id)=>id!==currentPlayer):[...hearts,currentPlayer]}; }); setPosts(upd); await storeSet("posts",upd); };
-  const addComment=async(postId,text)=>{ const comment={id:Date.now().toString(),playerId:currentPlayer,text,ts:new Date().toISOString()}; const upd=posts.map((p)=>p.id===postId?{...p,comments:[...(p.comments||[]),comment]}:p); setPosts(upd); await storeSet("posts",upd); setCommentingOn((prev)=>prev?upd.find((p)=>p.id===prev.id):prev); };
+
+  const toggleHeart = async (postId) => {
+    const upd = posts.map(p => { if (p.id !== postId) return p; const hearts = p.hearts || []; return { ...p, hearts: hearts.includes(currentPlayer) ? hearts.filter(id => id !== currentPlayer) : [...hearts, currentPlayer] }; });
+    setPosts(upd);
+    await storeSet("posts", upd);
+  };
+
+  const addComment = async (postId, text) => {
+    const comment = { id: Date.now().toString(), playerId: currentPlayer, text, ts: new Date().toISOString() };
+    const upd = posts.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), comment] } : p);
+    setPosts(upd);
+    await storeSet("posts", upd);
+    setCommentingOn(prev => prev ? upd.find(p => p.id === prev.id) : prev);
+  };
+
+  // All bets from teammates (not current player)
+  const teammateBets = (bets || []).filter(b => b.bettorId !== currentPlayer);
+
+  const copyBet = (bet) => {
+    setCopiedBet(bet);
+  };
+
+  const placeCopiedBet = async () => {
+    if (!copiedBet) return;
+    const myPoints = points?.[currentPlayer] || 0;
+    const wager = copiedBet.wager;
+    if (myPoints < wager) return;
+    const newBet = {
+      id: Date.now().toString(),
+      bettorId: currentPlayer,
+      playerId: copiedBet.playerId,
+      playerName: copiedBet.playerName,
+      field: copiedBet.field,
+      line: copiedBet.line,
+      side: copiedBet.side,
+      wager,
+      payout: copiedBet.payout,
+      odds: copiedBet.odds,
+      status: "open",
+      placedAt: new Date().toISOString(),
+      copiedFrom: copiedBet.bettorId,
+    };
+    const newPts = myPoints - wager;
+    const upd = { ...points, [currentPlayer]: newPts };
+    setPoints(upd);
+    await storeSet("points", upd);
+    const updBets = [...(bets || []), newBet];
+    setBets(updBets);
+    await storeSet("bets", updBets);
+    addToast?.("bet copied and placed!", "🎯");
+    setCopiedBet(null);
+  };
+
+  const addParlayLeg = (bet) => {
+    if (parlayLegs.find(l => l.id === bet.id)) {
+      setParlayLegs(prev => prev.filter(l => l.id !== bet.id));
+    } else if (parlayLegs.length < 4) {
+      setParlayLegs(prev => [...prev, bet]);
+    }
+  };
+
+  const parlayMultiplier = parlayLegs.reduce((mult, leg) => {
+    const dec = parseFloat(leg.odds?.replace("+","") || "100");
+    const oddsDecimal = leg.odds?.startsWith("+") ? (dec / 100) + 1 : (100 / Math.abs(dec)) + 1;
+    return mult * oddsDecimal;
+  }, 1);
+
+  const parlayPayout = Math.round(parlayWager * parlayMultiplier);
+
+  const placeParlay = async () => {
+    if (parlayLegs.length < 2) return;
+    const myPoints = points?.[currentPlayer] || 0;
+    if (myPoints < parlayWager) return;
+    const parlayBet = {
+      id: Date.now().toString(),
+      bettorId: currentPlayer,
+      isParlay: true,
+      legs: parlayLegs.map(l => ({ playerId: l.playerId, playerName: l.playerName, field: l.field, line: l.line, side: l.side, odds: l.odds })),
+      wager: parlayWager,
+      payout: parlayPayout,
+      multiplier: parlayMultiplier.toFixed(2),
+      status: "open",
+      placedAt: new Date().toISOString(),
+    };
+    const upd = { ...points, [currentPlayer]: myPoints - parlayWager };
+    setPoints(upd);
+    await storeSet("points", upd);
+    const updBets = [...(bets || []), parlayBet];
+    setBets(updBets);
+    await storeSet("bets", updBets);
+    addToast?.(`${parlayLegs.length}-leg parlay placed!`, "🎰");
+    setParlayLegs([]);
+    setShowParlay(false);
+    setParlayWager(10);
+  };
+
   return (
     <div className="bb-tab-content" style={s.tabContent}>
-      {composing&&<SocialComposer currentPlayer={currentPlayer} onPost={addPost} onClose={()=>setComposing(false)}/>}
-      {commentingOn&&<PostCommentsModal post={commentingOn} onAddComment={addComment} currentPlayer={currentPlayer} onClose={()=>setCommentingOn(null)}/>}
-      <div style={s.sectionRowHeader}>
-        <div style={s.sectionLabel}>team feed</div>
-        <button onClick={()=>setComposing(true)} className="bb-pressable bb-glow-violet" style={s.newPostBtn}><Plus size={14}/> post</button>
+      {composing && <SocialComposer currentPlayer={currentPlayer} onPost={addPost} onClose={() => setComposing(false)} />}
+      {commentingOn && <PostCommentsModal post={commentingOn} onAddComment={addComment} currentPlayer={currentPlayer} onClose={() => setCommentingOn(null)} />}
+
+      {/* Copied bet modal */}
+      {copiedBet && (
+        <div style={s.modalOverlay} onClick={() => setCopiedBet(null)}>
+          <div style={s.modalBox} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div style={s.modalTitle}>copy this bet?</div>
+              <button onClick={() => setCopiedBet(null)} className="bb-pressable" style={s.modalClose}><X size={20} /></button>
+            </div>
+            <div style={{ background: "rgba(184,255,77,0.06)", border: "1px solid rgba(184,255,77,0.2)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#E8ECF4", marginBottom: 6 }}>
+                {copiedBet.playerName} {copiedBet.side} {copiedBet.line} {copiedBet.field}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#8B92A8" }}>
+                <span>wager: <span style={{ color: "#B8FF4D", fontWeight: 700 }}>{copiedBet.wager} pts</span></span>
+                <span>odds: <span style={{ color: "#E8ECF4", fontWeight: 700 }}>{copiedBet.odds}</span></span>
+                <span>to win: <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{copiedBet.payout} pts</span></span>
+              </div>
+              <div style={{ fontSize: 11, color: "#4A5066", marginTop: 8 }}>
+                copied from {PLAYERS.find(p => p.id === copiedBet.bettorId)?.name}
+              </div>
+            </div>
+            <button onClick={placeCopiedBet} disabled={(points?.[currentPlayer] || 0) < copiedBet.wager} className="bb-pressable bb-glow-lime"
+              style={{ ...s.primaryBtn, opacity: (points?.[currentPlayer] || 0) < copiedBet.wager ? 0.4 : 1 }}>
+              {(points?.[currentPlayer] || 0) < copiedBet.wager ? "not enough pts" : `place bet — ${copiedBet.wager} pts`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sub tab switcher */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setSubTab("feed")} className="bb-pressable"
+          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === "feed" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: subTab === "feed" ? "#06070D" : "#8B92A8" }}>
+          📸 feed
+        </button>
+        <button onClick={() => setSubTab("bets")} className="bb-pressable"
+          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === "bets" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: subTab === "bets" ? "#06070D" : "#8B92A8" }}>
+          🎰 bets
+        </button>
       </div>
-      {posts.length===0&&<div style={s.emptyQueue}>no posts yet — share a clip or a funny moment.</div>}
-      {posts.map((post)=><PostCard key={post.id} post={post} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onOpenComments={setCommentingOn}/>)}
+
+      {subTab === "feed" && (
+        <>
+          <div style={s.sectionRowHeader}>
+            <div style={s.sectionLabel}>team feed</div>
+            <button onClick={() => setComposing(true)} className="bb-pressable bb-glow-violet" style={s.newPostBtn}><Plus size={14} /> post</button>
+          </div>
+          {posts.length === 0 && <div style={s.emptyQueue}>no posts yet — share a clip or a funny moment.</div>}
+          {posts.map(post => <PostCard key={post.id} post={post} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onOpenComments={setCommentingOn} />)}
+        </>
+      )}
+
+      {subTab === "bets" && (
+        <>
+          <div style={s.sectionRowHeader}>
+            <div style={s.sectionLabel}>teammate bets</div>
+            <button onClick={() => setShowParlay(v => !v)} className="bb-pressable bb-glow-violet"
+              style={{ ...s.newPostBtn, background: parlayLegs.length > 0 ? "rgba(255,209,102,0.15)" : "rgba(167,139,250,0.12)", borderColor: parlayLegs.length > 0 ? "rgba(255,209,102,0.4)" : "rgba(167,139,250,0.3)", color: parlayLegs.length > 0 ? "#FFD166" : "#A78BFA" }}>
+              🎰 parlay {parlayLegs.length > 0 ? `(${parlayLegs.length} legs)` : ""}
+            </button>
+          </div>
+
+          {/* Parlay builder */}
+          {showParlay && (
+            <div style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 16, border: "1px solid rgba(255,209,102,0.25)" }}>
+              <div style={{ fontSize: 12, color: "#FFD166", fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>PARLAY BUILDER</div>
+              {parlayLegs.length === 0 ? (
+                <div style={{ fontSize: 12, color: "#4A5066", marginBottom: 10 }}>tap + on any bet below to add a leg. up to 4 legs.</div>
+              ) : (
+                <>
+                  {parlayLegs.map((leg, i) => (
+                    <div key={leg.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "8px 10px" }}>
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#E8ECF4" }}>{leg.playerName} {leg.side} {leg.line} {leg.field}</div>
+                        <div style={{ fontSize: 10, color: "#4A5066" }}>{leg.odds}</div>
+                      </div>
+                      <button onClick={() => setParlayLegs(prev => prev.filter((_, idx) => idx !== i))} className="bb-pressable"
+                        style={{ background: "none", border: "none", color: "#FF5C8A", cursor: "pointer" }}><X size={14} /></button>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#4A5066", marginBottom: 4 }}>MULTIPLIER</div>
+                      <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: "#FFD166" }}>{parlayMultiplier.toFixed(2)}x</div>
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#4A5066", marginBottom: 4 }}>WAGER</div>
+                      <input type="number" value={parlayWager} onChange={e => setParlayWager(Math.max(1, Number(e.target.value)))}
+                        style={{ ...s.modalInput, padding: "8px 10px", fontSize: 14 }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#4A5066", marginBottom: 4 }}>TO WIN</div>
+                      <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: "#7CFFB2" }}>{parlayPayout}</div>
+                    </div>
+                  </div>
+                  <button onClick={placeParlay} disabled={parlayLegs.length < 2 || (points?.[currentPlayer] || 0) < parlayWager}
+                    className="bb-pressable bb-glow-lime" style={{ ...s.primaryBtn, marginTop: 12, opacity: parlayLegs.length < 2 || (points?.[currentPlayer] || 0) < parlayWager ? 0.4 : 1 }}>
+                    place {parlayLegs.length}-leg parlay — {parlayWager} pts to win {parlayPayout}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
+          {teammateBets.filter(b => !b.isParlay).length === 0 && (
+            <div style={s.emptyQueue}>no teammate bets yet — check back after someone visits the boost tab.</div>
+          )}
+
+          {teammateBets.filter(b => !b.isParlay).map(bet => {
+            const bettor = PLAYERS.find(p => p.id === bet.bettorId);
+            const subject = PLAYERS.find(p => p.id === bet.playerId);
+            const isInParlay = parlayLegs.find(l => l.id === bet.id);
+            const won = bet.status === "won";
+            const lost = bet.status === "lost";
+            return (
+              <div key={bet.id} style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 10, border: `1px solid ${bet.status === "open" ? "rgba(255,209,102,0.15)" : won ? "rgba(124,255,178,0.15)" : "rgba(255,92,138,0.1)"}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: 99, background: bettor?.color }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: bettor?.color }}>{bettor?.name}</span>
+                  <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt)}</span>
+                  {bet.status !== "open" && (
+                    <span style={{ fontSize: 10, fontWeight: 700, color: won ? "#7CFFB2" : "#FF5C8A", background: won ? "rgba(124,255,178,0.1)" : "rgba(255,92,138,0.1)", padding: "2px 7px", borderRadius: 99 }}>
+                      {won ? "WON" : "LOST"}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#E8ECF4", marginBottom: 6 }}>
+                  {bet.playerName} {bet.side} {bet.line} {bet.field}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8B92A8", marginBottom: 10 }}>
+                  <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
+                  <span>odds <span style={{ color: "#E8ECF4", fontWeight: 700 }}>{bet.odds}</span></span>
+                  <span>to win <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{bet.payout} pts</span></span>
+                </div>
+                {bet.status === "open" && (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => copyBet(bet)} className="bb-pressable bb-glow-lime"
+                      style={{ flex: 1, background: "rgba(184,255,77,0.1)", border: "1px solid rgba(184,255,77,0.3)", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, color: "#B8FF4D", cursor: "pointer" }}>
+                      copy bet
+                    </button>
+                    <button onClick={() => addParlayLeg(bet)} className="bb-pressable"
+                      style={{ width: 42, background: isInParlay ? "#FFD166" : "rgba(255,209,102,0.1)", border: `1px solid ${isInParlay ? "#FFD166" : "rgba(255,209,102,0.3)"}`, borderRadius: 10, fontSize: 16, color: isInParlay ? "#06070D" : "#FFD166", cursor: "pointer" }}>
+                      {isInParlay ? "✓" : "+"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* Teammate parlays */}
+          {teammateBets.filter(b => b.isParlay).length > 0 && (
+            <>
+              <div style={{ ...s.sectionLabel, marginTop: 20, marginBottom: 10 }}>teammate parlays</div>
+              {teammateBets.filter(b => b.isParlay).map(bet => {
+                const bettor = PLAYERS.find(p => p.id === bet.bettorId);
+                const won = bet.status === "won";
+                return (
+                  <div key={bet.id} style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 10, border: "1px solid rgba(167,139,250,0.2)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                      <div style={{ width: 7, height: 7, borderRadius: 99, background: bettor?.color }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: bettor?.color }}>{bettor?.name}</span>
+                      <span style={{ fontSize: 10, color: "#A78BFA", fontWeight: 700, marginLeft: 4 }}>{bet.legs?.length}-leg parlay</span>
+                      <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt)}</span>
+                    </div>
+                    {(bet.legs || []).map((leg, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "#8B92A8", marginBottom: 4 }}>
+                        <span style={{ color: "#E8ECF4", fontWeight: 600 }}>{leg.playerName}</span> {leg.side} {leg.line} {leg.field} <span style={{ color: "#A78BFA" }}>{leg.odds}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 11, color: "#8B92A8" }}>
+                      <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
+                      <span>{bet.multiplier}x multiplier</span>
+                      <span>to win <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{bet.payout} pts</span></span>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </>
+      )}
     </div>
   );
 }
@@ -2302,6 +2576,64 @@ const upd = [...myUpd, ...others];
                       </button>
                     )}
                   </div>
+<div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>BACKGROUNDS</div>
+<div style={{display:"flex",flexDirection:"column",gap:8}}>
+  {[
+    { id:"bg_carbon",   label:"Carbon Fiber",  desc:"dark carbon weave texture",   cost:80,  type:"bg", value:"carbon"  },
+    { id:"bg_spring",   label:"Soft Spring",   desc:"gentle pastel gradient",       cost:80,  type:"bg", value:"spring"  },
+    { id:"bg_aurora",   label:"Aurora",        desc:"shifting northern lights",     cost:100, type:"bg", value:"aurora"  },
+    { id:"bg_midnight", label:"Midnight Oil",  desc:"deep navy shimmer",            cost:100, type:"bg", value:"midnight"},
+    { id:"bg_custom",   label:"Ultimate BG",   desc:"upload your own image",        cost:5000, type:"bg", value:"custom" },
+  ].map(item => {
+    const isOwned = owned.includes(item.id);
+    const isEquipped = equipped[item.id];
+    const canAfford = myPoints >= item.cost;
+    const isCustom = item.value === "custom";
+    const fileRef = useRef(null);
+    return (
+      <div key={item.id} style={{background:isEquipped?"rgba(167,139,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px 14px",border:`1px solid ${isEquipped?"rgba(167,139,250,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
+        <div style={{width:36,height:36,borderRadius:8,flexShrink:0,background:
+          item.value==="carbon"?"repeating-linear-gradient(45deg,#1a1a1a 0px,#1a1a1a 2px,#2a2a2a 2px,#2a2a2a 4px)":
+          item.value==="spring"?"linear-gradient(135deg,#ffd6e7,#c3f0ca,#a8d8ea)":
+          item.value==="aurora"?"linear-gradient(135deg,#0d0221,#00ff87,#60efff)":
+          item.value==="midnight"?"linear-gradient(135deg,#0a0a2e,#1a1a5e,#2d2d8f)":
+          "linear-gradient(135deg,#A78BFA,#FFD166)"
+        }}/>
+        <div style={{flex:1}}>
+          <div style={{fontSize:13,fontWeight:700,color:isOwned?"#A78BFA":"#E8ECF4"}}>{item.label}</div>
+          <div style={{fontSize:10,color:"#4A5066",marginTop:1}}>{item.desc} {item.cost===5000&&"· 5000 pts"}</div>
+        </div>
+        {isOwned ? (
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            {isCustom && isEquipped && (
+              <>
+                <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{
+                  const f=e.target.files?.[0]; if(!f)return;
+                  const url=URL.createObjectURL(f);
+                  const upd={...points,[currentPlayer+"_customBg"]:url};
+                  setPoints(upd); await storeSet("points",upd);
+                }}/>
+                <button onClick={()=>fileRef.current?.click()} className="bb-pressable"
+                  style={{background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,padding:"5px 10px",fontSize:10,fontWeight:700,color:"#A78BFA",cursor:"pointer"}}>
+                  upload
+                </button>
+              </>
+            )}
+            <button onClick={()=>toggleEquip(item.id)} className="bb-pressable"
+              style={{background:isEquipped?"#A78BFA":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+              {isEquipped?"✓ on":"equip"}
+            </button>
+          </div>
+        ) : (
+          <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable"
+            style={{background:canAfford?"rgba(167,139,250,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(167,139,250,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:canAfford?"#A78BFA":"#4A5066",cursor:canAfford?"pointer":"default"}}>
+            {item.cost} pts
+          </button>
+        )}
+      </div>
+    );
+  })}
+</div>
                 );
               })}
             </div>
@@ -2518,7 +2850,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
           const isNext = !unlocked && currentProgress.tier === tier - 1;
 
           let rewardLabel = reward.label || reward.value;
-          let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📛" : reward.type === "car" ? "🏎️" : "🎁";
+          let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "⚗️" : reward.type === "car" ? "🏎️" : "🎁";
 
           return (
             <div key={tier} style={{ background: claimed ? "rgba(184,255,77,0.05)" : unlocked ? "#11131F" : "rgba(255,255,255,0.02)", borderRadius: 13, padding: "12px 14px", border: `1px solid ${claimed ? "rgba(184,255,77,0.2)" : isNext ? "rgba(167,139,250,0.3)" : unlocked ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"}`, display: "flex", alignItems: "center", gap: 12 }}>
@@ -2591,7 +2923,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
                 const reward = getPassRewardForOwnedId(ownedId);
                 if (!reward) return null;
                 const isEquipped = !!equipped[ownedId];
-                const emoji = reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📛" : "🎁";
+                const emoji = reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "⚗️" : "🎁";
                 return (
                   <div key={ownedId} style={{ background: isEquipped ? "rgba(184,255,77,0.06)" : "#11131F", borderRadius: 13, padding: "12px 14px", border: `1px solid ${isEquipped ? "rgba(184,255,77,0.25)" : "rgba(255,255,255,0.06)"}`, display: "flex", alignItems: "center", gap: 12 }}>
                     <span style={{ fontSize: 20 }}>{emoji}</span>
@@ -3238,7 +3570,16 @@ const addToast = (text, icon = "🔔") => {
 heartbeat();
     const hbInterval = setInterval(heartbeat, 30000);
     const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
-      if (key === "chat")           setMessages(value);
+      if (key === "chat") {
+  setMessages(prev => {
+    const newMsgs = value.filter(m => m.playerId !== currentPlayer && !prev.find(p => p.id === m.id));
+    newMsgs.forEach(m => {
+      const sender = PLAYERS.find(pl => pl.id === m.playerId);
+      addToast(`${sender?.name}: ${m.text}`, "💬");
+    });
+    return value;
+  });
+}
       if (key === "posts")          setPosts(value);
       if (key === "completions")    setCompletions(value);
 if (key === "time_logs") setTimeLogs(value);
@@ -3372,7 +3713,18 @@ const badges = {
   };
 
   return (
-<div style={{...s.appShell, background:theme.bg, color:theme.text, animation:"scaleFadeIn .4s cubic-bezier(.2,.8,.2,1)"}}>
+<div style={{...s.appShell, ...(()=>{
+  const eq = points?.[currentPlayer+"_equipped"] || {};
+  const own = points?.[currentPlayer+"_owned"] || [];
+  const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_custom"].includes(id));
+  const customUrl = points?.[currentPlayer+"_customBg"];
+  return bgId==="bg_carbon"?{backgroundImage:"repeating-linear-gradient(45deg,#0e0e0e 0px,#0e0e0e 3px,#1a1a1a 3px,#1a1a1a 6px)"}
+    :bgId==="bg_spring"?{backgroundImage:"linear-gradient(135deg,#1a0a1a,#0a1a12,#0a1220)"}
+    :bgId==="bg_aurora"?{backgroundImage:"linear-gradient(135deg,#040d14,#012a1a,#040818)"}
+    :bgId==="bg_midnight"?{backgroundImage:"linear-gradient(135deg,#04050f,#080830,#04050f)"}
+    :bgId==="bg_custom"&&customUrl?{backgroundImage:`url(${customUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
+    :{background:theme.bg};
+})(), color:theme.text, animation:"scaleFadeIn .4s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
 {theme.id==="starfield" && <StarfieldBg/>}
 {toasts.length > 0 && (
@@ -3431,7 +3783,7 @@ const badges = {
 {tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>}
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-       {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast}/>}
+      {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
 {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)}/>}
