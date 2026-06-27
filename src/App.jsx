@@ -10,7 +10,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const ADMIN_ID = "p1";
 const PLAYERS = [
   { id: "p1", name: "maglvxx",  color: "#B8FF4D", twitch: "" },
- { id: "p2", name: "Apcards5", color: "#4D9EFF", twitch: "" },
+ { id: "p2", name: "apcards5", color: "#4D9EFF", twitch: "" },
   { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "" },
 ];
 
@@ -30,6 +30,33 @@ const WEEKLY_EVENTS = [
   { id:"assist_week", emoji:"🎯", title:"Assist Week", desc:"games with 2+ assists earn bonus pass xp this week.", color:"#A78BFA" },
   { id:"save_week", emoji:"🧤", title:"Save Week", desc:"games with 3+ saves earn bonus pass xp this week.", color:"#4D9EFF" },
 ];
+
+// ===================== Team Chemistry =====================
+const CHEMISTRY_PAIRS = [
+  ["p1","p2"], ["p1","p3"], ["p2","p3"]
+];
+
+function getChemistryKey(a, b) {
+  return [a,b].sort().join("_");
+}
+
+function getChemistryLevel(xp) {
+  if (xp >= 500) return { level:5, label:"Legendary", color:"#FFD166", emoji:"👑" };
+  if (xp >= 300) return { level:4, label:"Elite",     color:"#FF61C1", emoji:"💎" };
+  if (xp >= 150) return { level:3, label:"Solid",     color:"#A78BFA", emoji:"⚡" };
+  if (xp >= 60)  return { level:2, label:"Building",  color:"#4D9EFF", emoji:"🤝" };
+  if (xp >= 10)  return { level:1, label:"Fresh",     color:"#B8FF4D", emoji:"🌱" };
+  return           { level:0, label:"None",     color:"#4A5066", emoji:"💤" };
+}
+
+function getChemistryBonus(xp) {
+  const lvl = getChemistryLevel(xp).level;
+  return {
+    xpBonus:     [0, 0.05, 0.10, 0.15, 0.25, 0.40][lvl],
+    oddsBonus:   [0, 0.02, 0.05, 0.08, 0.12, 0.20][lvl],
+  };
+}
+
 
 const FORCED_EVENT_ID = "double_xp"; // set to null to go back to random weekly rotation
 
@@ -99,6 +126,8 @@ function rankFromMMR(mmr) {
   return `${tier.name}${tier.name === "Supersonic Legend" ? "" : " "+["I","II","III","IV"][div-1]}`;
 }
 
+
+
 // ===================== SyncOverlay =====================
 function SyncOverlay({ onDone, label }) {
   const [progress, setProgress] = useState(0);
@@ -138,8 +167,8 @@ function GlobalStyles() {
 @keyframes scaleFadeIn { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
 @keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
       * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-      html, body { margin:0; padding:0; height:100%; overflow:hidden; }
-      #root { height:100%; }
+    html, body { margin:0; padding:0; height:100%; min-height:-webkit-fill-available; overflow:hidden; background:#06070D; }
+#root { height:100%; min-height:-webkit-fill-available; }
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
@@ -697,47 +726,44 @@ function CoachNoteCard({ stats, currentPlayer, onJumpToLog }) {
 }
 // ===================== Heat Streak =====================
 function getNightStreaks(stats) {
-  const wins = stats
-    .filter(g => g.mode === "3v3" && g.ourScore > g.theirScore)
+  const todayDk = dateKey(todayAtMidnight());
+
+  // only look at TODAY's 3v3 games
+  const todayGames = stats
+    .filter(g => g.mode === "3v3" && dateKey(new Date(g.ts)) === todayDk)
     .sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
-  const byDay = {};
-  wins.forEach(g => {
-    const dk = dateKey(new Date(g.ts));
-    if (!byDay[dk]) byDay[dk] = [];
-    byDay[dk].push(g);
+  if (!todayGames.length) return [];
+
+  // group by timestamp into "slots" (games played at same moment)
+  const slotMap = {};
+  todayGames.forEach(g => {
+    if (!slotMap[g.ts]) slotMap[g.ts] = [];
+    slotMap[g.ts].push(g);
   });
 
-  const streaks = [];
-  Object.entries(byDay).forEach(([dk, games]) => {
-    const allGames = stats
-      .filter(g => g.mode === "3v3" && dateKey(new Date(g.ts)) === dk)
-      .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+  const slots = Object.entries(slotMap)
+    .sort((a, b) => new Date(a[0]) - new Date(b[0]))
+    .map(([ts, games]) => ({ ts, games }));
 
-    const uniqueTimes = [...new Set(allGames.map(g => g.ts))].sort();
-    let consecutive = 0;
-    let streakGames = [];
+  // find the current win streak from the most recent games
+  let streak = 0;
+  const streakGames = [];
 
-    uniqueTimes.forEach(ts => {
-      const gamesAtTime = allGames.filter(g => g.ts === ts);
-      const isWin = gamesAtTime.some(g => g.ourScore > g.theirScore);
-      if (isWin) {
-        consecutive++;
-        streakGames.push({ ts, games: gamesAtTime });
-      } else {
-        if (consecutive >= 3) {
-          streaks.push({ dk, games: streakGames, peak: consecutive });
-        }
-        consecutive = 0;
-        streakGames = [];
-      }
-    });
-    if (consecutive >= 3) {
-      streaks.push({ dk, games: streakGames, peak: consecutive });
+  for (let i = slots.length - 1; i >= 0; i--) {
+    const slot = slots[i];
+    const isWin = slot.games.some(g => g.ourScore > g.theirScore);
+    if (isWin) {
+      streak++;
+      streakGames.unshift(slot);
+    } else {
+      break;
     }
-  });
+  }
 
-  return streaks.sort((a, b) => new Date(b.dk) - new Date(a.dk));
+  if (streak < 1) return [];
+
+  return [{ dk: todayDk, games: streakGames, peak: streak }];
 }
 
 function heatMultiplier(wins) {
@@ -749,110 +775,136 @@ function heatMultiplier(wins) {
 }
 
 function HeatStreakCard({ stats, currentPlayer }) {
-  const todayDk = dateKey(todayAtMidnight());
-  const allStreaks = getNightStreaks(stats);
-  const todayStreak = allStreaks.find(s => s.dk === todayDk);
-  const history = allStreaks.filter(s => s.dk !== todayDk);
-  const [expanded, setExpanded] = useState(null);
+  const [selectedGame, setSelectedGame] = useState(null);
 
-  const mult = todayStreak ? heatMultiplier(todayStreak.peak) : 1;
-  const flames = ["♨","♨♨","♨♨♨","♨♨♨♨"];
-  const flameIdx = Math.min(3, Math.max(0, todayStreak ? todayStreak.peak - 3 : 0));
+  const todayDk = dateKey(todayAtMidnight());
+  const streaks = getNightStreaks(stats);
+  const todayStreak = streaks[0];
+
+  if (!todayStreak || todayStreak.games.length === 0) {
+    return (
+      <div style={{ background: "#11131F", borderRadius: 14, padding: "18px 16px", border: "1px solid rgba(255,140,50,0.1)", textAlign: "center" }}>
+        <div style={{ fontSize: 28, marginBottom: 8 }}>♨️</div>
+        <div style={{ fontSize: 13, color: "#4A5066" }}>no wins yet today — start a streak</div>
+      </div>
+    );
+  }
+
+  const mult = heatMultiplier(todayStreak.peak);
+  const flameEmojis = "🔥".repeat(Math.min(todayStreak.peak, 8));
+console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", todayStreak.peak);
 
   return (
-    <div style={{ marginBottom: 20 }}>
-      {todayStreak && (
-        <div style={{ background: "linear-gradient(135deg,#1A0A00,#2A1000)", border: "1px solid rgba(255,140,50,0.4)", borderRadius: 18, padding: "16px", marginBottom: 14, boxShadow: "0 0 24px rgba(255,140,50,0.15)" }}>
-          <div style={{ fontSize: 11, color: "#FF8C32", fontWeight: 700, letterSpacing: 1, marginBottom: 6 }}>HEAT STREAK — TONIGHT {flames[flameIdx]}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 32, fontWeight: 700, color: "#FF8C32" }}>{todayStreak.peak}<span style={{ fontSize: 14, color: "#8B92A8", marginLeft: 6 }}>wins</span></div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 24, fontWeight: 700, color: "#FFD166" }}>{mult}x</div>
-              <div style={{ fontSize: 10, color: "#8B92A8" }}>pass xp bonus</div>
+    <>
+      {/* Game detail overlay */}
+      {selectedGame && (
+        <div
+          onClick={() => setSelectedGame(null)}
+          style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(4,8,24,0.92)", display: "flex", alignItems: "center", justifyContent: "center", animation: "chatFadeIn .2s ease", padding: "0 20px" }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: "linear-gradient(135deg,#11131F,#0C0E18)", borderRadius: 22, padding: "24px 20px", width: "100%", maxWidth: 380, border: "1px solid rgba(255,140,50,0.3)", animation: "scaleFadeIn .25s cubic-bezier(.2,.8,.2,1)" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <div style={{ fontSize: 11, color: "#FF8C32", fontWeight: 700, letterSpacing: 1 }}>GAME DETAIL</div>
+              <button onClick={() => setSelectedGame(null)} style={{ background: "none", border: "none", color: "#4A5066", cursor: "pointer", fontSize: 18 }}>✕</button>
             </div>
-          </div>
-          {todayStreak.games.map((slot, i) => {
-            const rep = slot.games[0];
-            const won = rep.ourScore > rep.theirScore;
-            return (
-              <div key={i} style={{ background: "rgba(255,140,50,0.06)", borderRadius: 11, padding: "10px 12px", marginBottom: 6, border: "1px solid rgba(255,140,50,0.15)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                  <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 16, fontWeight: 700 }}>{rep.ourScore}–{rep.theirScore}</div>
-                  <div style={{ fontSize: 10, color: won ? "#7CFFB2" : "#FF5C8A", fontWeight: 700 }}>W · game {i + 1}</div>
-                </div>
-                {PLAYERS.map(p => {
-                  const pg = slot.games.find(g => g.playerId === p.id);
-                  return (
-                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                      <div style={{ width: 6, height: 6, borderRadius: 99, background: pg ? p.color : "#2E3346", flexShrink: 0 }} />
-                      <span style={{ fontSize: 11, fontWeight: 700, color: pg ? p.color : "#4A5066", width: 70 }}>{p.name}</span>
-                      {pg ? (
-                        <span style={{ fontSize: 11, color: "#8B92A8" }}>{pg.goals}g {pg.assists}a {pg.saves}sv {pg.demos}dm</span>
-                      ) : (
-                        <span style={{ fontSize: 11, color: "#4A5066", fontStyle: "italic" }}>didn't log</span>
-                      )}
+            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 42, fontWeight: 700, textAlign: "center", marginBottom: 6, color: "#E8ECF4" }}>
+  {selectedGame.games[0]?.ourScore} – {selectedGame.games[0]?.theirScore}
+</div>
+            <div style={{ textAlign: "center", fontSize: 11, color: "#7CFFB2", fontWeight: 700, marginBottom: 20 }}>WIN · {heatMultiplier(selectedGame.gameNum)}x xp</div>
+            {PLAYERS.map(p => {
+              const pg = selectedGame.games.find(g => g.playerId === p.id);
+              return (
+                <div key={p.id} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 13, padding: "12px 14px", marginBottom: 8, border: `1px solid ${pg ? p.color + "33" : "rgba(255,255,255,0.04)"}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: pg ? 10 : 0 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: 99, background: pg ? p.color : "#2E3346" }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: pg ? p.color : "#4A5066" }}>{p.name}</span>
+                    {!pg && <span style={{ fontSize: 11, color: "#4A5066", fontStyle: "italic" }}>didn't log</span>}
+                  </div>
+                  {pg && (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
+                      {[["goals", pg.goals], ["assists", pg.assists], ["saves", pg.saves], ["shots", pg.shots], ["demos", pg.demos]].map(([label, val]) => (
+                        <div key={label} style={{ textAlign: "center", background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: "6px 2px" }}>
+                          <div style={{ fontSize: 9, color: "#4A5066", fontWeight: 700, marginBottom: 3, textTransform: "uppercase" }}>{label}</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: p.color }}>{val}</div>
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-            );
-          })}
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {history.length > 0 && (
-        <>
-          <div style={{ fontSize: 12, letterSpacing: 1, color: "#4A5066", fontWeight: 700, marginBottom: 10 }}>PAST HEAT STREAKS</div>
-          {history.map((streak, si) => {
-            const isOpen = expanded === si;
-            const m = heatMultiplier(streak.peak);
+      {/* Main streak card */}
+      <div style={{ background: "linear-gradient(135deg,#1A0A00,#2A1000)", border: "1px solid rgba(255,140,50,0.4)", borderRadius: 18, padding: "16px", boxShadow: "0 0 24px rgba(255,140,50,0.12)" }}>
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#FF8C32", fontWeight: 700, letterSpacing: 1, marginBottom: 4 }}>TONIGHT'S STREAK</div>
+            <div style={{ fontSize: 22, letterSpacing: 2 }}>{flameEmojis}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 28, fontWeight: 700, color: "#FF8C32" }}>
+              {todayStreak.peak}
+              <span style={{ fontSize: 13, color: "#8B92A8", marginLeft: 6 }}>wins</span>
+            </div>
+            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 20, fontWeight: 700, color: "#FFD166" }}>{mult}x</div>
+            <div style={{ fontSize: 10, color: "#8B92A8" }}>pass xp bonus</div>
+          </div>
+        </div>
+
+        {/* Game list — only tonight's streak games */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {todayStreak.games.map((slot, i) => {
+            const rep = slot.games[0];
+            const gameNum = i + 1;
             return (
-              <div key={si} style={{ background: "#11131F", borderRadius: 14, marginBottom: 8, border: "1px solid rgba(255,140,50,0.15)", overflow: "hidden" }}>
-                <button onClick={() => setExpanded(isOpen ? null : si)} className="bb-pressable" style={{ width: "100%", background: "none", border: "none", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
-                  <div style={{ textAlign: "left" }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#FF8C32" }}>{new Date(streak.dk + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })} 🔥</div>
-                    <div style={{ fontSize: 11, color: "#8B92A8", marginTop: 2 }}>{streak.peak} win streak · peak {m}x xp</div>
+              <button
+                key={i}
+                onClick={() => setSelectedGame({ ...slot, gameNum })}
+                className="bb-pressable"
+                style={{ background: "rgba(255,140,50,0.06)", borderRadius: 12, padding: "10px 12px", border: "1px solid rgba(255,140,50,0.15)", textAlign: "left", cursor: "pointer", width: "100%" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 14 }}>{"🔥".repeat(Math.min(gameNum, 5))}</span>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: "#E8ECF4" }}>{rep.ourScore}–{rep.theirScore}</div>
                   </div>
-                  <ChevronRight size={15} color="#4A5066" style={{ transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
-                </button>
-                {isOpen && (
-                  <div style={{ padding: "0 14px 14px" }}>
-                    {streak.games.map((slot, i) => {
-                      const rep = slot.games[0];
-                      return (
-                        <div key={i} style={{ background: "rgba(255,140,50,0.04)", borderRadius: 10, padding: "10px 12px", marginBottom: 6, border: "1px solid rgba(255,140,50,0.1)" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                            <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700 }}>{rep.ourScore}–{rep.theirScore}</div>
-                            <div style={{ fontSize: 10, color: "#7CFFB2", fontWeight: 700 }}>W · game {i + 1} · {heatMultiplier(i + 3)}x</div>
-                          </div>
-                          {PLAYERS.map(p => {
-                            const pg = slot.games.find(g => g.playerId === p.id);
-                            return (
-                              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
-                                <div style={{ width: 6, height: 6, borderRadius: 99, background: pg ? p.color : "#2E3346", flexShrink: 0 }} />
-                                <span style={{ fontSize: 11, fontWeight: 700, color: pg ? p.color : "#4A5066", width: 70 }}>{p.name}</span>
-                                {pg ? (
-                                  <span style={{ fontSize: 11, color: "#8B92A8" }}>{pg.goals}g {pg.assists}a {pg.saves}sv {pg.demos}dm</span>
-                                ) : (
-                                  <span style={{ fontSize: 11, color: "#4A5066", fontStyle: "italic" }}>didn't log</span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ fontSize: 10, color: "#FFD166", fontWeight: 700 }}>{heatMultiplier(gameNum)}x xp</div>
+                    <div style={{ fontSize: 10, color: "#7CFFB2", fontWeight: 700 }}>W #{gameNum}</div>
                   </div>
-                )}
-              </div>
+                </div>
+                {/* Mini player row */}
+                <div style={{ display: "flex", gap: 10 }}>
+                  {PLAYERS.map(p => {
+                    const pg = slot.games.find(g => g.playerId === p.id);
+                    return (
+                      <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <div style={{ width: 5, height: 5, borderRadius: 99, background: pg ? p.color : "#2E3346", flexShrink: 0 }} />
+                        {pg ? (
+                          <span style={{ fontSize: 10, color: "#8B92A8" }}>{pg.goals}g {pg.assists}a {pg.saves}sv</span>
+                        ) : (
+                          <span style={{ fontSize: 10, color: "#3A4256", fontStyle: "italic" }}>—</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 9, color: "#4A5066", marginTop: 4 }}>tap to expand →</div>
+              </button>
             );
           })}
-        </>
-      )}
-    </div>
+        </div>
+      </div>
+    </>
   );
-}
-      function TimePlayedTracker({ stats, currentPlayer, timeLogs, setTimeLogs }) {
+}  function TimePlayedTracker({ stats, currentPlayer, timeLogs, setTimeLogs }) {
   const [logging, setLogging] = useState(false);
   const [hours1v1, setHours1v1] = useState("");
   const [hours2v2, setHours2v2] = useState("");
@@ -1098,6 +1150,7 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
 function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
+ const [heatOpen, setHeatOpen] = useState(false);
   const nextMatch = allMatches.find((m)=>!m.result);
   const [showTeamComparison, setShowTeamComparison] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
@@ -1181,7 +1234,17 @@ return (
       </div>
 
       <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
-      <HeatStreakCard stats={stats} currentPlayer={currentPlayer} />
+<div style={{ marginBottom: 16 }}>
+  <button onClick={() => setHeatOpen(v => !v)} className="bb-pressable"
+    style={{ width: "100%", background: "#11131F", border: "1px solid rgba(255,140,50,0.2)", borderRadius: 14, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: heatOpen ? 8 : 0 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span style={{ fontSize: 16 }}>♨️</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#FF8C32" }}>heat streaks</span>
+    </div>
+    <ChevronRight size={15} color="#4A5066" style={{ transform: heatOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
+  </button>
+  {heatOpen && <HeatStreakCard stats={stats} currentPlayer={currentPlayer} />}
+</div>
       <TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
       <button onClick={()=>setShowTeamComparison(true)} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -1585,8 +1648,20 @@ function ChatMessage({ msg, isMe, onReact }) {
     </div>
   );
 }
-function ChatTab({ messages, setMessages, currentPlayer, addToast }) {
+function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus, setTypingStatus }) {
   const [text, setText] = useState("");
+  useEffect(() => {
+    if (!text.trim()) {
+      const upd = { ...typingStatus };
+      delete upd[currentPlayer];
+      setTypingStatus(upd);
+      storeSet("typing", upd);
+      return;
+    }
+    const upd = { ...typingStatus, [currentPlayer]: new Date().toISOString() };
+    setTypingStatus(upd);
+    storeSet("typing", upd);
+  }, [text]);            
   const scrollRef = useRef(null);
   useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
 
@@ -1614,6 +1689,18 @@ function ChatTab({ messages, setMessages, currentPlayer, addToast }) {
       <div style={s.chatScroll}>
         {messages.length === 0 && <div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
         {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} />)}
+{(() => {
+  const typers = Object.entries(typingStatus)
+    .filter(([pid, ts]) => pid !== currentPlayer && Date.now() - new Date(ts).getTime() < 4000)
+    .map(([pid]) => PLAYERS.find(p => p.id === pid)?.name)
+    .filter(Boolean);
+  if (!typers.length) return null;
+  return (
+    <div style={{ padding: "4px 8px 8px", fontSize: 11.5, color: "#4A5066", fontStyle: "italic", animation: "fadeSlideUp .2s ease" }}>
+      {typers.join(", ")} {typers.length === 1 ? "is" : "are"} typing...
+    </div>
+  );
+})()}
         <div ref={scrollRef} />
       </div>
       <div style={s.chatInputRow}>
@@ -2333,25 +2420,80 @@ starfield: {
     swatch: "radial-gradient(circle at 30% 40%,#7EB8FF 0%,#040818 70%)",
   },
 };
+
+const FLOWER_TYPES = [
+  { id: "rose",       emoji: "🌹", label: "Rose",       xp: 20, desc: "legendary play" },
+  { id: "sunflower",  emoji: "🌻", label: "Sunflower",  xp: 15, desc: "great assist" },
+  { id: "tulip",      emoji: "🌷", label: "Tulip",      xp: 10, desc: "nice save" },
+  { id: "daisy",      emoji: "🌼", label: "Daisy",      xp: 5,  desc: "solid effort" },
+];
+
+function getDailyShopSeed() {
+  const now = new Date();
+  const noon = new Date(now);
+  noon.setHours(12, 0, 0, 0);
+  if (now < noon) noon.setDate(noon.getDate() - 1);
+  return noon.getTime();
+}
+
+function getDailyShopItems() {
+  const seed = getDailyShopSeed();
+  const allIds = SHOP_ITEMS.map(i => i.id);
+  let h = seed;
+  const shuffled = [...SHOP_ITEMS].map((item, i) => {
+    h = ((h * 1664525 + 1013904223) + i * 7919) & 0xffffffff;
+    return { item, sort: Math.abs(h) };
+  }).sort((a, b) => a.sort - b.sort).map(x => x.item);
+  return shuffled.slice(0, 12);
+}
+
+function getTimeUntilNextShop() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(12, 0, 0, 0);
+  if (now >= next) next.setDate(next.getDate() + 1);
+  return next.getTime() - now.getTime();
+}
+
 const SHOP_ITEMS = [
-  { id:"lime_name",   label:"Lime",   desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
-  { id:"pink_name",   label:"Pink",   desc:"hot pink name glow",     cost:50,  type:"color", value:"#FF61C1", emoji:"🩷" },
-  { id:"violet_name", label:"Violet", desc:"violet name glow",       cost:50,  type:"color", value:"#A78BFA", emoji:"💜" },
-  { id:"gold_name",   label:"Gold",   desc:"gold name glow",         cost:75,  type:"color", value:"#FFD166", emoji:"🌟" },
-  { id:"icon_car",    label:"Car",    desc:"rocket car by your name", cost:60,  type:"icon",  value:"🏎️",     emoji:"🏎️" },
-  { id:"icon_fire",   label:"Fire",   desc:"you're on fire",         cost:60,  type:"icon",  value:"🔥",     emoji:"🔥" },
-  { id:"icon_crown",  label:"Crown",  desc:"for winners only",       cost:100, type:"icon",  value:"👑",     emoji:"👑" },
-  { id:"icon_goat",   label:"GOAT",   desc:"greatest of all time",   cost:80,  type:"icon",  value:"🐐",     emoji:"🐐" },
-  { id:"icon_bolt",   label:"Bolt",   desc:"fastest on the team",    cost:70,  type:"icon",  value:"⚡",     emoji:"⚡" },
-  { id:"icon_alien",  label:"Alien",  desc:"not of this world",      cost:90,  type:"icon",  value:"👾",     emoji:"👾" },
-  { id:"title_demogod",            cost:60,  type:"title", value:"demo god",            },
-  { id:"title_petty",         cost:60,  type:"title", value:"petty player",        },
-  { id:"title_scallions",  cost:100, type:"title", value:"scanlons scallions",  },
-  { id:"title_lonely",       cost:70,  type:"title", value:"the lonely girl",     },
-  { id:"title_powershot",     cost:75,  type:"title", value:"powershot pimp",      },
-  { id:"title_saved",          cost:65,  type:"title", value:"saved the day",       },
-  { id:"title_rule69",          cost:69,  type:"title", value:"rule 69",             },
-{ id:"title_buffalo",          cost:200,  type:"title", value:"buffalo burton",             },
+  // colors
+  { id:"lime_name",   label:"lime",     desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
+  { id:"pink_name",   label:"pink",     desc:"hot pink name glow",     cost:50,  type:"color", value:"#FF61C1", emoji:"🩷" },
+  { id:"violet_name", label:"violet",   desc:"violet name glow",       cost:50,  type:"color", value:"#A78BFA", emoji:"💜" },
+  { id:"gold_name",   label:"gold",     desc:"gold name glow",         cost:75,  type:"color", value:"#FFD166", emoji:"🌟" },
+  { id:"red_name",    label:"red",      desc:"hot red name glow",      cost:75,  type:"color", value:"#FF5C8A", emoji:"❤️" },
+  { id:"teal_name",   label:"teal",     desc:"neon teal name glow",    cost:75,  type:"color", value:"#00FFD0", emoji:"🩵" },
+  { id:"orange_name", label:"orange",   desc:"burnt orange name glow", cost:75,  type:"color", value:"#FF8C42", emoji:"🟠" },
+  { id:"blue_name",   label:"blue",     desc:"electric blue name glow",cost:50,  type:"color", value:"#4D9EFF", emoji:"🔵" },
+  // icons
+  { id:"frog",        label:"frog",                  cost:60,  type:"icon",  value:"🐸",     emoji:"🐸" },
+  { id:"icon_fire",   label:"fire",            cost:60,  type:"icon",  value:"🔥",     emoji:"🔥" },
+  { id:"icon_crown",  label:"crown",         cost:100, type:"icon",  value:"👑",     emoji:"👑" },
+  { id:"icon_goat",   label:"GOAT",       cost:80,  type:"icon",  value:"🐐",     emoji:"🐐" },
+  { id:"icon_bolt",   label:"bolt",        cost:70,  type:"icon",  value:"⚡",     emoji:"⚡" },
+  { id:"icon_alien",  label:"alien",        cost:90,  type:"icon",  value:"👾",     emoji:"👾" },
+  { id:"icon_rocket", label:"rocket",                cost:65,  type:"icon",  value:"🚀",     emoji:"🚀" },
+  { id:"icon_skull",  label:"nailed it",           cost:70,  type:"icon",  value:"💅",     emoji:"💀" },
+  { id:"icon_diamond",label:"diamond",         cost:80,  type:"icon",  value:"💎",     emoji:"💎" },
+  { id:"icon_ghost",  label:"ghost",         cost:60,  type:"icon",  value:"👻",     emoji:"👻" },
+  { id:"icon_wolf",   label:"wolf",            cost:75,  type:"icon",  value:"🐺",     emoji:"🐺" },
+  { id:"icon_dragon", label:"dragon",             cost:90,  type:"icon",  value:"🐉",     emoji:"🐉" },
+  { id:"icon_swords", label:"swords",               cost:70,  type:"icon",  value:"⚔️",     emoji:"⚔️" },
+  { id:"icon_target", label:"target",             cost:65,  type:"icon",  value:"🎯",     emoji:"🎯" },
+  { id:"icon_snake",  label:"snake",        cost:70,  type:"icon",  value:"🐍",     emoji:"🐍" },
+  { id:"icon_bat",    label:"bat",      cost:60,  type:"icon",  value:"🦇",     emoji:"🦇" },
+  { id:"icon_tiger",  label:"tiger",                 cost:80,  type:"icon",  value:"🐯",     emoji:"🐯" },
+  { id:"icon_shark",  label:"shark",          cost:85,  type:"icon",  value:"🦈",     emoji:"🦈" },
+  // titles
+  { id:"title_demogod",    cost:60,  type:"title", value:"demo god"            },
+  { id:"title_petty",      cost:60,  type:"title", value:"petty player"        },
+  { id:"title_scallions",  cost:100, type:"title", value:"scanlons scallions"  },
+  { id:"title_lonely",     cost:70,  type:"title", value:"the lonely girl"     },
+  { id:"title_powershot",  cost:75,  type:"title", value:"powershot pimp"      },
+  { id:"title_saved",      cost:65,  type:"title", value:"saved the day"       },
+  { id:"title_rule69",     cost:69,  type:"title", value:"rule 69"             },
+  { id:"title_buffalo",    cost:200, type:"title", value:"buffalo burton"      },
+
 ];
 const DAILY_SPINS_MAX = 3;
 const DAILY_SLOTS_MAX = 3;
@@ -2424,7 +2566,7 @@ const PREMIUM_PASS_REWARDS = {
   6:  { type:"title",  value:"the menace", label:"the menace" },
   7:  { type:"coins",  value:30,  label:"+30 pts" },
   8:  { type:"token",  value:"double_xp", label:"double xp token" },
-  9:  { type:"icon",   value:"🎯", label:"target icon" },
+  9:  { type:"icon",   value:"💩", label:"poop icon" },
   10: { type:"title",  value:"heat seeker", label:"heat seeker" },
   11: { type:"coins",  value:35,  label:"+35 pts" },
   12: { type:"icon",   value:"🛸", label:"ufo icon" },
@@ -2604,10 +2746,20 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
     </div>
   );
 }
-function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab }) {
+function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
+const [showFlowers, setShowFlowers] = useState(false);
+const [shopCountdown, setShopCountdown] = useState(getTimeUntilNextShop());
+const dailyShopItems = getDailyShopItems();
+
+useEffect(() => {
+  const iv = setInterval(() => setShopCountdown(getTimeUntilNextShop()), 1000);
+  return () => clearInterval(iv);
+}, []);
+const [flowerTarget, setFlowerTarget] = useState(null);
+const [selectedFlower, setSelectedFlower] = useState(null);
 const [showPass, setShowPass] = useState(false);
 const customBgFileRef = useRef(null);
 
@@ -2680,6 +2832,7 @@ const toggleEquip = async (itemId) => {
           <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
 <button onClick={()=>{ if(passPremium?.[currentPlayer]) setTab("garage"); else setShowPass(v=>!v); }} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
           <button onClick={()=>setShowRecap(v=>!v)} className="bb-pressable" style={{background:"rgba(255,209,102,0.1)",border:"1px solid rgba(255,209,102,0.3)",borderRadius:10,padding:"8px 12px",color:"#FFD166",fontSize:12,fontWeight:700,cursor:"pointer"}}>📊 recap</button>
+<button onClick={() => setShowFlowers(v => !v)} className="bb-pressable" style={{ background: "rgba(255,97,193,0.1)", border: "1px solid rgba(255,97,193,0.3)", borderRadius: 10, padding: "8px 12px", color: "#FF61C1", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🌸 props</button>
         </div>
       </div>
 
@@ -2718,6 +2871,74 @@ const toggleEquip = async (itemId) => {
           <div style={{fontSize:11,color:"#4A5066",marginTop:8}}>jackpot: +50 pts awarded sunday night to each category leader</div>
         </div>
       )}
+
+{showFlowers && (
+  <div style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 16, border: "1px solid rgba(255,97,193,0.2)" }}>
+    <div style={{ fontSize: 12, color: "#FF61C1", fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>SEND PROPS 🌸</div>
+    <div style={{ fontSize: 11, color: "#4A5066", marginBottom: 12 }}>choose a teammate and send them xp from your own stash</div>
+    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      {PLAYERS.filter(p => p.id !== currentPlayer).map(p => (
+        <button key={p.id} onClick={() => setFlowerTarget(p.id)} className="bb-pressable"
+          style={{ flex: 1, background: flowerTarget === p.id ? p.color : "rgba(255,255,255,0.05)", border: `1px solid ${flowerTarget === p.id ? p.color : "rgba(255,255,255,0.08)"}`, borderRadius: 10, padding: "9px 0", fontSize: 11, fontWeight: 700, color: flowerTarget === p.id ? "#06070D" : "#8B92A8", cursor: "pointer" }}>
+          {p.name}
+        </button>
+      ))}
+    </div>
+    {flowerTarget && (
+      <>
+        <div style={{ fontSize: 11, color: "#4A5066", fontWeight: 700, marginBottom: 8 }}>PICK A FLOWER</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          {FLOWER_TYPES.map(f => (
+            <button key={f.id} onClick={() => setSelectedFlower(f.id)} className="bb-pressable"
+              style={{ flex: 1, background: selectedFlower === f.id ? "rgba(255,97,193,0.2)" : "rgba(255,255,255,0.03)", border: `1px solid ${selectedFlower === f.id ? "#FF61C1" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, padding: "10px 4px", textAlign: "center", cursor: "pointer" }}>
+              <div style={{ fontSize: 22 }}>{f.emoji}</div>
+              <div style={{ fontSize: 9, color: "#E8ECF4", fontWeight: 700, marginTop: 3 }}>{f.label}</div>
+              <div style={{ fontSize: 9, color: "#FF61C1", fontWeight: 700 }}>{f.xp} xp</div>
+            </button>
+          ))}
+        </div>
+        {selectedFlower && (() => {
+          const flower = FLOWER_TYPES.find(f => f.id === selectedFlower);
+          const myXP = passXP?.[currentPlayer] || 0;
+          const canAfford = myXP >= flower.xp;
+          return (
+            <button onClick={async () => {
+              if (!canAfford) return;
+              const updXP = {
+                ...passXP,
+                [currentPlayer]: myXP - flower.xp,
+                [flowerTarget]: (passXP?.[flowerTarget] || 0) + flower.xp,
+              };
+              setPassXP(updXP);
+              await storeSet("pass_xp", updXP);
+              const updFlowers = [...(flowers || []), { id: Date.now().toString(), from: currentPlayer, to: flowerTarget, flower: flower.id, emoji: flower.emoji, xp: flower.xp, ts: new Date().toISOString() }];
+              setFlowers(updFlowers);
+              await storeSet("flowers", updFlowers);
+              addToast?.(`${flower.emoji} sent ${flower.label} to ${PLAYERS.find(p => p.id === flowerTarget)?.name} — ${flower.xp} xp`, "🌸");
+              setSelectedFlower(null); setFlowerTarget(null);
+            }} disabled={!canAfford} className="bb-pressable bb-glow-lime"
+              style={{ width: "100%", background: canAfford ? "#FF61C1" : "rgba(255,255,255,0.04)", border: "none", borderRadius: 10, padding: "12px 0", fontSize: 12.5, fontWeight: 700, color: canAfford ? "#06070D" : "#4A5066", cursor: canAfford ? "pointer" : "default" }}>
+              {canAfford ? `send ${flower.emoji} — costs you ${flower.xp} xp` : `not enough xp (need ${flower.xp})`}
+            </button>
+          );
+        })()}
+      </>
+    )}
+    {(flowers || []).filter(f => f.to === currentPlayer).length > 0 && (
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontSize: 10, color: "#4A5066", fontWeight: 700, marginBottom: 8 }}>RECEIVED</div>
+        {[...(flowers || [])].filter(f => f.to === currentPlayer).reverse().slice(0, 5).map(f => (
+          <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, fontSize: 12, color: "#8B92A8" }}>
+            <span style={{ fontSize: 18 }}>{f.emoji}</span>
+            <span style={{ color: "#E8ECF4", fontWeight: 700 }}>{PLAYERS.find(p => p.id === f.from)?.name}</span>
+            <span>sent you a {FLOWER_TYPES.find(fl => fl.id === f.flower)?.label}</span>
+            <span style={{ marginLeft: "auto", color: "#FF61C1", fontWeight: 700 }}>+{f.xp} xp</span>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
 {/* Burton Pass */}
       {showPass && (
         <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(167,139,250,0.2)"}}>
@@ -2779,12 +3000,17 @@ const toggleEquip = async (itemId) => {
       {/* Shop */}
       {showShop && (
         <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(184,255,77,0.15)"}}>
-          <div style={{fontSize:12,color:"#B8FF4D",fontWeight:700,letterSpacing:0.5,marginBottom:4}}>SHOP</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+  <div style={{ fontSize: 12, color: "#B8FF4D", fontWeight: 700, letterSpacing: 0.5 }}>DAILY SHOP</div>
+  <div style={{ fontSize: 10, color: "#4A5066", fontWeight: 700 }}>
+    🕐 resets in {String(Math.floor(shopCountdown / 3600000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 3600000) / 60000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 60000) / 1000)).padStart(2,"0")}
+  </div>
+</div>
           <div style={{fontSize:11,color:"#4A5066",marginBottom:12}}>earn pts by logging games (+10) and getting training approved (+15). weekly stat leaders get +50 jackpot.</div>
           <div style={{marginBottom:10}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8}}>NAME COLORS</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-              {SHOP_ITEMS.filter(i=>i.type==="color").map(item=>{
+              {dailyShopItems.filter(i=>i.type==="color").map(item=>{
                 const isOwned=owned.includes(item.id);
                 const isEquipped=equipped[item.id];
                 const canAfford=myPoints>=item.cost;
@@ -2809,7 +3035,7 @@ const toggleEquip = async (itemId) => {
             </div>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8}}>ICONS</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-              {SHOP_ITEMS.filter(i=>i.type==="icon").map(item=>{
+              {dailyShopItems.filter(i=>i.type==="icon").map(item=>{
                 const isOwned=owned.includes(item.id);
                 const isEquipped=equipped[item.id];
                 const canAfford=myPoints>=item.cost;
@@ -2833,7 +3059,7 @@ const toggleEquip = async (itemId) => {
 </div>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>TITLES</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {SHOP_ITEMS.filter(i=>i.type==="title").map(item=>{
+              {dailyShopItems.filter(i=>i.type==="title").map(item=>{
                 const isOwned=owned.includes(item.id);
                 const isEquipped=equipped[item.id];
                 const canAfford=myPoints>=item.cost;
@@ -3125,7 +3351,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
           const isNext = !unlocked && currentProgress.tier === tier - 1;
 
           let rewardLabel = reward.label || reward.value;
-          let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "⚗️" : reward.type === "car" ? "🏎️" : "🎁";
+          let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📝" : reward.type === "car" ? "🏎️" : "🎁";
 
           return (
             <div key={tier} style={{ background: claimed ? "rgba(184,255,77,0.05)" : unlocked ? "#11131F" : "rgba(255,255,255,0.02)", borderRadius: 13, padding: "12px 14px", border: `1px solid ${claimed ? "rgba(184,255,77,0.2)" : isNext ? "rgba(167,139,250,0.3)" : unlocked ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"}`, display: "flex", alignItems: "center", gap: 12 }}>
@@ -3198,7 +3424,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
                 const reward = getPassRewardForOwnedId(ownedId);
                 if (!reward) return null;
                 const isEquipped = !!equipped[ownedId];
-                const emoji = reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "⚗️" : "🎁";
+                const emoji = reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📝" : "🎁";
                 return (
                   <div key={ownedId} style={{ background: isEquipped ? "rgba(184,255,77,0.06)" : "#11131F", borderRadius: 13, padding: "12px 14px", border: `1px solid ${isEquipped ? "rgba(184,255,77,0.25)" : "rgba(255,255,255,0.06)"}`, display: "flex", alignItems: "center", gap: 12 }}>
                     <span style={{ fontSize: 20 }}>{emoji}</span>
@@ -3343,7 +3569,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers", "chemistry"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -3651,6 +3877,477 @@ const getStockPriceHistory = (playerId) => {
   );
 }
 
+          
+// ===================== RLCS Trivia =====================
+const RLCS_QUESTIONS = [
+  { q:"Which team won the RLCS 2022 World Championship?", options:["Team BDS","Moist Esports","G2 Esports","NRG"], answer:1 },
+  { q:"Who is known as 'The Dementor' in Rocket League?", options:["Jstn","Firstkiller","GarrettG","Jstn"], answer:1 },
+  { q:"Which country does RLCS pro Fairy Peak come from?", options:["Germany","France","Sweden","Netherlands"], answer:1 },
+  { q:"What is the max boost amount in Rocket League?", options:["50","75","100","150"], answer:2 },
+  { q:"Which org signed the team that won RLCS Season 9?", options:["NRG","G2 Esports","Renault Vitality","Team BDS"], answer:1 },
+  { q:"What year did Rocket League go free to play?", options:["2018","2019","2020","2021"], answer:2 },
+  { q:"Which player is nicknamed 'The Flash'?", options:["Jstn","Jstn","Kaydop","Turbopolsa"], answer:2 },
+  { q:"How many players are on each team in standard Rocket League?", options:["1","2","3","4"], answer:2 },
+  { q:"What is the name of the competitive Rocket League league run by Psyonix/Epic?", options:["RLCS","RLC","RLG","RLCX"], answer:0 },
+  { q:"Which arena is used most often in RLCS tournaments?", options:["Mannfield","DFH Stadium","Beckwith Park","Utopia Coliseum"], answer:1 },
+  { q:"Who won the RLCS X Championship (2021)?", options:["NRG","Team BDS","G2 Esports","Reciprocity"], answer:1 },
+  { q:"What is the duration of a standard Rocket League match?", options:["3 minutes","4 minutes","5 minutes","6 minutes"], answer:2 },
+  { q:"Which boost pad gives full boost in Rocket League?", options:["Small pads","Corner pads","Center pads","Goal pads"], answer:1 },
+  { q:"What rank is above Diamond in Rocket League?", options:["Platinum","Champion","Grand Champion","Supersonic Legend"], answer:1 },
+  { q:"Which player has the most RLCS World Championship titles?", options:["Kaydop","Turbopolsa","jstn","Fairy Peak"], answer:1 },
+  { q:"What is 'aerial' in Rocket League?", options:["A ground shot","Flying through the air to hit the ball","A wall shot","A ceiling shot"], answer:1 },
+  { q:"Which team color goes first in kickoff by convention?", options:["Blue","Orange","Random","Neither"], answer:0 },
+  { q:"What is 'musty flick' named after?", options:["A player named Musty","A move invented in musty weather","A pro named Gustav","A training pack"], answer:0 },
+  { q:"How many boost pads are on a standard RLCS map?", options:["22","28","34","40"], answer:2 },
+  { q:"What does 'rotation' mean in Rocket League strategy?", options:["Spinning your car","Players taking turns going for the ball","Changing positions","Boosting in circles"], answer:1 },
+];
+
+function RLCSTrivia({ currentPlayer, points, setPoints }) {
+  const [started, setStarted] = useState(false);
+  const [wager, setWager] = useState(10);
+  const [qIndex, setQIndex] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [correct, setCorrect] = useState(0);
+  const [wrong, setWrong] = useState(0);
+  const [done, setDone] = useState(false);
+  const [questions, setQuestions] = useState([]);
+  const [streak, setStreak] = useState(0);
+
+  const myPoints = points?.[currentPlayer] || 0;
+
+  const startGame = () => {
+    if (myPoints < wager) return;
+    const shuffled = [...RLCS_QUESTIONS].sort(() => Math.random() - 0.5).slice(0, 5);
+    setQuestions(shuffled);
+    setQIndex(0); setSelected(null); setCorrect(0); setWrong(0);
+    setDone(false); setStreak(0); setStarted(true);
+  };
+
+  const pick = async (idx) => {
+    if (selected !== null) return;
+    setSelected(idx);
+    const q = questions[qIndex];
+    const isCorrect = idx === q.answer;
+    const newStreak = isCorrect ? streak + 1 : 0;
+    setStreak(newStreak);
+    if (isCorrect) setCorrect(c => c + 1); else setWrong(w => w + 1);
+    setTimeout(async () => {
+      if (qIndex + 1 >= questions.length) {
+        // settle
+        const totalCorrect = correct + (isCorrect ? 1 : 0);
+        const mult = totalCorrect === 5 ? 3 : totalCorrect === 4 ? 2 : totalCorrect === 3 ? 1.5 : totalCorrect === 2 ? 1 : 0;
+        const payout = Math.round(wager * mult);
+        const net = payout - wager;
+        const upd = { ...points, [currentPlayer]: Math.max(0, myPoints - wager + payout) };
+        setPoints(upd); await storeSet("points", upd);
+        setDone(true);
+      } else {
+        setQIndex(i => i + 1);
+        setSelected(null);
+      }
+    }, 900);
+  };
+
+  const reset = () => { setStarted(false); setDone(false); setSelected(null); setQIndex(0); setCorrect(0); setWrong(0); };
+
+  if (!started) return (
+    <div>
+      <div style={{ background:"linear-gradient(135deg,#11131F,#0C0E18)", border:"1px solid rgba(77,158,255,0.2)", borderRadius:18, padding:"24px 20px", textAlign:"center", marginBottom:16 }}>
+        <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:20, fontWeight:700, color:"#4D9EFF", marginBottom:4 }}>RLCS TRIVIA</div>
+        <div style={{ fontSize:12, color:"#4A5066", marginBottom:20, lineHeight:1.5 }}>5 questions · 5/5 = 3x · 4/5 = 2x · 3/5 = 1.5x · 2/5 = 1x · 1/5 or less = 0</div>
+        <div style={{ fontSize:11, color:"#4A5066", fontWeight:700, marginBottom:8 }}>WAGER</div>
+        <div style={{ display:"flex", gap:8, justifyContent:"center", marginBottom:16 }}>
+          {[5,10,25,50,100].map(amt => (
+            <button key={amt} onClick={() => setWager(amt)} className="bb-pressable"
+              style={{ background:wager===amt?"#4D9EFF":"rgba(255,255,255,0.05)", border:"none", borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, color:wager===amt?"#06070D":"#8B92A8", cursor:"pointer" }}>
+              {amt}
+            </button>
+          ))}
+        </div>
+        <button onClick={startGame} disabled={myPoints < wager} className="bb-pressable"
+          style={{ background:myPoints>=wager?"#4D9EFF":"rgba(255,255,255,0.05)", border:"none", borderRadius:12, padding:"14px 48px", fontSize:14, fontWeight:700, color:myPoints>=wager?"#06070D":"#4A5066", cursor:myPoints>=wager?"pointer":"default" }}>
+          start — {wager} pts
+        </button>
+      </div>
+    </div>
+  );
+
+  if (done) {
+    const totalCorrect = correct;
+    const mult = totalCorrect===5?3:totalCorrect===4?2:totalCorrect===3?1.5:totalCorrect===2?1:0;
+    const payout = Math.round(wager * mult);
+    const net = payout - wager;
+    return (
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:64, marginBottom:12 }}>{totalCorrect >= 3 ? "🎉" : "💀"}</div>
+        <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:26, fontWeight:700, color:net>=0?"#7CFFB2":"#FF5C8A", marginBottom:8 }}>{correct}/5 correct</div>
+        <div style={{ fontSize:14, color:"#8B92A8", marginBottom:4 }}>{mult}x multiplier · {net>=0?"+":""}{net} pts</div>
+        <div style={{ fontSize:12, color:"#4A5066", marginBottom:24 }}>wagered {wager} · got back {payout}</div>
+        <button onClick={reset} className="bb-pressable bb-glow-lime"
+          style={{ background:"#4D9EFF", border:"none", borderRadius:12, padding:"14px 40px", fontSize:14, fontWeight:700, color:"#06070D", cursor:"pointer" }}>
+          play again
+        </button>
+      </div>
+    );
+  }
+
+  const q = questions[qIndex];
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <div style={{ fontSize:11, color:"#4D9EFF", fontWeight:700 }}>Q {qIndex+1} OF 5</div>
+        <div style={{ display:"flex", gap:8 }}>
+          <span style={{ fontSize:11, color:"#7CFFB2", fontWeight:700 }}>✓ {correct}</span>
+          <span style={{ fontSize:11, color:"#FF5C8A", fontWeight:700 }}>✗ {wrong}</span>
+        </div>
+      </div>
+      <div style={{ height:4, background:"rgba(255,255,255,0.08)", borderRadius:99, marginBottom:20, overflow:"hidden" }}>
+        <div style={{ height:"100%", width:`${((qIndex)/5)*100}%`, background:"#4D9EFF", borderRadius:99, transition:"width .4s ease" }}/>
+      </div>
+      <div style={{ background:"#11131F", borderRadius:16, padding:"18px 16px", marginBottom:16, border:"1px solid rgba(77,158,255,0.15)" }}>
+        <div style={{ fontSize:15, fontWeight:700, color:"#E8ECF4", lineHeight:1.5 }}>{q.q}</div>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {q.options.map((opt, i) => {
+          const isSelected = selected === i;
+          const isCorrectAns = i === q.answer;
+          const revealed = selected !== null;
+          let bg = "rgba(255,255,255,0.04)";
+          let border = "rgba(255,255,255,0.08)";
+          let color = "#E8ECF4";
+          if (revealed && isCorrectAns) { bg="rgba(124,255,178,0.12)"; border="#7CFFB2"; color="#7CFFB2"; }
+          else if (revealed && isSelected && !isCorrectAns) { bg="rgba(255,92,138,0.12)"; border="#FF5C8A"; color="#FF5C8A"; }
+          return (
+            <button key={i} onClick={() => pick(i)} disabled={selected!==null} className="bb-pressable"
+              style={{ background:bg, border:`1px solid ${border}`, borderRadius:12, padding:"14px 16px", fontSize:13.5, fontWeight:600, color, cursor:selected===null?"pointer":"default", textAlign:"left", transition:"all .2s" }}>
+              <span style={{ color:"#4A5066", marginRight:10 }}>{["A","B","C","D"][i]}.</span>{opt}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+          
+          // ===================== Boost Grab =====================
+const BOOST_PADS = [
+  { color:"#B8FF4D", label:"Small",  mult:1.5,  prob:0.30, emoji:"🟢" },
+  { color:"#4D9EFF", label:"Medium", mult:2.0,  prob:0.25, emoji:"🔵" },
+  { color:"#A78BFA", label:"Big",    mult:3.0,  prob:0.20, emoji:"🟣" },
+  { color:"#FFD166", label:"Full",   mult:4.0,  prob:0.12, emoji:"🟡" },
+  { color:"#FF8C42", label:"Mega",   mult:6.0,  prob:0.07, emoji:"🟠" },
+  { color:"#7CFFB2", label:"Super",  mult:8.0,  prob:0.04, emoji:"🩵" },
+  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.15, emoji:"🔴", isDead:true },
+  { color:"#FF5C8A", label:"BOMB",   mult:0,    prob:0.07, isDead:true, emoji:"🔴" },
+];
+
+function generateGrid() {
+  return Array.from({ length: 12 }, (_, i) => {
+    const r = Math.random();
+    let cum = 0;
+    for (const pad of BOOST_PADS) {
+      cum += pad.prob;
+      if (r <= cum) return { ...pad, id: i, revealed: false };
+    }
+    return { ...BOOST_PADS[0], id: i, revealed: false };
+  });
+}
+
+function BoostGrab({ currentPlayer, points, setPoints }) {
+  const [wager, setWager] = useState(10);
+  const [grid, setGrid] = useState(null);
+  const [collected, setCollected] = useState([]);
+  const [dead, setDead] = useState(false);
+  const [cashed, setCashed] = useState(false);
+  const [totalMult, setTotalMult] = useState(1);
+
+  const myPoints = points?.[currentPlayer] || 0;
+
+  const startGame = () => {
+    if (myPoints < wager) return;
+    setGrid(generateGrid());
+    setCollected([]); setDead(false); setCashed(false); setTotalMult(1);
+  };
+
+  const tap = async (pad) => {
+    if (!grid || pad.revealed || dead || cashed) return;
+    const newGrid = grid.map(p => p.id === pad.id ? { ...p, revealed: true } : p);
+    setGrid(newGrid);
+    if (pad.isDead) {
+      setDead(true);
+      const upd = { ...points, [currentPlayer]: Math.max(0, myPoints - wager) };
+      setPoints(upd); await storeSet("points", upd);
+    } else {
+      const newMult = totalMult * pad.mult;
+      setTotalMult(newMult);
+      setCollected(c => [...c, pad]);
+    }
+  };
+
+  const cashOut = async () => {
+    if (!grid || dead || cashed || collected.length === 0) return;
+    setCashed(true);
+    const payout = Math.round(wager * totalMult);
+    const upd = { ...points, [currentPlayer]: Math.max(0, myPoints - wager + payout) };
+    setPoints(upd); await storeSet("points", upd);
+  };
+
+  const reset = () => { setGrid(null); setCollected([]); setDead(false); setCashed(false); setTotalMult(1); };
+
+  if (!grid) return (
+    <div>
+    
+      <div style={{ background:"linear-gradient(135deg,#0A1808,#06070D)", border:"1px solid rgba(184,255,77,0.2)", borderRadius:18, padding:"24px 20px", textAlign:"center", marginBottom:16 }}>
+        
+        <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:20, fontWeight:700, color:"#B8FF4D", marginBottom:4 }}>BOOST GRAB</div>
+        <div style={{ fontSize:12, color:"#4A5066", marginBottom:20 }}>hit 🔴 = lose wager · cash out anytime</div>
+        <div style={{ display:"flex", gap:8, justifyContent:"center", flexWrap:"wrap", marginBottom:16 }}>
+          {BOOST_PADS.filter(p => !p.isDead).map(p => (
+            <div key={p.label} style={{ fontSize:10, color:p.color, fontWeight:700, background:`${p.color}18`, padding:"4px 8px", borderRadius:99 }}>
+              {p.emoji} {p.mult}x
+            </div>
+          ))}
+          <div style={{ fontSize:10, color:"#FF5C8A", fontWeight:700, background:"rgba(255,92,138,0.1)", padding:"4px 8px", borderRadius:99 }}>🔴 BOMB</div>
+        </div>
+        <div style={{ fontSize:11, color:"#4A5066", fontWeight:700, marginBottom:8 }}>WAGER</div>
+        <div style={{ display:"flex", gap:8, justifyContent:"center", marginBottom:16 }}>
+          {[5,10,25,50].map(amt => (
+            <button key={amt} onClick={() => setWager(amt)} className="bb-pressable"
+              style={{ background:wager===amt?"#B8FF4D":"rgba(255,255,255,0.05)", border:"none", borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, color:wager===amt?"#06070D":"#8B92A8", cursor:"pointer" }}>
+              {amt}
+            </button>
+          ))}
+        </div>
+        <button onClick={startGame} disabled={myPoints < wager} className="bb-pressable bb-glow-lime"
+          style={{ background:myPoints>=wager?"#B8FF4D":"rgba(255,255,255,0.05)", border:"none", borderRadius:12, padding:"14px 48px", fontSize:14, fontWeight:700, color:myPoints>=wager?"#06070D":"#4A5066", cursor:myPoints>=wager?"pointer":"default" }}>
+          start — {wager} pts
+        </button>
+      </div>
+    </div>
+  );
+
+  const payout = Math.round(wager * totalMult);
+
+  return (
+    <div>
+      {/* Status bar */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <div>
+          <div style={{ fontSize:10, color:"#4A5066", fontWeight:700 }}>CURRENT MULT</div>
+          <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:"#B8FF4D" }}>{totalMult.toFixed(2)}x</div>
+        </div>
+        <div style={{ textAlign:"center" }}>
+          <div style={{ fontSize:10, color:"#4A5066", fontWeight:700 }}>TO WIN</div>
+          <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:"#7CFFB2" }}>{payout} pts</div>
+        </div>
+        <button onClick={cashOut} disabled={collected.length===0||dead||cashed} className="bb-pressable"
+          style={{ background:collected.length>0&&!dead&&!cashed?"#7CFFB2":"rgba(255,255,255,0.05)", border:"none", borderRadius:12, padding:"12px 18px", fontSize:13, fontWeight:700, color:collected.length>0&&!dead&&!cashed?"#06070D":"#4A5066", cursor:collected.length>0&&!dead&&!cashed?"pointer":"default" }}>
+          cash out
+        </button>
+      </div>
+
+      {/* Result banner */}
+      {(dead || cashed) && (
+        <div style={{ background:cashed?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)", border:`1px solid ${cashed?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`, borderRadius:14, padding:16, marginBottom:16, textAlign:"center", animation:"scaleFadeIn .3s ease" }}>
+          <div style={{ fontSize:28, marginBottom:6 }}>{cashed ? "💰" : "💥"}</div>
+          <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:22, fontWeight:700, color:cashed?"#7CFFB2":"#FF5C8A" }}>
+            {cashed ? `+${payout - wager} pts profit` : `-${wager} pts — hit a bomb`}
+          </div>
+          <button onClick={reset} className="bb-pressable bb-glow-lime" style={{ background:"#B8FF4D", border:"none", borderRadius:10, padding:"12px 32px", fontSize:13, fontWeight:700, color:"#06070D", cursor:"pointer", marginTop:12 }}>
+            play again
+          </button>
+        </div>
+      )}
+
+      {/* Grid */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:10 }}>
+        {grid.map(pad => (
+          <button key={pad.id} onClick={() => tap(pad)} disabled={pad.revealed || dead || cashed} className="bb-pressable"
+            style={{ aspectRatio:"1", borderRadius:14, border:`2px solid ${pad.revealed ? pad.color : "rgba(255,255,255,0.1)"}`, background:pad.revealed ? `${pad.color}22` : "#11131F", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", cursor:pad.revealed||dead||cashed?"default":"pointer", transition:"all .2s", fontSize:pad.revealed?22:28 }}>
+            {pad.revealed ? (
+              <>
+                <span>{pad.emoji}</span>
+                <span style={{ fontSize:10, color:pad.color, fontWeight:700, marginTop:2 }}>{pad.isDead?"BOMB":`${pad.mult}x`}</span>
+              </>
+            ) : (
+              <span style={{ filter:"blur(1px)", opacity:0.3 }}>⚡</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ fontSize:11, color:"#4A5066", textAlign:"center", marginTop:12 }}>
+        {collected.length} boosts collected · {dead?"game over":cashed?"cashed out":"keep going or cash out"}
+      </div>
+    </div>
+  );
+}
+          
+          
+// ===================== Weekly Recap Trivia =====================
+function WeeklyRecapTrivia({ stats, currentPlayer, points, setPoints }) {
+  const [wager, setWager] = useState(10);
+  const [started, setStarted] = useState(false);
+  const [questions, setQuestions] = useState([]);
+  const [qIndex, setQIndex] = useState(0);
+  const [selected, setSelected] = useState(null);
+  const [correct, setCorrect] = useState(0);
+  const [done, setDone] = useState(false);
+
+  const myPoints = points?.[currentPlayer] || 0;
+  const weekStart = getWeekStart();
+
+  const buildQuestions = () => {
+    const qs = [];
+    PLAYERS.forEach(p => {
+      const pg = stats.filter(g => g.playerId === p.id && g.mode === "3v3" && new Date(g.ts) >= weekStart);
+      if (!pg.length) return;
+      const avgGoals = (pg.reduce((s,g)=>s+(g.goals||0),0)/pg.length).toFixed(1);
+      const avgSaves = (pg.reduce((s,g)=>s+(g.saves||0),0)/pg.length).toFixed(1);
+      const wins = pg.filter(g=>g.ourScore>g.theirScore).length;
+      const winPct = Math.round(wins/pg.length*100);
+
+      const wrongGoals = [
+        (parseFloat(avgGoals)+0.8).toFixed(1),
+        (parseFloat(avgGoals)-0.7).toFixed(1),
+        (parseFloat(avgGoals)+1.5).toFixed(1),
+      ].map(v => Math.max(0,parseFloat(v)).toFixed(1));
+
+      qs.push({
+        q:`what was ${p.name}'s avg goals/game in 3v3 this week?`,
+        options:[avgGoals,...wrongGoals].sort(()=>Math.random()-0.5),
+        answer:0,
+        _correct: avgGoals,
+      });
+
+      const wrongWin = [
+        Math.min(100,winPct+15),
+        Math.max(0,winPct-20),
+        Math.min(100,winPct+30),
+      ];
+      qs.push({
+        q:`what was ${p.name}'s win rate this week?`,
+        options:[`${winPct}%`,...wrongWin.map(w=>`${w}%`)].sort(()=>Math.random()-0.5),
+        answer:0,
+        _correct:`${winPct}%`,
+      });
+    });
+
+    // fix answers after shuffle
+    return qs.filter(q => q.options.length === 4).map(q => ({
+      ...q,
+      answer: q.options.indexOf(q._correct),
+    })).sort(() => Math.random()-0.5).slice(0,5);
+  };
+
+  const start = () => {
+    const qs = buildQuestions();
+    if (qs.length < 3) return;
+    setQuestions(qs); setQIndex(0); setSelected(null);
+    setCorrect(0); setDone(false); setStarted(true);
+  };
+
+  const pick = async (idx) => {
+    if (selected !== null) return;
+    setSelected(idx);
+    const isCorrect = idx === questions[qIndex].answer;
+    const newCorrect = correct + (isCorrect ? 1 : 0);
+    if (isCorrect) setCorrect(newCorrect);
+    setTimeout(async () => {
+      if (qIndex + 1 >= questions.length) {
+        const mult = newCorrect === questions.length ? 3 : newCorrect >= questions.length-1 ? 2 : newCorrect >= Math.floor(questions.length/2) ? 1.5 : 0;
+        const payout = Math.round(wager * mult);
+        const upd = { ...points, [currentPlayer]: Math.max(0, myPoints - wager + payout) };
+        setPoints(upd); await storeSet("points", upd);
+        setDone(true);
+      } else {
+        setQIndex(i => i+1); setSelected(null);
+      }
+    }, 900);
+  };
+
+  const reset = () => { setStarted(false); setDone(false); setSelected(null); setQIndex(0); setCorrect(0); };
+
+  const weekGames = stats.filter(g => new Date(g.ts) >= weekStart);
+  if (weekGames.length < 3) return (
+    <div style={{ textAlign:"center", padding:"24px 0" }}>
+      <div style={{ fontSize:32, marginBottom:12 }}>📊</div>
+      <div style={{ fontSize:13, color:"#4A5066" }}>not enough games logged this week — play some 3v3 first to unlock recap trivia.</div>
+    </div>
+  );
+
+  if (!started) return (
+    <div>
+      <div style={{ background:"linear-gradient(135deg,#11131F,#0C0E18)", border:"1px solid rgba(255,209,102,0.2)", borderRadius:18, padding:"24px 20px", textAlign:"center", marginBottom:16 }}>
+        <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:20, fontWeight:700, color:"#FFD166", marginBottom:4 }}>WEEKLY RECAP TRIVIA</div>
+        <div style={{ fontSize:12, color:"#4A5066", marginBottom:20 }}>questions based on THIS week's real stats</div>
+        <div style={{ fontSize:11, color:"#4A5066", fontWeight:700, marginBottom:8 }}>WAGER</div>
+        <div style={{ display:"flex", gap:8, justifyContent:"center", marginBottom:16 }}>
+          {[5,10,25,50].map(amt => (
+            <button key={amt} onClick={() => setWager(amt)} className="bb-pressable"
+              style={{ background:wager===amt?"#FFD166":"rgba(255,255,255,0.05)", border:"none", borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, color:wager===amt?"#06070D":"#8B92A8", cursor:"pointer" }}>
+              {amt}
+            </button>
+          ))}
+        </div>
+        <button onClick={start} disabled={myPoints<wager} className="bb-pressable"
+          style={{ background:myPoints>=wager?"#FFD166":"rgba(255,255,255,0.05)", border:"none", borderRadius:12, padding:"14px 48px", fontSize:14, fontWeight:700, color:myPoints>=wager?"#06070D":"#4A5066", cursor:myPoints>=wager?"pointer":"default" }}>
+          start — {wager} pts
+        </button>
+      </div>
+    </div>
+  );
+
+  if (done) {
+    const mult = correct===questions.length?3:correct>=questions.length-1?2:correct>=Math.floor(questions.length/2)?1.5:0;
+    const payout = Math.round(wager*mult);
+    return (
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:64, marginBottom:12 }}>{correct>=3?"🎉":"💀"}</div>
+        <div style={{ fontFamily:"'Oswald',sans-serif", fontSize:26, fontWeight:700, color:payout>=wager?"#7CFFB2":"#FF5C8A", marginBottom:8 }}>{correct}/{questions.length} correct</div>
+        <div style={{ fontSize:14, color:"#8B92A8", marginBottom:24 }}>{mult}x · {payout>=wager?"+":""}{payout-wager} pts</div>
+        <button onClick={reset} className="bb-pressable"
+          style={{ background:"#FFD166", border:"none", borderRadius:12, padding:"14px 40px", fontSize:14, fontWeight:700, color:"#06070D", cursor:"pointer" }}>
+          play again
+        </button>
+      </div>
+    );
+  }
+
+  const q = questions[qIndex];
+  return (
+    <div>
+      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:16 }}>
+        <div style={{ fontSize:11, color:"#FFD166", fontWeight:700 }}>Q {qIndex+1} OF {questions.length}</div>
+        <div style={{ fontSize:11, color:"#7CFFB2", fontWeight:700 }}>✓ {correct}</div>
+      </div>
+      <div style={{ height:4, background:"rgba(255,255,255,0.08)", borderRadius:99, marginBottom:20, overflow:"hidden" }}>
+        <div style={{ height:"100%", width:`${(qIndex/questions.length)*100}%`, background:"#FFD166", borderRadius:99, transition:"width .4s" }}/>
+      </div>
+      <div style={{ background:"#11131F", borderRadius:16, padding:"18px 16px", marginBottom:16, border:"1px solid rgba(255,209,102,0.15)" }}>
+        <div style={{ fontSize:15, fontWeight:700, color:"#E8ECF4", lineHeight:1.5 }}>{q.q}</div>
+      </div>
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {q.options.map((opt, i) => {
+          const revealed = selected !== null;
+          const isCorrectAns = i === q.answer;
+          const isSelected = selected === i;
+          let bg = "rgba(255,255,255,0.04)", border = "rgba(255,255,255,0.08)", color = "#E8ECF4";
+          if (revealed && isCorrectAns) { bg="rgba(124,255,178,0.12)"; border="#7CFFB2"; color="#7CFFB2"; }
+          else if (revealed && isSelected) { bg="rgba(255,92,138,0.12)"; border="#FF5C8A"; color="#FF5C8A"; }
+          return (
+            <button key={i} onClick={() => pick(i)} disabled={selected!==null} className="bb-pressable"
+              style={{ background:bg, border:`1px solid ${border}`, borderRadius:12, padding:"14px 16px", fontSize:13.5, fontWeight:600, color, cursor:selected===null?"pointer":"default", textAlign:"left", transition:"all .2s" }}>
+              <span style={{ color:"#4A5066", marginRight:10 }}>{["A","B","C","D"][i]}.</span>{opt}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}          
+          
+          
 function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
 const [section, setSection] = useState("wheel");
 const [parlayLegs, setParlayLegs] = useState([]);
@@ -4385,11 +5082,16 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
   const [flipping, setFlipping] = useState(false);
   const [result, setResult] = useState(null);
   const myPoints = points?.[currentPlayer] || 0;
+  const weekStart = getWeekStart();
+const weekFlipKey = `coinflips_used_${currentPlayer}_${dateKey(weekStart)}`;
+const flipsUsedThisWeek = points?.[weekFlipKey] || 0;
+const WEEKLY_FLIP_LIMIT = 3;
+const flipsLeft = Math.max(0, WEEKLY_FLIP_LIMIT - flipsUsedThisWeek);
 
   const opponents = PLAYERS.filter(p => p.id !== currentPlayer);
 
-  const flip = async () => {
-    if (!selectedOpponent || myPoints < wager || flipping) return;
+ const flip = async () => {
+    if (!selectedOpponent || myPoints < wager || flipping || flipsLeft <= 0) return;
     setFlipping(true);
     setResult(null);
     await new Promise(r => setTimeout(r, 1800));
@@ -4409,6 +5111,9 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
     const updFlips = [...(coinFlips || []), outcome];
     setCoinFlips(updFlips);
     await storeSet("coin_flips", updFlips);
+    const updPts2 = { ...upd, [weekFlipKey]: flipsUsedThisWeek + 1 };
+setPoints(updPts2);
+await storeSet("points", updPts2);                  
     setResult(outcome);
     setFlipping(false);
   };
@@ -4473,9 +5178,9 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
       )}
 
       {/* Flip button */}
-      <button onClick={flip} disabled={!selectedOpponent||myPoints<wager||flipping} className="bb-pressable bb-glow-lime"
+      <button onClick={flip} disabled={!selectedOpponent || myPoints < wager || flipping || flipsLeft <= 0}className="bb-pressable bb-glow-lime"
         style={{...s.primaryBtn,background:!selectedOpponent||myPoints<wager||flipping?"rgba(255,255,255,0.05)":"#FFD166",color:!selectedOpponent||myPoints<wager||flipping?"#4A5066":"#06070D",opacity:!selectedOpponent||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:16,letterSpacing:1,marginBottom:24}}>
-        {flipping?"flipping…":`flip for ${wager} pts`}
+        {flipping ? "flipping…" : flipsLeft <= 0 ? "no flips left this week" : `flip for ${wager} pts — ${flipsLeft} left`}
       </button>
 
       {/* History */}
@@ -4512,9 +5217,7 @@ const RACE_OBJECTIVES = [
   { id:"wins_10",      label:"10 Wins",      field:null,      target:10,  emoji:"🏆", color:"#FF61C1" },
 ];
 
-function RaceModeTab({ stats, currentPlayer, points, setPoints }) {
-  const [activeRace, setActiveRace] = useState(null);
-  const [raceStart, setRaceStart] = useState(null);
+function RaceModeTab({ stats, currentPlayer, points, setPoints, activeRace, setActiveRace, raceStart, setRaceStart }) {
 
   const weekStart = getWeekStart();
 
@@ -4530,20 +5233,20 @@ function RaceModeTab({ stats, currentPlayer, points, setPoints }) {
     }
     return pg.reduce((s, g) => s + (g[objective.field] || 0), 0);
   };
-
-  const startRace = async (obj) => {
-    setActiveRace(obj.id);
+const startRace = async (obj) => {
+    const existing = await storeGet("active_race");
+    if (existing && existing.objectiveId) return; // already one running
     const ts = new Date().toISOString();
+    const raceData = { objectiveId: obj.id, startedAt: ts, startedBy: currentPlayer };
+    setActiveRace(obj.id);
     setRaceStart(ts);
-    await storeSet("active_race", { objectiveId: obj.id, startedAt: ts, startedBy: currentPlayer });
+    await storeSet("active_race", raceData);
   };
-
-  const endRace = async () => {
+const endRace = async () => {
     setActiveRace(null);
     setRaceStart(null);
-    await storeSet("active_race", null);
+    await storeSet("active_race", { objectiveId: null, cancelled: true, cancelledBy: currentPlayer, cancelledAt: new Date().toISOString() });
   };
-
   const currentObj = RACE_OBJECTIVES.find(o => o.id === activeRace);
 
   const leaderboard = currentObj
@@ -4565,7 +5268,7 @@ function RaceModeTab({ stats, currentPlayer, points, setPoints }) {
         <>
           <div style={{...s.sectionLabel,marginBottom:12}}>pick an objective</div>
           {RACE_OBJECTIVES.map(obj => (
-            <button key={obj.id} onClick={() => startRace(obj)} className="bb-pressable"
+            <button key={obj.id} onClick={() => startRace(obj)} disabled={!!activeRace} className="bb-pressable"
               style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${obj.color}22`,borderRadius:16,padding:"16px",marginBottom:10,textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
               <span style={{fontSize:32}}>{obj.emoji}</span>
               <div style={{flex:1}}>
@@ -4635,7 +5338,186 @@ function RaceModeTab({ stats, currentPlayer, points, setPoints }) {
       )}
     </div>
   );
-}                  
+}        
+                  
+function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, setChemistry }) {
+  const weekStart = getWeekStart();
+  const [selectedDuo, setSelectedDuo] = useState(null);
+
+  // award chemistry XP for assists to teammates this week
+  const awardChemXP = async (pid1, pid2, xp) => {
+    const key = getChemistryKey(pid1, pid2);
+    const current = chemistry?.[key] || 0;
+    const upd = { ...chemistry, [key]: current + xp };
+    setChemistry(upd);
+    await storeSet("chemistry", upd);
+  };
+
+  const myPairs = CHEMISTRY_PAIRS.filter(pair => pair.includes(currentPlayer));
+
+  // Compute chemistry from this week's shared games
+  const getSharedGames = (pid1, pid2) => {
+    const p1Games = stats.filter(g => g.playerId === pid1 && g.mode === "3v3" && new Date(g.ts) >= weekStart);
+    const p2Games = stats.filter(g => g.playerId === pid2 && g.mode === "3v3" && new Date(g.ts) >= weekStart);
+    const p1Times = new Set(p1Games.map(g => g.ts));
+    return p2Games.filter(g => p1Times.has(g.ts));
+  };
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <div style={{ fontSize:11, color:"#4A5066", marginBottom:16, lineHeight:1.5 }}>
+        chemistry builds when you win together, assist each other, and log games at the same time. higher chemistry = xp bonus and better betting odds.
+      </div>
+
+      {CHEMISTRY_PAIRS.map(([pid1, pid2]) => {
+        const key = getChemistryKey(pid1, pid2);
+        const chemXP = chemistry?.[key] || 0;
+        const lvl = getChemistryLevel(chemXP);
+        const bonus = getChemistryBonus(chemXP);
+        const p1 = PLAYERS.find(p => p.id === pid1);
+        const p2 = PLAYERS.find(p => p.id === pid2);
+        const shared = getSharedGames(pid1, pid2);
+        const sharedWins = shared.filter(g => g.ourScore > g.theirScore).length;
+        const isMyPair = pid1 === currentPlayer || pid2 === currentPlayer;
+        const nextLvlXP = [10,60,150,300,500,999][lvl.level];
+        const prevLvlXP = [0,10,60,150,300,500][lvl.level];
+        const pct = lvl.level >= 5 ? 1 : (chemXP - prevLvlXP) / (nextLvlXP - prevLvlXP);
+
+        return (
+          <div key={key} onClick={() => setSelectedDuo({ pid1, pid2 })} className="bb-pressable" style={{ background: isMyPair ? "linear-gradient(135deg,#11131F,#0C0E18)" : "#11131F", borderRadius:18, padding:"16px", marginBottom:14, border:`1px solid ${isMyPair ? lvl.color+"44" : "rgba(255,255,255,0.05)"}`, boxShadow: isMyPair ? `0 0 20px ${lvl.color}10` : "none", cursor:"pointer" }}>
+            {/* Duo header */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                  <div style={{ width:10, height:10, borderRadius:99, background:p1.color, boxShadow:`0 0 6px ${p1.color}88` }}/>
+                  <span style={{ fontSize:13, fontWeight:700, color:p1.color }}>{p1.name}</span>
+                </div>
+                <span style={{ fontSize:11, color:"#4A5066" }}>×</span>
+                <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                  <div style={{ width:10, height:10, borderRadius:99, background:p2.color, boxShadow:`0 0 6px ${p2.color}88` }}/>
+                  <span style={{ fontSize:13, fontWeight:700, color:p2.color }}>{p2.name}</span>
+                </div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:18 }}>{lvl.emoji}</div>
+                <div style={{ fontSize:10, color:lvl.color, fontWeight:700, marginTop:2 }}>{lvl.label}</div>
+              </div>
+            </div>
+
+            {/* XP bar */}
+            <div style={{ marginBottom:12 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:"#8B92A8", marginBottom:5 }}>
+                <span style={{ color:lvl.color, fontWeight:700 }}>Lvl {lvl.level} · {chemXP} xp</span>
+                <span>{lvl.level < 5 ? `${nextLvlXP} to next` : "MAX"}</span>
+              </div>
+              <div style={{ height:7, background:"rgba(255,255,255,0.08)", borderRadius:99, overflow:"hidden" }}>
+                <div style={{ height:"100%", width:`${Math.min(1,pct)*100}%`, background:lvl.color, borderRadius:99, transition:"width .4s ease", boxShadow:`0 0 8px ${lvl.color}88` }}/>
+              </div>
+            </div>
+
+            {/* Stats row */}
+            <div style={{ display:"flex", gap:8, marginBottom:12 }}>
+              <div style={{ flex:1, background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"8px", textAlign:"center" }}>
+                <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>SHARED GAMES</div>
+                <div style={{ fontSize:14, fontWeight:700, color:lvl.color }}>{shared.length}</div>
+              </div>
+              <div style={{ flex:1, background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"8px", textAlign:"center" }}>
+                <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>WINS TOGETHER</div>
+                <div style={{ fontSize:14, fontWeight:700, color:"#7CFFB2" }}>{sharedWins}</div>
+              </div>
+              <div style={{ flex:1, background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"8px", textAlign:"center" }}>
+                <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>XP BONUS</div>
+                <div style={{ fontSize:14, fontWeight:700, color:lvl.color }}>+{Math.round(bonus.xpBonus*100)}%</div>
+              </div>
+            </div>
+
+            {/* Badges */}
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              {sharedWins >= 5 && <div style={{ fontSize:10, fontWeight:700, color:"#FFD166", background:"rgba(255,209,102,0.1)", padding:"3px 8px", borderRadius:99 }}>🏆 5-win duo</div>}
+              {sharedWins >= 10 && <div style={{ fontSize:10, fontWeight:700, color:"#FF61C1", background:"rgba(255,97,193,0.1)", padding:"3px 8px", borderRadius:99 }}>💎 10-win duo</div>}
+              {shared.length >= 20 && <div style={{ fontSize:10, fontWeight:700, color:"#A78BFA", background:"rgba(167,139,250,0.1)", padding:"3px 8px", borderRadius:99 }}>⚡ grinders</div>}
+              {lvl.level >= 4 && <div style={{ fontSize:10, fontWeight:700, color:lvl.color, background:`${lvl.color}18`, padding:"3px 8px", borderRadius:99 }}>{lvl.emoji} {lvl.label} duo</div>}
+              {lvl.level === 0 && <div style={{ fontSize:10, color:"#4A5066" }}>play together to start building chemistry</div>}
+            </div>
+
+            {/* Boost chemistry button (award XP manually based on this week's wins) */}
+            {isMyPair && shared.length > 0 && (
+              <button onClick={(e) => { e.stopPropagation(); awardChemXP(pid1, pid2, sharedWins * 5 + shared.length * 2); }} className="bb-pressable bb-glow-lime"
+                style={{ width:"100%", background:`${lvl.color}18`, border:`1px solid ${lvl.color}44`, borderRadius:10, padding:"10px 0", fontSize:12, fontWeight:700, color:lvl.color, cursor:"pointer", marginTop:12 }}>
+                sync week's chemistry (+{sharedWins*5 + shared.length*2} xp)
+              </button>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Bonus info */}
+      <div style={{ background:"#11131F", borderRadius:14, padding:14, border:"1px solid rgba(255,255,255,0.05)", marginTop:4 }}>
+        <div style={{ fontSize:11, color:"#4A5066", fontWeight:700, marginBottom:10 }}>CHEMISTRY BONUSES</div>
+        {[
+          ["🌱 Fresh (Lvl 1)", "+5% xp"],
+          ["🤝 Building (Lvl 2)", "+10% xp"],
+          ["👯‍♂️ Close Friends (Lvl 3)", "+15% xp"],
+          ["🦢 Love Birds (Lvl 4)", "+25% xp"],
+          ["🧙‍♂️🧙‍♂️ Wizards (Lvl 5)", "+40% xp"],
+        ].map(([label, bonus]) => (
+          <div key={label} style={{ display:"flex", justifyContent:"space-between", marginBottom:8, fontSize:12 }}>
+            <span style={{ color:"#E8ECF4" }}>{label}</span>
+            <span style={{ color:"#B8FF4D", fontWeight:700 }}>{bonus}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Duo detail modal */}
+      {selectedDuo && (() => {
+        const { pid1, pid2 } = selectedDuo;
+        const key = getChemistryKey(pid1, pid2);
+        const chemXP = chemistry?.[key] || 0;
+        const lvl = getChemistryLevel(chemXP);
+        const p1 = PLAYERS.find(p => p.id === pid1);
+        const p2 = PLAYERS.find(p => p.id === pid2);
+        const shared = getSharedGames(pid1, pid2);
+        const sortedShared = [...shared].sort((a,b) => new Date(b.ts) - new Date(a.ts));
+
+        return (
+          <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+              <button onClick={()=>setSelectedDuo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+                <ChevronLeft size={18}/>
+              </button>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>{p1.name} × {p2.name}</div>
+              <button onClick={()=>setSelectedDuo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+              <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:`1px solid ${lvl.color}33`}}>
+                <div style={{fontSize:40,marginBottom:6}}>{lvl.emoji}</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:lvl.color}}>{lvl.label}</div>
+                <div style={{fontSize:12,color:"#4A5066",marginTop:4}}>{chemXP} xp · Lvl {lvl.level}</div>
+              </div>
+
+              <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>SHARED GAME HISTORY · {sortedShared.length} GAMES</div>
+              {sortedShared.length === 0 && <div style={{color:"#4A5066",textAlign:"center",marginTop:30,fontSize:13}}>no shared games logged this week yet</div>}
+              {sortedShared.map(g => {
+                const won = g.ourScore > g.theirScore;
+                return (
+                  <div key={g.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{g.ourScore}–{g.theirScore}</div>
+                      <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(g.ts)}</div>
+                    </div>
+                    <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",border:`1px solid ${won?"rgba(124,255,178,0.4)":"rgba(255,92,138,0.4)"}`,borderRadius:99,padding:"3px 9px"}}>
+                      {won?"WIN":"LOSS"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}              
                   
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
@@ -4669,6 +5551,7 @@ const [passActiveBoosts, setPassActiveBoosts] = useState({}); // { [playerId]: {
   const [jumpKey,setJumpKey]=useState(null);
 const [coinFlips, setCoinFlips] = useState([]);
 const [activeRace, setActiveRace] = useState(null);
+const [raceStart, setRaceStart] = useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
 const [themeId, setThemeId] = useState("starfield");
@@ -4676,8 +5559,11 @@ const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const [showAllGames, setShowAllGames] = useState(false);
 const [statsJumpDate, setStatsJumpDate] = useState(null);
 const [stocks, setStocks] = useState({});
+const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
+const [chemistry, setChemistry] = useState({});                      
 const [chatOpen, setChatOpen] = useState(false);
+const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
 const addToast = useCallback((text, icon = "🔔") => {
   const id = Date.now().toString();
@@ -4711,8 +5597,27 @@ heartbeat();
       if (key === "completions")    setCompletions(value);
 if (key === "time_logs") setTimeLogs(value);
 if (key === "stocks") setStocks(value);
+if (key === "flowers") setFlowers(Array.isArray(value) ? value : []);
+if (key === "chemistry") setChemistry(value || {});
 if (key === "coin_flips") setCoinFlips(value);
-if (key === "active_race") setActiveRace(value);
+if (key === "active_race") {
+  if (value?.objectiveId) {
+    setActiveRace(value.objectiveId);
+    setRaceStart(value.startedAt);
+    if (value.startedBy !== currentPlayer) {
+      const starter = PLAYERS.find(p => p.id === value.startedBy);
+      const obj = RACE_OBJECTIVES.find(o => o.id === value.objectiveId);
+      addToast(`${starter?.name} started a race — ${obj?.label}! Go to Race tab.`, obj?.emoji || "🏁");
+    }
+  } else {
+    setActiveRace(null);
+    setRaceStart(null);
+    if (value?.cancelled && value?.cancelledBy !== currentPlayer) {
+      const canceller = PLAYERS.find(p => p.id === value.cancelledBy);
+      addToast(`${canceller?.name} cancelled the race.`, "❌");
+    }
+  }
+}
       if (key === "training")       setTrainingData(value);
       if (key === "schedule")       setSchedule(value);
       if (key === "comments")       setComments(value);
@@ -4726,7 +5631,8 @@ if (key === "pass_xp")      setPassXP(value);
 if (key === "pass_premium") setPassPremium(value);
 if (key === "pass_claimed") setPassClaimed(value);
 if (key === "pass_tokens")  setPassTokens(value);
-      if (key === "pass_active_boosts") setPassActiveBoosts(value);
+if (key === "pass_active_boosts") setPassActiveBoosts(value);
+if (key === "typing") setTypingStatus(value || {});
     });
      return () => { unsub(); clearInterval(hbInterval); };
   }, [currentPlayer]);
@@ -4736,7 +5642,7 @@ if (key === "pass_tokens")  setPassTokens(value);
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar] = await Promise.all([
+const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem] = await Promise.all([
     storeGet("schedule"),
     storeGet("training"),
     storeGet("completions"),
@@ -4758,6 +5664,7 @@ const loadSharedData = async (pid) => {
     storeGet("stocks"),
     storeGet("coin_flips"),
     storeGet("active_race"),
+    storeGet("chemistry"),
   ]);
 
   if (sched) setSchedule(sched);
@@ -4780,7 +5687,8 @@ if (pab) setPassActiveBoosts(pab);
 if (tlogs) setTimeLogs(Array.isArray(tlogs) ? tlogs : []);
 if (stks) setStocks(stks);
 if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
-if (ar) setActiveRace(ar);
+if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.startedAt); }
+if (chem) setChemistry(chem);
 
 const savedLastSeen = await storeGet(`lastSeen:${pid}`);
 if (savedLastSeen) setLastSeen(savedLastSeen);
@@ -4842,6 +5750,10 @@ const TABS=[
 {id:"coinflip", icon:Dice5, label:"flip"},
 {id:"race",     icon:Trophy, label:"race"},
     {id:"garage",icon:Trophy,label:"garage"},
+{id:"chemistry",icon:Heart,label:"chem"},
+{id:"trivia",icon:Dice5,label:"trivia"},
+{id:"boostgrab",icon:Dice5,label:"grab"},
+{id:"recap",icon:BarChart2,label:"recap"},
     ...(isAdmin?[{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
   const badges = {
@@ -4921,15 +5833,19 @@ const TABS=[
         {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
       {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
-        {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>}
+        {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
 {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)}/>}
  {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
 {tab==="coinflip"&&<CoinFlipTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips}/>}
-{tab==="race"&&<RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+{tab==="race"&&<RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
 {tab==="stocks"&&<StockMarketTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
-{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab}/>}
+{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast}/>}
 {tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
+{tab==="chemistry"&&<TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
+{tab==="trivia"&&<RLCSTrivia currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+{tab==="boostgrab"&&<BoostGrab currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+{tab==="recap"&&<WeeklyRecapTrivia stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
    {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
       {chatOpen && (
@@ -4944,9 +5860,9 @@ const TABS=[
               </button>
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team chat</div>
             </div>
-            <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
-              <ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>
-            </div>
+           <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
+  <ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>
+</div>
           </div>
         </div>
       )}
@@ -4971,7 +5887,7 @@ const TABS=[
 
 // ===================== Styles =====================
 const s = {
-appShell:{display:"flex",flexDirection:"column",height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",width:"100%",position:"relative"},
+appShell:{display:"flex",flexDirection:"column",height:"100vh",minHeight:"-webkit-fill-available",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",width:"100%",position:"relative"},
   screen:{height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
 topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
