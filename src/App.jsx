@@ -1048,11 +1048,12 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
 
   return (
     <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+<div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
           <ChevronLeft size={18}/>
         </button>
         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>team comparison · 3v3</div>
+        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",marginLeft:"auto"}}><X size={20}/></button>
 <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",marginLeft:"auto"}}><X size={20}/></button>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
