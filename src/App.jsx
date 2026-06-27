@@ -911,6 +911,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
   const [showTeamComparison, setShowTeamComparison] = useState(null);
+  const [expandedStat, setExpandedStat] = useState(null);
   const record = schedule.league.reduce((acc,m)=>{
     if (!m.result) return acc;
     if (m.result.status==="win"||m.result.status==="forfeit_win"||m.result.status==="bye") acc.w++; else acc.l++;
@@ -923,6 +924,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
 
 return (
     <div className="bb-tab-content" style={s.tabContent}>
+    {expandedStat && <ExpandedStatModal stat={expandedStat} record={record} schedule={schedule} onClose={() => setExpandedStat(null)} />}
      {showTeamComparison && <TeamComparisonModal stats={stats} currentPlayer={currentPlayer} onClose={()=>setShowTeamComparison(false)}/>}
       <div style={s.heroCard}>
         <div style={s.heroEyebrow}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
@@ -2575,67 +2577,64 @@ const upd = [...myUpd, ...others];
                       <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
                         {item.cost} pts
                       </button>
-       </div>
+</div>
                 );
               })}
             </div>
 <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>BACKGROUNDS</div>
-<div style={{display:"flex",flexDirection:"column",gap:8}}>
-  {[
-    { id:"bg_carbon",   label:"Carbon Fiber",  desc:"dark carbon weave texture",   cost:80,   value:"carbon"   },
-    { id:"bg_spring",   label:"Soft Spring",   desc:"gentle pastel gradient",       cost:80,   value:"spring"   },
-    { id:"bg_aurora",   label:"Aurora",        desc:"shifting northern lights",     cost:100,  value:"aurora"   },
-    { id:"bg_midnight", label:"Midnight Oil",  desc:"deep navy shimmer",            cost:100,  value:"midnight" },
-    { id:"bg_custom",   label:"Ultimate BG",   desc:"upload your own image",        cost:5000, value:"custom"   },
-  ].map(item => {
-    const isOwned = owned.includes(item.id);
-    const isEquipped = equipped[item.id];
-    const canAfford = myPoints >= item.cost;
-    const isCustom = item.value === "custom";
-    return (
-      <div key={item.id} style={{background:isEquipped?"rgba(167,139,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px 14px",border:`1px solid ${isEquipped?"rgba(167,139,250,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
-        <div style={{width:36,height:36,borderRadius:8,flexShrink:0,background:
-          item.value==="carbon"?"repeating-linear-gradient(45deg,#1a1a1a 0px,#1a1a1a 2px,#2a2a2a 2px,#2a2a2a 4px)":
-          item.value==="spring"?"linear-gradient(135deg,#ffd6e7,#c3f0ca,#a8d8ea)":
-          item.value==="aurora"?"linear-gradient(135deg,#0d0221,#00ff87,#60efff)":
-          item.value==="midnight"?"linear-gradient(135deg,#0a0a2e,#1a1a5e,#2d2d8f)":
-          "linear-gradient(135deg,#A78BFA,#FFD166)"
-        }}/>
-        <div style={{flex:1}}>
-          <div style={{fontSize:13,fontWeight:700,color:isOwned?"#A78BFA":"#E8ECF4"}}>{item.label}</div>
-          <div style={{fontSize:10,color:"#4A5066",marginTop:1}}>{item.desc}{item.cost===5000?" · 5000 pts":""}</div>
-        </div>
-        {isOwned ? (
-          <div style={{display:"flex",gap:6,alignItems:"center"}}>
-            {isCustom && isEquipped && (
-              <>
-                <input ref={customBgFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{
-                  const f=e.target.files?.[0]; if(!f)return;
-                  const url=URL.createObjectURL(f);
-                  const upd={...points,[currentPlayer+"_customBg"]:url};
-                  setPoints(upd); await storeSet("points",upd);
-                }}/>
-                <button onClick={()=>customBgFileRef.current?.click()} className="bb-pressable"
-                  style={{background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,padding:"5px 10px",fontSize:10,fontWeight:700,color:"#A78BFA",cursor:"pointer"}}>
-                  upload
-                </button>
-              </>
-            )}
-            <button onClick={()=>toggleEquip(item.id)} className="bb-pressable"
-              style={{background:isEquipped?"#A78BFA":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-              {isEquipped?"✓ on":"equip"}
-            </button>
-          </div>
-        ) : (
-          <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable"
-            style={{background:canAfford?"rgba(167,139,250,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(167,139,250,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:canAfford?"#A78BFA":"#4A5066",cursor:canAfford?"pointer":"default"}}>
-            {item.cost} pts
-          </button>
-        )}
-      </div>
-    );
-  })}
-</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {[
+                { id:"bg_carbon",   label:"Carbon Fiber",  desc:"dark carbon weave texture",   cost:80,   value:"carbon"   },
+                { id:"bg_spring",   label:"Soft Spring",   desc:"gentle pastel gradient",       cost:80,   value:"spring"   },
+                { id:"bg_aurora",   label:"Aurora",        desc:"shifting northern lights",     cost:100,  value:"aurora"   },
+                { id:"bg_midnight", label:"Midnight Oil",  desc:"deep navy shimmer",            cost:100,  value:"midnight" },
+                { id:"bg_custom",   label:"Ultimate BG",   desc:"upload your own image",        cost:5000, value:"custom"   },
+              ].map(item => {
+                const isOwned = owned.includes(item.id);
+                const isEquipped = equipped[item.id];
+                const canAfford = myPoints >= item.cost;
+                const isCustom = item.value === "custom";
+                return (
+                  <div key={item.id} style={{background:isEquipped?"rgba(167,139,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px 14px",border:`1px solid ${isEquipped?"rgba(167,139,250,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{width:36,height:36,borderRadius:8,flexShrink:0,background:
+                      item.value==="carbon"?"repeating-linear-gradient(45deg,#1a1a1a 0px,#1a1a1a 2px,#2a2a2a 2px,#2a2a2a 4px)":
+                      item.value==="spring"?"linear-gradient(135deg,#ffd6e7,#c3f0ca,#a8d8ea)":
+                      item.value==="aurora"?"linear-gradient(135deg,#0d0221,#00ff87,#60efff)":
+                      item.value==="midnight"?"linear-gradient(135deg,#0a0a2e,#1a1a5e,#2d2d8f)":
+                      "linear-gradient(135deg,#A78BFA,#FFD166)"
+                    }}/>
+                    <div style={{flex:1}}>
+                      <div style={{fontSize:13,fontWeight:700,color:isOwned?"#A78BFA":"#E8ECF4"}}>{item.label}</div>
+                      <div style={{fontSize:10,color:"#4A5066",marginTop:1}}>{item.desc}{item.cost===5000?" · 5000 pts":""}</div>
+                    </div>
+                    {isOwned ? (
+                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                        {isCustom && isEquipped && (
+                          <>
+                            <input ref={customBgFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{
+                              const f=e.target.files?.[0]; if(!f)return;
+                              const url=URL.createObjectURL(f);
+                              const upd={...points,[currentPlayer+"_customBg"]:url};
+                              setPoints(upd); await storeSet("points",upd);
+                            }}/>
+                            <button onClick={()=>customBgFileRef.current?.click()} className="bb-pressable"
+                              style={{background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,padding:"5px 10px",fontSize:10,fontWeight:700,color:"#A78BFA",cursor:"pointer"}}>
+                              upload
+                            </button>
+                          </>
+                        )}
+                        <button onClick={()=>toggleEquip(item.id)} className="bb-pressable"
+                          style={{background:isEquipped?"#A78BFA":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                          {isEquipped?"✓ on":"equip"}
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable"
+                        style={{background:canAfford?"rgba(167,139,250,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(167,139,250,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:canAfford?"#A78BFA":"#4A5066",cursor:canAfford?"pointer":"default"}}>
+                        {item.cost} pts
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>
