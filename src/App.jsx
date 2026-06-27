@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef } from "react";
 import {
   Home, Lock, Check, ChevronRight, Send, X, Plus, Minus, Trophy, Dumbbell,
   MessageCircle, LogOut, Shield, Edit3, ChevronLeft, Image as ImageIcon,
   Heart, ClipboardCheck, Bell, ThumbsDown, ThumbsUp, Clock, Tv, Circle, BarChart2, Dice5,
 } from "lucide-react";
 import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti } from "./lib/storage";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
@@ -20,6 +20,34 @@ const PLAYOFF_START  = new Date("2026-08-24T00:00:00");
 const PLAYOFF_END    = new Date("2026-09-21T23:59:59");
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DAY_MS  = 24 * 60 * 60 * 1000;
+const STOCK_BASE_PRICE = 100;
+
+const WEEKLY_EVENTS = [
+  { id:"double_xp", emoji:"🔥", title:"Double Pass XP Week", desc:"all pass xp from training approvals and logged games is doubled this week.", color:"#B8FF4D" },
+  { id:"double_points", emoji:"💰", title:"Double Points Week", desc:"all points earned from logged games and approved training are doubled this week.", color:"#FFD166" },
+  { id:"no_betting", emoji:"🚫", title:"No Betting Week", desc:"the boost tab's wheel, slots, props, and parlays are paused this week. focus up.", color:"#FF5C8A" },
+  { id:"heat_surge", emoji:"⚡", title:"Heat Streak Surge", desc:"heat streak multipliers are boosted this week — win streaks hit harder.", color:"#FF8C32" },
+  { id:"assist_week", emoji:"🎯", title:"Assist Week", desc:"games with 2+ assists earn bonus pass xp this week.", color:"#A78BFA" },
+  { id:"save_week", emoji:"🧤", title:"Save Week", desc:"games with 3+ saves earn bonus pass xp this week.", color:"#4D9EFF" },
+];
+
+const FORCED_EVENT_ID = "double_xp"; // set to null to go back to random weekly rotation
+
+function getWeeklyEvent() {
+  const weekNum = Math.floor(Date.now() / WEEK_MS);
+  if (FORCED_EVENT_ID) {
+    const forced = WEEKLY_EVENTS.find(e => e.id === FORCED_EVENT_ID);
+    if (forced) return { ...forced, weekNum };
+  }
+  // Deterministic seeded pick so every player sees the same event this week.
+  let h = weekNum * 2654435761;
+  h = (h ^ (h >>> 13)) % 100000;
+  const idx = Math.abs(h) % WEEKLY_EVENTS.length;
+  return { ...WEEKLY_EVENTS[idx], weekNum };
+}
+function isEventActive(eventId) {
+  return getWeeklyEvent().id === eventId;
+}
 
 function weekRangeLabel(start) {
   const end = new Date(start.getTime() + 6 * DAY_MS);
@@ -169,31 +197,73 @@ function CreatePasscodeScreen({ player, onCreated }) {
         <input type="password" inputMode="numeric" value={code} onChange={(e)=>setCode(e.target.value)} placeholder="NEW PASSCODE" style={s.loginInput} autoFocus />
         <input type="password" inputMode="numeric" value={confirm} onChange={(e)=>setConfirm(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&submit()} placeholder="CONFIRM PASSCODE" style={s.loginInput} />
         {error && <div style={s.loginError}>{error}</div>}
-        <button onClick={submit} className="bb-pressable bb-glow-lime" style={s.loginSubmit}>set passcode <ChevronRight size={16}/></button>
+    <button onClick={submit} className="bb-pressable bb-glow-lime" style={s.loginSubmit}>set passcode <ChevronRight size={16}/></button>
       </div>
     </div></div>
   );
 }
-
 function EnterPasscodeScreen({ player, onSuccess, onBack }) {
-  const [code, setCode] = useState(""); const [error, setError] = useState("");
-  const submit = async () => {
-    const auth = await storeGet(`auth:${player.id}`);
-    if (auth?.passcode === code) onSuccess();
-    else { setError("Wrong passcode."); setCode(""); }
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [shaking, setShaking] = useState(false);
+  const cachedAuth = useRef(null);
+
+  useEffect(() => {
+    storeGet(`auth:${player.id}`).then(a => { cachedAuth.current = a; });
+  }, [player.id]);
+
+  const submit = (finalCode) => {
+    if (cachedAuth.current?.passcode === finalCode) onSuccess();
+    else {
+      setShaking(true);
+      setError("Wrong passcode.");
+      setCode("");
+      setTimeout(() => setShaking(false), 500);
+    }
   };
+
+  const pressNum = (num) => {
+    if (code.length >= 4) return;
+    const next = code + num;
+    setCode(next);
+    setError("");
+    if (next.length === 4) setTimeout(() => submit(next), 80);
+  };
+
+  const pressDelete = () => setCode(c => c.slice(0, -1));
+
+  const NUMS = [["1","2","3"],["4","5","6"],["7","8","9"],["","0","⌫"]];
+
   return (
-    <div style={s.loginScreen}><div style={s.loginGlow} /><div style={s.loginContent}>
-      <button onClick={onBack} className="bb-pressable" style={s.backBtn}><ChevronLeft size={16}/> back</button>
-      <div style={{ ...s.loginPlayerDot, background:player.color, margin:"0 auto 18px", width:14, height:14 }} />
-      <div style={s.loginTitle}>{player.name}</div>
-      <div style={s.loginSub}>enter your passcode</div>
-      <div style={s.loginCodeWrap}>
-        <input type="password" inputMode="numeric" value={code} onChange={(e)=>setCode(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&submit()} placeholder="PASSCODE" style={s.loginInput} autoFocus />
-        {error && <div style={s.loginError}>{error}</div>}
-        <button onClick={submit} className="bb-pressable bb-glow-lime" style={s.loginSubmit}>enter <ChevronRight size={16}/></button>
+    <div style={s.loginScreen}>
+      <div style={s.loginGlow} />
+      <div style={s.loginContent}>
+        <button onClick={onBack} className="bb-pressable" style={s.backBtn}><ChevronLeft size={16}/> back</button>
+        <div style={{ ...s.loginPlayerDot, background:player.color, margin:"0 auto 18px", width:14, height:14 }} />
+        <div style={s.loginTitle}>{player.name}</div>
+        <div style={s.loginSub}>enter your passcode</div>
+        <div style={{display:"flex",justifyContent:"center",gap:16,marginBottom:32,marginTop:8}}>
+          {[0,1,2,3].map(i => (
+            <div key={i} style={{width:14,height:14,borderRadius:"50%",background:code.length>i?player.color:"rgba(255,255,255,0.15)",transition:"background .15s ease",boxShadow:code.length>i?`0 0 8px ${player.color}99`:""}}/>
+          ))}
+        </div>
+        {error && <div style={{...s.loginError,marginBottom:16,textAlign:"center"}}>{error}</div>}
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {NUMS.map((row, ri) => (
+            <div key={ri} style={{display:"flex",justifyContent:"center",gap:20}}>
+              {row.map((num, ci) => (
+                num === "" ? <div key={ci} style={{width:72,height:72}}/> :
+                <button key={ci} onClick={() => { num==="⌫" ? pressDelete() : pressNum(num); }}
+                  className="bb-pressable"
+                  style={{width:72,height:72,borderRadius:"50%",background:num==="⌫"?"none":"rgba(255,255,255,0.08)",border:num==="⌫"?"none":"1px solid rgba(255,255,255,0.1)",color:"#E8ECF4",fontSize:num==="⌫"?22:24,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  {num}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
-    </div></div>
+    </div>
   );
 }
 
@@ -286,18 +356,21 @@ const ALL_CHALLENGES = [
   { mode:"3v3", type:"avg", field:"saves",    target:3.0, desc:(t,r)=>`average ${t} saves/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
   { mode:"3v3", type:"avg", field:"demos",    target:2.0, desc:(t,r)=>`average ${t} demos/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
   { mode:"3v3", type:"avg", field:"shots",    target:3.5, desc:(t,r)=>`average ${t} shots/game in 3v3 to beat ${r}'s average`, color:"#B8FF4D" },
+  { mode:"3v3", type:"cumulative", field:"saves", target:12, desc:(t)=>`rack up ${t} total saves across your 3v3 games this week`, color:"#B8FF4D" },
   // 2v2
   { mode:"2v2", type:"cumulative", field:"assists", target:10, desc:(t)=>`get ${t} total assists across your 2v2 games this week`, color:"#FF61C1" },
   { mode:"2v2", type:"cumulative", field:"saves",   target:15, desc:(t)=>`rack up ${t} saves in 2v2 this week`, color:"#FF61C1" },
   { mode:"2v2", type:"avg",        field:"goals",   target:2.0, desc:(t)=>`average ${t}+ goals per game in 2v2 this week`, color:"#FF61C1" },
   { mode:"2v2", type:"winrate",    field:null,      target:0.6, desc:()=>`win more than 60% of your 2v2 games this week`, color:"#FF61C1" },
   { mode:"2v2", type:"cumulative", field:"demos",   target:8,  desc:(t)=>`land ${t} demos in 2v2 this week`, color:"#FF61C1" },
+  { mode:"2v2", type:"avg",        field:"shots",   target:3.0, desc:(t)=>`average ${t}+ shots per game in 2v2 this week`, color:"#FF61C1" },
   // 1v1
   { mode:"1v1", type:"streak",     field:null,      target:3,  desc:()=>`win 3 in a row in 1v1`, color:"#4D9EFF" },
   { mode:"1v1", type:"avg",        field:"goals",   target:3.0, desc:(t)=>`average ${t}+ goals per game in 1v1 this week`, color:"#4D9EFF" },
   { mode:"1v1", type:"cumulative", field:"shots",   target:20, desc:(t)=>`take ${t} total shots in 1v1 this week`, color:"#4D9EFF" },
   { mode:"1v1", type:"avg",        field:"saves",   target:2.0, desc:(t)=>`average ${t}+ saves per game in 1v1`, color:"#4D9EFF" },
   { mode:"1v1", type:"streak",     field:null,      target:3,  desc:()=>`score first in 3 consecutive 1v1 games`, color:"#4D9EFF" },
+  { mode:"1v1", type:"cumulative", field:"assists", target:5,  desc:(t)=>`get ${t} total assists in 1v1 this week`, color:"#4D9EFF" },
 ];
 function getWeekStart() {
   const d = new Date();
@@ -339,25 +412,148 @@ function getChallengeProgress(challenge, stats, playerId) {
   return { current: 0, target: challenge.target, done: false, display: 0 };
 }
 
+function ChallengeCompactRow({ challenge, mode, idxInMode, stats, currentPlayer, rival, completions, onClaim }) {
+  const rivalGames = stats.filter(g => g.playerId === rival.id && g.mode === "3v3");
+  const rivalAvg = mode === "3v3" && challenge.field && rivalGames.length
+    ? (rivalGames.reduce((s,g) => s+(g[challenge.field]||0),0)/rivalGames.length).toFixed(1)
+    : null;
+  const adjustedTarget = mode === "3v3" && challenge.type === "avg" && rivalAvg
+    ? Math.max(Number(rivalAvg)+0.1, challenge.target)
+    : challenge.target;
+  const progress = getChallengeProgress({...challenge, target: adjustedTarget}, stats, currentPlayer);
+  const claimKey = `challenge_${currentPlayer}_${Math.floor(Date.now()/WEEK_MS)}_${mode}_${idxInMode}`;
+  const claimed = !!completions[claimKey];
+  const grantsBonusSpin = idxInMode === 0 || idxInMode === 3;
+  const color = challenge.color;
+  const progressPct = Math.min(1, progress.current / adjustedTarget);
+  const descText = mode === "3v3" && rivalAvg
+    ? challenge.desc(adjustedTarget.toFixed(1), rival.name)
+    : challenge.desc(adjustedTarget);
+  const modeLabel = `${{ "3v3":"3V3","2v2":"2V2","1v1":"1V1" }[mode]}${idxInMode>0?` #${idxInMode+1}`:""}`;
+
+  return (
+    <div style={{background:"#161927",borderRadius:11,padding:"10px 12px",marginBottom:6,border:`1px solid ${color}1a`}}>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+        <div style={{fontSize:9,color,fontWeight:700,letterSpacing:0.5}}>{modeLabel}</div>
+        {grantsBonusSpin && <div style={{fontSize:8,color:"#FFD166",fontWeight:700}}>🎡</div>}
+        <div style={{fontSize:10.5,color:"#8B92A8",marginLeft:"auto"}}>{progress.display} / {challenge.type==="winrate"?"60%":adjustedTarget}</div>
+      </div>
+      <div style={{fontSize:11.5,color:"#E8ECF4",lineHeight:1.35,marginBottom:6}}>{descText}</div>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={{flex:1,height:5,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${progressPct*100}%`,background:progress.done?"#7CFFB2":color,borderRadius:99,transition:"width .3s ease"}}/>
+        </div>
+        {claimed ? (
+          <span style={{fontSize:10,color:"#7CFFB2",fontWeight:700,flexShrink:0}}>✓ claimed</span>
+        ) : progress.done ? (
+          <button onClick={()=>onClaim(claimKey, grantsBonusSpin)} className="bb-pressable bb-glow-lime"
+            style={{flexShrink:0,background:color,border:"none",borderRadius:7,padding:"4px 9px",fontSize:9.5,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
+            claim
+          </button>
+        ) : (
+          <span style={{fontSize:9.5,color:"#4A5066",flexShrink:0}}>in progress</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AllChallengesModal({ challengesByMode, stats, currentPlayer, rival, completions, onClaim, onClose }) {
+  return (
+    <div style={s.modalOverlay} onClick={onClose}>
+      <div style={{...s.modalBox, maxHeight:"82vh", display:"flex", flexDirection:"column"}} onClick={(e)=>e.stopPropagation()}>
+        <div style={s.modalHeader}>
+          <div style={s.modalTitle}>all weekly challenges</div>
+          <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
+        </div>
+        <div style={{flex:1,overflowY:"auto"}}>
+          {challengesByMode.map(({ mode, challenges }) => (
+            <div key={mode} style={{marginBottom:14}}>
+              <div style={{fontSize:10.5,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:6}}>{mode.toUpperCase()}</div>
+              {challenges.map((challenge, idx) => (
+                <ChallengeCompactRow
+                  key={`${mode}-${idx}`}
+                  challenge={challenge}
+                  mode={mode}
+                  idxInMode={idx}
+                  stats={stats}
+                  currentPlayer={currentPlayer}
+                  rival={rival}
+                  completions={completions}
+                  onClaim={onClaim}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, setCompletions }) {
   const playerIdx = PLAYERS.findIndex(p => p.id === currentPlayer);
   const weekNum = Math.floor(Date.now() / (WEEK_MS));
+  const [showAllModal, setShowAllModal] = useState(false);
 
   const modes = ["3v3", "2v2", "1v1"];
-  const challenges = modes.map((mode, mi) => {
+  const challengesByMode = modes.map((mode) => {
     const modeChallenges = ALL_CHALLENGES.filter(c => c.mode === mode);
-    const seed = weekNum * 31 + playerIdx * 7 + mi * 13;
-    return { challenge: modeChallenges[seed % modeChallenges.length], mode };
+    const seedBase = weekNum * 31 + playerIdx * 7 + mode.length * 13;
+    const shuffled = modeChallenges
+      .map((c, i) => ({ c, key: ((seedBase + i * 17) * 2654435761) % 100000 }))
+      .sort((a, b) => a.key - b.key)
+      .map(x => x.c);
+    const picked = shuffled.slice(0, Math.min(6, shuffled.length));
+    return { mode, challenges: picked };
   });
 
   const rivals = PLAYERS.filter(p => p.id !== currentPlayer);
   const seed0 = weekNum * 31 + playerIdx * 7;
   const rival = rivals[seed0 % rivals.length];
 
+  const XP_PER_CHALLENGE = 17;
+
+  const claimXP = async (claimKey, grantsBonusSpin) => {
+    if (completions[claimKey]) return;
+    const upd = {...completions, [claimKey]: true};
+    setCompletions(upd);
+    await storeSet("completions", upd);
+    const pxp = await storeGet("pass_xp") || {};
+    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+XP_PER_CHALLENGE};
+    setPassXP(updXP);
+    await storeSet("pass_xp", updXP);
+    if (grantsBonusSpin) {
+      const bonusSpins = await storeGet("points") || {};
+      const updBonus = {...bonusSpins,[currentPlayer+"_bonusSpins"]:(bonusSpins[currentPlayer+"_bonusSpins"]||0)+1,[currentPlayer+"_bonusSlots"]:(bonusSpins[currentPlayer+"_bonusSlots"]||0)+1};
+      await storeSet("points", updBonus);
+    }
+  };
+
+  // Default view: first challenge per mode (3 cards)
+  const defaultItems = challengesByMode.map(({ mode, challenges }) => ({ challenge: challenges[0], mode, idxInMode: 0 }));
+
   return (
     <div style={{marginBottom:20}}>
-      <div style={{...s.sectionLabel,marginBottom:10}}>weekly challenges</div>
-      {challenges.map(({ challenge, mode }, ci) => {
+      {showAllModal && (
+        <AllChallengesModal
+          challengesByMode={challengesByMode}
+          stats={stats}
+          currentPlayer={currentPlayer}
+          rival={rival}
+          completions={completions}
+          onClaim={claimXP}
+          onClose={()=>setShowAllModal(false)}
+        />
+      )}
+      <div style={s.sectionRowHeader}>
+        <div style={s.sectionLabel}>weekly challenges</div>
+        <button onClick={()=>setShowAllModal(true)} className="bb-pressable" style={s.viewAllBtn}>
+          view all 18 <ChevronRight size={12}/>
+        </button>
+      </div>
+      {defaultItems.map((challengeItem) => {
+        const { challenge, mode, idxInMode } = challengeItem;
         const rivalGames = stats.filter(g => g.playerId === rival.id && g.mode === "3v3");
         const rivalAvg = mode === "3v3" && challenge.field && rivalGames.length
           ? (rivalGames.reduce((s,g) => s+(g[challenge.field]||0),0)/rivalGames.length).toFixed(1)
@@ -366,21 +562,10 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
           ? Math.max(Number(rivalAvg)+0.1, challenge.target)
           : challenge.target;
         const progress = getChallengeProgress({...challenge, target: adjustedTarget}, stats, currentPlayer);
-        const claimKey = `challenge_${currentPlayer}_${weekNum}_${mode}`;
+        const claimKey = `challenge_${currentPlayer}_${weekNum}_${mode}_${idxInMode}`;
         const claimed = !!completions[claimKey];
-
-        const claimXP = async () => {
-          if (!progress.done || claimed) return;
-          const upd = {...completions, [claimKey]: true};
-          setCompletions(upd);
-          await storeSet("completions", upd);
-          const pxp = await storeGet("pass_xp") || {};
-          const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+50};
-          setPassXP(updXP);
-          await storeSet("pass_xp", updXP);
-        };
-
-        const modeLabel = { "3v3":"3V3","2v2":"2V2","1v1":"1V1" }[mode];
+        const grantsBonusSpin = idxInMode === 0 || idxInMode === 3;
+        const modeLabel = `${{ "3v3":"3V3","2v2":"2V2","1v1":"1V1" }[mode]}`;
         const color = challenge.color;
         const progressPct = Math.min(1, progress.current / adjustedTarget);
         const descText = mode === "3v3" && rivalAvg
@@ -388,10 +573,11 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
           : challenge.desc(adjustedTarget);
 
         return (
-          <div key={mode} style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${color}22`,marginBottom:10}}>
+          <div key={`${mode}-${idxInMode}`} style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:`1px solid ${color}22`,marginBottom:10}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <div style={{fontSize:10,color,fontWeight:700,letterSpacing:0.8}}>{modeLabel} CHALLENGE</div>
               <div style={{width:6,height:6,borderRadius:99,background:color}}/>
+              {grantsBonusSpin && <div style={{fontSize:9,color:"#FFD166",fontWeight:700,marginLeft:"auto"}}>🎡 +spin</div>}
             </div>
             <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{descText}</div>
             <div style={{marginBottom:12}}>
@@ -404,12 +590,12 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
               </div>
             </div>
             {progress.done && !claimed && (
-              <button onClick={claimXP} className="bb-pressable bb-glow-lime"
+              <button onClick={()=>claimXP(claimKey, grantsBonusSpin)} className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
-                🏆 claim +50 pass xp
+                🏆 claim +{XP_PER_CHALLENGE} pass xp{grantsBonusSpin?" + spin":""}
               </button>
             )}
-            {claimed && <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +50 xp claimed this week</div>}
+            {claimed && <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +{XP_PER_CHALLENGE} xp claimed this week</div>}
             <div style={{fontSize:11,color:"#4A5066"}}>resets weekly · {mode} games only</div>
           </div>
         );
@@ -438,9 +624,8 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
         })}
       </div>
     </div>
-);
+  );
 }
-
 // ===================== Coach Note =====================
 function getCoachNote(stats, playerId) {
   const todayKey = dateKey(todayAtMidnight());
@@ -923,10 +1108,20 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
   const today = todayAtMidnight();
   const previewDays = Array.from({length:5},(_,i)=>{ const date=new Date(today.getTime()+i*DAY_MS); const key=dateKey(date); return {key,date,training:trainingData[tKey(key,currentPlayer)]||null}; });
 
+const weeklyEvent = getWeeklyEvent();
+
 return (
     <div className="bb-tab-content" style={s.tabContent}>
     {expandedStat && <ExpandedStatModal stat={expandedStat} record={record} schedule={schedule} onClose={() => setExpandedStat(null)} />}
      {showTeamComparison && <TeamComparisonModal stats={stats} currentPlayer={currentPlayer} onClose={()=>setShowTeamComparison(false)}/>}
+      <div style={{background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
+        <span style={{fontSize:26,flexShrink:0}}>{weeklyEvent.emoji}</span>
+        <div>
+          <div style={{fontSize:10,color:weeklyEvent.color,fontWeight:700,letterSpacing:1,marginBottom:3}}>THIS WEEK'S MODIFIER</div>
+          <div style={{fontSize:14,fontWeight:700,color:"#E8ECF4",marginBottom:2}}>{weeklyEvent.title}</div>
+          <div style={{fontSize:11.5,color:"#8B92A8",lineHeight:1.4}}>{weeklyEvent.desc}</div>
+        </div>
+      </div>
       <div style={s.heroCard}>
         <div style={s.heroEyebrow}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
         {nextMatch ? (
@@ -1195,14 +1390,16 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
       const pid=key.split("__")[1];
       await storeSet("points",{...pts,[pid]:(pts[pid]||0)+15});
     }
-      if (decision==="approved") {
+   if (decision==="approved") {
       const pts=await storeGet("points")||{};
       const pid=key.split("__")[1];
-      await storeSet("points",{...pts,[pid]:(pts[pid]||0)+15});
+      const pointsMult = isEventActive("double_points") ? 2 : 1;
+      await storeSet("points",{...pts,[pid]:(pts[pid]||0)+15*pointsMult});
    const pxp=await storeGet("pass_xp")||{};
       const activeBoosts=await storeGet("pass_active_boosts")||{};
       const mult=getActiveBoostMultiplier(pid,activeBoosts);
-      const updXP={...pxp,[pid]:(pxp[pid]||0)+20*mult};
+      const eventMult = isEventActive("double_xp") ? 2 : 1;
+      const updXP={...pxp,[pid]:(pxp[pid]||0)+20*mult*eventMult};
       setPassXP(updXP); await storeSet("pass_xp",updXP);
     }
     setNoteDraft((d)=>{ const n={...d}; delete n[key]; return n; });
@@ -1323,45 +1520,106 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
 }
 
 // ===================== Chat Tab =====================
-function ChatMessage({ msg, isMe }) {
-  const player=PLAYERS.find((p)=>p.id===msg.playerId);
+const REACTION_EMOJIS = ["🐐","💩","😕","🤓","🌬️","🥀","🤣","😎"];
+function seededShuffle(arr, seed) {
+  const out = [...arr];
+  for (let i = out.length - 1; i > 0; i--) {
+    seed = (seed * 1664525 + 1013904223) & 0xffffffff;
+    const j = Math.abs(seed) % (i + 1);
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+function ChatMessage({ msg, isMe, onReact }) {
+  const player = PLAYERS.find((p) => p.id === msg.playerId);
+  const [showPicker, setShowPicker] = useState(false);
+  const pressTimer = useRef(null);
+  const handleTouchStart = () => { pressTimer.current = setTimeout(() => setShowPicker(true), 500); };
+  const handleTouchEnd = () => { clearTimeout(pressTimer.current); };
+  const handleMouseDown = () => { pressTimer.current = setTimeout(() => setShowPicker(true), 500); };
+  const handleMouseUp = () => { clearTimeout(pressTimer.current); };
+  const reactionCounts = {};
+  const myReactions = new Set();
+  (msg.reactions || []).forEach(r => {
+    reactionCounts[r.emoji] = (reactionCounts[r.emoji] || 0) + 1;
+  });
+  (msg.reactions || []).filter(r => r.playerId === (isMe ? msg.playerId : undefined)).forEach(r => myReactions.add(r.emoji));
+  const existingReactions = Object.keys(reactionCounts);
+  const msgSeed = msg.id ? parseInt(msg.id.slice(-6), 10) || 42 : 42;
+  const shuffledEmojis = seededShuffle(REACTION_EMOJIS, msgSeed);
   return (
-    <div style={{...s.chatMsgRow,justifyContent:isMe?"flex-end":"flex-start"}}>
-      <div style={{...s.chatBubble,background:isMe?"#B8FF4D":"#161927",color:isMe?"#06070D":"#E8ECF4"}}>
-        {!isMe&&<div style={{...s.chatAuthor,color:player?.color}}>{player?.name}</div>}
+    <div style={{ ...s.chatMsgRow, justifyContent: isMe ? "flex-end" : "flex-start", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+      {showPicker && (
+        <div style={{ display: "flex", gap: 6, background: "#1A1D2E", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 22, padding: "6px 10px", marginBottom: 6, flexWrap: "wrap", maxWidth: 260, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", zIndex: 10 }}>
+          {shuffledEmojis.map(emoji => (
+            <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowPicker(false); }}
+              style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", padding: "2px 3px", borderRadius: 8, lineHeight: 1 }}>
+              {emoji}
+            </button>
+          ))}
+          <button onClick={() => setShowPicker(false)} style={{ background: "none", border: "none", color: "#4A5066", fontSize: 14, cursor: "pointer", padding: "2px 4px" }}>✕</button>
+        </div>
+      )}
+      <div
+        style={{ ...s.chatBubble, background: isMe ? "#B8FF4D" : "#161927", color: isMe ? "#06070D" : "#E8ECF4", userSelect: "none" }}
+        onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
+        onMouseDown={handleMouseDown} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+      >
+        {!isMe && <div style={{ ...s.chatAuthor, color: player?.color }}>{player?.name}</div>}
         <div style={s.chatText}>{msg.text}</div>
-        <div style={{...s.chatTime,color:isMe?"rgba(6,7,13,0.5)":"#4A5066"}}>{new Date(msg.ts).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}</div>
+        <div style={{ ...s.chatTime, color: isMe ? "rgba(6,7,13,0.5)" : "#4A5066" }}>{new Date(msg.ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
       </div>
+      {existingReactions.length > 0 && (
+        <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
+          {existingReactions.map(emoji => (
+            <button key={emoji} onClick={() => onReact(msg.id, emoji)}
+              style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 99, padding: "2px 8px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: "#E8ECF4" }}>
+              {emoji} <span style={{ fontSize: 11, color: "#8B92A8" }}>{reactionCounts[emoji]}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 function ChatTab({ messages, setMessages, currentPlayer, addToast }) {
-  const [text,setText]=useState("");
-  const scrollRef=useRef(null);
-  useEffect(()=>{ scrollRef.current?.scrollIntoView({behavior:"smooth"}); },[messages.length]);
-  const send=async()=>{
+  const [text, setText] = useState("");
+  const scrollRef = useRef(null);
+  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
+
+  const send = async () => {
     if (!text.trim()) return;
-    const msg={id:Date.now().toString(),playerId:currentPlayer,text:text.trim(),ts:new Date().toISOString()};
-   const upd=[...messages,msg];
-    setMessages(upd); await storeSet("chat",upd); setText("");
-addToast?.(`${PLAYERS.find(pl=>pl.id===currentPlayer)?.name}: ${text.trim()}`, "💬");
+    const msg = { id: Date.now().toString(), playerId: currentPlayer, text: text.trim(), ts: new Date().toISOString(), reactions: [] };
+    const upd = [...messages, msg];
+    setMessages(upd); await storeSet("chat", upd); setText("");
+    addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name}: ${text.trim()}`, "💬");
   };
+
+  const onReact = async (msgId, emoji) => {
+    const upd = messages.map(m => {
+      if (m.id !== msgId) return m;
+      const reactions = m.reactions || [];
+      const exists = reactions.find(r => r.playerId === currentPlayer && r.emoji === emoji);
+      return { ...m, reactions: exists ? reactions.filter(r => !(r.playerId === currentPlayer && r.emoji === emoji)) : [...reactions, { playerId: currentPlayer, emoji, ts: new Date().toISOString() }] };
+    });
+    setMessages(upd); await storeSet("chat", upd);
+  };
+
   return (
     <div className="bb-tab-content" style={s.chatTabWrap}>
-      <div style={s.chatHeader}><div style={s.sectionLabel}>team chat</div><div style={s.sectionSubLabel}>talk about last night, plan the next session</div></div>
+      <div style={s.chatHeader}><div style={s.sectionLabel}>team chat</div><div style={s.sectionSubLabel}>long press a message to react</div></div>
       <div style={s.chatScroll}>
-        {messages.length===0&&<div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
-        {messages.map((m)=><ChatMessage key={m.id} msg={m} isMe={m.playerId===currentPlayer}/>)}
-        <div ref={scrollRef}/>
+        {messages.length === 0 && <div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
+        {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} />)}
+        <div ref={scrollRef} />
       </div>
       <div style={s.chatInputRow}>
-        <input value={text} onChange={(e)=>setText(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&send()} placeholder="message the team..." style={s.chatInput}/>
-        <button onClick={send} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}><Send size={16}/></button>
+        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="message the team..." style={s.chatInput} />
+        <button onClick={send} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}><Send size={16} /></button>
       </div>
     </div>
   );
 }
-
 // ===================== Social Tab =====================
 function SocialComposer({ currentPlayer, onPost, onClose }) {
   const [caption,setCaption]=useState(""); const [file,setFile]=useState(null); const [previewUrl,setPreviewUrl]=useState(null); const [uploading,setUploading]=useState(false);
@@ -1915,7 +2173,8 @@ const saveGame=async(entry)=>{
   const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd);
   const pts=await storeGet("points")||{};
   let cur=pts[currentPlayer]||0;
-  cur+=10;
+  const pointsMult = isEventActive("double_points") ? 2 : 1;
+  cur+=10*pointsMult;
   const allBets=await storeGet("bets")||[];
   const resolvedBets=allBets.map(bet=>{
     if(bet.status!=="open") return bet;
@@ -1941,8 +2200,12 @@ for (let i = allTodayGames.length - 1; i >= 0; i--) {
   if (allTodayGames[i].ourScore > allTodayGames[i].theirScore) streak++;
   else break;
 }
-const heatMult = heatMultiplier(streak);
-const finalMult = mult * heatMult;
+const heatMult = heatMultiplier(streak) * (isEventActive("heat_surge") ? 1.5 : 1);
+const eventMult = isEventActive("double_xp") ? 2 : 1;
+const statBonus = (isEventActive("assist_week") && (entry.assists||0) >= 2) ? 1.5
+  : (isEventActive("save_week") && (entry.saves||0) >= 3) ? 1.5
+  : 1;
+const finalMult = mult * heatMult * eventMult * statBonus;
 const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
   setPassXP(updXP); await storeSet("pass_xp",updXP);
 };
@@ -2087,6 +2350,8 @@ const SHOP_ITEMS = [
   { id:"title_rule69",          cost:69,  type:"title", value:"rule 69",             },
 { id:"title_buffalo",          cost:200,  type:"title", value:"buffalo burton",             },
 ];
+const DAILY_SPINS_MAX = 3;
+const DAILY_SLOTS_MAX = 3;
 const PASS_PREMIUM_COST = 150;
 const PASS_PREMIUM_HEAD_START = 10;
 const FREE_TIER_COUNT = 50;
@@ -2288,7 +2553,7 @@ function getActiveBoostMultiplier(playerId, activeBoosts) {
 }
 function isOnline(ts) {
   if (!ts) return false;
-  return Date.now() - new Date(ts).getTime() < 90000;
+  return Date.now() - new Date(ts).getTime() < 45000;
 }
 
 function PlayerNameDisplay({ playerId, points }) {
@@ -3075,7 +3340,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -3149,8 +3414,257 @@ function calcPayout(wager, decimalOdds) {
   return Math.round(wager * parseFloat(decimalOdds));
 }
 
+function StockTrendLine({ priceHistory, color, width = 260, height = 70 }) {
+  if (!priceHistory || priceHistory.length < 2) {
+    return (
+      <div style={{height, display:"flex", alignItems:"center", justifyContent:"center", color:"#4A5066", fontSize:11}}>
+        not enough games yet for a chart
+      </div>
+    );
+  }
+  const vals = priceHistory.slice(-20);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const range = Math.max(1, max - min);
+  const pad = 6;
+  const w = width, h = height;
+
+  const pts = vals.map((v, i) => {
+    const x = pad + (i / (vals.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return { x, y };
+  });
+
+  const linePoints = pts.map(p => `${p.x},${p.y}`).join(" ");
+  const areaPoints = `${pts[0].x},${h} ${linePoints} ${pts[pts.length-1].x},${h}`;
+
+  const up = vals[vals.length - 1] >= vals[0];
+  const lineColor = color || (up ? "#7CFFB2" : "#FF5C8A");
+  const gradId = `stockgrad-${lineColor.replace("#","")}`;
+
+  return (
+    <svg width={w} height={h} style={{display:"block"}}>
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={lineColor} stopOpacity="0.35"/>
+          <stop offset="100%" stopColor={lineColor} stopOpacity="0"/>
+        </linearGradient>
+      </defs>
+      <polygon points={areaPoints} fill={`url(#${gradId})`} />
+      <polyline points={linePoints} fill="none" stroke={lineColor} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+      {pts.map((p,i)=>(
+        i === pts.length - 1
+          ? <circle key={i} cx={p.x} cy={p.y} r="3.5" fill={lineColor} style={{filter:`drop-shadow(0 0 4px ${lineColor}99)`}}/>
+          : null
+      ))}
+    </svg>
+  );
+}
+
+function StockMarketTab({ stats, currentPlayer, points, setPoints, stocks, setStocks }) {
+  const myPoints = points?.[currentPlayer] || 0;
+  const [investAmount, setInvestAmount] = useState(10);
+  const [result, setResult] = useState(null);
+
+  const getStockPrice = (playerId) => {
+    const pg = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
+    if (!pg.length) return STOCK_BASE_PRICE;
+    const weekStart = getWeekStart();
+    const weekGames = pg.filter(g => new Date(g.ts) >= weekStart);
+    const allAvgGoals = pg.length ? pg.reduce((s,g) => s+(g.goals||0),0)/pg.length : 1;
+    const weekAvgGoals = weekGames.length ? weekGames.reduce((s,g) => s+(g.goals||0),0)/weekGames.length : allAvgGoals;
+    const wins = pg.filter(g => g.ourScore > g.theirScore).length;
+    const winRate = pg.length ? wins/pg.length : 0.5;
+    const weekWins = weekGames.filter(g => g.ourScore > g.theirScore).length;
+    const weekWinRate = weekGames.length ? weekWins/weekGames.length : winRate;
+    const price = Math.round(STOCK_BASE_PRICE * (1 + (weekWinRate - 0.5) * 1.5 + (weekAvgGoals - allAvgGoals) * 0.2));
+    return Math.max(10, Math.min(500, price));
+  };
+
+const getStockPriceHistory = (playerId) => {
+    const pg = stats
+      .filter(g => g.playerId === playerId && g.mode === "3v3")
+      .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    if (pg.length < 2) return null; // not enough points for a real chart
+
+    const allAvgGoalsRunning = [];
+    const history = pg.map((g, i) => {
+      const upToHere = pg.slice(0, i + 1);
+      const weekStart = getWeekStart();
+      const weekGames = upToHere.filter(gg => new Date(gg.ts) >= weekStart);
+      const allAvgGoals = upToHere.reduce((s, gg) => s + (gg.goals || 0), 0) / upToHere.length;
+      const weekAvgGoals = weekGames.length
+        ? weekGames.reduce((s, gg) => s + (gg.goals || 0), 0) / weekGames.length
+        : allAvgGoals;
+      const wins = upToHere.filter(gg => gg.ourScore > gg.theirScore).length;
+      const winRate = wins / upToHere.length;
+      const weekWins = weekGames.filter(gg => gg.ourScore > gg.theirScore).length;
+      const weekWinRate = weekGames.length ? weekWins / weekGames.length : winRate;
+      const price = Math.round(STOCK_BASE_PRICE * (1 + (weekWinRate - 0.5) * 1.5 + (weekAvgGoals - allAvgGoals) * 0.2));
+      return Math.max(10, Math.min(500, price));
+    });
+    return history;
+  };
+  const getPriceChange = (playerId) => {
+    const current = getStockPrice(playerId);
+    const prev = stocks?.[playerId+"_prevPrice"] || STOCK_BASE_PRICE;
+    return { change: current - prev, pct: (((current - prev) / prev) * 100).toFixed(1) };
+  };
+
+  const invest = async (targetId) => {
+    if (myPoints < investAmount) return;
+    const price = getStockPrice(targetId);
+    const shares = investAmount / price;
+    const existing = stocks?.[currentPlayer+"_"+targetId] || { shares: 0, invested: 0 };
+    const upd = {
+      ...stocks,
+      [currentPlayer+"_"+targetId]: { shares: existing.shares + shares, invested: existing.invested + investAmount },
+      [targetId+"_prevPrice"]: price,
+    };
+    setStocks(upd); await storeSet("stocks", upd);
+    const updPts = { ...points, [currentPlayer]: myPoints - investAmount };
+    setPoints(updPts); await storeSet("points", updPts);
+    setResult({ action: "bought", amount: investAmount, player: PLAYERS.find(p=>p.id===targetId)?.name });
+    setTimeout(() => setResult(null), 3000);
+  };
+
+  const cashOut = async (targetId) => {
+    const holding = stocks?.[currentPlayer+"_"+targetId];
+    if (!holding || holding.shares <= 0) return;
+    const currentPrice = getStockPrice(targetId);
+    const value = Math.round(holding.shares * currentPrice);
+    const profit = value - holding.invested;
+    const upd = { ...stocks, [currentPlayer+"_"+targetId]: { shares: 0, invested: 0 }, [targetId+"_prevPrice"]: currentPrice };
+    setStocks(upd); await storeSet("stocks", upd);
+    const updPts = { ...points, [currentPlayer]: myPoints + value };
+    setPoints(updPts); await storeSet("points", updPts);
+    setResult({ action: "sold", value, profit, player: PLAYERS.find(p=>p.id===targetId)?.name });
+    setTimeout(() => setResult(null), 3000);
+  };
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>invest points into teammates before matches. if they pop off this week their stock rises and you profit. if they choke you lose.</div>
+
+      {result && (
+        <div style={{background:result.profit>=0||result.action==="bought"?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)",border:`1px solid ${result.profit>=0||result.action==="bought"?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`,borderRadius:14,padding:14,marginBottom:16,textAlign:"center"}}>
+          {result.action==="bought" ? (
+            <div style={{fontSize:13,fontWeight:700,color:"#7CFFB2"}}>invested {result.amount} pts in {result.player} 📈</div>
+          ) : (
+            <>
+              <div style={{fontSize:13,fontWeight:700,color:result.profit>=0?"#7CFFB2":"#FF5C8A"}}>cashed out {result.player} for {result.value} pts</div>
+              <div style={{fontSize:12,color:"#8B92A8",marginTop:4}}>{result.profit>=0?"+":""}{result.profit} pts profit</div>
+            </>
+          )}
+        </div>
+      )}
+
+      <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(255,255,255,0.05)"}}>
+        <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:10}}>INVEST AMOUNT</div>
+        <div style={{display:"flex",gap:8}}>
+          {[10,25,50,100].map(amt=>(
+            <button key={amt} onClick={()=>setInvestAmount(amt)} className="bb-pressable"
+              style={{flex:1,background:investAmount===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"8px 0",fontSize:11,fontWeight:700,color:investAmount===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+              {amt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {PLAYERS.filter(p => p.id !== currentPlayer).map(player => {
+        const price = getStockPrice(player.id);
+        const { change, pct } = getPriceChange(player.id);
+        const holding = stocks?.[currentPlayer+"_"+player.id];
+        const hasShares = holding?.shares > 0;
+        const currentValue = hasShares ? Math.round(holding.shares * price) : 0;
+        const profit = hasShares ? currentValue - holding.invested : 0;
+        const pg = stats.filter(g => g.playerId === player.id && g.mode === "3v3");
+        const weekStart = getWeekStart();
+        const weekGames = pg.filter(g => new Date(g.ts) >= weekStart);
+
+        return (
+          <div key={player.id} style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"16px",marginBottom:14,border:`1px solid ${player.color}22`}}>
+           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:10,height:10,borderRadius:99,background:player.color,boxShadow:`0 0 8px ${player.color}99`}}/>
+                <span style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:player.color}}>{player.name}</span>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"#E8ECF4"}}>{price}<span style={{fontSize:11,color:"#4A5066",marginLeft:2}}>pts</span></div>
+                <div style={{fontSize:11,fontWeight:700,color:change>=0?"#7CFFB2":"#FF5C8A"}}>{change>=0?"▲":"▼"} {Math.abs(change)} ({pct}%)</div>
+              </div>
+            </div>
+
+            <div style={{marginBottom:12, background:"rgba(255,255,255,0.02)", borderRadius:10, padding:"8px 4px"}}>
+              <StockTrendLine priceHistory={getStockPriceHistory(player.id)} color={change>=0?"#7CFFB2":"#FF5C8A"} width={280} height={70}/>
+            </div>
+
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              <div style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2}}>THIS WEEK</div>
+                <div style={{fontSize:13,fontWeight:700,color:player.color}}>{weekGames.length}g</div>
+              </div>
+              <div style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2}}>WIN RATE</div>
+                <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4"}}>{weekGames.length?Math.round(weekGames.filter(g=>g.ourScore>g.theirScore).length/weekGames.length*100):0}%</div>
+              </div>
+              <div style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2}}>AVG GOALS</div>
+                <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4"}}>{weekGames.length?(weekGames.reduce((s,g)=>s+(g.goals||0),0)/weekGames.length).toFixed(1):0}</div>
+              </div>
+            </div>
+
+            {hasShares && (
+              <div style={{background:profit>=0?"rgba(124,255,178,0.06)":"rgba(255,92,138,0.06)",border:`1px solid ${profit>=0?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,borderRadius:10,padding:"10px 12px",marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:10,color:"#4A5066",marginBottom:2}}>YOUR POSITION</div>
+                    <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4"}}>{holding.shares.toFixed(3)} shares · invested {holding.invested} pts</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:13,fontWeight:700,color:profit>=0?"#7CFFB2":"#FF5C8A"}}>{currentValue} pts</div>
+                    <div style={{fontSize:11,color:profit>=0?"#7CFFB2":"#FF5C8A"}}>{profit>=0?"+":""}{profit} profit</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>invest(player.id)} disabled={myPoints<investAmount} className="bb-pressable bb-glow-lime"
+                style={{flex:1,background:myPoints>=investAmount?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${myPoints>=investAmount?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:myPoints>=investAmount?"#B8FF4D":"#4A5066",cursor:myPoints>=investAmount?"pointer":"default"}}>
+                📈 buy {investAmount} pts
+              </button>
+              {hasShares && (
+                <button onClick={()=>cashOut(player.id)} className="bb-pressable"
+                  style={{flex:1,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
+                  💰 cash out {currentValue} pts
+                </button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
-  const [section, setSection] = useState("wheel");
+const [section, setSection] = useState("wheel");
+const [parlayLegs, setParlayLegs] = useState([]);
+const [parlayWager, setParlayWager] = useState(10);
+const [showParlay, setShowParlay] = useState(false);
+const [slotSpinning, setSlotSpinning] = useState(false);
+const [slotReels, setSlotReels] = useState(["🚀","🚀","🚀"]);
+const [slotResult, setSlotResult] = useState(null);
+const [slotWager, setSlotWager] = useState(10);
+const [slotDisplayReels, setSlotDisplayReels] = useState(["🚀","🚀","🚀"]);
+const todayKey = dateKey(todayAtMidnight());
+const spinCountKey = `spins_${currentPlayer}_${todayKey}`;
+const slotCountKey = `slots_${currentPlayer}_${todayKey}`;
+const spinsUsed = points?.[spinCountKey] || 0;
+const slotsUsed = points?.[slotCountKey] || 0;
+const spinsLeft = Math.max(0, DAILY_SPINS_MAX + (points?.[currentPlayer+"_bonusSpins"] || 0) - spinsUsed);
+const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusSlots"] || 0) - slotsUsed);
   const [wager, setWager] = useState(10);
   const [spinning, setSpinning] = useState(false);
   const [spinResult, setSpinResult] = useState(null);
@@ -3208,33 +3722,28 @@ const PROP_FIELD_CONFIG = {
   const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
   const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
 
-  const spinWheel = async () => {
+const spinWheel = async () => {
     if (spinning || wager < 1 || myPoints < wager) return;
+    if(spinsLeft<=0) return;
     setSpinning(true);
     setSpinResult(null);
-    const seg = pickSegment();
-const spins = 5 + Math.random() * 3;
-const segIdx = WHEEL_SEGMENTS.indexOf(seg);
-const segAngle = 360 / WHEEL_SEGMENTS.length;
-// Segment i sits at angle (i * segAngle) measured from 12 o'clock, clockwise.
-// To bring that segment's center UNDER the fixed pointer at 12 o'clock,
-// we need to rotate the wheel by the negative of that angle (plus full spins).
-const segCenterAngle = segIdx * segAngle + segAngle / 2;
-const jitter = (Math.random() - 0.5) * (segAngle * 0.6); // stay within the wedge, off-center a bit
-const targetAngle = spins * 360 - segCenterAngle - jitter;
-setRotation(prev => {
-  // normalize so we always spin forward a fresh amount from current visual position
-  const current = prev % 360;
-  const delta = ((targetAngle - current) % 360 + 360) % 360 + spins * 360;
-  return prev + delta;
-});
+    const segAngle = 360 / WHEEL_SEGMENTS.length;
+    const spins = 5 + Math.floor(Math.random() * 3);
+    const targetDeg = spins * 360 + Math.random() * 360;
+    const newRotation = rotation + targetDeg;
+    setRotation(newRotation);
     setTimeout(async () => {
+      const normalizedAngle = ((360 - (newRotation % 360)) + 360) % 360;
+      const segIdx = Math.floor(normalizedAngle / segAngle) % WHEEL_SEGMENTS.length;
+      const seg = WHEEL_SEGMENTS[segIdx];
       const payout = Math.round(wager * seg.mult);
       const net = payout - wager;
       const newPts = Math.max(0, myPoints - wager + payout);
       const upd = { ...points, [currentPlayer]: newPts };
       setPoints(upd);
       await storeSet("points", upd);
+      const updCount = {...points,[currentPlayer]:newPts,[spinCountKey]:spinsUsed+1};
+      setPoints(updCount); await storeSet("points",updCount);
       setSpinResult({ seg, wager, payout, net });
       setSpinning(false);
     }, 3000);
@@ -3278,6 +3787,20 @@ const placeBet = async (chosenLine) => {
 
   const segAngle = 360 / WHEEL_SEGMENTS.length;
 
+const noBettingWeek = isEventActive("no_betting");
+
+  if (noBettingWeek) {
+    return (
+      <div className="bb-tab-content" style={s.tabContent}>
+        <div style={{background:"linear-gradient(135deg,#1A0A14,#0C0A18)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:18,padding:"28px 20px",textAlign:"center"}}>
+          <div style={{fontSize:36,marginBottom:10}}>🚫</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#FF5C8A",marginBottom:8}}>no betting this week</div>
+          <div style={{fontSize:13,color:"#8B92A8",lineHeight:1.5}}>the wheel, slots, props, and parlays are paused — this week's modifier is no betting. check back next week.</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       {/* Header */}
@@ -3285,6 +3808,10 @@ const placeBet = async (chosenLine) => {
         <div>
           <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
+        <div style={{display:"flex",gap:12,marginTop:6}}>
+          <div style={{fontSize:11,color:"#4A5066"}}>🎡 <span style={{color:spinsLeft>0?"#B8FF4D":"#FF5C8A",fontWeight:700}}>{spinsLeft}</span> spins left</div>
+          <div style={{fontSize:11,color:"#4A5066"}}>🎰 <span style={{color:slotsLeft>0?"#A78BFA":"#FF5C8A",fontWeight:700}}>{slotsLeft}</span> slots left</div>
+        </div>
         </div>
         <div style={{fontSize:11,color:"#4A5066",textAlign:"right"}}>
           <div style={{color:"#FFD166",fontWeight:700,fontSize:13}}>{myOpenBets.length} open bets</div>
@@ -3294,7 +3821,7 @@ const placeBet = async (chosenLine) => {
 
       {/* Section tabs */}
       <div style={{display:"flex",gap:8,marginBottom:18}}>
-        {[{id:"wheel",label:"🎡 wheel"},{id:"props",label:"📊 props"},{id:"mybets",label:"🎟 my bets"}].map(sec=>(
+     {[{id:"wheel",label:"🎡 wheel"},{id:"slots",label:"🎰 slots"},{id:"props",label:"📊 props"},{id:"parlay",label:"🃏 parlay"},{id:"predict",label:"🔮 predict"},{id:"mybets",label:"🎟 my bets"}].map(sec=>(
           <button key={sec.id} onClick={()=>setSection(sec.id)} className="bb-pressable"
             style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
             {sec.label}
@@ -3369,10 +3896,13 @@ const placeBet = async (chosenLine) => {
           {/* Odds table */}
           <div style={{marginTop:20,background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
             <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:10}}>PAYOUT TABLE</div>
-            {WHEEL_SEGMENTS.map(seg=>(
+           {WHEEL_SEGMENTS.map(seg=>(
               <div key={seg.label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
-                <div style={{fontSize:13}}>{seg.label}</div>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:700,color:seg.mult>=2?"#7CFFB2":seg.mult>0?"#B8FF4D":"#FF5C8A"}}>{seg.mult}x</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:seg.color,flexShrink:0}}/>
+                  <div style={{fontSize:13,color:seg.color,fontWeight:700}}>{seg.label}</div>
+                </div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:14,fontWeight:700,color:seg.color}}>{seg.mult}x</div>
               </div>
             ))}
           </div>
@@ -3477,6 +4007,329 @@ const placeBet = async (chosenLine) => {
         </div>
       )}
 
+     {/* SLOTS */}
+      {section==="slots"&&(()=>{
+        const SLOT_SYMBOLS = [
+          {sym:"🥅", label:"Goal",      mult:0, prob:0.30},
+          {sym:"🧤", label:"Save",      mult:1.5, prob:0.25},
+          {sym:"🚀", label:"Rocket",    mult:2.0, prob:0.20},
+          {sym:"💥", label:"Demo",      mult:0, prob:0.12},
+          {sym:"⭐", label:"Epic Save", mult:5.0, prob:0.08},
+          {sym:"👑", label:"MVP",       mult:10.0, prob:0.05},
+        ];
+        const pickSym = () => {
+          const r = Math.random(); let cum = 0;
+          for (const s of SLOT_SYMBOLS) { cum+=s.prob; if(r<=cum) return s; }
+          return SLOT_SYMBOLS[0];
+        };
+        const spinSlots = async () => {
+          if(slotSpinning||myPoints<slotWager||slotsLeft<=0) return;
+          setSlotSpinning(true); setSlotResult(null);
+          const results = [pickSym(),pickSym(),pickSym()];
+          let tick = 0;
+          const iv = setInterval(()=>{
+            setSlotDisplayReels([
+              SLOT_SYMBOLS[Math.floor(Math.random()*SLOT_SYMBOLS.length)].sym,
+              SLOT_SYMBOLS[Math.floor(Math.random()*SLOT_SYMBOLS.length)].sym,
+              SLOT_SYMBOLS[Math.floor(Math.random()*SLOT_SYMBOLS.length)].sym,
+            ]);
+            tick++;
+            if(tick>18){
+              clearInterval(iv);
+              setSlotDisplayReels(results.map(r=>r.sym));
+              setSlotReels(results.map(r=>r.sym));
+              const allSame = results.every(r=>r.sym===results[0].sym);
+              const twosame = results[0].sym===results[1].sym||results[1].sym===results[2].sym||results[0].sym===results[2].sym;
+              let mult = 0;
+              if(allSame) mult = results[0].mult * 3;
+              else if(twosame) mult = results.find((r,i)=>results.indexOf(r)!==i||results.lastIndexOf(r)!==i)?.mult || 0;
+              const payout = Math.round(slotWager * mult);
+              const net = payout - slotWager;
+              const newPts = Math.max(0, myPoints - slotWager + payout);
+              const upd = {...points,[currentPlayer]:newPts};
+              setPoints(upd); storeSet("points",upd);
+              const updCount2 = {...upd,[slotCountKey]:slotsUsed+1};
+              setPoints(updCount2); storeSet("points",updCount2);
+              setSlotResult({results,mult,payout,net,allSame,twosame});
+              setSlotSpinning(false);
+            }
+          },100);
+        };
+        return (
+          <div>
+            <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>match 3 for a big win. match 2 for a small win. no match — you lose your wager.</div>
+            <div style={{background:"linear-gradient(135deg,#1A0A2E,#0A0818)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:18,padding:"24px 16px",marginBottom:16,textAlign:"center"}}>
+              <div style={{fontSize:11,color:"#A78BFA",fontWeight:700,letterSpacing:1,marginBottom:16}}>SLOTS</div>
+              <div style={{display:"flex",justifyContent:"center",gap:12,marginBottom:20}}>
+                {slotDisplayReels.map((sym,i)=>(
+                  <div key={i} style={{width:80,height:80,background:"rgba(255,255,255,0.06)",borderRadius:16,border:"2px solid rgba(167,139,250,0.3)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:36,transition:slotSpinning?"none":"all .2s"}}>
+                    {sym}
+                  </div>
+                ))}
+              </div>
+              {slotResult&&(
+                <div style={{background:slotResult.net>=0?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)",border:`1px solid ${slotResult.net>=0?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`,borderRadius:12,padding:"12px",marginBottom:16}}>
+                  <div style={{fontSize:18,marginBottom:4}}>{slotResult.allSame?"🎉 JACKPOT!":slotResult.twosame?"✨ MATCH!":"💀 NO MATCH"}</div>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:slotResult.net>=0?"#7CFFB2":"#FF5C8A"}}>{slotResult.net>=0?"+":""}{slotResult.net} pts</div>
+                  <div style={{fontSize:11,color:"#4A5066",marginTop:4}}>{slotResult.mult}x · wagered {slotWager} · got {slotResult.payout}</div>
+                </div>
+              )}
+              <div style={{display:"flex",gap:8,justifyContent:"center",marginBottom:14}}>
+                {[5,10,25,50].map(amt=>(
+                  <button key={amt} onClick={()=>setSlotWager(amt)} className="bb-pressable"
+                    style={{background:slotWager===amt?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"7px 14px",fontSize:11,fontWeight:700,color:slotWager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                    {amt}
+                  </button>
+                ))}
+              </div>
+              <button onClick={spinSlots} disabled={slotSpinning||myPoints<slotWager} className="bb-pressable"
+                style={{width:"100%",background:slotSpinning||myPoints<slotWager?"rgba(255,255,255,0.05)":"#A78BFA",border:"none",borderRadius:12,padding:"14px",fontSize:15,fontWeight:700,color:slotSpinning||myPoints<slotWager?"#4A5066":"#06070D",cursor:slotSpinning||myPoints<slotWager?"default":"pointer",fontFamily:"'Oswald',sans-serif",letterSpacing:1}}>
+                {slotSpinning?"spinning…":"spin — "+slotWager+" pts"}
+              </button>
+            </div>
+            <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:10}}>PAYOUT TABLE</div>
+              {SLOT_SYMBOLS.map(s=>(
+                <div key={s.sym} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:20}}>{s.sym}</span>
+                    <span style={{fontSize:12,color:"#8B92A8"}}>{s.label}</span>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:12,fontWeight:700,color:"#A78BFA"}}>3x = {s.mult*3}x</div>
+                    <div style={{fontSize:10,color:"#4A5066"}}>2x = {s.mult}x</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+    
+    {/* PARLAY */}
+      {section==="parlay"&&(
+        <div>
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>build a parlay from your open props or teammate bets. all legs must hit to win.</div>
+          <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(255,209,102,0.25)"}}>
+            <div style={{fontSize:12,color:"#FFD166",fontWeight:700,letterSpacing:0.5,marginBottom:8}}>PARLAY BUILDER</div>
+            {parlayLegs.length===0?(
+              <div style={{fontSize:12,color:"#4A5066",marginBottom:10}}>tap + on any prop or bet below to add a leg. up to 4 legs.</div>
+            ):(
+              <>
+                {parlayLegs.map((leg,i)=>(
+                  <div key={leg.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px"}}>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:700,color:"#E8ECF4"}}>{leg.playerName} {leg.side} {leg.line} {leg.field}</div>
+                      <div style={{fontSize:10,color:"#4A5066"}}>{leg.odds}</div>
+                    </div>
+                    <button onClick={()=>setParlayLegs(prev=>prev.filter((_,idx)=>idx!==i))} className="bb-pressable"
+                      style={{background:"none",border:"none",color:"#FF5C8A",cursor:"pointer"}}><X size={14}/></button>
+                  </div>
+                ))}
+                {(()=>{
+                  const mult = parlayLegs.reduce((m,leg)=>{
+                    const dec = parseFloat(leg.odds?.replace("+","") || "100");
+                    const od = leg.odds?.startsWith("+")?(dec/100)+1:(100/Math.abs(dec))+1;
+                    return m*od;
+                  },1);
+                  const payout = Math.round(parlayWager*mult);
+                  return (
+                    <>
+                      <div style={{display:"flex",gap:8,marginTop:10,alignItems:"center"}}>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>MULTIPLIER</div>
+                          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#FFD166"}}>{mult.toFixed(2)}x</div>
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>WAGER</div>
+                          <input type="number" value={parlayWager} onChange={e=>setParlayWager(Math.max(1,Number(e.target.value)))}
+                            style={{...s.modalInput,padding:"8px 10px",fontSize:14}}/>
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>TO WIN</div>
+                          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#7CFFB2"}}>{payout}</div>
+                        </div>
+                      </div>
+                      <button onClick={async()=>{
+                        if(parlayLegs.length<2||myPoints<parlayWager) return;
+                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({playerId:l.playerId,playerName:l.playerName,field:l.field,line:l.line,side:l.side,odds:l.odds})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString()};
+                        const upd={...points,[currentPlayer]:myPoints-parlayWager};
+                        setPoints(upd); await storeSet("points",upd);
+                        const updBets=[...(bets||[]),parlayBet];
+                        setBets(updBets); await storeSet("bets",updBets);
+                        setParlayLegs([]); setParlayWager(10);
+                      }} disabled={parlayLegs.length<2||myPoints<parlayWager} className="bb-pressable bb-glow-lime"
+                        style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<parlayWager?0.4:1}}>
+                        place {parlayLegs.length}-leg parlay — {parlayWager} pts to win {payout}
+                      </button>
+                    </>
+                  );
+                })()}
+              </>
+            )}
+          </div>
+
+          <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:0.5,marginBottom:10}}>AVAILABLE PROPS</div>
+          {props.map(card=>{
+            const lineIdx = Math.floor(card.lineOptions.length/2);
+            const current = card.lineOptions[lineIdx];
+            const overLeg = {id:`${card.id}_over`,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"over",odds:current.overOdds.american};
+            const underLeg = {id:`${card.id}_under`,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"under",odds:current.underOdds.american};
+            return (
+              <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(255,255,255,0.05)"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                  <div style={{width:8,height:8,borderRadius:99,background:card.playerColor}}/>
+                  <span style={{fontWeight:700,fontSize:13,color:card.playerColor}}>{card.playerName}</span>
+                  <span style={{fontSize:13,color:"#E8ECF4",marginLeft:4}}>· {card.field}</span>
+                  <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>line: {current.line}</span>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>{if(parlayLegs.length>=4)return;if(parlayLegs.find(l=>l.id===overLeg.id)){setParlayLegs(p=>p.filter(l=>l.id!==overLeg.id));}else{setParlayLegs(p=>[...p,overLeg]);}}} className="bb-pressable"
+                    style={{flex:1,background:parlayLegs.find(l=>l.id===overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.08)",border:`1px solid ${parlayLegs.find(l=>l.id===overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700}}>OVER {current.line}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:parlayLegs.find(l=>l.id===overLeg.id)?"#06070D":"#7CFFB2"}}>{current.overOdds.american}</div>
+                  </button>
+                  <button onClick={()=>{if(parlayLegs.length>=4)return;if(parlayLegs.find(l=>l.id===underLeg.id)){setParlayLegs(p=>p.filter(l=>l.id!==underLeg.id));}else{setParlayLegs(p=>[...p,underLeg]);}}} className="bb-pressable"
+                    style={{flex:1,background:parlayLegs.find(l=>l.id===underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.08)",border:`1px solid ${parlayLegs.find(l=>l.id===underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700}}>UNDER {current.line}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:parlayLegs.find(l=>l.id===underLeg.id)?"#06070D":"#FF5C8A"}}>{current.underOdds.american}</div>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+    
+    {/* PREDICTION MARKET */}
+{section==="predict"&&(()=>{
+  const PREDICTIONS = [
+    { id:"goals_2plus", question:(p)=>`will ${p.name} score 2+ goals next game?`, field:"goals", threshold:2, type:"over" },
+    { id:"own_goal",    question:()=>"will anyone score an own goal this week?",   field:"ourScore", threshold:0, type:"special" },
+    { id:"save_3plus",  question:(p)=>`will ${p.name} get 3+ saves next game?`,   field:"saves",  threshold:3, type:"over" },
+    { id:"assist_2",    question:(p)=>`will ${p.name} get 2+ assists?`,            field:"assists",threshold:2, type:"over" },
+    { id:"demo_2",      question:(p)=>`will ${p.name} get 2+ demos?`,             field:"demos",  threshold:2, type:"over" },
+    { id:"win_streak",  question:()=>"will the team win 3 in a row this week?",    field:null,     threshold:3, type:"streak" },
+    { id:"shutout",     question:(p)=>`will ${p.name} have 0 goals scored against them?`, field:"theirScore", threshold:0, type:"exact" },
+  ];
+
+  const weekStart = getWeekStart();
+  const recentGames = stats.filter(g => g.mode==="3v3" && new Date(g.ts) >= weekStart);
+
+  const buildCards = () => {
+    const cards = [];
+    PLAYERS.filter(p => p.id !== currentPlayer).forEach(player => {
+      const pg = stats.filter(g => g.playerId===player.id && g.mode==="3v3");
+      PREDICTIONS.filter(pred => pred.type !== "special" && pred.type !== "streak").forEach(pred => {
+        const hitRate = pg.length ? pg.filter(g => (g[pred.field]||0) >= pred.threshold).length / pg.length : 0.5;
+        const yesPct  = Math.max(0.08, Math.min(0.92, hitRate));
+        const noPct   = 1 - yesPct;
+        const yesOdds = calcOdds(yesPct);
+        const noOdds  = calcOdds(noPct);
+        cards.push({ id:`${player.id}_${pred.id}`, player, pred, yesPct, noPct, yesOdds, noOdds, gamesPlayed: pg.length });
+      });
+    });
+    // team-level predictions
+    [PREDICTIONS.find(p=>p.id==="win_streak"), PREDICTIONS.find(p=>p.id==="own_goal")].forEach(pred => {
+      if (!pred) return;
+      cards.push({ id:`team_${pred.id}`, player: null, pred, yesPct:0.35, noPct:0.65, yesOdds: calcOdds(0.35), noOdds: calcOdds(0.65), gamesPlayed: recentGames.length });
+    });
+    return cards;
+  };
+
+  const predCards = buildCards();
+  const myPredBets = (bets||[]).filter(b => b.bettorId===currentPlayer && b.isPrediction && b.status==="open");
+
+  const placePredBet = async (card, side, wager) => {
+    if (myPoints < wager) return;
+    const odds = side==="yes" ? card.yesOdds : card.noOdds;
+    const payout = calcPayout(wager, odds.decimal);
+    const bet = {
+      id: Date.now().toString(),
+      bettorId: currentPlayer,
+      isPrediction: true,
+      predId: card.id,
+      question: card.player ? card.pred.question(card.player) : card.pred.question(),
+      playerId: card.player?.id || null,
+      field: card.pred.field,
+      threshold: card.pred.threshold,
+      predType: card.pred.type,
+      side,
+      wager,
+      payout,
+      odds: odds.american,
+      status: "open",
+      placedAt: new Date().toISOString(),
+    };
+    const upd = { ...points, [currentPlayer]: myPoints - wager };
+    setPoints(upd); await storeSet("points", upd);
+    const updBets = [...(bets||[]), bet];
+    setBets(updBets); await storeSet("bets", updBets);
+  };
+
+  const [predWager, setPredWager] = useState(10);
+  const [selectedPred, setSelectedPred] = useState(null);
+  const [predSide, setPredSide] = useState(null);
+
+  return (
+    <div>
+      <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>predict what happens in upcoming games. live odds based on real stats. all predictions resolve at end of week.</div>
+
+      <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,255,255,0.05)"}}>
+        <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER</div>
+        <div style={{display:"flex",gap:8}}>
+          {[5,10,25,50].map(amt=>(
+            <button key={amt} onClick={()=>setPredWager(amt)} className="bb-pressable"
+              style={{flex:1,background:predWager===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"7px 0",fontSize:11,fontWeight:700,color:predWager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+              {amt}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {predCards.map(card => {
+        const isSelected = selectedPred===card.id;
+        const question = card.player ? card.pred.question(card.player) : card.pred.question();
+        const alreadyBet = myPredBets.find(b => b.predId===card.id);
+        return (
+          <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${isSelected?"rgba(255,209,102,0.3)":"rgba(255,255,255,0.05)"}`}}>
+            {card.player && (
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:6}}>
+                <div style={{width:7,height:7,borderRadius:99,background:card.player.color}}/>
+                <span style={{fontSize:11,fontWeight:700,color:card.player.color}}>{card.player.name}</span>
+                <span style={{fontSize:10,color:"#4A5066",marginLeft:"auto"}}>{card.gamesPlayed}g history</span>
+              </div>
+            )}
+            <div style={{fontSize:13.5,fontWeight:700,color:"#E8ECF4",marginBottom:10,lineHeight:1.4}}>{question}</div>
+            {alreadyBet ? (
+              <div style={{fontSize:11,color:"#FFD166",fontWeight:700,background:"rgba(255,209,102,0.08)",borderRadius:8,padding:"8px 10px"}}>
+                you bet {alreadyBet.side.toUpperCase()} · {alreadyBet.wager} pts to win {alreadyBet.payout} · {alreadyBet.odds}
+              </div>
+            ) : (
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>{setSelectedPred(card.id);setPredSide("yes");placePredBet(card,"yes",predWager);}} disabled={myPoints<predWager} className="bb-pressable"
+                  style={{flex:1,background:"rgba(124,255,178,0.08)",border:"1px solid rgba(124,255,178,0.2)",borderRadius:10,padding:"10px 0",cursor:myPoints>=predWager?"pointer":"default",textAlign:"center",opacity:myPoints<predWager?0.4:1}}>
+                  <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>YES</div>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:"#7CFFB2"}}>{card.yesOdds.american}</div>
+                  <div style={{fontSize:9,color:"#4A5066",marginTop:2}}>{Math.round(card.yesPct*100)}% hist.</div>
+                </button>
+                <button onClick={()=>{setSelectedPred(card.id);setPredSide("no");placePredBet(card,"no",predWager);}} disabled={myPoints<predWager} className="bb-pressable"
+                  style={{flex:1,background:"rgba(255,92,138,0.08)",border:"1px solid rgba(255,92,138,0.2)",borderRadius:10,padding:"10px 0",cursor:myPoints>=predWager?"pointer":"default",textAlign:"center",opacity:myPoints<predWager?0.4:1}}>
+                  <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>NO</div>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:"#FF5C8A"}}>{card.noOdds.american}</div>
+                  <div style={{fontSize:9,color:"#4A5066",marginTop:2}}>{Math.round(card.noPct*100)}% hist.</div>
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {predCards.length===0 && <div style={s.emptyQueue}>log some 3v3 games first — predictions unlock once there's game history.</div>}
+    </div>
+  );
+})()}
 
       {/* MY BETS */}
       {section==="mybets"&&(
@@ -3522,6 +4375,266 @@ const placeBet = async (chosenLine) => {
     </div>
   );
 }
+                  
+// ===================== Coin Flip Duel =====================
+function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips }) {
+  const [selectedOpponent, setSelectedOpponent] = useState(null);
+  const [wager, setWager] = useState(10);
+  const [flipping, setFlipping] = useState(false);
+  const [result, setResult] = useState(null);
+  const myPoints = points?.[currentPlayer] || 0;
+
+  const opponents = PLAYERS.filter(p => p.id !== currentPlayer);
+
+  const flip = async () => {
+    if (!selectedOpponent || myPoints < wager || flipping) return;
+    setFlipping(true);
+    setResult(null);
+    await new Promise(r => setTimeout(r, 1800));
+    const won = Math.random() < 0.5;
+    const outcome = {
+      id: Date.now().toString(),
+      challenger: currentPlayer,
+      opponent: selectedOpponent,
+      wager,
+      won,
+      ts: new Date().toISOString(),
+    };
+    const newPts = won ? myPoints + wager : myPoints - wager;
+    const upd = { ...points, [currentPlayer]: Math.max(0, newPts) };
+    setPoints(upd);
+    await storeSet("points", upd);
+    const updFlips = [...(coinFlips || []), outcome];
+    setCoinFlips(updFlips);
+    await storeSet("coin_flips", updFlips);
+    setResult(outcome);
+    setFlipping(false);
+  };
+
+  const myHistory = (coinFlips || []).filter(f => f.challenger === currentPlayer).slice(-10).reverse();
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>
+        challenge a teammate to a coin flip. winner takes the wager. loser cries.
+      </div>
+
+      {/* Balance */}
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(255,209,102,0.2)",borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#FFD166"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
+        </div>
+        <div style={{fontSize:36}}>🪙</div>
+      </div>
+
+      {/* Pick opponent */}
+      <div style={{...s.sectionLabel,marginBottom:10}}>challenge</div>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        {opponents.map(p => (
+          <button key={p.id} onClick={() => setSelectedOpponent(p.id)} className="bb-pressable"
+            style={{flex:1,background:selectedOpponent===p.id?p.color:"rgba(255,255,255,0.05)",border:`1px solid ${selectedOpponent===p.id?p.color:"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"12px 0",fontSize:12,fontWeight:700,color:selectedOpponent===p.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
+            {p.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Wager */}
+      <div style={{...s.sectionLabel,marginBottom:10}}>wager</div>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        {[10,25,50,100,250].map(amt => (
+          <button key={amt} onClick={() => setWager(amt)} className="bb-pressable"
+            style={{flex:1,background:wager===amt?"#FFD166":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"8px 0",fontSize:11,fontWeight:700,color:wager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+            {amt}
+          </button>
+        ))}
+      </div>
+
+      {/* Coin animation */}
+      <div style={{textAlign:"center",marginBottom:20}}>
+        <div style={{fontSize:flipping?64:56,transition:"font-size .2s",display:"inline-block",animation:flipping?"spin 0.3s linear infinite":"none",filter:result?(result.won?"drop-shadow(0 0 16px #FFD166)":"drop-shadow(0 0 16px #FF5C8A)"):"none"}}>
+          🪙
+        </div>
+      </div>
+
+      {/* Result */}
+      {result && !flipping && (
+        <div style={{background:result.won?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)",border:`1px solid ${result.won?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`,borderRadius:16,padding:"18px",marginBottom:16,textAlign:"center"}}>
+          <div style={{fontSize:28,marginBottom:6}}>{result.won?"🎉":"💀"}</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:result.won?"#7CFFB2":"#FF5C8A",marginBottom:4}}>
+            {result.won?"you win!":"you lose"}
+          </div>
+          <div style={{fontSize:13,color:"#8B92A8"}}>
+            {result.won?`+${result.wager} pts`:`-${result.wager} pts`} vs {PLAYERS.find(p=>p.id===result.opponent)?.name}
+          </div>
+        </div>
+      )}
+
+      {/* Flip button */}
+      <button onClick={flip} disabled={!selectedOpponent||myPoints<wager||flipping} className="bb-pressable bb-glow-lime"
+        style={{...s.primaryBtn,background:!selectedOpponent||myPoints<wager||flipping?"rgba(255,255,255,0.05)":"#FFD166",color:!selectedOpponent||myPoints<wager||flipping?"#4A5066":"#06070D",opacity:!selectedOpponent||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:16,letterSpacing:1,marginBottom:24}}>
+        {flipping?"flipping…":`flip for ${wager} pts`}
+      </button>
+
+      {/* History */}
+      {myHistory.length > 0 && (
+        <>
+          <div style={{...s.sectionLabel,marginBottom:10}}>recent flips</div>
+          {myHistory.map(f => {
+            const opp = PLAYERS.find(p => p.id === f.opponent);
+            return (
+              <div key={f.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",marginBottom:8,border:`1px solid ${f.won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:f.won?"#7CFFB2":"#FF5C8A"}}>{f.won?"won":"lost"} vs {opp?.name}</div>
+                  <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(f.ts)}</div>
+                </div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:f.won?"#7CFFB2":"#FF5C8A"}}>
+                  {f.won?"+":"-"}{f.wager} pts
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ===================== Race Mode =====================
+const RACE_OBJECTIVES = [
+  { id:"shots_100",    label:"100 Shots",    field:"shots",   target:100, emoji:"🎯", color:"#B8FF4D" },
+  { id:"saves_20",     label:"20 Saves",     field:"saves",   target:20,  emoji:"🧤", color:"#4D9EFF" },
+  { id:"assists_15",   label:"15 Assists",   field:"assists", target:15,  emoji:"🍀", color:"#A78BFA" },
+  { id:"goals_50",     label:"50 Goals",     field:"goals",   target:50,  emoji:"⚽", color:"#FFD166" },
+  { id:"demos_30",     label:"30 Demos",     field:"demos",   target:30,  emoji:"💥", color:"#FF8C42" },
+  { id:"wins_10",      label:"10 Wins",      field:null,      target:10,  emoji:"🏆", color:"#FF61C1" },
+];
+
+function RaceModeTab({ stats, currentPlayer, points, setPoints }) {
+  const [activeRace, setActiveRace] = useState(null);
+  const [raceStart, setRaceStart] = useState(null);
+
+  const weekStart = getWeekStart();
+
+  const getProgress = (playerId, objective) => {
+    const cutoff = raceStart ? new Date(raceStart) : weekStart;
+    const pg = stats.filter(g =>
+      g.playerId === playerId &&
+      g.mode === "3v3" &&
+      new Date(g.ts) >= cutoff
+    );
+    if (objective.field === null) {
+      return pg.filter(g => g.ourScore > g.theirScore).length;
+    }
+    return pg.reduce((s, g) => s + (g[objective.field] || 0), 0);
+  };
+
+  const startRace = async (obj) => {
+    setActiveRace(obj.id);
+    const ts = new Date().toISOString();
+    setRaceStart(ts);
+    await storeSet("active_race", { objectiveId: obj.id, startedAt: ts, startedBy: currentPlayer });
+  };
+
+  const endRace = async () => {
+    setActiveRace(null);
+    setRaceStart(null);
+    await storeSet("active_race", null);
+  };
+
+  const currentObj = RACE_OBJECTIVES.find(o => o.id === activeRace);
+
+  const leaderboard = currentObj
+    ? [...PLAYERS].map(p => ({
+        player: p,
+        progress: getProgress(p.id, currentObj),
+      })).sort((a, b) => b.progress - a.progress)
+    : [];
+
+  const winner = leaderboard.find(l => l.progress >= (currentObj?.target || 0));
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>
+        everyone races to complete the same objective. first to hit the target wins bonus pts.
+      </div>
+
+      {!activeRace ? (
+        <>
+          <div style={{...s.sectionLabel,marginBottom:12}}>pick an objective</div>
+          {RACE_OBJECTIVES.map(obj => (
+            <button key={obj.id} onClick={() => startRace(obj)} className="bb-pressable"
+              style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${obj.color}22`,borderRadius:16,padding:"16px",marginBottom:10,textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+              <span style={{fontSize:32}}>{obj.emoji}</span>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:obj.color}}>{obj.label}</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:3}}>first to {obj.target} · winner gets +50 pts bonus</div>
+              </div>
+              <ChevronRight size={16} color="#4A5066"/>
+            </button>
+          ))}
+        </>
+      ) : (
+        <>
+          {/* Active race header */}
+          <div style={{background:`linear-gradient(135deg,${currentObj.color}18,${currentObj.color}08)`,border:`1px solid ${currentObj.color}40`,borderRadius:18,padding:"18px",marginBottom:20,textAlign:"center"}}>
+            <div style={{fontSize:11,color:currentObj.color,fontWeight:700,letterSpacing:1,marginBottom:6}}>RACE IN PROGRESS</div>
+            <div style={{fontSize:42,marginBottom:6}}>{currentObj.emoji}</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"#E8ECF4",marginBottom:4}}>{currentObj.label}</div>
+            <div style={{fontSize:12,color:"#8B92A8"}}>first to {currentObj.target} wins +50 pts</div>
+            {raceStart && <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>started {fmtRelTime(raceStart)}</div>}
+          </div>
+
+          {/* Winner banner */}
+          {winner && (
+            <div style={{background:"linear-gradient(135deg,rgba(255,209,102,0.15),rgba(255,209,102,0.05))",border:"1px solid rgba(255,209,102,0.4)",borderRadius:16,padding:"18px",marginBottom:16,textAlign:"center"}}>
+              <div style={{fontSize:32,marginBottom:6}}>🏆</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#FFD166",marginBottom:4}}>
+                {winner.player.name} wins!
+              </div>
+              <div style={{fontSize:12,color:"#8B92A8"}}>+50 pts bonus awarded</div>
+              <button onClick={endRace} className="bb-pressable bb-glow-lime"
+                style={{...s.primaryBtn,marginTop:12,background:"#FFD166",color:"#06070D"}}>
+                end race
+              </button>
+            </div>
+          )}
+
+          {/* Leaderboard */}
+          <div style={{...s.sectionLabel,marginBottom:12}}>standings</div>
+          {leaderboard.map((entry, i) => {
+            const pct = Math.min(1, entry.progress / currentObj.target);
+            const isMe = entry.player.id === currentPlayer;
+            return (
+              <div key={entry.player.id} style={{background:isMe?"linear-gradient(135deg,#11131F,#0C0E18)":"#11131F",borderRadius:14,padding:"14px 16px",marginBottom:10,border:`1px solid ${isMe?entry.player.color+"33":"rgba(255,255,255,0.05)"}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:i===0?"#FFD166":"#4A5066",width:24}}>{i+1}</div>
+                  <div style={{width:9,height:9,borderRadius:99,background:entry.player.color,boxShadow:`0 0 8px ${entry.player.color}99`}}/>
+                  <span style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:entry.player.color,flex:1}}>{entry.player.name}</span>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:entry.player.color}}>
+                    {entry.progress}<span style={{fontSize:11,color:"#4A5066",marginLeft:3}}>/ {currentObj.target}</span>
+                  </div>
+                </div>
+                <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${pct*100}%`,background:pct>=1?"#FFD166":entry.player.color,borderRadius:99,transition:"width .4s ease",boxShadow:pct>=1?`0 0 8px #FFD16699`:`0 0 6px ${entry.player.color}88`}}/>
+                </div>
+                {pct >= 1 && <div style={{fontSize:11,color:"#FFD166",fontWeight:700,marginTop:6}}>🏆 finished!</div>}
+              </div>
+            );
+          })}
+
+          {!winner && (
+            <button onClick={endRace} className="bb-pressable"
+              style={{width:"100%",background:"rgba(255,92,138,0.08)",border:"1px solid rgba(255,92,138,0.2)",borderRadius:12,padding:"12px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer",marginTop:8}}>
+              cancel race
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}                  
+                  
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
@@ -3552,26 +4665,31 @@ const [passActiveBoosts, setPassActiveBoosts] = useState({}); // { [playerId]: {
   const [pendingResyncPlayer,setPendingResyncPlayer]=useState(null);
   const [commentDay,setCommentDay]=useState(null);
   const [jumpKey,setJumpKey]=useState(null);
+const [coinFlips, setCoinFlips] = useState([]);
+const [activeRace, setActiveRace] = useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
 const [themeId, setThemeId] = useState("starfield");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const [showAllGames, setShowAllGames] = useState(false);
 const [statsJumpDate, setStatsJumpDate] = useState(null);
+const [stocks, setStocks] = useState({});
 const [timeLogs, setTimeLogs] = useState([]);
 const [chatOpen, setChatOpen] = useState(false);
 const theme = THEMES[themeId];
-const addToast = (text, icon = "🔔") => {
+const addToast = useCallback((text, icon = "🔔") => {
   const id = Date.now().toString();
   setToasts(prev => [...prev, { id, text, icon }]);
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
-};
+}, []);
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
     if (!currentPlayer) return;
-    const heartbeat = async () => {
-      const upd = { ...presence, [currentPlayer]: new Date().toISOString() };
+const heartbeat = async () => {
+      const fresh = await storeGet("presence") || {};
+      const upd = { ...fresh, [currentPlayer]: new Date().toISOString() };
+      setPresence(upd);
       await storeSet("presence", upd);
     };
 heartbeat();
@@ -3587,18 +4705,21 @@ heartbeat();
     return value;
   });
 }
-      if (key === "posts")          setPosts(value);
+      if (key === "posts")          setPosts(Array.isArray(value) ? value : []);
       if (key === "completions")    setCompletions(value);
 if (key === "time_logs") setTimeLogs(value);
+if (key === "stocks") setStocks(value);
+if (key === "coin_flips") setCoinFlips(value);
+if (key === "active_race") setActiveRace(value);
       if (key === "training")       setTrainingData(value);
       if (key === "schedule")       setSchedule(value);
       if (key === "comments")       setComments(value);
       if (key === "stream_profiles") setStreamProfiles(value);
-       if (key === "stats")           setStats(value);
+       if (key === "stats") setStats(Array.isArray(value) ? value : []);
       if (key === "presence")        setPresence(value);
-      if (key === "pings")           setPings(value);
+      if (key === "pings")           setPings(Array.isArray(value) ? value : []);
       if (key === "points")          setPoints(value);
-if (key === "bets")            setBets(value);
+if (key === "bets")            setBets(Array.isArray(value) ? value : []);
 if (key === "pass_xp")      setPassXP(value);
 if (key === "pass_premium") setPassPremium(value);
 if (key === "pass_claimed") setPassClaimed(value);
@@ -3613,7 +4734,7 @@ if (key === "pass_tokens")  setPassTokens(value);
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs] = await Promise.all([
+  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar] = await Promise.all([
     storeGet("schedule"),
     storeGet("training"),
     storeGet("completions"),
@@ -3631,27 +4752,34 @@ const loadSharedData = async (pid) => {
     storeGet("pass_claimed"),
     storeGet("pass_tokens"),
     storeGet("pass_active_boosts"),
-storeGet("time_logs"),
+    storeGet("time_logs"),
+    storeGet("stocks"),
+    storeGet("coin_flips"),
+    storeGet("active_race"),
   ]);
 
   if (sched) setSchedule(sched);
-    if (training) setTrainingData(training);
-    if (comp) setCompletions(comp);
-    if (chat) setMessages(chat);
-    if (cmts) setComments(cmts);
-    if (pst) setPosts(pst);
-    if (strm) setStreamProfiles(strm);
-    if (sts) setStats(sts);
-    if (prs) setPresence(prs);
-    if (pngs) setPings(pngs);
-if (pts) setPoints(pts);  
-if (bts) setBets(bts);
+if (training) setTrainingData(training);
+if (comp) setCompletions(comp);
+if (chat) setMessages(Array.isArray(chat) ? chat : []);
+if (cmts) setComments(cmts);
+if (pst) setPosts(Array.isArray(pst) ? pst : []);
+if (strm) setStreamProfiles(strm);
+if (sts) setStats(Array.isArray(sts) ? sts : []);
+if (prs) setPresence(prs);
+if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
+if (pts) setPoints(pts);
+if (bts) setBets(Array.isArray(bts) ? bts : []);
 if (pxp) setPassXP(pxp);
 if (ppm) setPassPremium(ppm);
 if (pcl) setPassClaimed(pcl);
 if (ptk) setPassTokens(ptk);
 if (pab) setPassActiveBoosts(pab);
-if (tlogs) setTimeLogs(tlogs);
+if (tlogs) setTimeLogs(Array.isArray(tlogs) ? tlogs : []);
+if (stks) setStocks(stks);
+if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
+if (ar) setActiveRace(ar);
+
 const savedLastSeen = await storeGet(`lastSeen:${pid}`);
 if (savedLastSeen) setLastSeen(savedLastSeen);
 else setLastSeen({social:0, chat:0, training:0});
@@ -3706,44 +4834,44 @@ const TABS=[
     {id:"bracket",icon:Trophy,label:"bracket"},
     {id:"training",icon:Dumbbell,label:"training"},
     {id:"social",icon:ImageIcon,label:"social"},
-    {id:"stream",icon:Tv,label:"stream"},
-      {id:"stats",icon:BarChart2,label:"stats"},
-{id:"presence",icon:Circle,label:"squad"},
-{id:"boost",icon:Dice5,label:"boost"},
-{id:"garage",icon:Trophy,label:"garage"},
- ...(isAdmin?[{id:"admin",icon:Shield,label:"admin"}]:[]),
+    {id:"stats",icon:BarChart2,label:"stats"},
+    {id:"presence",icon:Circle,label:"squad"},
+    {id:"boost",icon:Dice5,label:"boost"},
+{id:"coinflip", icon:Dice5, label:"flip"},
+{id:"race",     icon:Trophy, label:"race"},
+    {id:"garage",icon:Trophy,label:"garage"},
+    ...(isAdmin?[{id:"admin",icon:Shield,label:"admin"}]:[]),
   ];
-const badges = {
+  const badges = {
     social: Math.max(0, posts.length - lastSeen.social),
     chat: Math.max(0, messages.length - lastSeen.chat),
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
-
-  return (
-<div style={{...s.appShell, ...(()=>{
   const eq = points?.[currentPlayer+"_equipped"] || {};
   const own = points?.[currentPlayer+"_owned"] || [];
   const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_custom"].includes(id));
   const customUrl = points?.[currentPlayer+"_customBg"];
-  return bgId==="bg_carbon"?{backgroundImage:"repeating-linear-gradient(45deg,#0e0e0e 0px,#0e0e0e 3px,#1a1a1a 3px,#1a1a1a 6px)"}
-    :bgId==="bg_spring"?{backgroundImage:"linear-gradient(135deg,#1a0a1a,#0a1a12,#0a1220)"}
-    :bgId==="bg_aurora"?{backgroundImage:"linear-gradient(135deg,#040d14,#012a1a,#040818)"}
-    :bgId==="bg_midnight"?{backgroundImage:"linear-gradient(135deg,#04050f,#080830,#04050f)"}
-    :bgId==="bg_custom"&&customUrl?{backgroundImage:`url(${customUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
-    :{background:theme.bg};
-})(), color:theme.text, animation:"scaleFadeIn .4s cubic-bezier(.2,.8,.2,1)"}}>
+  const bgStyle = bgId==="bg_carbon" ? {backgroundImage:"repeating-linear-gradient(45deg,#0e0e0e 0px,#0e0e0e 3px,#1a1a1a 3px,#1a1a1a 6px)"}
+    : bgId==="bg_spring"   ? {backgroundImage:"linear-gradient(135deg,#1a0a1a,#0a1a12,#0a1220)"}
+    : bgId==="bg_aurora"   ? {backgroundImage:"linear-gradient(135deg,#040d14,#012a1a,#040818)"}
+    : bgId==="bg_midnight" ? {backgroundImage:"linear-gradient(135deg,#04050f,#080830,#04050f)"}
+    : bgId==="bg_custom" && customUrl ? {backgroundImage:`url(${customUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
+    : {background:theme.bg};
+
+  return (
+    <div style={{...s.appShell, ...bgStyle, color:theme.text, animation:"scaleFadeIn .4s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
-{theme.id==="starfield" && <StarfieldBg/>}
-{toasts.length > 0 && (
-  <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,display:"flex",flexDirection:"column",gap:8,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"none"}}>
-    {toasts.map(t=>(
-      <div key={t.id} style={{background:"#1A1D2E",border:"1px solid rgba(184,255,77,0.25)",borderRadius:13,padding:"12px 16px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,0.4)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)"}}>
-        <span style={{fontSize:18}}>{t.icon}</span>
-        <span style={{fontSize:13,fontWeight:600,color:"#E8ECF4"}}>{t.text}</span>
-      </div>
-    ))}
-  </div>
-)}
+      {theme.id==="starfield" && <StarfieldBg/>}
+      {toasts.length > 0 && (
+        <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,display:"flex",flexDirection:"column",gap:8,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"none"}}>
+          {toasts.map(t=>(
+            <div key={t.id} style={{background:"#1A1D2E",border:"1px solid rgba(184,255,77,0.25)",borderRadius:13,padding:"12px 16px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,0.4)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)"}}>
+              <span style={{fontSize:18}}>{t.icon}</span>
+              <span style={{fontSize:13,fontWeight:600,color:"#E8ECF4"}}>{t.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
       {commentDay&&<CommentsModal dayKey={commentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setCommentDay(null)}/>}
  <div style={s.topBar}>
@@ -3794,7 +4922,10 @@ const badges = {
         {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast}/>}
         {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
 {tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)}/>}
- {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>}       
+ {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
+{tab==="coinflip"&&<CoinFlipTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips}/>}
+{tab==="race"&&<RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+{tab==="stocks"&&<StockMarketTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
 {tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab}/>}
 {tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
    {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
@@ -3825,7 +4956,7 @@ const badges = {
             if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
           }} className="bb-pressable" style={s.tabBtn}>
             <div style={{position:"relative",display:"inline-flex"}}>
-              <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"}style={{filter:tab===t.id?`drop-shadow(0 0 6px ${t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"})`:"drop-shadow(0 0 0px transparent)",transition:"filter .2s ease"}}/>
+             <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"}/>
               {badges[t.id]>0&&<div style={{position:"absolute",top:-4,right:-6,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
             </div>
             <span style={{color:tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066",fontSize:9,fontWeight:600}}>{t.label}</span>
@@ -3838,7 +4969,7 @@ const badges = {
 
 // ===================== Styles =====================
 const s = {
-appShell:{display:"flex",flexDirection:"column",height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",width:"100%",position:"relative",overflow:"hidden"},
+appShell:{display:"flex",flexDirection:"column",height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",width:"100%",position:"relative"},
   screen:{height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
 topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
@@ -3849,7 +4980,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:8,WebkitOverflowScrolling:"touch",minHeight:0},
   tabContent:{padding:"16px 16px 24px"},
 tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"env(safe-area-inset-bottom,0px)"},
- tabBtn:{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:4,padding:"10px 2px 8px",cursor:"pointer",minWidth:0,overflow:"hidden",outline:"none",WebkitTapHighlightColor:"transparent"},
+tabBtn:{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"8px 1px 6px",cursor:"pointer",minWidth:0,overflow:"hidden",outline:"none",WebkitTapHighlightColor:"transparent"},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
   reminderTitle:{fontSize:12.5,fontWeight:700,color:"#FF5C8A"},
