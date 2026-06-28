@@ -197,10 +197,11 @@ function GlobalStyles() {
       @keyframes chatSlideIn { from { transform:translateY(100%); } to { transform:translateY(0); } }
       @keyframes chatFadeIn { from { opacity:0; } to { opacity:1; } }
       @keyframes heartPop { 0%{transform:scale(1)} 40%{transform:scale(1.35)} 100%{transform:scale(1)} }
-      @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+   @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+@keyframes bounceDot { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
 @keyframes scaleFadeIn { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
 @keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
-      * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
     html, body { margin:0; padding:0; height:100%; min-height:-webkit-fill-available; overflow:hidden; background:#06070D; }
 #root { height:100%; min-height:-webkit-fill-available; }
       input::placeholder, textarea::placeholder { color:#4A5066; }
@@ -1374,7 +1375,7 @@ return (
   </div>
   {PLAYERS.map(p=>{
     const pg = stats.filter(g=>g.playerId===p.id&&g.mode==="3v3");
-    const avg = (field) => pg.length ? (pg.reduce((s,g)=>s+(g[field]||0),0)/pg.length).toFixed(1) : "—";
+   const avg = (field) => pg.length ? (pg.reduce((s,g) => s+(Number(g[field])||0),0)/pg.length).toFixed(1) : "—";
     return (
       <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
         <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -1703,7 +1704,7 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
 }
 
 // ===================== Chat Tab =====================
-const REACTION_EMOJIS = ["🐐","💩","😕","🤓","🌬️","🥀","🤣","😎"];
+const REACTION_EMOJIS = ["🐐","💩","😕","🤓","🌬️","🥀","🤣","😎","🫩","😭","🙉","😈"];
 function seededShuffle(arr, seed) {
   const out = [...arr];
   for (let i = out.length - 1; i > 0; i--) {
@@ -1717,10 +1718,10 @@ function ChatMessage({ msg, isMe, onReact }) {
   const player = PLAYERS.find((p) => p.id === msg.playerId);
   const [showPicker, setShowPicker] = useState(false);
   const pressTimer = useRef(null);
-  const handleTouchStart = () => { pressTimer.current = setTimeout(() => setShowPicker(true), 500); };
-  const handleTouchEnd = () => { clearTimeout(pressTimer.current); };
-  const handleMouseDown = () => { pressTimer.current = setTimeout(() => setShowPicker(true), 500); };
-  const handleMouseUp = () => { clearTimeout(pressTimer.current); };
+const handleTouchStart = () => { pressTimer.current = setTimeout(() => setShowPicker(true), 500); };
+const handleTouchEnd = () => { clearTimeout(pressTimer.current); };
+const handleMouseDown = () => { pressTimer.current = setTimeout(() => setShowPicker(true), 500); };
+const handleMouseUp = () => { clearTimeout(pressTimer.current); };
   const reactionCounts = {};
   const myReactions = new Set();
   (msg.reactions || []).forEach(r => {
@@ -1740,14 +1741,15 @@ function ChatMessage({ msg, isMe, onReact }) {
               {emoji}
             </button>
           ))}
-          <button onClick={() => setShowPicker(false)} style={{ background: "none", border: "none", color: "#4A5066", fontSize: 14, cursor: "pointer", padding: "2px 4px" }}>✕</button>
+        <button onClick={() => setShowPicker(false)} style={{ background: "rgba(255,255,255,0.08)", border: "none", color: "#8B92A8", fontSize: 17, cursor: "pointer", padding: "4px 8px", borderRadius: 8, lineHeight: 1, minWidth: 32, display:"flex", alignItems:"center", justifyContent:"center" }}>✕</button>
         </div>
       )}
-      <div
-        style={{ ...s.chatBubble, background: isMe ? "#B8FF4D" : "#161927", color: isMe ? "#06070D" : "#E8ECF4", userSelect: "none" }}
-        onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
-        onMouseDown={handleMouseDown} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
-      >
+     <div
+  style={{ ...s.chatBubble, background: isMe ? "#B8FF4D" : "#161927", color: isMe ? "#06070D" : "#E8ECF4", userSelect: "none" }}
+  onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}
+  onMouseDown={handleMouseDown} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+  onClick={() => { if (showPicker) setShowPicker(false); }}
+>
         {!isMe && <div style={{ ...s.chatAuthor, color: player?.color }}>{player?.name}</div>}
         <div style={s.chatText}>{msg.text}</div>
         <div style={{ ...s.chatTime, color: isMe ? "rgba(6,7,13,0.5)" : "#4A5066" }}>{new Date(msg.ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
@@ -1784,7 +1786,7 @@ useEffect(() => {
   });
 }, [text]);           
   const scrollRef = useRef(null);
-  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
+  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length, typingStatus]);
 
   const send = async () => {
     if (!text.trim()) return;
@@ -1818,8 +1820,19 @@ useEffect(() => {
     .filter(Boolean);
   if (!typers.length) return null;
   return (
-    <div style={{ padding: "4px 8px 8px", fontSize: 11.5, color: "#4A5066", fontStyle: "italic", animation: "fadeSlideUp .2s ease" }}>
-      {typers.join(", ")} {typers.length === 1 ? "is" : "are"} typing...
+    <div style={{ padding: "4px 8px 8px", display: "flex", alignItems: "center", gap: 6, animation: "fadeSlideUp .2s ease" }}>
+      <span style={{ fontSize: 11.5, color: "#4A5066", fontStyle: "italic" }}>
+        {typers.join(", ")} {typers.length === 1 ? "is" : "are"} typing
+      </span>
+      <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        {[0, 1, 2].map(i => (
+          <span key={i} style={{
+            width: 5, height: 5, borderRadius: "50%", background: "#4A5066", display: "inline-block",
+            animation: `bounceDot 1.2s ease-in-out infinite`,
+            animationDelay: `${i * 0.2}s`
+          }}/>
+        ))}
+      </span>
     </div>
   );
 })()}
@@ -1963,7 +1976,7 @@ function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
       <div style={s.modalHeader}><div style={s.modalTitle}>comments</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
       <div style={{flex:1,overflowY:"auto",marginBottom:12}}>
         {!(post.comments||[]).length&&<div style={s.chatEmpty}>no comments yet.</div>}
-        {(post.comments||[]).map((c)=>{ const p=PLAYERS.find((pl)=>pl.id===c.playerId); return <div key={c.id} style={s.commentItem}><div style={{width:6,height:6,borderRadius:99,background:p?.color,marginTop:6,flexShrink:0}}/><div><div style={{fontSize:12,fontWeight:700,color:p?.color}}>{p?.name}</div><div style={{fontSize:14,color:"#E8ECF4"}}>{c.text}</div></div></div>; })}
+       {(post.comments||[]).map((c)=>{ const p=PLAYERS.find((pl)=>pl.id===c.playerId); const hearted=(c.hearts||[]).includes(currentPlayer); return <div key={c.id} style={{...s.commentItem,justifyContent:"space-between",alignItems:"flex-start"}}><div style={{display:"flex",gap:8,flex:1}}><div style={{width:6,height:6,borderRadius:99,background:p?.color,marginTop:6,flexShrink:0}}/><div><div style={{fontSize:12,fontWeight:700,color:p?.color}}>{p?.name}</div><div style={{fontSize:14,color:"#E8ECF4"}}>{c.text}</div></div></div><button onClick={()=>onHeartComment(post.id,c.id)} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,flexShrink:0,padding:"2px 4px"}}><Heart size={14} color={hearted?"#FF5C8A":"#4A5066"} fill={hearted?"#FF5C8A":"none"}/><span style={{fontSize:11,color:hearted?"#FF5C8A":"#4A5066"}}>{(c.hearts||[]).length||""}</span></button></div>; })}
       </div>
       <div style={s.chatInputRow}><input value={text} onChange={(e)=>setText(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&submit()} placeholder="add a comment..." style={s.chatInput}/><button onClick={submit} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}><Send size={16}/></button></div>
     </div></div>
@@ -1989,20 +2002,56 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
     addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name} posted something`, "📸");
   };
 
-  const toggleHeart = async (postId) => {
-    const upd = posts.map(p => { if (p.id !== postId) return p; const hearts = p.hearts || []; return { ...p, hearts: hearts.includes(currentPlayer) ? hearts.filter(id => id !== currentPlayer) : [...hearts, currentPlayer] }; });
-    setPosts(upd);
-    await storeSet("posts", upd);
+const pushActivity = async ({ to, type, fromName, text }) => {
+    const existing = await storeGet("activity_feed") || [];
+    const entry = { id: Date.now().toString(), to, type, fromName, text, ts: new Date().toISOString(), seen: false };
+    const upd = [entry, ...existing].slice(0, 50);
+    await storeSet("activity_feed", upd);
   };
 
-  const addComment = async (postId, text) => {
-    const comment = { id: Date.now().toString(), playerId: currentPlayer, text, ts: new Date().toISOString() };
+  const toggleHeart = async (postId) => {
+    const post = posts.find(p => p.id === postId);
+    const hearts = post?.hearts || [];
+    const isLiking = !hearts.includes(currentPlayer);
+    const upd = posts.map(p => { if (p.id !== postId) return p; return { ...p, hearts: hearts.includes(currentPlayer) ? hearts.filter(id => id !== currentPlayer) : [...hearts, currentPlayer] }; });
+    setPosts(upd);
+    await storeSet("posts", upd);
+    if (isLiking && post && post.playerId !== currentPlayer) {
+      await pushActivity({ to: post.playerId, type: "like", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your post` });
+    }
+  };
+const addComment = async (postId, text) => {
+    const comment = { id: Date.now().toString(), playerId: currentPlayer, text, ts: new Date().toISOString(), hearts: [] };
     const upd = posts.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), comment] } : p);
     setPosts(upd);
     await storeSet("posts", upd);
     setCommentingOn(prev => prev ? upd.find(p => p.id === prev.id) : prev);
+    const post = posts.find(p => p.id === postId);
+    if (post && post.playerId !== currentPlayer) {
+      await pushActivity({ to: post.playerId, type: "comment", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `left a comment on your post` });
+    }
   };
 
+  const heartComment = async (postId, commentId) => {
+    const upd = posts.map(p => {
+      if (p.id !== postId) return p;
+      const comments = (p.comments||[]).map(c => {
+        if (c.id !== commentId) return c;
+        const hearts = c.hearts||[];
+        const liked = hearts.includes(currentPlayer);
+        return { ...c, hearts: liked ? hearts.filter(id=>id!==currentPlayer) : [...hearts, currentPlayer] };
+      });
+      return { ...p, comments };
+    });
+    setPosts(upd);
+    await storeSet("posts", upd);
+    setCommentingOn(prev => prev ? upd.find(p => p.id === prev.id) : prev);
+    const post = posts.find(p => p.id === postId);
+    const comment = post?.comments?.find(c => c.id === commentId);
+    if (comment && comment.playerId !== currentPlayer) {
+      await pushActivity({ to: comment.playerId, type: "comment_heart", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your comment` });
+    }
+  };
   // All bets from teammates (not current player)
   const teammateBets = (bets || []).filter(b => b.bettorId !== currentPlayer);
 
@@ -2087,7 +2136,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
   return (
     <div className="bb-tab-content" style={s.tabContent}>
    {composing && <SocialComposer currentPlayer={currentPlayer} onPost={addPost} onClose={() => setComposing(false)} />}
-      {commentingOn && <PostCommentsModal post={commentingOn} onAddComment={addComment} currentPlayer={currentPlayer} onClose={() => setCommentingOn(null)} />}
+   {commentingOn && <PostCommentsModal post={commentingOn} onAddComment={addComment} onHeartComment={heartComment} currentPlayer={currentPlayer} onClose={() => setCommentingOn(null)} />}
       {expandedPost && <PostFullscreenModal post={posts.find(p=>p.id===expandedPost.id)||expandedPost} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onClose={() => setExpandedPost(null)} />}
 
       {/* Copied bet modal */}
@@ -2494,7 +2543,7 @@ const FIELDS = ["goals","assists","saves","shots"];
   onTouchStart={handleTouchStart}
   onTouchMove={handleTouchMove}
   onTouchEnd={handleTouchEnd}
-  style={{position:"fixed",inset:0,zIndex:500,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",transform:`translateX(${swipeOffset}px)`,opacity:Math.max(0,1-swipeOffset/280),transition:swipeOffset===0?"transform .25s ease,opacity .25s ease":"none"}}>
+ style={{position:"fixed",inset:0,zIndex:500,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",transform:`translateX(${swipeOffset}px)`,transition:swipeOffset===0?"transform .25s ease":"none"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
           <ChevronLeft size={18}/>
@@ -3045,8 +3094,8 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
 };
   const modeGames=stats.filter(g=>g.mode===mode);
   const myGames=modeGames.filter(g=>g.playerId===currentPlayer).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
-  const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+g[field],0)/arr.length).toFixed(1):"—";
-  const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>g.ourScore>g.theirScore).length/arr.length)*100)+"%"; };
+  const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+(Number(g[field])||0),0)/arr.length).toFixed(1):"—";
+  const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>(Number(g.ourScore)||0)>(Number(g.theirScore)||0)).length/arr.length)*100)+"%"; };
   const playerColor=PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
 return (
     <div className="bb-tab-content" style={s.tabContent}>
@@ -3528,7 +3577,7 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
     </div>
   );
 }
-function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast }) {
+function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
@@ -3594,15 +3643,28 @@ const toggleEquip = async (itemId) => {
   });
 
   // Notifications feed
- const notifs = [
-    ...(pings||[]).filter(p => p.to === currentPlayer).map(p => ({ 
-      id:p.id, ts:p.ts, 
-      text: p.type==="flower" ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} sent you ${p.emoji} (+${p.xp} xp)` : `${PLAYERS.find(pl=>pl.id===p.from)?.name} wants to run 2s`, 
-      icon: p.type==="flower" ? "🌸" : "🎮" 
-    })),
-    ...(Object.entries(completions||{})).filter(([k,v]) => v.status==="approved" && k.endsWith(`__${currentPlayer}`)).map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt, text:`training approved — +15 pts`, icon:"✅" })),
-  ].sort((a,b) => new Date(b.ts) - new Date(a.ts)).slice(0, 20);
+const activityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
+    id: e.id, ts: e.ts,
+    text: `${e.fromName} ${e.text}`,
+    icon: e.type==="like" ? "❤️" : e.type==="comment" ? "💬" : e.type==="comment_heart" ? "🩷" : "🔔",
+    isActivity: true,
+  }));
 
+  const pingNotifs = (pings||[]).filter(p => p.to === currentPlayer).map(p => ({
+    id: p.id, ts: p.ts,
+    text: p.type==="flower"
+      ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} sent you ${p.emoji} (+${p.xp} xp)`
+      : `${PLAYERS.find(pl=>pl.id===p.from)?.name} wants to run 2s`,
+    icon: p.type==="flower" ? "🌸" : "🎮",
+  }));
+
+  const trainingNotifs = Object.entries(completions||{})
+    .filter(([k,v]) => v.status==="approved" && k.endsWith(`__${currentPlayer}`))
+    .map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt, text:`training approved — +15 pts`, icon:"✅" }));
+
+  const notifs = [...activityNotifs, ...pingNotifs, ...trainingNotifs]
+    .sort((a,b) => new Date(b.ts) - new Date(a.ts))
+    .slice(0, 30);
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       {/* Points bar */}
@@ -3623,9 +3685,19 @@ const toggleEquip = async (itemId) => {
       </div>
 
       {/* Notification center */}
-      {showNotifs && (
+   {showNotifs && (
         <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(167,139,250,0.2)"}}>
-          <div style={{fontSize:12,color:"#A78BFA",fontWeight:700,letterSpacing:0.5,marginBottom:12}}>NOTIFICATIONS</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontSize:12,color:"#A78BFA",fontWeight:700,letterSpacing:0.5}}>NOTIFICATIONS</div>
+            {notifs.length>0&&<button onClick={async()=>{
+              const af = await storeGet("activity_feed")||[];
+              const cleared = af.filter(e=>e.to!==currentPlayer);
+              await storeSet("activity_feed",cleared);
+              setActivityFeed([]);
+            }} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:8,padding:"4px 10px",fontSize:10,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
+              clear all
+            </button>}
+          </div>
           {notifs.length===0 && <div style={{color:"#4A5066",fontSize:13}}>nothing yet</div>}
           {notifs.map(n=>(
             <div key={n.id} style={{display:"flex",gap:10,alignItems:"flex-start",marginBottom:10,paddingBottom:10,borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
@@ -3634,6 +3706,14 @@ const toggleEquip = async (itemId) => {
                 <div style={{fontSize:13,color:"#E8ECF4"}}>{n.text}</div>
                 <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(n.ts)}</div>
               </div>
+              {n.isActivity&&<button onClick={async()=>{
+                const af = await storeGet("activity_feed")||[];
+                const upd = af.filter(e=>e.id!==n.id);
+                await storeSet("activity_feed",upd);
+                setActivityFeed(upd.filter(e=>e.to===currentPlayer));
+              }} className="bb-pressable" style={{background:"none",border:"none",color:"#4A5066",cursor:"pointer",padding:"2px 4px",flexShrink:0}}>
+                <X size={14}/>
+              </button>}
             </div>
           ))}
         </div>
@@ -4399,7 +4479,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "typing"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "typing", "activity_feed"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -6659,6 +6739,8 @@ const [stocks, setStocks] = useState({});
 const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
 const [chemistry, setChemistry] = useState({});   
+const [activityFeed, setActivityFeed] = useState([]);
+const [pendingActivityToasts, setPendingActivityToasts] = useState([]);                      
 const [flipChallenges, setFlipChallenges] = useState([]);    
 const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
 const [chatOpen, setChatOpen] = useState(false);
@@ -6742,6 +6824,15 @@ if (key === "pass_claimed") setPassClaimed(value);
 if (key === "pass_tokens")  setPassTokens(value);
 if (key === "pass_active_boosts") setPassActiveBoosts(value);
 if (key === "typing") setTypingStatus(value || {});
+if (key === "activity_feed") {
+  const myFeed = (Array.isArray(value)?value:[]).filter(e=>e.to===currentPlayer);
+  const prev = activityFeed || [];
+  const newEntries = myFeed.filter(e=>!prev.find(p=>p.id===e.id)&&!e.seen);
+  newEntries.forEach((e,i)=>{
+    setTimeout(()=>addToast(`${e.fromName} ${e.text}`,e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"),i*800);
+  });
+  setActivityFeed(myFeed);
+}
 });
 return () => {
     clearInterval(hbInterval);
@@ -6776,7 +6867,7 @@ return () => {
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc] = await Promise.all([
+const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af] = await Promise.all([
     storeGet("schedule"),
     storeGet("training"),
     storeGet("completions"),
@@ -6800,7 +6891,8 @@ const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pc
     storeGet("coin_flips"),
     storeGet("active_race"),
     storeGet("chemistry"),
-    storeGet("flip_challenges"),
+storeGet("flip_challenges"),
+    storeGet("activity_feed"),
   ]);
 
   if (sched) setSchedule(sched);
@@ -6827,6 +6919,14 @@ if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.start
 if (chem) setChemistry(chem);
 if (fc) setFlipChallenges(Array.isArray(fc) ? fc : []);
 if (tr && !tr.closed) setTeamRoom(tr);
+if (af) {
+  const myFeed = (Array.isArray(af) ? af : []).filter(e => e.to === pid);
+  setActivityFeed(myFeed);
+  const unseen = myFeed.filter(e => !e.seen);
+  if (unseen.length > 0) {
+    setPendingActivityToasts(unseen);
+  }
+}
 
 const savedLastSeen = await storeGet(`lastSeen:${pid}`);
 if (savedLastSeen) setLastSeen(savedLastSeen);
@@ -6915,6 +7015,19 @@ const TABS=[
     <div style={{...s.appShell, ...bgStyle, color:theme.text, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {theme.id==="starfield" && <StarfieldBg/>}
+{pendingActivityToasts.length > 0 && (() => {
+  setTimeout(async () => {
+    pendingActivityToasts.forEach((e, i) => {
+      setTimeout(() => addToast(`${e.fromName} ${e.text}`, e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"), i * 800);
+    });
+    const af = await storeGet("activity_feed") || [];
+    const marked = af.map(e => e.to === currentPlayer ? { ...e, seen: true } : e);
+    await storeSet("activity_feed", marked);
+    setActivityFeed(marked.filter(e => e.to === currentPlayer));
+    setPendingActivityToasts([]);
+  }, 600);
+  return null;
+})()}
       {toasts.length > 0 && (
         <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,display:"flex",flexDirection:"column",gap:8,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"none"}}>
           {toasts.map(t=>(
@@ -6979,7 +7092,7 @@ const TABS=[
 {tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
 {tab==="race"&&<RaceModeTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
 {tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
-{tab==="presence"&&<PresenceTab key={tab} presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast}/>}
+{tab==="presence"&&<PresenceTab key={tab} presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed}/>}
 {tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
 {tab==="trivia"&&<RLCSTrivia key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
@@ -6988,7 +7101,7 @@ const TABS=[
    {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
       {chatOpen && (
-       <div style={{position:"fixed",inset:0,zIndex:500,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
+       <div style={{position:"fixed",inset:0,zIndex:50,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
           <div style={{animation:"chatSlideIn .32s cubic-bezier(.2,.8,.2,1)",flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={()=>{
@@ -7008,10 +7121,11 @@ const TABS=[
    <div style={s.tabBar}>
         {TABS.map((t)=>(
         <button key={t.id} onClick={()=>{
-            setTab(t.id);
-            if (t.id==="social") { const upd={...lastSeen,social:posts.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
-            if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
-          }} className="bb-pressable" style={s.tabBtn}>
+    setTab(t.id);
+    setChatOpen(false);
+    if (t.id==="social") { const upd={...lastSeen,social:posts.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
+    if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
+  }} className="bb-pressable" style={s.tabBtn}>
             <div style={{position:"relative",display:"inline-flex"}}>
              <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"}/>
               {badges[t.id]>0&&<div style={{position:"absolute",top:-4,right:-6,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
