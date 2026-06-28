@@ -4394,7 +4394,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "typing"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -6970,7 +6970,7 @@ const TABS=[
    {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
       {chatOpen && (
-        <div style={{position:"fixed",inset:0,zIndex:500,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease"}}>
+       <div style={{position:"fixed",inset:0,zIndex:500,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
           <div style={{animation:"chatSlideIn .32s cubic-bezier(.2,.8,.2,1)",flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={()=>{
@@ -7132,7 +7132,7 @@ modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"10
   numericCounter:{display:"flex",alignItems:"center",justifyContent:"center",gap:18,background:"rgba(255,255,255,0.03)",borderRadius:13,padding:"10px 0"},
   counterBtn:{width:36,height:36,borderRadius:99,background:"rgba(255,255,255,0.07)",border:"none",color:"#E8ECF4",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"},
   counterVal:{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:600,minWidth:50,textAlign:"center"},
-  chatTabWrap:{display:"flex",flexDirection:"column",height:"100%"},
+  chatTabWrap:{display:"flex",flexDirection:"column",flex:1,minHeight:0},
   chatHeader:{padding:"16px 16px 8px",flexShrink:0},
   chatScroll:{flex:1,overflowY:"auto",padding:"0 16px",WebkitOverflowScrolling:"touch"},
   chatEmpty:{textAlign:"center",color:"#4A5066",fontSize:13,marginTop:40},
@@ -7141,7 +7141,7 @@ modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"10
   chatAuthor:{fontSize:11,fontWeight:700,marginBottom:3},
   chatText:{fontSize:14.5,lineHeight:1.4},
   chatTime:{fontSize:10,marginTop:4,textAlign:"right"},
-  chatInputRow:{display:"flex",gap:8,padding:"12px 16px",borderTop:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
+chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"80px",borderTop:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
   chatInput:{flex:1,background:"#11131F",border:"1px solid rgba(255,255,255,0.1)",borderRadius:99,padding:"11px 16px",color:"#E8ECF4",fontSize:14,outline:"none"},
   chatSendBtn:{width:42,height:42,background:"#B8FF4D",border:"none",borderRadius:99,color:"#06070D",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0},
   commentItem:{display:"flex",gap:8,marginBottom:14},
