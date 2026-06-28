@@ -9,11 +9,10 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
-  { id: "p1", name: "maglvxx",  color: "#B8FF4D", twitch: "" },
- { id: "p2", name: "apcards5", color: "#4D9EFF", twitch: "" },
-  { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "" },
+  { id: "p1", name: "maglvxx",  color: "#B8FF4D", twitch: "", platform: "psn" },
+  { id: "p2", name: "apcards5", color: "#4D9EFF", twitch: "", platform: "xbl" },
+  { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "", platform: "xbl" },
 ];
-
 const TRAINING_START = new Date("2026-07-01T00:00:00");
 const LEAGUE_START   = new Date("2026-07-20T00:00:00");
 const PLAYOFF_START  = new Date("2026-08-24T00:00:00");
@@ -162,24 +161,13 @@ function rankFromMMR(mmr) {
 
 
 // ===================== SyncOverlay =====================
-function SyncOverlay({ onDone, label }) {
-  const [progress, setProgress] = useState(0);
-  useEffect(() => {
-    let p = 0;
-    const iv = setInterval(() => {
-      p += 8 + Math.random() * 10;
-      if (p >= 100) { clearInterval(iv); setProgress(100); setTimeout(onDone, 450); }
-      else setProgress(p);
-    }, 180);
-    return () => clearInterval(iv);
-  }, [onDone]);
+function SyncOverlay({ label }) {
   return (
     <div style={s.syncOverlay}>
       <div style={s.syncBox}>
         <div style={s.syncSpinner} />
-        <div style={s.syncTitle}>{label || "syncing…"}</div>
-        <div style={s.syncBarTrack}><div style={{ ...s.syncBarFill, width:`${Math.min(100,progress)}%` }} /></div>
-        <div style={s.syncPct}>{Math.min(100,Math.round(progress))}%</div>
+        <div style={s.syncTitle}>{label || "fetching from tracker…"}</div>
+        <div style={{ fontSize:11, color:"#4A5066", marginTop:8 }}>usually takes 1–5 seconds</div>
       </div>
     </div>
   );
@@ -335,35 +323,50 @@ function EnterPasscodeScreen({ player, onSuccess, onBack }) {
 }
 
 function TrackerSetup({ player, onComplete }) {
-  const [platform, setPlatform] = useState("psn");
-  const [handle, setHandle] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [error, setError] = useState(null);
+
   const finishSync = async () => {
-    const ranks = RL_PLAYLISTS.map((name, i) => {
-      const mmr = deterministicMMR(handle + platform, i) + Math.floor(Math.random()*10-5);
-      return { playlist:name, mmr, rank:rankFromMMR(mmr) };
-    });
-    await setMMR(player.id, { platform, handle, ranks, lastSynced:new Date().toISOString(), source:"synced" });
-    setSyncing(false);
-    onComplete();
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await fetch(
+       `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${player.platform}&username=${player.name}`,
+        { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+      );
+      const json = await res.json();
+      const segments = json?.data?.segments || [];
+      const playlistIds = { "Ranked Duel 1v1": 10, "Ranked Doubles 2v2": 11, "Ranked Standard 3v3": 13 };
+      const ranks = RL_PLAYLISTS.map(name => {
+     const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === name);
+const mmr = seg?.stats?.rating?.value || 0;
+const rankName = seg?.stats?.tier?.metadata?.name || rankFromMMR(mmr);
+        return { playlist: name, mmr, rank: rankName };
+      });
+      await setMMR(player.id, { platform: player.platform, handle: player.name, ranks, lastSynced: new Date().toISOString(), source: "synced" });
+      setSyncing(false);
+      onComplete();
+    } catch (e) {
+      setError("failed to fetch — check connection");
+      setSyncing(false);
+    }
   };
+
   return (
     <div style={s.screen}>
-      {syncing && <SyncOverlay onDone={finishSync} label="syncing rocket league data" />}
       <div style={s.setupWrap}>
         <div style={s.setupTitle}>link your rocket league account</div>
-        <div style={s.setupSub}>one-time setup — enter your platform & handle so the team can see your ranks.</div>
-        <div style={s.setupRow}>
-          {["epic","steam","psn","xbl"].map((pl) => (
-            <button key={pl} onClick={()=>setPlatform(pl)} className="bb-pressable"
-              style={{ ...s.platformBtn, background:platform===pl?"#B8FF4D":"rgba(255,255,255,0.05)", color:platform===pl?"#06070D":"#8B92A8" }}>
-              {pl.toUpperCase()}
-            </button>
-          ))}
+        <div style={s.setupSub}>pulls your real ranks from tracker.gg</div>
+        <div style={{ marginBottom: 16, background: "#11131F", borderRadius: 14, padding: 14, border: "1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ fontSize: 11, color: "#4A5066", marginBottom: 4 }}>platform</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#B8FF4D" }}>{player.platform.toUpperCase()}</div>
+          <div style={{ fontSize: 11, color: "#4A5066", marginTop: 8, marginBottom: 4 }}>username</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#E8ECF4" }}>{player.name}</div>
         </div>
-        <input value={handle} onChange={(e)=>setHandle(e.target.value)} placeholder="your username" style={s.setupInput} />
-        <button onClick={()=>handle.trim()&&setSyncing(true)} disabled={!handle.trim()} className="bb-pressable bb-glow-lime"
-          style={{ ...s.primaryBtn, opacity:handle.trim()?1:0.4 }}>sync my data</button>
+        {error && <div style={{ color: "#FF5C8A", fontSize: 12, marginBottom: 12 }}>{error}</div>}
+        <button onClick={finishSync} disabled={syncing} className="bb-pressable bb-glow-lime" style={{ ...s.primaryBtn, opacity: syncing ? 0.6 : 1 }}>
+          {syncing ? "fetching from tracker…" : "sync my ranks"}
+        </button>
       </div>
     </div>
   );
@@ -739,11 +742,11 @@ const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
               </div>
             </div>
 {progress.done && !claimed && (
-              <button onClick={()=>claimXP(claimKey, grantsBonusSpin, grantsPassTier)} className="bb-pressable bb-glow-lime"
+              <button onClick={()=>claimXP(claimKey, grantsBonusSpin, idxInMode===0||idxInMode===2)} className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
                 🏆 claim +{XP_PER_CHALLENGE} xp + ⬆️ tier + 🎡 spin{grantsBonusSpin?" x2":""}
               </button>
-    )}
+            )}
             {claimed && <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +{XP_PER_CHALLENGE} xp claimed this week</div>}
             <div style={{fontSize:11,color:"#4A5066"}}>resets weekly · {mode} games only</div>
           </div>
@@ -1273,6 +1276,68 @@ transition: swipeOffset === 0 ? "transform .3s cubic-bezier(.25,.46,.45,.94)" : 
     </div>
   );
 }
+          
+function LiveMMRFeed({ mmrProfiles }) {
+  const [expanded, setExpanded] = useState(null);
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{fontSize:12,letterSpacing:1,color:"#4A5066",fontWeight:700,marginBottom:8}}>live mmr · all players</div>
+      {PLAYERS.map(p => {
+        const profile = mmrProfiles[p.id];
+        if (!profile?.ranks) return (
+          <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"11px 14px",marginBottom:8,border:"1px solid rgba(255,255,255,0.05)",display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:8,height:8,borderRadius:99,background:p.color}}/>
+            <span style={{fontSize:13,fontWeight:700,color:p.color}}>{p.name}</span>
+            <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>not synced yet</span>
+          </div>
+        );
+        const isOpen = expanded === p.id;
+        const standardRank = profile.ranks.find(r => r.playlist === "Ranked Standard 3v3");
+        return (
+          <div key={p.id}>
+            <button onClick={() => setExpanded(isOpen ? null : p.id)} className="bb-pressable"
+              style={{width:"100%",background:"#11131F",borderRadius:isOpen?"13px 13px 0 0":"13px",padding:"12px 14px",marginBottom:isOpen?0:8,border:"1px solid rgba(255,255,255,0.06)",display:"flex",alignItems:"center",gap:10,cursor:"pointer",textAlign:"left"}}>
+              <div style={{width:9,height:9,borderRadius:99,background:p.color,boxShadow:`0 0 8px ${p.color}88`,flexShrink:0}}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:p.color}}>{p.name}</div>
+                <div style={{fontSize:11,color:"#8B92A8",marginTop:1}}>{standardRank?.rank || "unranked"} · 3v3</div>
+              </div>
+              <div style={{textAlign:"right",marginRight:8}}>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{standardRank?.mmr || "—"}</div>
+              </div>
+              <ChevronRight size={14} color="#4A5066" style={{transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s",flexShrink:0}}/>
+            </button>
+            {isOpen && (
+              <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderTop:"none",borderRadius:"0 0 13px 13px",padding:"12px 14px",marginBottom:8}}>
+                {profile.ranks.map(r => {
+                  const label = r.playlist === "Ranked Duel 1v1" ? "1v1" : r.playlist === "Ranked Doubles 2v2" ? "2v2" : "3v3";
+                  const diff = r.prevMmr ? r.mmr - r.prevMmr : null;
+                  return (
+                    <div key={r.playlist} style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingBottom:10,marginBottom:10,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                      <div>
+                        <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:3}}>{label}</div>
+                        <div style={{fontSize:13,fontWeight:700,color:p.color}}>{r.rank}</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>{r.mmr}</div>
+                        {diff !== null && diff !== 0 && (
+                          <div style={{fontSize:11,fontWeight:700,color:diff>0?"#7CFFB2":"#FF5C8A"}}>{diff>0?"+":""}{diff}</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>synced {new Date(profile.lastSynced).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+          
+          
 // ===================== Home Tab =====================
 function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
@@ -1280,6 +1345,7 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
   const nextMatch = allMatches.find((m)=>!m.result);
   const [showTeamComparison, setShowTeamComparison] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
+const [homeSubTab, setHomeSubTab] = useState("overview");    
   useEffect(() => {
   setShowTeamComparison(false);
   setExpandedStat(null);
@@ -1297,9 +1363,25 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, 
 const weeklyEvent = getWeeklyEvent();
 
 return (
-    <div className="bb-tab-content" style={s.tabContent}>
+  <div className="bb-tab-content" style={s.tabContent}>
     {expandedStat && <ExpandedStatModal stat={expandedStat} record={record} schedule={schedule} onClose={() => setExpandedStat(null)} />}
-     {showTeamComparison && <TeamComparisonModal stats={stats} currentPlayer={currentPlayer} onClose={()=>setShowTeamComparison(false)}/>}
+    {showTeamComparison && <TeamComparisonModal stats={stats} currentPlayer={currentPlayer} onClose={()=>setShowTeamComparison(false)}/>}
+
+    {/* Sub-tab switcher */}
+    <div style={{display:"flex",gap:8,marginBottom:16}}>
+      <button onClick={()=>setHomeSubTab("overview")} className="bb-pressable"
+        style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:homeSubTab==="overview"?"#B8FF4D":"rgba(255,255,255,0.05)",color:homeSubTab==="overview"?"#06070D":"#8B92A8"}}>
+        🏠 overview
+      </button>
+      <button onClick={()=>setHomeSubTab("mmr")} className="bb-pressable"
+        style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:homeSubTab==="mmr"?"#B8FF4D":"rgba(255,255,255,0.05)",color:homeSubTab==="mmr"?"#06070D":"#8B92A8"}}>
+        📊 mmr
+      </button>
+    </div>
+
+    {homeSubTab==="mmr" && <LiveMMRFeed mmrProfiles={mmrProfiles} />}
+
+    {homeSubTab==="overview" && <>
       <div style={{background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
         <span style={{fontSize:26,flexShrink:0}}>{weeklyEvent.emoji}</span>
         <div>
@@ -1308,6 +1390,7 @@ return (
           <div style={{fontSize:11.5,color:"#8B92A8",lineHeight:1.4}}>{weeklyEvent.desc}</div>
         </div>
       </div>
+
       <div style={s.heroCard}>
         <div style={s.heroEyebrow}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
         {nextMatch ? (
@@ -1322,20 +1405,20 @@ return (
         ) : <div style={s.heroMatchup}><div style={s.heroTeamName}>gg. see you next circuit.</div></div>}
       </div>
 
-<div style={s.recordRow}>
-  <div onClick={()=>setExpandedStat("record")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
-    <div style={s.recordNum}>{record.w}-{record.l}</div>
-    <div style={s.recordLabel}>series record</div>
-  </div>
-  <div onClick={()=>setExpandedStat("diff")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
-    <div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div>
-    <div style={s.recordLabel}>goal diff</div>
-  </div>
-  <div onClick={()=>setExpandedStat("gf")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
-    <div style={s.recordNum}>{record.gf}</div>
-    <div style={s.recordLabel}>goals for</div>
-  </div>
-</div>
+      <div style={s.recordRow}>
+        <div onClick={()=>setExpandedStat("record")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
+          <div style={s.recordNum}>{record.w}-{record.l}</div>
+          <div style={s.recordLabel}>series record</div>
+        </div>
+        <div onClick={()=>setExpandedStat("diff")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
+          <div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div>
+          <div style={s.recordLabel}>goal diff</div>
+        </div>
+        <div onClick={()=>setExpandedStat("gf")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
+          <div style={s.recordNum}>{record.gf}</div>
+          <div style={s.recordLabel}>goals for</div>
+        </div>
+      </div>
 
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
@@ -1365,36 +1448,37 @@ return (
 
       <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
       <TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
-     <button onClick={()=>{ setShowTeamComparison(true); }} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
-  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-    <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1}}>TEAM COMPARISON · 3V3</div>
-    <ChevronRight size={14} color="#4A5066"/>
-  </div>
-  <div style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:8}}>
-    <div/>
-    {["goals","assists","saves","shots"].map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
-  </div>
-  {PLAYERS.map(p=>{
-    const pg = stats.filter(g=>g.playerId===p.id&&g.mode==="3v3");
-   const avg = (field) => pg.length ? (pg.reduce((s,g) => s+(Number(g[field])||0),0)/pg.length).toFixed(1) : "—";
-    return (
-      <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
-        <div style={{display:"flex",alignItems:"center",gap:5}}>
-          <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
-          <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
+      <button onClick={()=>{ setShowTeamComparison(true); }} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1}}>TEAM COMPARISON · 3V3</div>
+          <ChevronRight size={14} color="#4A5066"/>
         </div>
-        {["goals","assists","saves","shots"].map(f=>(
-          <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(f)}</div>
-        ))}
-      </div>
-    );
-  })}
-  <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>tap for full breakdown →</div>
-</button>
-        <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
-    </div>
+        <div style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:8}}>
+          <div/>
+          {["goals","assists","saves","shots"].map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
+        </div>
+        {PLAYERS.map(p=>{
+          const pg = stats.filter(g=>g.playerId===p.id&&g.mode==="3v3");
+          const avg = (field) => pg.length ? (pg.reduce((s,g) => s+(Number(g[field])||0),0)/pg.length).toFixed(1) : "—";
+          return (
+            <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
+              <div style={{display:"flex",alignItems:"center",gap:5}}>
+                <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
+                <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
+              </div>
+              {["goals","assists","saves","shots"].map(f=>(
+                <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(f)}</div>
+              ))}
+            </div>
+          );
+        })}
+        <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>tap for full breakdown →</div>
+      </button>
+      <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
+    </>}
+  </div>
 );
-}
+}    
 
 // ===================== Bracket Tab =====================
 function MatchRow({ m, onEdit, editable }) {
@@ -1992,7 +2076,10 @@ return (
           {existingReactions.map(emoji=>(
             <button key={emoji} onClick={()=>onReactPost(post.id,emoji)}
               style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:99,padding:"2px 8px",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:4,color:"#E8ECF4"}}>
-              {emoji}<span style={{fontSize:11,color:"#8B92A8"}}>{reactionCounts[emoji]}</span>
+              {emoji}
+<span style={{fontSize:10,color:"#8B92A8",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+  {(post.postReactions||[]).filter(r=>r.emoji===emoji).map(r=>PLAYERS.find(p=>p.id===r.playerId)?.name).filter(Boolean).join(" · ")}
+</span>
             </button>
           ))}
         </div>
@@ -2004,6 +2091,7 @@ function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
   const player = PLAYERS.find((p) => p.id === post.playerId);
   const hearted = (post.hearts || []).includes(currentPlayer);
   const [swipeOffset, setSwipeOffset] = useState(0);
+const [imgLoaded, setImgLoaded] = useState(false);
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
 
@@ -2047,45 +2135,27 @@ function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
           <X size={18}/>
         </button>
       </div>
-    {(()=>{
-  const [imgLoaded, setImgLoaded] = useState(false);
-  return (
-    <div onClick={(e)=>e.stopPropagation()} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", position:"relative" }}>
-      {post.image && !imgLoaded && !post.isVideo && (
-        <div style={{
-          position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
-          background:"rgba(255,255,255,0.03)",
-        }}>
-          <div style={{
-            width:40, height:40, borderRadius:"50%",
-            border:"3px solid rgba(255,255,255,0.08)",
-            borderTopColor: player?.color || "#B8FF4D",
-            animation:"spin .8s linear infinite",
-          }}/>
-        </div>
-      )}
-      {post.image && (post.isVideo
-        ? <video src={post.image} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }} controls muted playsInline loop autoPlay/>
-        : <img
-            src={post.image}
-            alt="post"
-            onLoad={()=>setImgLoaded(true)}
-            style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain", opacity: imgLoaded ? 1 : 0, transition:"opacity .2s ease" }}
-          />
-      )}
+<div onClick={(e)=>e.stopPropagation()} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", position:"relative" }}>
+  {post.image && !imgLoaded && !post.isVideo && (
+    <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(255,255,255,0.03)" }}>
+      <div style={{ width:40, height:40, borderRadius:"50%", border:"3px solid rgba(255,255,255,0.08)", borderTopColor: player?.color || "#B8FF4D", animation:"spin .8s linear infinite" }}/>
     </div>
-  );
-})()}
-      {post.caption && (
-        <div onClick={(e)=>e.stopPropagation()} style={{ padding:"14px 16px", paddingBottom:"max(14px, env(safe-area-inset-bottom))", flexShrink:0 }}>
-          <div style={{ fontSize:14, color:"#E8ECF4", lineHeight:1.5, marginBottom:10 }}>{post.caption}</div>
-          <button onClick={()=>onToggleHeart(post.id)} className="bb-pressable" style={{ background:"none", border:"none", display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
-            <Heart size={20} color={hearted?"#FF5C8A":"#8B92A8"} fill={hearted?"#FF5C8A":"none"}/>
-            <span style={{ color:hearted?"#FF5C8A":"#8B92A8", fontSize:13, fontWeight:700 }}>{(post.hearts||[]).length}</span>
-          </button>
-        </div>
-      )}
-    </div>
+  )}
+  {post.image && (post.isVideo
+    ? <video src={post.image} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }} controls muted playsInline loop autoPlay/>
+    : <img src={post.image} alt="post" onLoad={()=>setImgLoaded(true)} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain", opacity: imgLoaded ? 1 : 0, transition:"opacity .2s ease" }}/>
+  )}
+</div>
+{post.caption && (
+  <div onClick={(e)=>e.stopPropagation()} style={{ padding:"14px 16px", paddingBottom:"max(14px, env(safe-area-inset-bottom))", flexShrink:0 }}>
+    <div style={{ fontSize:14, color:"#E8ECF4", lineHeight:1.5, marginBottom:10 }}>{post.caption}</div>
+    <button onClick={()=>onToggleHeart(post.id)} className="bb-pressable" style={{ background:"none", border:"none", display:"flex", alignItems:"center", gap:6, cursor:"pointer" }}>
+      <Heart size={20} color={hearted?"#FF5C8A":"#8B92A8"} fill={hearted?"#FF5C8A":"none"}/>
+      <span style={{ color:hearted?"#FF5C8A":"#8B92A8", fontSize:13, fontWeight:700 }}>{(post.hearts||[]).length}</span>
+    </button>
+  </div>
+)}
+  </div>
   );
 }
 
@@ -3046,7 +3116,7 @@ setProgress(100);
 }
 
 
-function TeamRoomModal({ currentPlayer, stats, setStats, teamRoom, setTeamRoom, onClose }) {
+function TeamRoomModal({ currentPlayer, stats, setStats, teamRoom, setTeamRoom, onClose, addToast }) {
   const [mode, setMode] = useState("3v3");
   const [loggingInRoom, setLoggingInRoom] = useState(false);
   const openRoom = async () => {
@@ -3079,6 +3149,89 @@ const [swipeOffset, setSwipeOffset] = useState(0);
     else setSwipeOffset(0);
   };
 
+useEffect(() => {
+  if (!teamRoom) return;
+
+  const pollForGames = async () => {
+    const roomCutoff = new Date(teamRoom.createdAt).getTime();
+    const detectedGames = {};
+
+    for (const p of PLAYERS) {
+      const profile = await getMMR(p.id);
+      if (!profile) continue;
+
+      try {
+        const res = await fetch(
+          `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${profile.platform}&username=${profile.handle}`,
+          { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+        );
+        const json = await res.json();
+        const sessions = json?.data?.sessions || [];
+        
+        // filter to sessions after room opened and matching mode
+        const playlistName = teamRoom.mode === "3v3"
+          ? "Ranked Standard 3v3"
+          : "Ranked Doubles 2v2";
+
+        const recentSession = sessions
+          .filter(s => {
+            const ts = new Date(s.date || s.metadata?.date).getTime();
+            return ts > roomCutoff && s.metadata?.playlistName === playlistName;
+          })
+          .sort((a, b) => new Date(b.date || b.metadata?.date) - new Date(a.date || a.metadata?.date))[0];
+
+        if (recentSession) {
+          detectedGames[p.id] = {
+            playerId: p.id,
+            mode: teamRoom.mode,
+            ourScore: recentSession.stats?.goals?.value || recentSession.metadata?.team1Score || 0,
+            theirScore: recentSession.metadata?.team2Score || recentSession.stats?.goalsAgainst?.value || 0,
+            goals: recentSession.stats?.goals?.value || 0,
+            assists: recentSession.stats?.assists?.value || 0,
+            saves: recentSession.stats?.saves?.value || 0,
+            shots: recentSession.stats?.shots?.value || 0,
+            score: recentSession.stats?.score?.value || 0,
+            demos: recentSession.stats?.demolitions?.value || 0,
+            ts: new Date(recentSession.date || recentSession.metadata?.date).toISOString(),
+            roomId: teamRoom.id,
+            sessionCode: teamRoom.id,
+            id: Date.now().toString() + p.id,
+          };
+        }
+      } catch(e) {
+        console.log("poll error for", p.id, e);
+      }
+    }
+
+    const expectedPlayers = teamRoom.mode === "2v2" ? 2 : 3;
+    const detectedIds = Object.keys(detectedGames);
+
+    if (detectedIds.length >= expectedPlayers) {
+      // check scores all match
+      const scores = detectedIds.map(id => `${detectedGames[id].ourScore}-${detectedGames[id].theirScore}`);
+      const allMatch = scores.every(s => s === scores[0]);
+
+      if (allMatch) {
+        // auto log all games
+        const newEntries = Object.values(detectedGames);
+        const updStats = [...newEntries, ...stats];
+        await storeSet("stats", updStats);
+        setStats(updStats);
+
+        // close the room
+        setTeamRoom(null);
+        await storeSet("team_room", { closed: true, closedAt: new Date().toISOString() });
+
+        addToast?.("🎮 game detected — stats auto-logged for everyone!", "✅");
+      }
+    }
+  };
+
+  // poll every 60 seconds
+  const iv = setInterval(pollForGames, 60000);
+  return () => clearInterval(iv);
+}, [teamRoom?.id]);              
+              
   return (
     <div
       onTouchStart={handleTouchStart}
@@ -3143,11 +3296,49 @@ const [swipeOffset, setSwipeOffset] = useState(0);
                 )}
               </div>
             ))}
-           {!roomGames.find(g => g.playerId === currentPlayer) && (
-              <button onClick={() => setLoggingInRoom(true)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:12,padding:"13px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",marginTop:8}}>
-                log my stats for this game
-              </button>
-            )}
+         {!roomGames.find(g => g.playerId === currentPlayer) && (() => {
+  const fiveMinAgo = Date.now() - 60 * 60 * 1000;
+  const recentGame = stats
+    .filter(g => g.playerId === currentPlayer && g.mode === teamRoom.mode && new Date(g.ts).getTime() > fiveMinAgo)
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts))[0];
+  const alreadyLinked = recentGame && roomGames.find(g => g.id === recentGame.id);
+
+  if (alreadyLinked) return (
+    <div style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:"12px",marginTop:8,textAlign:"center",fontSize:12,color:"#4A5066"}}>
+      already logged this game
+    </div>
+  );
+
+  if (recentGame) return (
+    <button onClick={async () => {
+  const withRoom = { ...recentGame, roomId: teamRoom.id, sessionCode: teamRoom.id };
+  const updStats = stats.map(g => g.id === recentGame.id ? withRoom : g);
+  await storeSet("stats", updStats);
+  setStats(updStats);
+
+  // Check if all 3 players have now logged — and scores all match
+  const roomEntries = updStats.filter(g => g.roomId === teamRoom.id);
+  const allIn = PLAYERS.every(p => roomEntries.find(g => g.playerId === p.id));
+  if (allIn) {
+    const scores = roomEntries.map(g => `${g.ourScore}-${g.theirScore}`);
+    const allMatch = scores.every(s => s === scores[0]);
+    if (allMatch) {
+      // Auto-close the room
+      setTeamRoom(null);
+      await storeSet("team_room", { closed: true, closedAt: new Date().toISOString() });
+    }
+  }
+}} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:12,padding:"13px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",marginTop:8}}>
+      link my last {teamRoom.mode} game ({recentGame.ourScore}–{recentGame.theirScore})
+    </button>
+  );
+
+  return (
+    <div style={{background:"rgba(255,255,255,0.03)",border:"1px dashed rgba(255,255,255,0.1)",borderRadius:12,padding:"12px",marginTop:8,textAlign:"center",fontSize:12,color:"#4A5066"}}>
+      no recent {teamRoom.mode} game found — log one in the stats tab first
+    </div>
+  );
+})()}
             {teamRoom.createdBy === currentPlayer && (
               <button onClick={closeRoom} className="bb-pressable" style={{width:"100%",background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:12,padding:"13px 0",fontSize:13,fontWeight:700,color:"#FF5C8A",cursor:"pointer",marginTop:10}}>
                 close room
@@ -3169,7 +3360,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
 }
 
 
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom }) {
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
   const [showAllGames, setShowAllGames]=useState(false);
@@ -3234,8 +3425,35 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
 return (
     <div className="bb-tab-content" style={s.tabContent}>
       {logging&&<LogGameModal mode={mode} currentPlayer={currentPlayer} onSave={saveGame} onClose={()=>setLogging(false)}/>}
-      <div style={s.sectionRowHeader}>
+<div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>stats tracker</div>
+        <button onClick={async () => {
+          const profile = mmrProfiles?.[currentPlayer];
+          if (!profile) return;
+          addToast?.("syncing…", "🔄");
+          try {
+            const res = await fetch(
+             `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${profile.platform}&username=${profile.handle}`,
+              { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+            );
+            const json = await res.json();
+            const segments = json?.data?.segments || [];
+            const playlistIds = { "Ranked Duel 1v1": 10, "Ranked Doubles 2v2": 11, "Ranked Standard 3v3": 13 };
+            const newRanks = profile.ranks.map(r => {
+    const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === r.playlist);
+const newMmr = seg?.stats?.rating?.value || r.mmr;
+const newRankName = seg?.stats?.tier?.metadata?.name || rankFromMMR(newMmr);
+              return { ...r, prevMmr: r.mmr, prevRank: r.rank, mmr: newMmr, rank: newRankName };
+            });
+            const updated = { ...profile, ranks: newRanks, lastSynced: new Date().toISOString() };
+            setMmrProfiles(prev => ({ ...prev, [currentPlayer]: updated }));
+            await setMMR(currentPlayer, updated);
+            addToast?.("ranks updated!", "✅");
+          } catch(e) { addToast?.("sync failed", "❌"); }
+        }} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>
+          🔄 sync ranks
+        </button>
+      </div>
 {teamRoom && (
   <div onClick={() => setShowRoom(true)} className="bb-pressable" style={{background:"rgba(184,255,77,0.08)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:13,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
     <div style={{width:8,height:8,borderRadius:99,background:"#B8FF4D",animation:"livePulse 1.4s ease-in-out infinite"}}/>
@@ -3251,8 +3469,7 @@ return (
     + open team room
   </button>
 )}
-{showRoom && <TeamRoomModal currentPlayer={currentPlayer} stats={stats} setStats={setStats} teamRoom={teamRoom} setTeamRoom={setTeamRoom} onClose={() => setShowRoom(false)}/>}
-   </div>
+{showRoom && <TeamRoomModal currentPlayer={currentPlayer} stats={stats} setStats={setStats} teamRoom={teamRoom} setTeamRoom={setTeamRoom} onClose={() => setShowRoom(false)} addToast={addToast}/>}
 {mode!=="3v3" && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>log game</button></div>}
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"📊 stats"},{id:"sessions",label:"🎮 sessions"}].map(sub=>(
@@ -3711,7 +3928,7 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
     </div>
   );
 }
-function PresenceTab({ presence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed }) {
+function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
@@ -3727,6 +3944,7 @@ const [flowerTarget, setFlowerTarget] = useState(null);
 const [selectedFlower, setSelectedFlower] = useState(null);
 const [showPass, setShowPass] = useState(false);
 const customBgFileRef = useRef(null);
+const [myMode, setMyMode] = useState(null);
 
   const sendPing = async (toId) => {
     const ping = { id: Date.now().toString(), from: currentPlayer, to: toId, ts: new Date().toISOString(), type: "2s" };
@@ -4149,29 +4367,44 @@ await storeSet("pings", pingUpd2);
       )}
       {/* Online now */}
 
+
+<div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+  {["1v1","2v2","3v3","free play",null].map(m=>(
+    <button key={m??"off"} onClick={async()=>{
+      setMyMode(m);
+      const upd={...presence,[currentPlayer+"_mode"]:m,[currentPlayer]:new Date().toISOString()};
+      setPresence(upd); await storeSet("presence",upd);
+    }} className="bb-pressable"
+    style={{background:myMode===m?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:myMode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
+      {m??"off"}
+    </button>
+  ))}
+</div>
+
       {/* Online now */}
       <div style={{...s.sectionLabel,marginBottom:10}}>online now</div>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
-        {PLAYERS.map(p=>{
-          const online = isOnline(presence?.[p.id]);
-          const isMe = p.id === currentPlayer;
-          return (
-            <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
-              <div style={{width:10,height:10,borderRadius:99,background:online?"#7CFFB2":"#2E3346",boxShadow:online?"0 0 8px #7CFFB299":""}}/>
-              <div style={{flex:1}}>
-                <PlayerNameDisplay playerId={p.id} points={points}/>
-                <div style={{fontSize:11,color:"#4A5066",marginTop:1}}>{online?"online now":presence?.[p.id]?`last seen ${fmtRelTime(presence[p.id])}`:"offline"}</div>
-              </div>
-              {!isMe && online && (
-                <button onClick={()=>sendPing(p.id)} className="bb-pressable bb-glow-lime" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>
-                  🎮 run 2s?
-                </button>
-              )}
-            </div>
-          );
-        })}
+   {PLAYERS.map(p=>{
+  const online = isOnline(presence?.[p.id]);
+  const isMe = p.id === currentPlayer;
+  return (
+    <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
+      <div style={{width:10,height:10,borderRadius:99,background:online?"#7CFFB2":"#2E3346",boxShadow:online?"0 0 8px #7CFFB299":""}}/>
+      <div style={{flex:1}}>
+        <PlayerNameDisplay playerId={p.id} points={points}/>
+        <div style={{fontSize:11,color:"#4A5066",marginTop:1}}>
+          {online ? (presence?.[p.id+"_mode"] ? `🎮 in ${presence[p.id+"_mode"]}` : "online now") : presence?.[p.id] ? `last seen ${fmtRelTime(presence[p.id])}` : "offline"}
+        </div>
       </div>
-
+      {!isMe && online && (
+        <button onClick={()=>sendPing(p.id)} className="bb-pressable bb-glow-lime" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>
+          🎮 run 2s?
+        </button>
+      )}
+    </div>
+  );
+})}
+</div>
  {/* Incoming pings */}
 {myPings.filter(p => p.type !== "flower").length > 0 && (
   <>
@@ -6540,12 +6773,11 @@ const endRace = async () => {
 }        
                   
 const CHEMISTRY_RESET_VERSION = 3;
-
 function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, setChemistry }) {
   const weekStart = getWeekStart();
   const [selectedDuo, setSelectedDuo] = useState(null);
+  const [chemSelectedGame, setChemSelectedGame] = useState(null);
   const getSyncedCountKey = (key) => `${key}_syncedCount`;
-
   useEffect(() => {
     if (chemistry?._resetVersion === CHEMISTRY_RESET_VERSION) return;
     const wiped = { _resetVersion: CHEMISTRY_RESET_VERSION };
@@ -6555,7 +6787,6 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
   const [duoSwipeOffset, setDuoSwipeOffset] = useState(0);
   const duoSwipeStartX = useRef(0);
   const duoSwipeStartY = useRef(0);
-
   const handleDuoTouchStart = (e) => {
     duoSwipeStartX.current = e.touches[0].clientX;
     duoSwipeStartY.current = e.touches[0].clientY;
@@ -6828,7 +7059,215 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
       })()}
     </div>
   );
-}              
+}  
+                  
+// ===================== RLCS Bets =====================
+const RLCS_MATCHES = [
+  { id:"m1", home:"NRG",          away:"G2 Esports",    league:"RLCS NA",   date:"Jul 5",  homeOdds:"-140", awayOdds:"+115" },
+  { id:"m2", home:"Team Falcons", away:"Team BDS",       league:"RLCS EU",   date:"Jul 5",  homeOdds:"+105", awayOdds:"-125" },
+  { id:"m3", home:"Moist",        away:"Complexity",     league:"RLCS NA",   date:"Jul 6",  homeOdds:"-160", awayOdds:"+130" },
+  { id:"m4", home:"Karmine Corp", away:"Vitality",       league:"RLCS EU",   date:"Jul 6",  homeOdds:"+120", awayOdds:"-145" },
+  { id:"m5", home:"SSG",          away:"Faze",           league:"RLCS NA",   date:"Jul 7",  homeOdds:"-110", awayOdds:"-110" },
+  { id:"m6", home:"FURIA",        away:"Cloud9",         league:"RLCS SAM",  date:"Jul 7",  homeOdds:"+135", awayOdds:"-160" },
+];
+
+function americanToDecimal(odds) {
+  const n = parseInt(odds.replace("+",""));
+  return odds.startsWith("+") ? (n/100)+1 : (100/Math.abs(n))+1;
+}
+
+function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
+  const [wager, setWager] = useState(20);
+  const [placed, setPlaced] = useState({});
+  const myPoints = points?.[currentPlayer] || 0;
+
+  const myRlcsBets = (bets||[]).filter(b => b.bettorId === currentPlayer && b.isRlcs);
+
+  const placeBet = async (match, side) => {
+    if (myPoints < wager) return;
+    const odds = side === "home" ? match.homeOdds : match.awayOdds;
+    const dec = americanToDecimal(odds);
+    const payout = Math.round(wager * dec);
+    const team = side === "home" ? match.home : match.away;
+    const bet = {
+      id: Date.now().toString(),
+      bettorId: currentPlayer,
+      isRlcs: true,
+      matchId: match.id,
+      team,
+      opponent: side === "home" ? match.away : match.home,
+      league: match.league,
+      date: match.date,
+      wager,
+      payout,
+      odds,
+      status: "open",
+      placedAt: new Date().toISOString(),
+    };
+    const upd = { ...points, [currentPlayer]: myPoints - wager };
+    setPoints(upd); await storeSet("points", upd);
+    const updBets = [...(bets||[]), bet];
+    setBets(updBets); await storeSet("bets", updBets);
+    setPlaced(p => ({ ...p, [match.id]: side }));
+  };
+
+  return (
+    <div>
+      <div style={{fontSize:11,color:"#4A5066",marginBottom:14,lineHeight:1.5}}>
+        bet on real RLCS matches. results update manually — captain marks winners.
+      </div>
+      <div style={{background:"#11131F",borderRadius:13,padding:12,marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
+        <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER</div>
+        <div style={{display:"flex",gap:8}}>
+          {[10,25,50,100].map(amt=>(
+            <button key={amt} onClick={()=>setWager(amt)} className="bb-pressable"
+              style={{flex:1,background:wager===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"8px 0",fontSize:11,fontWeight:700,color:wager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+              {amt}
+            </button>
+          ))}
+        </div>
+      </div>
+      {RLCS_MATCHES.map(match => {
+        const alreadyBet = placed[match.id] || myRlcsBets.find(b => b.matchId === match.id);
+        const homeDec = americanToDecimal(match.homeOdds);
+        const awayDec = americanToDecimal(match.awayOdds);
+        return (
+          <div key={match.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${alreadyBet?"rgba(184,255,77,0.25)":"rgba(255,255,255,0.05)"}`}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+              <div style={{fontSize:9,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>{match.league}</div>
+              <div style={{fontSize:9,color:"#4A5066"}}>{match.date}</div>
+            </div>
+            {alreadyBet ? (
+              <div style={{textAlign:"center",padding:"10px 0"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#7CFFB2",marginBottom:4}}>
+                  ✓ bet placed — {typeof alreadyBet === "string"
+                    ? (alreadyBet==="home"?match.home:match.away)
+                    : alreadyBet.team}
+                </div>
+                <div style={{fontSize:10,color:"#4A5066"}}>to win {typeof alreadyBet==="string" ? Math.round(wager*(alreadyBet==="home"?homeDec:awayDec)) : alreadyBet.payout} pts</div>
+              </div>
+            ) : (
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>placeBet(match,"home")} disabled={myPoints<wager} className="bb-pressable"
+                  style={{flex:1,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"12px 8px",cursor:myPoints>=wager?"pointer":"default",opacity:myPoints<wager?0.4:1,textAlign:"center"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4",marginBottom:6}}>{match.home}</div>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#B8FF4D"}}>{match.homeOdds}</div>
+                  <div style={{fontSize:9,color:"#4A5066",marginTop:4}}>win {Math.round(wager*homeDec)} pts</div>
+                </button>
+                <div style={{display:"flex",alignItems:"center",fontSize:11,color:"#4A5066",fontWeight:700,padding:"0 4px"}}>VS</div>
+                <button onClick={()=>placeBet(match,"away")} disabled={myPoints<wager} className="bb-pressable"
+                  style={{flex:1,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"12px 8px",cursor:myPoints>=wager?"pointer":"default",opacity:myPoints<wager?0.4:1,textAlign:"center"}}>
+                  <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4",marginBottom:6}}>{match.away}</div>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#FF61C1"}}>{match.awayOdds}</div>
+                  <div style={{fontSize:9,color:"#4A5066",marginTop:4}}>win {Math.round(wager*awayDec)} pts</div>
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {myRlcsBets.length > 0 && (
+        <div style={{marginTop:16}}>
+          <div style={{fontSize:11,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:10}}>YOUR RLCS BETS</div>
+          {myRlcsBets.map(b => (
+            <div key={b.id} style={{background:"#11131F",borderRadius:12,padding:12,marginBottom:8,border:`1px solid ${b.status==="won"?"rgba(124,255,178,0.2)":b.status==="lost"?"rgba(255,92,138,0.1)":"rgba(255,209,102,0.15)"}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#E8ECF4"}}>{b.team} <span style={{color:"#4A5066"}}>vs</span> {b.opponent}</div>
+                  <div style={{fontSize:10,color:"#4A5066",marginTop:2}}>{b.league} · {b.date} · {b.odds}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:11,fontWeight:700,color:b.status==="won"?"#7CFFB2":b.status==="lost"?"#FF5C8A":"#FFD166"}}>
+                    {b.status==="open"?"PENDING":b.status.toUpperCase()}
+                  </div>
+                  <div style={{fontSize:10,color:"#4A5066",marginTop:2}}>to win {b.payout} pts</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===================== Games Hub Tab =====================
+const GAME_CARDS = [
+  { id:"trivia",   emoji:"🧠", label:"RLCS Trivia",     desc:"5 questions · up to 3x your wager",       color:"#4D9EFF" },
+  { id:"race",     emoji:"🏁", label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
+  { id:"boostgrab",emoji:"⚡", label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
+  { id:"recap",    emoji:"📊", label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
+  { id:"rlcsbets", emoji:"🏆", label:"RLCS Bets",        desc:"bet on real pro matches with live odds",    color:"#FF61C1" },
+  { id:"stocks",   emoji:"📈", label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
+];
+
+function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, activeRace, setActiveRace, raceStart, setRaceStart }) {
+  const [active, setActive] = useState(null);
+  const myPoints = points?.[currentPlayer] || 0;
+
+  if (active === "trivia") return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
+      <RLCSTrivia currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>
+    </div>
+  );
+  if (active === "race") return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
+      <RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>
+    </div>
+  );
+  if (active === "boostgrab") return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
+      <BoostGrab currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>
+    </div>
+  );
+  if (active === "recap") return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
+      <WeeklyRecapTrivia stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>
+    </div>
+  );
+  if (active === "rlcsbets") return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
+      <RLCSBets currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>
+    </div>
+  );
+  if (active === "stocks") return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
+      <StockMarketTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={{}} setStocks={()=>{}}/>
+    </div>
+  );
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4}}>arcade</div>
+      <div style={{fontSize:12,color:"#4A5066",marginBottom:20}}>
+        balance: <span style={{color:"#B8FF4D",fontWeight:700}}>{myPoints} pts</span>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        {GAME_CARDS.map(card => (
+          <button key={card.id} onClick={()=>setActive(card.id)} className="bb-pressable"
+            style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${card.color}33`,borderRadius:18,padding:"18px 14px",textAlign:"left",cursor:"pointer",display:"flex",flexDirection:"column",gap:0,minHeight:140}}>
+            <div style={{fontSize:32,marginBottom:10}}>{card.emoji}</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:700,color:card.color,marginBottom:6,lineHeight:1.1}}>{card.label}</div>
+            <div style={{fontSize:11,color:"#4A5066",lineHeight:1.4,flex:1}}>{card.desc}</div>
+            <div style={{fontSize:10,color:card.color,fontWeight:700,marginTop:10}}>play →</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const backBtnStyle = {
+  background:"none",border:"none",color:"#A78BFA",fontSize:12.5,fontWeight:700,
+  cursor:"pointer",padding:"0 0 16px",display:"block",letterSpacing:0.3,
+};                  
+                  
                   
 export default function App() {
   const [authStage,setAuthStage]=useState("select");
@@ -7026,7 +7465,7 @@ return () => {
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af] = await Promise.all([
+  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af] = await Promise.all([
     storeGet("schedule"),
     storeGet("training"),
     storeGet("completions"),
@@ -7050,106 +7489,144 @@ const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pc
     storeGet("coin_flips"),
     storeGet("active_race"),
     storeGet("chemistry"),
-storeGet("flip_challenges"),
+    storeGet("flip_challenges"),
     storeGet("activity_feed"),
   ]);
 
   if (sched) setSchedule(sched);
-if (training) setTrainingData(training);
-if (comp) setCompletions(comp);
-if (chat) setMessages(Array.isArray(chat) ? chat : []);
-if (cmts) setComments(cmts);
-if (pst) setPosts(Array.isArray(pst) ? pst : []);
-if (strm) setStreamProfiles(strm);
-if (sts) setStats(Array.isArray(sts) ? sts : []);
-if (prs) setPresence(prs);
-if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
-if (pts) setPoints(pts);
-if (bts) setBets(Array.isArray(bts) ? bts : []);
-if (pxp) setPassXP(pxp);
-if (ppm) setPassPremium(ppm);
-if (pcl) setPassClaimed(pcl);
-if (ptk) setPassTokens(ptk);
-if (pab) setPassActiveBoosts(pab);
-if (tlogs) setTimeLogs(Array.isArray(tlogs) ? tlogs : []);
-if (stks) setStocks(stks);
-if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
-if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.startedAt); }
-if (chem) setChemistry(chem);
-if (fc) setFlipChallenges(Array.isArray(fc) ? fc : []);
-if (tr && !tr.closed) setTeamRoom(tr);
-if (af) {
-  const myFeed = (Array.isArray(af) ? af : []).filter(e => e.to === pid);
-  setActivityFeed(myFeed);
-  const unseen = myFeed.filter(e => !e.seen);
-const seenIds = new Set((await storeGet(`seen_toasts:${pid}`)) || []);
+  if (training) setTrainingData(training);
+  if (comp) setCompletions(comp);
+  if (chat) setMessages(Array.isArray(chat) ? chat : []);
+  if (cmts) setComments(cmts);
+  if (pst) setPosts(Array.isArray(pst) ? pst : []);
+  if (strm) setStreamProfiles(strm);
+  if (sts) setStats(Array.isArray(sts) ? sts : []);
+  if (prs) setPresence(prs);
+  if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
+  if (pts) setPoints(pts);
+  if (bts) setBets(Array.isArray(bts) ? bts : []);
+  if (pxp) setPassXP(pxp);
+  if (ppm) setPassPremium(ppm);
+  if (pcl) setPassClaimed(pcl);
+  if (ptk) setPassTokens(ptk);
+  if (pab) setPassActiveBoosts(pab);
+  if (tlogs) setTimeLogs(Array.isArray(tlogs) ? tlogs : []);
+  if (stks) setStocks(stks);
+  if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
+  if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.startedAt); }
+  if (chem) setChemistry(chem);
+  if (fc) setFlipChallenges(Array.isArray(fc) ? fc : []);
+  if (tr && !tr.closed) setTeamRoom(tr);
 
-  // also catch up on chat messages sent while offline
-  const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
-  const missedChats = (Array.isArray(chat) ? chat : [])
-    .filter(m => m.playerId !== pid && new Date(m.ts).getTime() > recentCutoff)
-    .slice(-5)
-    .map(m => ({
-      id: m.id,
-      fromName: PLAYERS.find(p => p.id === m.playerId)?.name || "teammate",
-      text: `said: "${m.text.slice(0, 40)}${m.text.length > 40 ? "…" : ""}"`,
-      type: "chat",
-      ts: m.ts,
-    }));
+  if (af) {
+    const myFeed = (Array.isArray(af) ? af : []).filter(e => e.to === pid);
+    setActivityFeed(myFeed);
 
-  // catch up on post reactions/comments directed at this player's posts
-  const myPostIds = new Set((Array.isArray(pst) ? pst : [])
-    .filter(p => p.playerId === pid).map(p => p.id));
-  const missedPostActivity = [];
-  (Array.isArray(pst) ? pst : []).forEach(post => {
-    if (!myPostIds.has(post.id)) return;
-    (post.comments || [])
-      .filter(c => c.playerId !== pid && new Date(c.ts).getTime() > recentCutoff)
-      .forEach(c => {
-        const name = PLAYERS.find(p => p.id === c.playerId)?.name || "someone";
-        missedPostActivity.push({ id: c.id, fromName: name, text: "commented on your post", type: "comment", ts: c.ts });
-      });
-    (post.postReactions || [])
-      .filter(r => r.playerId !== pid && new Date(r.ts).getTime() > recentCutoff)
-      .forEach(r => {
-        const name = PLAYERS.find(p => p.id === r.playerId)?.name || "someone";
-        missedPostActivity.push({ id: r.ts, fromName: name, text: `reacted ${r.emoji} to your post`, type: "post_react", ts: r.ts });
-      });
-  });
+    const lastLoginAt = await storeGet(`lastLoginAt:${pid}`) || 0;
+    const newSince = new Date(lastLoginAt).getTime();
+    await storeSet(`lastLoginAt:${pid}`, new Date().toISOString());
 
-  const allCatchup = [...unseen, ...missedChats, ...missedPostActivity]
-    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+const unseenNew = myFeed.filter(e =>
+      !e.seen && new Date(e.ts).getTime() > newSince
+    );
+
+    const missedChats = (Array.isArray(chat) ? chat : [])
+      .filter(m => m.playerId !== pid && new Date(m.ts).getTime() > newSince)
+      .slice(-3)
+      .map(m => ({
+        id: m.id,
+        fromName: PLAYERS.find(p => p.id === m.playerId)?.name || "teammate",
+        text: `said: "${m.text.slice(0, 40)}${m.text.length > 40 ? "…" : ""}"`,
+        type: "chat",
+        ts: m.ts,
+      }));
+
+    const myPostIds = new Set((Array.isArray(pst) ? pst : [])
+      .filter(p => p.playerId === pid).map(p => p.id));
+    const missedPostActivity = [];
+    (Array.isArray(pst) ? pst : []).forEach(post => {
+      if (!myPostIds.has(post.id)) return;
+      (post.comments || [])
+        .filter(c => c.playerId !== pid && new Date(c.ts).getTime() > newSince)
+        .forEach(c => {
+          const name = PLAYERS.find(p => p.id === c.playerId)?.name || "someone";
+          missedPostActivity.push({ id: c.id, fromName: name, text: "commented on your post", type: "comment", ts: c.ts });
+        });
+    });
+
+    const allCatchup = [...unseenNew, ...missedChats, ...missedPostActivity]
+      .sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
 if (allCatchup.length > 0) {
-  const newSeenIds = [...seenIds, ...allCatchup.map(e => e.id)];
-  await storeSet(`seen_toasts:${pid}`, newSeenIds);
-  setPendingActivityToasts(allCatchup);
-}
-}
-
-const savedLastSeen = await storeGet(`lastSeen:${pid}`);
-if (savedLastSeen) setLastSeen(savedLastSeen);
-else setLastSeen({social:0, chat:0, training:0});
-    const profiles={};
-    for (const p of PLAYERS) { const profile=await getMMR(p.id); if(profile) profiles[p.id]=profile; }
-    setMmrProfiles(profiles);
-      setCurrentPlayer(pid);
-setMmrProfiles(prev => ({...prev}));
-    if (!profiles[pid]) setAuthStage("tracker"); else setAuthStage("app");
-    setLoading(false);
-  };
-
-  const handleResync=(pid)=>{ setPendingResyncPlayer(pid); setResyncOverlay(true); setResyncingId(pid); };
-  const finishResync=async()=>{
-    const pid=pendingResyncPlayer; const existing=mmrProfiles[pid];
-    if (existing) {
-      const newRanks=existing.ranks.map((r)=>{ const mmr=r.mmr+Math.floor(Math.random()*16-8); return {...r,mmr,rank:rankFromMMR(mmr)}; });
-      const profile={...existing,ranks:newRanks,lastSynced:new Date().toISOString(),source:existing.source==="admin"?"admin":"synced"};
-      setMmrProfiles((prev)=>({...prev,[pid]:profile}));
-      await setMMR(pid,profile);
+      setPendingActivityToasts(allCatchup);
     }
-    setResyncOverlay(false); setResyncingId(null);
-  };
+
+    if (unseenNew.length > 0) {
+      const seenIds = new Set(unseenNew.map(e => e.id));
+      const markedSeen = af.map(e => seenIds.has(e.id) ? { ...e, seen: true } : e);
+      await storeSet("activity_feed", markedSeen);
+    }
+  }
+
+const profiles = {};
+  for (const p of PLAYERS) {
+    const profile = await getMMR(p.id);
+    if (profile) {
+      if (!profile.ranks?.[0]?.prevMmr) {
+        const stamped = { ...profile, ranks: profile.ranks.map(r => ({ ...r, prevMmr: r.mmr, prevRank: r.rank })) };
+        await setMMR(p.id, stamped);
+        profiles[p.id] = stamped;
+      } else {
+        profiles[p.id] = profile;
+      }
+    }
+  }
+  setMmrProfiles(profiles);
+  setCurrentPlayer(pid);
+
+  const savedLastSeen = await storeGet(`lastSeen:${pid}`);
+  if (savedLastSeen) setLastSeen(savedLastSeen);
+  else setLastSeen({ social: 0, chat: 0, training: 0 });
+
+  if (!profiles[pid]) setAuthStage("tracker");
+  else setAuthStage("app");
+
+  setLoading(false);
+};
+
+
+const handleResync = async (pid) => {
+  setResyncingId(pid);
+  setResyncOverlay(true);
+  setPendingResyncPlayer(pid);
+  await new Promise(r => setTimeout(r, 100)); // let overlay render
+  const existing = mmrProfiles[pid];
+  if (existing) {
+    try {
+      const res = await fetch(
+        `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${existing.platform}&username=${existing.handle}`,
+        { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+      );
+      const json = await res.json();
+      const segments = json?.data?.segments || [];
+      const playlistIds = { "Ranked Duel 1v1": 10, "Ranked Doubles 2v2": 11, "Ranked Standard 3v3": 13 };
+      const newRanks = existing.ranks.map(r => {
+const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === r.playlist);
+const newMmr = seg?.stats?.rating?.value || r.mmr;
+const newRankName = seg?.stats?.tier?.metadata?.name || rankFromMMR(newMmr);
+        return { ...r, prevMmr: r.mmr, prevRank: r.rank, mmr: newMmr, rank: newRankName };
+      });
+      const updated = { ...existing, ranks: newRanks, lastSynced: new Date().toISOString(), source: existing.source === "admin" ? "admin" : "synced" };
+      setMmrProfiles(prev => ({ ...prev, [pid]: updated }));
+      await setMMR(pid, updated);
+      addToast?.("ranks updated!", "✅");
+    } catch(e) {
+      addToast?.("sync failed — check connection", "❌");
+    }
+  }
+  setResyncOverlay(false);
+  setResyncingId(null);
+};
 
   const incompleteDays=(()=>{
     if (!currentPlayer) return [];
@@ -7178,22 +7655,19 @@ if (loading) return <><GlobalStyles/><div style={{...s.screen,alignItems:"center
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const isAdmin=currentPlayer===ADMIN_ID;
 const TABS=[
-    {id:"home",icon:Home,label:"home"},
-    {id:"bracket",icon:Trophy,label:"bracket"},
-    {id:"training",icon:Dumbbell,label:"training"},
-    {id:"social",icon:ImageIcon,label:"social"},
-    {id:"stats",icon:BarChart2,label:"stats"},
-    {id:"presence",icon:Circle,label:"squad"},
-    {id:"boost",icon:Dice5,label:"boost"},
-{id:"coinflip", icon:Dice5, label:"flip"},
-{id:"race",     icon:Trophy, label:"race"},
-    {id:"garage",icon:Trophy,label:"garage"},
-{id:"chemistry",icon:Heart,label:"chem"},
-{id:"trivia",icon:Dice5,label:"trivia"},
-{id:"boostgrab",icon:Dice5,label:"grab"},
-{id:"recap",icon:BarChart2,label:"recap"},
+    {id:"home",     icon:Home,       label:"home"},
+    {id:"bracket",  icon:Trophy,     label:"bracket"},
+    {id:"training", icon:Dumbbell,   label:"training"},
+    {id:"social",   icon:ImageIcon,  label:"social"},
+    {id:"stats",    icon:BarChart2,  label:"stats"},
+    {id:"presence", icon:Circle,     label:"squad"},
+    {id:"boost",    icon:Dice5,      label:"boost"},
+    {id:"coinflip", icon:Dice5,      label:"flip"},
+    {id:"games",    icon:Dice5,      label:"games"},
+    {id:"garage",   icon:Trophy,     label:"garage"},
+    {id:"chemistry",icon:Heart,      label:"chem"},
     ...(isAdmin?[{id:"admin",icon:Shield,label:"admin"}]:[]),
-  ];
+];
   const badges = {
     social: Math.max(0, posts.length - lastSeen.social),
     chat: Math.max(0, messages.length - lastSeen.chat),
@@ -7269,17 +7743,26 @@ const TABS=[
       {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="chat"&&<ChatTab key={tab} messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
-{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom}/>}
+{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast}/>}
  {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
 {tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
-{tab==="race"&&<RaceModeTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
+
 {tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
-{tab==="presence"&&<PresenceTab key={tab} presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed}/>}
+{tab==="presence"&&<PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed}/>}
 {tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
-{tab==="trivia"&&<RLCSTrivia key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
-{tab==="boostgrab"&&<BoostGrab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
-{tab==="recap"&&<WeeklyRecapTrivia key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+{tab==="games"&&<GamesTab
+  stats={stats}
+  currentPlayer={currentPlayer}
+  points={points}
+  setPoints={setPoints}
+  bets={bets}
+  setBets={setBets}
+  activeRace={activeRace}
+  setActiveRace={setActiveRace}
+  raceStart={raceStart}
+  setRaceStart={setRaceStart}
+/>}
    {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
       {chatOpen && (
