@@ -1767,18 +1767,22 @@ function ChatMessage({ msg, isMe, onReact }) {
 }
 function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus, setTypingStatus }) {
   const [text, setText] = useState("");
-  useEffect(() => {
-    if (!text.trim()) {
-      const upd = { ...typingStatus };
+useEffect(() => {
+  if (!text.trim()) {
+    storeGet("typing").then(current => {
+      const upd = { ...(current || {}) };
       delete upd[currentPlayer];
       setTypingStatus(upd);
       storeSet("typing", upd);
-      return;
-    }
-    const upd = { ...typingStatus, [currentPlayer]: new Date().toISOString() };
+    });
+    return;
+  }
+  storeGet("typing").then(current => {
+    const upd = { ...(current || {}), [currentPlayer]: new Date().toISOString() };
     setTypingStatus(upd);
     storeSet("typing", upd);
-  }, [text]);            
+  });
+}, [text]);           
   const scrollRef = useRef(null);
   useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages.length]);
 
@@ -2499,7 +2503,7 @@ const FIELDS = ["goals","assists","saves","shots"];
         <div style={{marginLeft:"auto",fontSize:10,color:"#4A5066"}}>{fmtRelTime(game.ts)}</div>
       </div>
 
-      <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+     <div style={{flex:1,overflowY:"auto",padding:"20px 16px",paddingBottom:"100px"}}>
         {/* Score hero */}
         <div style={{background:`linear-gradient(135deg,${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"},#0C0E18)`,border:`1px solid ${won?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.2)"}`,borderRadius:20,padding:"24px",textAlign:"center",marginBottom:20}}>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:"#E8ECF4",letterSpacing:2}}>{game.ourScore} – {game.theirScore}</div>
