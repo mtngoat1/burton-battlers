@@ -1807,8 +1807,9 @@ function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus,
         {messages.length === 0 && <div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
         {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} />)}
 {(() => {
+  const now = Date.now();
   const typers = Object.entries(typingStatus)
-    .filter(([pid, ts]) => pid !== currentPlayer && Date.now() - new Date(ts).getTime() < 4000)
+    .filter(([pid, ts]) => pid !== currentPlayer && now - new Date(ts).getTime() < 8000)
     .map(([pid]) => PLAYERS.find(p => p.id === pid)?.name)
     .filter(Boolean);
   if (!typers.length) return null;
@@ -2458,7 +2459,7 @@ sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
 
 function GameDetailModal({ game, allPlayerGames, onClose }) {
   const won = game.ourScore > game.theirScore;
-  const FIELDS = ["goals","assists","saves","shots","score","demos"];
+const FIELDS = ["goals","assists","saves","shots"];
   const [swipeOffset, setSwipeOffset] = useState(0);
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
@@ -6526,6 +6527,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
         const p2 = PLAYERS.find(p => p.id === pid2);
         const shared = getSharedGames(pid1, pid2);
         const sortedShared = [...shared].sort((a,b) => new Date(b.p1game.ts) - new Date(a.p1game.ts));
+        const [chemSelectedGame, setChemSelectedGame] = useState(null);
 
         return (
         <div
@@ -6576,20 +6578,32 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 
               <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>SHARED GAME HISTORY · {sortedShared.length} GAMES</div>
               {sortedShared.length === 0 && <div style={{color:"#4A5066",textAlign:"center",marginTop:30,fontSize:13}}>no shared games logged this week yet</div>}
+{chemSelectedGame && (
+  <GameDetailModal
+    game={chemSelectedGame.game}
+    allPlayerGames={chemSelectedGame.allPlayerGames}
+    onClose={() => setChemSelectedGame(null)}
+  />
+)}
 {sortedShared.map(({p1game, p2game}, i) => {
-                const won = p1game.ourScore > p1game.theirScore;
-                return (
-                  <div key={p1game.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <div>
-                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{p1game.ourScore}–{p1game.theirScore}</div>
-                      <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(p1game.ts)}{p1game.sessionCode ? ` · ${p1game.sessionCode}` : ""}</div>
-                    </div>
-                    <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",border:`1px solid ${won?"rgba(124,255,178,0.4)":"rgba(255,92,138,0.4)"}`,borderRadius:99,padding:"3px 9px"}}>
-                      {won?"WIN":"LOSS"}
-                    </div>
-                  </div>
-                );
-              })}
+  const won = p1game.ourScore > p1game.theirScore;
+  const myAllGames = stats.filter(g => g.playerId === p1game.playerId && g.mode === p1game.mode).sort((a,b) => new Date(a.ts)-new Date(b.ts));
+  return (
+    <button key={p1game.id} onClick={() => setChemSelectedGame({ game: p1game, allPlayerGames: myAllGames })} className="bb-pressable"
+      style={{width:"100%",background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",textAlign:"left"}}>
+      <div>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{p1game.ourScore}–{p1game.theirScore}</div>
+        <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(p1game.ts)}{p1game.sessionCode ? ` · ${p1game.sessionCode}` : ""}</div>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",border:`1px solid ${won?"rgba(124,255,178,0.4)":"rgba(255,92,138,0.4)"}`,borderRadius:99,padding:"3px 9px"}}>
+          {won?"WIN":"LOSS"}
+        </div>
+        <ChevronRight size={13} color="#4A5066"/>
+      </div>
+    </button>
+  );
+})}
             </div>
           </div>
         );
