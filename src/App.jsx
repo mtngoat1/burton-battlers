@@ -186,23 +186,13 @@ function SyncOverlay({ onDone, label }) {
 }
 
 // ===================== Global CSS =====================
-function loadTesseract() {
-  return new Promise((resolve, reject) => {
-    if (window.Tesseract) return resolve(window.Tesseract);
-    const script = document.createElement("script");
-    script.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js";
-    script.onload = () => resolve(window.Tesseract);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
 
 function GlobalStyles() {
   return (
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600&family=Inter:wght@400;600;700&display=swap');
       @keyframes spin { to { transform: rotate(360deg); } }
-      @keyframes fadeSlideUp { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+      @keyframes fadeSlideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 @keyframes dropDown { from { transform:translateY(-100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
       @keyframes chatSlideIn { from { transform:translateY(100%); } to { transform:translateY(0); } }
       @keyframes chatFadeIn { from { opacity:0; } to { opacity:1; } }
@@ -236,7 +226,7 @@ function GlobalStyles() {
 // ===================== Auth screens =====================
 function NameSelectScreen({ onSelect }) {
   return (
-    <div style={s.loginScreen}>
+    <div style={{...s.loginScreen, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
       <div style={s.loginGlow} />
       <div style={s.loginContent}>
         <div style={s.loginEyebrow}>rivalry circuit · jul 20 – sep 21</div>
@@ -264,7 +254,7 @@ function CreatePasscodeScreen({ player, onCreated }) {
     onCreated();
   };
   return (
-    <div style={s.loginScreen}><div style={s.loginGlow} /><div style={s.loginContent}>
+   <div style={{...s.loginScreen, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}><div style={s.loginGlow} /><div style={s.loginContent}>
       <div style={{ ...s.loginPlayerDot, background:player.color, margin:"0 auto 18px", width:14, height:14 }} />
       <div style={s.loginTitle}>{player.name}</div>
       <div style={s.loginSub}>create your passcode</div>
@@ -467,43 +457,65 @@ function getWeekStart() {
   return Object.values(groups).sort((a,b) => new Date(b.ts) - new Date(a.ts));
 }
             
-  function SessionGroupCard({ session }) {
+function SessionGroupCard({ session, allStats }) {
+  const [open, setOpen] = useState(false);
+  const [selectedGame, setSelectedGame] = useState(null);
   const rep = session.games[0];
   const won = rep.ourScore > rep.theirScore;
+
   return (
-    <div style={{background:"#11131F",borderRadius:14,padding:"14px 16px",marginBottom:10,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-        <div>
-          <div style={{fontSize:10,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>SESSION · {session.code.toUpperCase()}</div>
-          <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session.mode} · {fmtRelTime(session.ts)} · {session.games.length} player{session.games.length!==1?"s":""} logged</div>
-        </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>{rep.ourScore}–{rep.theirScore}</div>
-          <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A"}}>{won?"WIN":"LOSS"}</div>
-        </div>
-      </div>
-      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-        {session.games.map(g => {
-          const p = PLAYERS.find(pl => pl.id === g.playerId);
-          return (
-            <div key={g.id} style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:10}}>
-              <div style={{width:7,height:7,borderRadius:99,background:p?.color,flexShrink:0}}/>
-              <span style={{fontSize:12,fontWeight:700,color:p?.color,minWidth:64}}>{p?.name}</span>
-              <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
-                {["goals","assists","saves","shots","demos"].map(f => (
-                  <div key={f} style={{textAlign:"center"}}>
-                    <div style={{fontSize:8,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
-                    <div style={{fontSize:12,fontWeight:700,color:"#E8ECF4"}}>{g[f]||0}</div>
-                  </div>
-                ))}
-              </div>
+    <div style={{background:"#11131F",borderRadius:14,marginBottom:10,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
+      {selectedGame && (
+        <GameDetailModal
+          game={selectedGame}
+          allPlayerGames={(allStats||[]).filter(g=>g.playerId===selectedGame.playerId&&g.mode===selectedGame.mode).sort((a,b)=>new Date(a.ts)-new Date(b.ts))}
+          onClose={()=>setSelectedGame(null)}
+        />
+      )}
+      {/* Clickable header */}
+      <button onClick={()=>setOpen(v=>!v)} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:10,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>SESSION · {session.code.toUpperCase()}</div>
+            <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session.mode} · {fmtRelTime(session.ts)} · {session.games.length} player{session.games.length!==1?"s":""} logged</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>{rep.ourScore}–{rep.theirScore}</div>
+              <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A"}}>{won?"WIN":"LOSS"}</div>
             </div>
-          );
-        })}
-      </div>
+            <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s",flexShrink:0}}/>
+          </div>
+        </div>
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div style={{padding:"0 16px 14px",display:"flex",flexDirection:"column",gap:6}}>
+          {session.games.map(g => {
+            const p = PLAYERS.find(pl => pl.id === g.playerId);
+            return (
+              <button key={g.id} onClick={()=>setSelectedGame(g)} className="bb-pressable"
+                style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:10,border:"1px solid rgba(255,255,255,0.04)",cursor:"pointer",textAlign:"left",width:"100%"}}>
+                <div style={{width:7,height:7,borderRadius:99,background:p?.color,flexShrink:0}}/>
+                <span style={{fontSize:12,fontWeight:700,color:p?.color,minWidth:64}}>{p?.name}</span>
+                <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
+                  {["goals","assists","saves","shots","demos"].map(f => (
+                    <div key={f} style={{textAlign:"center"}}>
+                      <div style={{fontSize:8,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
+                      <div style={{fontSize:12,fontWeight:700,color:p?.color||"#E8ECF4"}}>{g[f]||0}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{fontSize:9,color:"#4A5066",flexShrink:0}}>→</div>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
-}          
+}
             
 function getChallengeProgress(challenge, stats, playerId) {
   const weekStart = getWeekStart();
@@ -622,6 +634,7 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
   const playerIdx = PLAYERS.findIndex(p => p.id === currentPlayer);
   const weekNum = Math.floor(Date.now() / (WEEK_MS));
   const [showAllModal, setShowAllModal] = useState(false);
+  const [showRoom, setShowRoom] = useState(false);              
 
   const modes = ["3v3", "2v2", "1v1"];
   const challengesByMode = modes.map((mode) => {
@@ -642,21 +655,26 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
 const XP_PER_CHALLENGE = 17;
   const PASS_TIERS_PER_CHALLENGE = 1; // tiers awarded for first two challenges
 
-  const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
+const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
     if (completions[claimKey]) return;
     const upd = {...completions, [claimKey]: true};
     setCompletions(upd);
     await storeSet("completions", upd);
     const pxp = await storeGet("pass_xp") || {};
-    const tierBonus = grantsPassTier ? PASS_TIERS_PER_CHALLENGE * 100 : 0; // 100 XP = 1 tier
-    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+XP_PER_CHALLENGE+tierBonus};
+    const tierBonus = grantsPassTier ? PASS_TIERS_PER_CHALLENGE * 100 : 0;
+    // every claim grants +1 full pass tier (100 xp), plus any extra tier bonus
+    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+XP_PER_CHALLENGE+tierBonus+XP_PER_TIER};
     setPassXP(updXP);
     await storeSet("pass_xp", updXP);
-    if (grantsBonusSpin) {
-      const bonusSpins = await storeGet("points") || {};
-      const updBonus = {...bonusSpins,[currentPlayer+"_bonusSpins"]:(bonusSpins[currentPlayer+"_bonusSpins"]||0)+1,[currentPlayer+"_bonusSlots"]:(bonusSpins[currentPlayer+"_bonusSlots"]||0)+1};
-      await storeSet("points", updBonus);
-    }
+    // every claim grants +1 wheel spin and +1 slot spin, plus an extra one on bonus-spin challenges
+    const bonusSpins = await storeGet("points") || {};
+    const extraSpin = grantsBonusSpin ? 1 : 0;
+    const updBonus = {
+      ...bonusSpins,
+      [currentPlayer+"_bonusSpins"]: (bonusSpins[currentPlayer+"_bonusSpins"]||0) + 1 + extraSpin,
+      [currentPlayer+"_bonusSlots"]: (bonusSpins[currentPlayer+"_bonusSlots"]||0) + 1 + extraSpin,
+    };
+    await storeSet("points", updBonus);
   };
 
   // Default view: first challenge per mode (3 cards)
@@ -718,40 +736,17 @@ const XP_PER_CHALLENGE = 17;
                 <div style={{height:"100%",width:`${progressPct*100}%`,background:progress.done?"#7CFFB2":color,borderRadius:99,transition:"width .4s ease",boxShadow:progress.done?`0 0 8px #7CFFB299`:`0 0 8px ${color}88`}}/>
               </div>
             </div>
-            {progress.done && !claimed && (
+{progress.done && !claimed && (
               <button onClick={()=>claimXP(claimKey, grantsBonusSpin, grantsPassTier)} className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
-                🏆 claim +{XP_PER_CHALLENGE} xp{grantsBonusSpin?" + 🎡":"+"}{grantsPassTier?"⬆️ tier":""}
+                🏆 claim +{XP_PER_CHALLENGE} xp + ⬆️ tier + 🎡 spin{grantsBonusSpin?" x2":""}
               </button>
-            )}
+    )}
             {claimed && <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +{XP_PER_CHALLENGE} xp claimed this week</div>}
             <div style={{fontSize:11,color:"#4A5066"}}>resets weekly · {mode} games only</div>
           </div>
         );
       })}
-
-      {/* 3v3 mini leaderboard */}
-      <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
-        <div style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:8}}>
-          <div/>
-          {CHALLENGE_FIELDS.map(f=><div key={f} style={{fontSize:9,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
-        </div>
-        {PLAYERS.map(p=>{
-          const pg = stats.filter(g => g.playerId===p.id && g.mode==="3v3");
-          const avg = (field) => pg.length ? (pg.reduce((s,g)=>s+(g[field]||0),0)/pg.length).toFixed(1) : "—";
-          return (
-            <div key={p.id} style={{display:"grid",gridTemplateColumns:`60px repeat(4,1fr)`,gap:4,marginBottom:6,alignItems:"center"}}>
-              <div style={{display:"flex",alignItems:"center",gap:5}}>
-                <div style={{width:6,height:6,borderRadius:99,background:p.color,flexShrink:0}}/>
-                <span style={{fontSize:10,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:p.id===currentPlayer?p.color:"#E8ECF4"}}>{p.name}</span>
-              </div>
-              {CHALLENGE_FIELDS.map(f=>(
-                <div key={f} style={{fontSize:12,fontWeight:700,color:p.color,textAlign:"center"}}>{avg(f)}</div>
-              ))}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }
@@ -1103,7 +1098,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
           <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><ChevronLeft size={18}/></button>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>{stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"}</div>
         </div>
-        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
+       
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {stat === "record" && (
@@ -1228,8 +1223,8 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
     display:"flex", flexDirection:"column",
     animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",
     transform:`translateX(${swipeOffset}px)`,
-    opacity: Math.max(0, 1 - swipeOffset / 280),
-    transition: swipeOffset === 0 ? "transform .25s ease, opacity .25s ease" : "none",
+    opacity: Math.max(0, 1 - swipeOffset / 400),
+transition: swipeOffset === 0 ? "transform .3s cubic-bezier(.25,.46,.45,.94)" : "none",
   }}>
      <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
@@ -1280,10 +1275,13 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
 function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
- const [heatOpen, setHeatOpen] = useState(false);
   const nextMatch = allMatches.find((m)=>!m.result);
   const [showTeamComparison, setShowTeamComparison] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
+  useEffect(() => {
+  setShowTeamComparison(false);
+  setExpandedStat(null);
+}, []);    
   const record = schedule.league.reduce((acc,m)=>{
     if (!m.result) return acc;
     if (m.result.status==="win"||m.result.status==="forfeit_win"||m.result.status==="bye") acc.w++; else acc.l++;
@@ -1364,17 +1362,6 @@ return (
       </div>
 
       <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
-<div style={{ marginBottom: 16 }}>
-  <button onClick={() => setHeatOpen(v => !v)} className="bb-pressable"
-    style={{ width: "100%", background: "#11131F", border: "1px solid rgba(255,140,50,0.2)", borderRadius: 14, padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: heatOpen ? 8 : 0 }}>
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span style={{ fontSize: 16 }}>♨️</span>
-      <span style={{ fontSize: 13, fontWeight: 700, color: "#FF8C32" }}>heat streaks</span>
-    </div>
-    <ChevronRight size={15} color="#4A5066" style={{ transform: heatOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }} />
-  </button>
-  {heatOpen && <HeatStreakCard stats={stats} currentPlayer={currentPlayer} />}
-</div>
       <TimePlayedTracker stats={stats} currentPlayer={currentPlayer} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>
      <button onClick={()=>{ setShowTeamComparison(true); }} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
@@ -2127,7 +2114,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
         </div>
       )}
 
-      {/* Sub tab switcher */}
+{/* Sub tab switcher */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <button onClick={() => setSubTab("feed")} className="bb-pressable"
           style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === "feed" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: subTab === "feed" ? "#06070D" : "#8B92A8" }}>
@@ -2136,6 +2123,10 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
         <button onClick={() => setSubTab("bets")} className="bb-pressable"
           style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === "bets" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: subTab === "bets" ? "#06070D" : "#8B92A8" }}>
           🎰 bets
+        </button>
+        <button onClick={() => setSubTab("teamlink")} className="bb-pressable"
+          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === "teamlink" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: subTab === "teamlink" ? "#06070D" : "#8B92A8" }}>
+          🔗 team link
         </button>
       </div>
 
@@ -2148,6 +2139,10 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
           {posts.length === 0 && <div style={s.emptyQueue}>no posts yet — share a clip or a funny moment.</div>}
          {posts.map(post => <PostCard key={post.id} post={post} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onOpenComments={setCommentingOn} onExpand={setExpandedPost} />)}
         </>
+      )}
+
+{subTab === "teamlink" && (
+        <TeamLinkGames stats={stats} />
       )}
 
       {subTab === "bets" && (
@@ -2361,6 +2356,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
 }
 // ===================== Stats Tab =====================
 const STAT_MODES = ["3v3","2v2","1v1"];
+const LOGGABLE_MODES = ["2v2","1v1"];
 const STAT_FIELDS = ["goals","assists","saves","shots","score"];
 
 function StatsTrendLine({ games, field, color }) {
@@ -2386,6 +2382,12 @@ function StatsTrendLine({ games, field, color }) {
 }
 
 function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
+const [roomId, setRoomId] = useState(null);
+useEffect(() => {
+  storeGet("team_room").then(room => {
+    if (room?.id) setRoomId(room.id);
+  }).catch(()=>{});
+}, []);
   const [ourScore, setOurScore] = useState("");
   const [theirScore, setTheirScore] = useState("");
   const [goals, setGoals] = useState("");
@@ -2394,25 +2396,7 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   const [shots, setShots] = useState("");
   const [score, setScore] = useState("");
   const [demos, setDemos] = useState("");
-  const [sessionCode, setSessionCode] = useState("");
-  const [generating, setGenerating] = useState(false);
 
-  useEffect(() => {
-    // pick up a shared session code generated within the last 5 minutes
-    storeGet("session_code_pool").then(pool => {
-      if (pool && pool.code && Date.now() - new Date(pool.createdAt).getTime() < 5*60*1000) {
-        setSessionCode(pool.code);
-      }
-    }).catch(()=>{});
-  }, []);
-
-  const generateCode = async () => {
-    setGenerating(true);
-    const code = Math.random().toString(36).slice(2,8);
-    setSessionCode(code);
-    await storeSet("session_code_pool", { code, createdAt: new Date().toISOString(), createdBy: currentPlayer });
-    setGenerating(false);
-  };
 
   const submit = () => {
     if (ourScore === "" || theirScore === "") return;
@@ -2429,7 +2413,8 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
       score: Number(score) || 0,
       demos: Number(demos) || 0,
       ts: new Date().toISOString(),
-      sessionCode: sessionCode.trim().toLowerCase() || null,
+roomId: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
+sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
     };
     onSave(entry);
     onClose();
@@ -2442,6 +2427,7 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
           <div style={s.modalTitle}>log {mode} game</div>
           <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
         </div>
+
         <div style={s.modalLabel}>score</div>
         <div style={s.modalScoreRow}>
           <div style={{flex:1}}><div style={s.modalLabel}>us</div><input type="number" value={ourScore} onChange={e=>setOurScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
@@ -2456,27 +2442,11 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
             </div>
           ))}
         </div>
-  {(mode === "3v3" || mode === "2v2") && (
-          <div>
-            <div style={s.modalLabel}>session code — optional</div>
-            <div style={{display:"flex",gap:8}}>
-              <input
-                value={sessionCode}
-                onChange={e => setSessionCode(e.target.value)}
-                placeholder="e.g. tuesday or gg1"
-                style={{...s.modalInput,flex:1}}
-              />
-              <button onClick={generateCode} disabled={generating} className="bb-pressable bb-glow-lime"
-                style={{flexShrink:0,background:"#B8FF4D",border:"none",borderRadius:9,padding:"0 14px",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
-                {generating?"…":"generate"}
-              </button>
-            </div>
-            <div style={{fontSize:10,color:"#4A5066",marginTop:6,lineHeight:1.5}}>
-              tap generate — your teammate's "log game" screen will auto-fill the same code within 5 minutes. or just type any shared word yourselves.
-            </div>
-          </div>
-        )}
-        <button onClick={submit} disabled={ourScore===""||theirScore===""} className="bb-pressable bb-glow-lime"
+{roomId && (mode === "3v3" || mode === "2v2") && (
+  <div style={{background:"rgba(184,255,77,0.08)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:10,padding:"10px 12px",marginTop:4}}>
+    <div style={{fontSize:11,fontWeight:700,color:"#B8FF4D"}}>✓ team room active — your stats will link automatically</div>
+  </div>
+)} <button onClick={submit} disabled={ourScore===""||theirScore===""} className="bb-pressable bb-glow-lime"
           style={{...s.primaryBtn,opacity:ourScore===""||theirScore===""?0.4:1,marginTop:16}}>
           save game
         </button>
@@ -2485,14 +2455,158 @@ function LogGameModal({ mode, currentPlayer, onSave, onClose }) {
   );
 }
 
-function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS }) {
+
+function GameDetailModal({ game, allPlayerGames, onClose }) {
+  const won = game.ourScore > game.theirScore;
+  const FIELDS = ["goals","assists","saves","shots","score","demos"];
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
+  const handleTouchStart = (e) => {
+    swipeStartX.current = e.touches[0].clientX;
+    swipeStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchMove = (e) => {
+    const dx = e.touches[0].clientX - swipeStartX.current;
+    const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
+    if (dx > 0 && dx > dy) setSwipeOffset(dx);
+  };
+  const handleTouchEnd = () => {
+    if (swipeOffset > 80) { onClose(); setSwipeOffset(0); }
+    else setSwipeOffset(0);
+  };
+
+  // Get player's last 10 games for sparkline context
+  const last10 = allPlayerGames.slice(-10);
+  const player = PLAYERS.find(p => p.id === game.playerId);
+
+  const avg = (field) => last10.length
+    ? (last10.reduce((s,g) => s+(g[field]||0),0)/last10.length)
+    : 0;
+
+  return (
+<div
+  onTouchStart={handleTouchStart}
+  onTouchMove={handleTouchMove}
+  onTouchEnd={handleTouchEnd}
+  style={{position:"fixed",inset:0,zIndex:500,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",transform:`translateX(${swipeOffset}px)`,opacity:Math.max(0,1-swipeOffset/280),transition:swipeOffset===0?"transform .25s ease,opacity .25s ease":"none"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+          <ChevronLeft size={18}/>
+        </button>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>game detail</div>
+        <div style={{marginLeft:"auto",fontSize:10,color:"#4A5066"}}>{fmtRelTime(game.ts)}</div>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+        {/* Score hero */}
+        <div style={{background:`linear-gradient(135deg,${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"},#0C0E18)`,border:`1px solid ${won?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.2)"}`,borderRadius:20,padding:"24px",textAlign:"center",marginBottom:20}}>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:"#E8ECF4",letterSpacing:2}}>{game.ourScore} – {game.theirScore}</div>
+          <div style={{fontSize:13,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",letterSpacing:1,marginTop:4}}>{won?"WIN":"LOSS"}</div>
+          <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>{game.mode} · {fmtRelTime(game.ts)}</div>
+        </div>
+
+        {/* Stat bars vs personal avg */}
+        <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>THIS GAME VS YOUR AVG (last 10)</div>
+        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
+          {FIELDS.map(field => {
+            const val = game[field] || 0;
+            const average = avg(field);
+            const max = Math.max(val, average, 1);
+            const valPct = val / max;
+            const avgPct = average / max;
+            const above = val >= average;
+            return (
+              <div key={field} style={{background:"#11131F",borderRadius:14,padding:"13px 14px",border:`1px solid ${above?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.06)"}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:11,color:"#4A5066",fontWeight:700,textTransform:"uppercase",letterSpacing:0.6}}>{field}</div>
+                  <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                    <span style={{fontSize:11,color:"#4A5066"}}>avg <span style={{color:"#8B92A8",fontWeight:700}}>{average.toFixed(1)}</span></span>
+                    <span style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:above?"#7CFFB2":"#FF5C8A"}}>{val}</span>
+                  </div>
+                </div>
+                {/* This game bar */}
+                <div style={{marginBottom:6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#4A5066",marginBottom:3}}>
+                    <span>this game</span><span style={{color:above?"#7CFFB2":"#FF5C8A",fontWeight:700}}>{val}</span>
+                  </div>
+                  <div style={{height:8,background:"rgba(255,255,255,0.06)",borderRadius:99,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${valPct*100}%`,background:above?"#7CFFB2":"#FF5C8A",borderRadius:99,boxShadow:`0 0 8px ${above?"#7CFFB2":"#FF5C8A"}66`,transition:"width .5s cubic-bezier(.2,.8,.2,1)"}}/>
+                  </div>
+                </div>
+                {/* Avg bar */}
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#4A5066",marginBottom:3}}>
+                    <span>10-game avg</span><span style={{fontWeight:700}}>{average.toFixed(1)}</span>
+                  </div>
+                  <div style={{height:5,background:"rgba(255,255,255,0.06)",borderRadius:99,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${avgPct*100}%`,background:"rgba(139,146,168,0.5)",borderRadius:99}}/>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Sparkline trend for each stat */}
+        <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>RECENT TREND · LAST 10 GAMES</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
+          {FIELDS.map(field => {
+            const vals = last10.map(g => g[field]||0);
+            const max = Math.max(...vals,1);
+            const w=140, h=48, pad=4;
+            const pts = vals.map((v,i)=>{
+              const x=pad+(i/(Math.max(vals.length-1,1)))*(w-pad*2);
+              const y=h-pad-(v/max)*(h-pad*2);
+              return `${x},${y}`;
+            }).join(" ");
+            const thisVal = game[field]||0;
+            const gameIdx = last10.findIndex(g=>g.id===game.id);
+            const gx = gameIdx>=0 ? pad+(gameIdx/(Math.max(last10.length-1,1)))*(w-pad*2) : null;
+            const gy = gameIdx>=0 ? h-pad-((thisVal)/max)*(h-pad*2) : null;
+            return (
+              <div key={field} style={{background:"#11131F",borderRadius:13,padding:"10px 10px 8px",border:"1px solid rgba(255,255,255,0.05)"}}>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:700,textTransform:"uppercase",letterSpacing:0.5,marginBottom:6}}>{field}</div>
+                <svg width={w} height={h} style={{display:"block",overflow:"visible"}}>
+                  {vals.length>1&&<polyline points={pts} fill="none" stroke={player?.color||"#B8FF4D"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.5"/>}
+                  {vals.map((v,i)=>{
+                    const x=pad+(i/(Math.max(vals.length-1,1)))*(w-pad*2);
+                    const y=h-pad-(v/max)*(h-pad*2);
+                    const isThis=last10[i]?.id===game.id;
+                    return <circle key={i} cx={x} cy={y} r={isThis?4:2} fill={isThis?"#fff":player?.color||"#B8FF4D"} opacity={isThis?1:0.4}/>;
+                  })}
+                </svg>
+                <div style={{fontSize:11,fontWeight:700,color:player?.color||"#B8FF4D",marginTop:2}}>{thisVal} <span style={{fontSize:9,color:"#4A5066",fontWeight:400}}>this game</span></div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats, currentPlayer }) {
   const [open, setOpen] = useState(dk === jumpDate || false);
+  const [selectedGame, setSelectedGame] = useState(null);
   const date = new Date(dk + "T00:00:00");
   const wins = games.filter(g => g.ourScore > g.theirScore).length;
   const isJump = dk === jumpDate;
   useEffect(() => { if (isJump) setOpen(true); }, [isJump]);
+
+  const myAllGames = (allStats||[])
+    .filter(g => g.playerId === currentPlayer && g.mode === games[0]?.mode)
+    .sort((a,b) => new Date(a.ts)-new Date(b.ts));
+
   return (
     <div id={`gamelog-${dk}`} style={{marginBottom:10}}>
+      {selectedGame && (
+        <GameDetailModal
+          game={selectedGame}
+          allPlayerGames={myAllGames}
+          onClose={() => setSelectedGame(null)}
+        />
+      )}
       <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
         style={{width:"100%",background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${isJump?"rgba(167,139,250,0.4)":"rgba(255,255,255,0.06)"}`,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:open?6:0}}>
         <div style={{textAlign:"left"}}>
@@ -2507,7 +2621,8 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS }) {
       {open && games.map(g => {
         const won = g.ourScore > g.theirScore;
         return (
-          <div key={g.id} style={{background:"rgba(255,255,255,0.02)",borderRadius:11,padding:"11px 13px",marginBottom:6,border:`1px solid ${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"}`}}>
+          <button key={g.id} onClick={() => setSelectedGame(g)} className="bb-pressable"
+            style={{width:"100%",background:"rgba(255,255,255,0.02)",borderRadius:11,padding:"11px 13px",marginBottom:6,border:`1px solid ${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"}`,textAlign:"left",cursor:"pointer"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:700}}>{g.ourScore} – {g.theirScore}</div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -2523,13 +2638,67 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS }) {
                 </div>
               ))}
             </div>
-          </div>
+            <div style={{fontSize:9,color:"#4A5066",marginTop:6}}>tap for full breakdown →</div>
+          </button>
         );
       })}
     </div>
   );
 }
 
+function TeamLinkGames({ stats }) {
+ const roomGames = stats.filter(g => g.roomId || g.sessionCode);
+  const dayMap = {};
+  roomGames.forEach(g => {
+    const dk = dateKey(new Date(g.ts));
+    if (!dayMap[dk]) dayMap[dk] = [];
+    dayMap[dk].push(g);
+  });
+  const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
+
+  if (days.length === 0) {
+    return <div style={s.emptyQueue}>no team room games logged yet — open a team room in the stats tab and log games together to see them here.</div>;
+  }
+
+  return (
+    <div>
+      {days.map(([dk, dayGames]) => {
+        const sessionMap = {};
+        dayGames.forEach(g => {
+ const key = g.roomId || g.sessionCode;
+if (!sessionMap[key]) sessionMap[key] = { code: g.roomId || g.sessionCode, mode: g.mode, games: [], ts: g.ts };
+          sessionMap[key].games.push(g);
+          if (new Date(g.ts) > new Date(sessionMap[key].ts)) sessionMap[key].ts = g.ts;
+        });
+        const sessions = Object.values(sessionMap).sort((a,b) => new Date(b.ts) - new Date(a.ts));
+        return (
+          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={stats} />
+        );
+      })}
+    </div>
+  );
+}
+
+function TeamLinkDayGroup({ dk, sessions, allStats }) {
+  const [open, setOpen] = useState(false);
+  const date = new Date(dk + "T00:00:00");
+  const totalGames = sessions.reduce((s,sess) => s + sess.games.length, 0);
+  return (
+    <div style={{marginBottom:10}}>
+      <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
+        style={{width:"100%",background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(184,255,77,0.15)",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:open?8:0}}>
+        <div style={{textAlign:"left"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#B8FF4D"}}>{fmtDay(date)}</div>
+          <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{sessions.length} session{sessions.length!==1?"s":""} · {totalGames} game{totalGames!==1?"s":""}</div>
+        </div>
+        <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
+      </button>
+ {open && sessions.map(sess => (
+     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats}/>
+))}
+    </div>
+  );
+}
 
 function TournamentOCRTab({ schedule, setSchedule, currentPlayer }) {
   const [image, setImage] = useState(null);
@@ -2570,13 +2739,32 @@ function TournamentOCRTab({ schedule, setSchedule, currentPlayer }) {
     setScanning(true);
     setProgress(0);
     try {
-      const Tesseract = await loadTesseract();
-      const result = await Tesseract.recognize(imageFile, "eng", {
-        logger: (m) => { if (m.status === "recognizing text") setProgress(Math.round((m.progress||0)*100)); },
-      });
-      const text = result.data.text || "";
-      setRawText(text);
-      setParsed(parseOcrText(text));
+     const base64 = await new Promise((res) => {
+  const reader = new FileReader();
+  reader.onload = () => res(reader.result.split(",")[1]);
+  reader.readAsDataURL(imageFile);
+});
+
+const response = await fetch("https://api.anthropic.com/v1/messages", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    model: "claude-sonnet-4-6",
+    max_tokens: 1000,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+        { type: "text", text: "Look at this Rocket League screenshot. Return ONLY a JSON object with these fields: ourScore (number), theirScore (number), opponent (string team name). No other text." }
+      ]
+    }]
+  })
+});
+
+const data = await response.json();
+const clean = data.content[0].text.replace(/```json|```/g, "").trim();
+setParsed(JSON.parse(clean));
+setProgress(100);
     } catch (e) {
       setRawText("scan failed — try a clearer screenshot.");
     }
@@ -2669,11 +2857,136 @@ function TournamentOCRTab({ schedule, setSchedule, currentPlayer }) {
   );
 }
 
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule }) {
+
+function TeamRoomModal({ currentPlayer, stats, setStats, teamRoom, setTeamRoom, onClose }) {
+  const [mode, setMode] = useState("3v3");
+  const [loggingInRoom, setLoggingInRoom] = useState(false);
+  const openRoom = async () => {
+    const room = { id: Date.now().toString(), mode, createdBy: currentPlayer, createdAt: new Date().toISOString(), games: [] };
+    setTeamRoom(room);
+    await storeSet("team_room", room);
+  };
+  const closeRoom = async () => {
+    setTeamRoom(null);
+    await storeSet("team_room", { closed: true, closedAt: new Date().toISOString() });
+    onClose();
+  };
+  const roomGames = teamRoom ? stats.filter(g => g.roomId === teamRoom.id) : [];
+  const byPlayer = PLAYERS.map(p => ({ player: p, game: roomGames.find(g => g.playerId === p.id) }));
+const [swipeOffset, setSwipeOffset] = useState(0);
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
+
+  const handleTouchStart = (e) => {
+    swipeStartX.current = e.touches[0].clientX;
+    swipeStartY.current = e.touches[0].clientY;
+  };
+  const handleTouchMove = (e) => {
+    const dx = e.touches[0].clientX - swipeStartX.current;
+    const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
+    if (dx > 0 && dx > dy) setSwipeOffset(dx);
+  };
+  const handleTouchEnd = () => {
+    if (swipeOffset > 80) { onClose(); setSwipeOffset(0); }
+    else setSwipeOffset(0);
+  };
+
+  return (
+    <div
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      style={{
+        position:"fixed", inset:0, zIndex:400, background:"#040818",
+        display:"flex", flexDirection:"column",
+        animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",
+        transform:`translateX(${swipeOffset}px)`,
+        opacity: Math.max(0, 1 - swipeOffset / 400),
+        transition: swipeOffset === 0 ? "transform .3s cubic-bezier(.25,.46,.45,.94)" : "none",
+      }}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><ChevronLeft size={18}/></button>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team room</div>
+        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+        {!teamRoom ? (
+          <>
+            <div style={{fontSize:12,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>open a room and everyone on the team can log their stats for the same game — no session codes needed. the room stays open until you close it.</div>
+            <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>GAME MODE</div>
+            <div style={{display:"flex",gap:8,marginBottom:20}}>
+              {["3v3","2v2"].map(m => (
+                <button key={m} onClick={() => setMode(m)} className="bb-pressable"
+                  style={{flex:1,background:mode===m?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"11px 0",fontSize:13,fontWeight:700,color:mode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  {m}
+                </button>
+              ))}
+            </div>
+            <button onClick={openRoom} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:12,padding:"14px 0",fontSize:14,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
+              open {mode} room
+            </button>
+          </>
+        ) : (
+          <>
+      <div style={{background:"linear-gradient(135deg,rgba(184,255,77,0.1),rgba(184,255,77,0.04))",border:"1px solid rgba(184,255,77,0.3)",borderRadius:16,padding:"16px",marginBottom:20,textAlign:"center"}}>
+              <div style={{fontSize:10,color:"#B8FF4D",fontWeight:700,letterSpacing:1,marginBottom:4}}>ROOM OPEN · {teamRoom.mode.toUpperCase()}</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:700,color:"#E8ECF4",letterSpacing:4,margin:"10px 0"}}>{teamRoom.id.slice(-4).toUpperCase()}</div>
+              <div style={{fontSize:10,color:"#4A5066",marginBottom:8}}>ROOM CODE</div>
+              <div style={{fontSize:11,color:"#8B92A8",marginBottom:2}}>opened by {PLAYERS.find(p=>p.id===teamRoom.createdBy)?.name} · {fmtRelTime(teamRoom.createdAt)}</div>
+              <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>logged games sync automatically to social → team link tab</div>
+            </div>
+            <div style={{fontSize:11,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:12}}>LOGGED SO FAR</div>
+            {byPlayer.map(({player, game}) => (
+              <div key={player.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${game?player.color+"33":"rgba(255,255,255,0.05)"}`}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:game?10:0}}>
+                  <div style={{width:8,height:8,borderRadius:99,background:game?player.color:"#2E3346"}}/>
+                  <span style={{fontSize:13,fontWeight:700,color:game?player.color:"#4A5066"}}>{player.name}</span>
+                  {!game && <span style={{fontSize:11,color:"#4A5066",fontStyle:"italic",marginLeft:"auto"}}>hasn't logged yet</span>}
+                </div>
+                {game && (
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
+                    {["goals","assists","saves","shots","demos"].map(f => (
+                      <div key={f} style={{textAlign:"center",background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"6px 2px"}}>
+                        <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
+                        <div style={{fontSize:14,fontWeight:700,color:player.color}}>{game[f]||0}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+           {!roomGames.find(g => g.playerId === currentPlayer) && (
+              <button onClick={() => setLoggingInRoom(true)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:12,padding:"13px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",marginTop:8}}>
+                log my stats for this game
+              </button>
+            )}
+            {teamRoom.createdBy === currentPlayer && (
+              <button onClick={closeRoom} className="bb-pressable" style={{width:"100%",background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:12,padding:"13px 0",fontSize:13,fontWeight:700,color:"#FF5C8A",cursor:"pointer",marginTop:10}}>
+                close room
+              </button>
+            )}
+{loggingInRoom && (
+  <LogGameModal mode={teamRoom.mode} currentPlayer={currentPlayer} onSave={async (entry) => {
+    const withRoom = { ...entry, roomId: teamRoom.id, sessionCode: teamRoom.id };
+    const updStats = [withRoom, ...stats];
+    await storeSet("stats", updStats);
+    setStats(updStats);
+  }} onClose={() => setLoggingInRoom(false)} />
+)}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
   const [showAllGames, setShowAllGames]=useState(false);
   const [statsSubTab, setStatsSubTab] = useState("tracker");
+const [showRoom, setShowRoom] = useState(false);
 useEffect(() => {
   if (jumpDate) {
     setMode("3v3");
@@ -2735,30 +3048,44 @@ return (
       {logging&&<LogGameModal mode={mode} currentPlayer={currentPlayer} onSave={saveGame} onClose={()=>setLogging(false)}/>}
       <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>stats tracker</div>
-        <button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}><Plus size={14}/> log game</button>
-      </div>
+{teamRoom && (
+  <div onClick={() => setShowRoom(true)} className="bb-pressable" style={{background:"rgba(184,255,77,0.08)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:13,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
+    <div style={{width:8,height:8,borderRadius:99,background:"#B8FF4D",animation:"livePulse 1.4s ease-in-out infinite"}}/>
+    <div style={{flex:1}}>
+      <div style={{fontSize:12,fontWeight:700,color:"#B8FF4D"}}>room open · {teamRoom.mode} · code {teamRoom.id.slice(-4).toUpperCase()}</div>
+      <div style={{fontSize:11,color:"#8B92A8",marginTop:1}}>tap to view team logs · games sync to social → team link</div>
+    </div>
+    <ChevronRight size={14} color="#B8FF4D"/>
+  </div>
+)}
+{!teamRoom && (
+  <button onClick={() => setShowRoom(true)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.03)",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#4A5066",cursor:"pointer",marginBottom:14}}>
+    + open team room
+  </button>
+)}
+{showRoom && <TeamRoomModal currentPlayer={currentPlayer} stats={stats} setStats={setStats} teamRoom={teamRoom} setTeamRoom={setTeamRoom} onClose={() => setShowRoom(false)}/>}
+   </div>
+{mode!=="3v3" && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>log game</button></div>}
 <div style={{display:"flex",gap:8,marginBottom:18}}>
-        {[{id:"tracker",label:"📊 stats"},{id:"sessions",label:"🎮 sessions"},{id:"tourney",label:"📸 tournament"}].map(sub=>(
-          <button key={sub.id} onClick={()=>setStatsSubTab(sub.id)} className="bb-pressable"
-            style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:statsSubTab===sub.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:statsSubTab===sub.id?"#06070D":"#8B92A8"}}>
-            {sub.label}
-          </button>
-        ))}
-      </div>
-{statsSubTab==="tourney" ? (
-        <TournamentOCRTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>
-      ) : statsSubTab==="sessions" ? (
-        <div>
-          <div style={{ fontSize:11, color:"#4A5066", marginBottom:16, lineHeight:1.5 }}>
-            games are grouped by session code — everyone who logged a 2v2 or 3v3 with the same code shows up together here.
-          </div>
-          {(() => {
-            const groups = getSessionGroups(stats);
-            if (groups.length === 0) return <div style={s.emptyQueue}>no session-coded games yet — use the generate button when logging a 2v2 or 3v3 to link your stats together.</div>;
-            return groups.map(grp => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp}/>);
-          })()}
-        </div>
-      ) : (
+{[{id:"tracker",label:"📊 stats"},{id:"sessions",label:"🎮 sessions"}].map(sub=>(
+  <button key={sub.id} onClick={()=>setStatsSubTab(sub.id)} className="bb-pressable"
+    style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:statsSubTab===sub.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:statsSubTab===sub.id?"#06070D":"#8B92A8"}}>
+    {sub.label}
+  </button>
+))}
+</div>
+{statsSubTab==="sessions" ? (
+  <div>
+    <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>
+      tap a session to expand. click a player row to see their full game breakdown.
+    </div>
+    {(() => {
+      const groups = getSessionGroups(stats);
+      if (groups.length === 0) return <div style={s.emptyQueue}>no session-coded games yet.</div>;
+      return groups.map(grp => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats}/>);
+    })()}
+  </div>
+) : (
       <>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
         {STAT_MODES.map(m=>(
@@ -2837,7 +3164,7 @@ return (
         const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
         const visibleDays = showAllGames ? days : days.slice(0,3);
         return visibleDays.map(([dk, dayGames]) => (
-          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={STAT_FIELDS}/>
+          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={STAT_FIELDS} allStats={stats} currentPlayer={currentPlayer}/>
         ));
       })()}
 {Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
@@ -4067,7 +4394,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -5993,10 +6320,19 @@ const endRace = async () => {
   );
 }        
                   
+const CHEMISTRY_RESET_VERSION = 3;
+
 function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, setChemistry }) {
   const weekStart = getWeekStart();
   const [selectedDuo, setSelectedDuo] = useState(null);
   const getSyncedCountKey = (key) => `${key}_syncedCount`;
+
+  useEffect(() => {
+    if (chemistry?._resetVersion === CHEMISTRY_RESET_VERSION) return;
+    const wiped = { _resetVersion: CHEMISTRY_RESET_VERSION };
+    setChemistry(wiped);
+    storeSet("chemistry", wiped);
+  }, [chemistry?._resetVersion]);
   const [duoSwipeOffset, setDuoSwipeOffset] = useState(0);
   const duoSwipeStartX = useRef(0);
   const duoSwipeStartY = useRef(0);
@@ -6038,13 +6374,29 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
   const myPairs = CHEMISTRY_PAIRS.filter(pair => pair.includes(currentPlayer));
 
   // Compute chemistry from this week's shared games
+const SHARED_GAME_WINDOW_MS = 10 * 60 * 1000; // games logged within 10 min of each other count as "played together"
+
 const getSharedGames = (pid1, pid2, allTime = false) => {
-    const p1Games = stats.filter(g => g.playerId === pid1 && (g.mode === "3v3" || g.mode === "2v2") && g.sessionCode && (allTime || new Date(g.ts) >= weekStart));
-    const p2Games = stats.filter(g => g.playerId === pid2 && (g.mode === "3v3" || g.mode === "2v2") && g.sessionCode && (allTime || new Date(g.ts) >= weekStart));
+    const p1Games = stats.filter(g => g.playerId === pid1 && (g.mode === "3v3" || g.mode === "2v2") && (allTime || new Date(g.ts) >= weekStart));
+    const p2Games = stats.filter(g => g.playerId === pid2 && (g.mode === "3v3" || g.mode === "2v2") && (allTime || new Date(g.ts) >= weekStart));
     const linked = [];
+    const usedP2Ids = new Set();
     p1Games.forEach(g1 => {
-      const match = p2Games.find(g2 => g2.sessionCode === g1.sessionCode && g2.mode === g1.mode);
-      if (match) linked.push({ p1game: g1, p2game: match });
+      // Prefer an exact sessionCode match if both have one
+      let match = g1.sessionCode
+        ? p2Games.find(g2 => !usedP2Ids.has(g2.id) && g2.sessionCode === g1.sessionCode && g2.mode === g1.mode)
+        : null;
+      // Otherwise fall back to "logged within the same time window, same mode, same final score"
+      if (!match) {
+        match = p2Games.find(g2 =>
+          !usedP2Ids.has(g2.id) &&
+          g2.mode === g1.mode &&
+          g2.ourScore === g1.ourScore &&
+          g2.theirScore === g1.theirScore &&
+          Math.abs(new Date(g2.ts) - new Date(g1.ts)) <= SHARED_GAME_WINDOW_MS
+        );
+      }
+      if (match) { linked.push({ p1game: g1, p2game: match }); usedP2Ids.add(match.id); }
     });
     return linked;
   };
@@ -6052,7 +6404,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={{ fontSize:11, color:"#4A5066", marginBottom:16, lineHeight:1.5 }}>
-        chemistry builds when you win together, assist each other, and log games at the same time. higher chemistry = xp bonus and better betting odds.
+        chemistry builds when you win together, assist each other, and log games at the same time. higher chemistry = xp bonus
       </div>
 
       {CHEMISTRY_PAIRS.map(([pid1, pid2]) => {
@@ -6129,8 +6481,8 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
               ))}
             </div>
 
-      {/* Sync chemistry — only pays out for NEW shared games since last sync */}
-            {isMyPair && shared.length > 0 && (() => {
+    {/* Sync chemistry — only pays out for NEW shared games since last sync */}
+            {isMyPair && (() => {
               const countKey = getSyncedCountKey(key);
               const alreadySynced = chemistry?.[countKey] || 0;
               const newCount = shared.length - alreadySynced;
@@ -6289,7 +6641,8 @@ const [stocks, setStocks] = useState({});
 const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
 const [chemistry, setChemistry] = useState({});   
-const [flipChallenges, setFlipChallenges] = useState([]);                      
+const [flipChallenges, setFlipChallenges] = useState([]);    
+const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
 const [chatOpen, setChatOpen] = useState(false);
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
@@ -6315,6 +6668,8 @@ window.addEventListener("focus", updateActive);
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) updateActive();
 });
+document.addEventListener("touchstart", updateActive, { passive: true });
+document.addEventListener("mousemove", updateActive, { passive: true });
     const hbInterval = setInterval(heartbeat, 30000);
     const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
       if (key === "chat") {
@@ -6335,6 +6690,7 @@ if (key === "stocks") setStocks(value);
 if (key === "flowers") setFlowers(Array.isArray(value) ? value : []);
 if (key === "chemistry") setChemistry(value || {});
 if (key === "coin_flips") setCoinFlips(value);
+if (key === "team_room") setTeamRoom(value?.closed ? null : value);
 if (key === "active_race") {
   if (value?.objectiveId) {
     setActiveRace(value.objectiveId);
@@ -6369,6 +6725,13 @@ if (key === "pass_tokens")  setPassTokens(value);
 if (key === "pass_active_boosts") setPassActiveBoosts(value);
 if (key === "typing") setTypingStatus(value || {});
 });
+return () => {
+    clearInterval(hbInterval);
+    unsub?.();
+    document.removeEventListener("touchstart", updateActive);
+    document.removeEventListener("mousemove", updateActive);
+    window.removeEventListener("focus", updateActive);
+  };
   }, [currentPlayer]);
 
   useEffect(() => {
@@ -6395,7 +6758,7 @@ if (key === "typing") setTypingStatus(value || {});
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc] = await Promise.all([
+const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc] = await Promise.all([
     storeGet("schedule"),
     storeGet("training"),
     storeGet("completions"),
@@ -6406,6 +6769,7 @@ const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,pts,bts,pxp,ppm,pcl,p
     storeGet("stats"),
     storeGet("presence"),
     storeGet("pings"),
+    storeGet("team_room"),
     storeGet("points"),
     storeGet("bets"),
     storeGet("pass_xp"),
@@ -6444,6 +6808,7 @@ if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
 if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.startedAt); }
 if (chem) setChemistry(chem);
 if (fc) setFlipChallenges(Array.isArray(fc) ? fc : []);
+if (tr && !tr.closed) setTeamRoom(tr);
 
 const savedLastSeen = await storeGet(`lastSeen:${pid}`);
 if (savedLastSeen) setLastSeen(savedLastSeen);
@@ -6491,7 +6856,7 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   const selectedPlayer=PLAYERS.find((p)=>p.id===selectedPlayerId);
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")}/></>;
-  if (loading) return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center"}}><div style={{color:"#4A5066",fontSize:13,letterSpacing:1}}>loading team data…</div></div></>;
+if (loading) return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center",animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}><div style={{color:"#4A5066",fontSize:13,letterSpacing:1}}>loading team data…</div></div></>;
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const isAdmin=currentPlayer===ADMIN_ID;
@@ -6529,7 +6894,7 @@ const TABS=[
     : {background:theme.bg};
 
   return (
-    <div style={{...s.appShell, ...bgStyle, color:theme.text, animation:"scaleFadeIn .4s cubic-bezier(.2,.8,.2,1)"}}>
+    <div style={{...s.appShell, ...bgStyle, color:theme.text, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {theme.id==="starfield" && <StarfieldBg/>}
       {toasts.length > 0 && (
@@ -6585,24 +6950,24 @@ const TABS=[
 </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-{tab==="home"&&<HomeTab schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>}
-        {tab==="bracket"&&<BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
-        {tab==="training"&&<TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-      {tab==="social"&&<SocialTab posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
-        {tab==="chat"&&<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>}
-        {tab==="stream"&&<StreamTab streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
-{tab==="stats"&&<StatsTab stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule}/>}
- {tab==="boost"&&<BoostTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
-{tab==="coinflip"&&<CoinFlipTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
-{tab==="race"&&<RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
-{tab==="stocks"&&<StockMarketTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
-{tab==="presence"&&<PresenceTab presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast}/>}
-{tab==="garage"&&<GarageTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
-{tab==="chemistry"&&<TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
-{tab==="trivia"&&<RLCSTrivia currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
-{tab==="boostgrab"&&<BoostGrab currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
-{tab==="recap"&&<WeeklyRecapTrivia stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
-   {tab==="admin"&&isAdmin&&<AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
+{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>}
+        {tab==="bracket"&&<BracketTab key={tab} schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
+        {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
+      {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
+        {tab==="chat"&&<ChatTab key={tab} messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>}
+        {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
+{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom}/>}
+ {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
+{tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
+{tab==="race"&&<RaceModeTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
+{tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
+{tab==="presence"&&<PresenceTab key={tab} presence={presence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast}/>}
+{tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
+{tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
+{tab==="trivia"&&<RLCSTrivia key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+{tab==="boostgrab"&&<BoostGrab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+{tab==="recap"&&<WeeklyRecapTrivia key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>}
+   {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
       </div>
       {chatOpen && (
         <div style={{position:"fixed",inset:0,zIndex:500,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease"}}>
@@ -6653,7 +7018,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:8,WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"max(8px, env(safe-area-inset-bottom,0px))",overflowX:"auto",WebkitOverflowScrolling:"touch"},
+tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"max(8px, env(safe-area-inset-bottom,0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"relative",zIndex:600},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 4px 4px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent"},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
