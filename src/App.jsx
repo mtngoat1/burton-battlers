@@ -200,6 +200,7 @@ function GlobalStyles() {
    @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 @keyframes bounceDot { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
 @keyframes scaleFadeIn { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
+@keyframes floatUp { 0%{transform:translateY(0) scale(0.5); opacity:0;} 15%{opacity:1;} 100%{transform:translateY(-180px) scale(1.1); opacity:0;} }
 @keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
     * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
     html, body { margin:0; padding:0; height:100%; min-height:-webkit-fill-available; overflow:hidden; background:#06070D; }
@@ -1714,6 +1715,43 @@ function seededShuffle(arr, seed) {
   }
   return out;
 }
+          
+function SwipeToast({ toast, onDismiss }) {
+  const [offset, setOffset] = useState(0);
+  const [leaving, setLeaving] = useState(false);
+  const startY = useRef(0);
+
+  const dismiss = () => {
+    setLeaving(true);
+    setTimeout(onDismiss, 300);
+  };
+
+  return (
+    <div
+      onTouchStart={(e)=>{ startY.current = e.touches[0].clientY; }}
+      onTouchMove={(e)=>{ const dy = e.touches[0].clientY - startY.current; if (dy < 0) setOffset(dy); }}
+      onTouchEnd={()=>{ if (offset < -40) dismiss(); else setOffset(0); }}
+      style={{
+        background:"#1A1D2E",
+        border:"1px solid rgba(184,255,77,0.25)",
+        borderRadius:13,
+        padding:"12px 16px",
+        display:"flex",
+        alignItems:"center",
+        gap:10,
+        boxShadow:"0 8px 32px rgba(0,0,0,0.4)",
+        animation: leaving ? "dropUp .3s cubic-bezier(.2,.8,.2,1) forwards" : "dropDown .4s cubic-bezier(.2,.8,.2,1)",
+        transform:`translateY(${offset}px)`,
+        opacity: leaving ? 0 : Math.max(0,1+offset/100),
+        transition: offset===0 ? "transform .3s ease, opacity .3s ease" : "none",
+        pointerEvents:"auto",
+      }}>
+      <span style={{fontSize:18}}>{toast.icon}</span>
+      <span style={{fontSize:13,fontWeight:600,color:"#E8ECF4"}}>{toast.text}</span>
+    </div>
+  );
+}        
+          
 function ChatMessage({ msg, isMe, onReact }) {
   const player = PLAYERS.find((p) => p.id === msg.playerId);
   const [showPicker, setShowPicker] = useState(false);
@@ -1736,7 +1774,7 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
       {showPicker && (
         <div style={{ display: "flex", gap: 6, background: "#1A1D2E", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 22, padding: "6px 10px", marginBottom: 6, flexWrap: "wrap", maxWidth: 260, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", zIndex: 10 }}>
           {shuffledEmojis.map(emoji => (
-            <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowPicker(false); }}
+            <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowReactPicker(false); }}
               style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", padding: "2px 3px", borderRadius: 8, lineHeight: 1 }}>
               {emoji}
             </button>
@@ -1870,13 +1908,54 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
     </div></div>
   );
 }
-function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments, onExpand }) {
+function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments, onExpand, onReactPost }) {
   const player=PLAYERS.find((p)=>p.id===post.playerId);
   const hearted=(post.hearts||[]).includes(currentPlayer);
+  const [showPicker,setShowPicker]=useState(false);
   const [popped,setPopped]=useState(false);
-  const heartClick=()=>{ setPopped(true); setTimeout(()=>setPopped(false),320); onToggleHeart(post.id); };
-  return (
+  const [burst,setBurst]=useState(null);
+  const pressTimer=useRef(null);
+  useEffect(() => {
+    if (post.image && !post.isVideo) {
+      const img = new Image();
+      img.src = post.image;
+    }
+  }, [post.image]);
+  const handleTouchStart=()=>{pressTimer.current=setTimeout(()=>setShowPicker(true),500);};
+  const handleTouchEnd=()=>{clearTimeout(pressTimer.current);};
+  const handleMouseDown=()=>{pressTimer.current=setTimeout(()=>setShowPicker(true),500);};
+  const handleMouseUp=()=>{clearTimeout(pressTimer.current);};
+  const reactionCounts={};
+  (post.reactions||[]).forEach(r=>{reactionCounts[r.emoji]=(reactionCounts[r.emoji]||0)+1;});
+  const existingReactions=Object.keys(reactionCounts);
+  const msgSeed=post.id?parseInt(post.id.slice(-6),10)||42:42;
+  const shuffledEmojis=seededShuffle(REACTION_EMOJIS,msgSeed);
+  const heartClick=()=>{setPopped(true);setTimeout(()=>setPopped(false),320);onToggleHeart(post.id);};
+
+  const pickReaction=(emoji)=>{
+    setShowPicker(false);
+    setBurst({emoji,id:Date.now()});
+    onReactPost(post.id,emoji);
+    setTimeout(()=>setBurst(null),1400);
+  };
+return (
     <div style={s.postCard}>
+      {/* Floating emoji burst */}
+      {burst&&Array.from({length:6}).map((_,i)=>(
+        <div key={`${burst.id}-${i}`} style={{
+          position:"absolute",
+          bottom:40,
+          left:`${10+i*13}%`,
+          zIndex:20,
+          pointerEvents:"none",
+          animation:"floatUp 1.6s ease forwards",
+          animationDelay:`${i*0.12}s`,
+          fontSize:28,
+          opacity:0,
+        }}>
+          {burst.emoji}
+        </div>
+      ))}
       <div style={s.postHeader}>
         <div style={{width:8,height:8,borderRadius:99,background:player?.color,boxShadow:`0 0 8px ${player?.color}99`}}/>
         <span style={{fontWeight:700,fontSize:13.5}}>{player?.name}</span>
@@ -1884,11 +1963,11 @@ function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments, onExpand
       </div>
       <div onClick={()=>onExpand(post)} style={{cursor:"pointer"}}>
         {post.image&&(post.isVideo
-  ? <video src={post.image} style={s.postImage} controls muted playsInline loop/>
-  : <img src={post.image} alt="post" style={s.postImage}/>)}
+          ?<video src={post.image} style={s.postImage} controls muted playsInline loop/>
+          :<img src={post.image} alt="post" style={s.postImage}/>)}
         {post.caption&&<div style={s.postCaption}>{post.caption}</div>}
       </div>
-      <div style={s.postActions}>
+      <div style={{...s.postActions,position:"relative"}}>
         <button onClick={heartClick} className="bb-pressable" style={s.postActionBtn}>
           <Heart size={18} className={popped?"bb-heart-pop":""} color={hearted?"#FF5C8A":"#4A5066"} fill={hearted?"#FF5C8A":"none"}/>
           <span style={{color:hearted?"#FF5C8A":"#4A5066",fontSize:12.5,fontWeight:700}}>{(post.hearts||[]).length}</span>
@@ -1897,11 +1976,30 @@ function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments, onExpand
           <MessageCircle size={17} color="#4A5066"/>
           <span style={{color:"#4A5066",fontSize:12.5,fontWeight:700}}>{(post.comments||[]).length}</span>
         </button>
+        <button onClick={()=>setShowPicker(v=>!v)} className="bb-pressable" style={s.postActionBtn}>
+          <span style={{fontSize:17}}>😀</span>
+        </button>
+        {showPicker&&(
+          <div style={{position:"absolute",bottom:44,right:14,display:"flex",gap:4,background:"#1A1D2E",border:"1px solid rgba(255,255,255,0.12)",borderRadius:22,padding:"6px 10px",flexWrap:"wrap",maxWidth:240,boxShadow:"0 4px 20px rgba(0,0,0,0.4)",zIndex:10}}>
+            {shuffledEmojis.map(emoji=>(
+              <button key={emoji} onClick={()=>pickReaction(emoji)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",padding:"2px 3px"}}>{emoji}</button>
+            ))}
+          </div>
+        )}
       </div>
+      {existingReactions.length>0&&(
+        <div style={{display:"flex",gap:4,padding:"0 14px 12px",flexWrap:"wrap"}}>
+          {existingReactions.map(emoji=>(
+            <button key={emoji} onClick={()=>onReactPost(post.id,emoji)}
+              style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:99,padding:"2px 8px",fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:4,color:"#E8ECF4"}}>
+              {emoji}<span style={{fontSize:11,color:"#8B92A8"}}>{reactionCounts[emoji]}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
-
 function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
   const player = PLAYERS.find((p) => p.id === post.playerId);
   const hearted = (post.hearts || []).includes(currentPlayer);
@@ -1949,11 +2047,35 @@ function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
           <X size={18}/>
         </button>
       </div>
-      <div onClick={(e)=>e.stopPropagation()} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden" }}>
-        {post.image && (post.isVideo
-          ? <video src={post.image} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }} controls muted playsInline loop autoPlay/>
-          : <img src={post.image} alt="post" style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }}/>)}
-      </div>
+    {(()=>{
+  const [imgLoaded, setImgLoaded] = useState(false);
+  return (
+    <div onClick={(e)=>e.stopPropagation()} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", position:"relative" }}>
+      {post.image && !imgLoaded && !post.isVideo && (
+        <div style={{
+          position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
+          background:"rgba(255,255,255,0.03)",
+        }}>
+          <div style={{
+            width:40, height:40, borderRadius:"50%",
+            border:"3px solid rgba(255,255,255,0.08)",
+            borderTopColor: player?.color || "#B8FF4D",
+            animation:"spin .8s linear infinite",
+          }}/>
+        </div>
+      )}
+      {post.image && (post.isVideo
+        ? <video src={post.image} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }} controls muted playsInline loop autoPlay/>
+        : <img
+            src={post.image}
+            alt="post"
+            onLoad={()=>setImgLoaded(true)}
+            style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain", opacity: imgLoaded ? 1 : 0, transition:"opacity .2s ease" }}
+          />
+      )}
+    </div>
+  );
+})()}
       {post.caption && (
         <div onClick={(e)=>e.stopPropagation()} style={{ padding:"14px 16px", paddingBottom:"max(14px, env(safe-area-inset-bottom))", flexShrink:0 }}>
           <div style={{ fontSize:14, color:"#E8ECF4", lineHeight:1.5, marginBottom:10 }}>{post.caption}</div>
@@ -1968,7 +2090,7 @@ function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
 }
 
 
-function PostCommentsModal({ post, onAddComment, currentPlayer, onClose }) {
+function PostCommentsModal({ post, onAddComment, onHeartComment, currentPlayer, onClose }) {
   const [text,setText]=useState("");
   const submit=()=>{ if(!text.trim())return; onAddComment(post.id,text.trim()); setText(""); };
   return (
@@ -2020,6 +2142,18 @@ const pushActivity = async ({ to, type, fromName, text }) => {
       await pushActivity({ to: post.playerId, type: "like", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your post` });
     }
   };
+
+const reactToPost = async (postId, emoji) => {
+    const post = posts.find(p => p.id === postId);
+    const upd = posts.map(p => p.id===postId ? {...p, postReactions:[...(p.postReactions||[]), {playerId:currentPlayer, emoji, ts:new Date().toISOString()}]} : p);
+    setPosts(upd);
+    await storeSet("posts", upd);
+    if (post && post.playerId !== currentPlayer) {
+      await pushActivity({ to: post.playerId, type: "post_react", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `reacted ${emoji} to your post` });
+    }
+  };
+
+
 const addComment = async (postId, text) => {
     const comment = { id: Date.now().toString(), playerId: currentPlayer, text, ts: new Date().toISOString(), hearts: [] };
     const upd = posts.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), comment] } : p);
@@ -2191,7 +2325,7 @@ const addComment = async (postId, text) => {
             <button onClick={() => setComposing(true)} className="bb-pressable bb-glow-violet" style={s.newPostBtn}><Plus size={14} /> post</button>
           </div>
           {posts.length === 0 && <div style={s.emptyQueue}>no posts yet — share a clip or a funny moment.</div>}
-         {posts.map(post => <PostCard key={post.id} post={post} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onOpenComments={setCommentingOn} onExpand={setExpandedPost} />)}
+       {posts.map(post => <PostCard key={post.id} post={post} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onOpenComments={setCommentingOn} onExpand={setExpandedPost} onReactPost={reactToPost} />)}
         </>
       )}
 
@@ -6740,7 +6874,9 @@ const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
 const [chemistry, setChemistry] = useState({});   
 const [activityFeed, setActivityFeed] = useState([]);
-const [pendingActivityToasts, setPendingActivityToasts] = useState([]);                      
+const [pendingActivityToasts, setPendingActivityToasts] = useState([]);  
+const [catchupQueue, setCatchupQueue] = useState([]);
+const [catchupStopped, setCatchupStopped] = useState(false);                      
 const [flipChallenges, setFlipChallenges] = useState([]);    
 const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
 const [chatOpen, setChatOpen] = useState(false);
@@ -6751,8 +6887,31 @@ const AUTO_LOCK_MS = 10 * 60 * 1000;
 const addToast = useCallback((text, icon = "🔔") => {
   const id = Date.now().toString();
   setToasts(prev => [...prev, { id, text, icon }]);
-  setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+  setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
 }, []);
+                      
+
+useEffect(() => {
+  if (catchupStopped || catchupQueue.length === 0) return;
+  const [next, ...rest] = catchupQueue;
+  addToast(`${next.fromName} ${next.text}`, next.type==="like"?"❤️":next.type==="comment"?"💬":"🔔");
+  const timer = setTimeout(() => setCatchupQueue(rest), 1400);
+  return () => clearTimeout(timer);
+}, [catchupQueue, catchupStopped]);   
+                      
+
+useEffect(() => {
+  if (pendingActivityToasts.length === 0) return;
+  setCatchupQueue(pendingActivityToasts);
+  setCatchupStopped(false);
+  setPendingActivityToasts([]);
+  (async () => {
+    const af = await storeGet("activity_feed") || [];
+    const marked = af.map(e => e.to === currentPlayer ? { ...e, seen: true } : e);
+    await storeSet("activity_feed", marked);
+    setActivityFeed(marked.filter(e => e.to === currentPlayer));
+  })();
+}, [pendingActivityToasts]);                      
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
@@ -6923,9 +7082,49 @@ if (af) {
   const myFeed = (Array.isArray(af) ? af : []).filter(e => e.to === pid);
   setActivityFeed(myFeed);
   const unseen = myFeed.filter(e => !e.seen);
-  if (unseen.length > 0) {
-    setPendingActivityToasts(unseen);
-  }
+const seenIds = new Set((await storeGet(`seen_toasts:${pid}`)) || []);
+
+  // also catch up on chat messages sent while offline
+  const recentCutoff = Date.now() - 24 * 60 * 60 * 1000;
+  const missedChats = (Array.isArray(chat) ? chat : [])
+    .filter(m => m.playerId !== pid && new Date(m.ts).getTime() > recentCutoff)
+    .slice(-5)
+    .map(m => ({
+      id: m.id,
+      fromName: PLAYERS.find(p => p.id === m.playerId)?.name || "teammate",
+      text: `said: "${m.text.slice(0, 40)}${m.text.length > 40 ? "…" : ""}"`,
+      type: "chat",
+      ts: m.ts,
+    }));
+
+  // catch up on post reactions/comments directed at this player's posts
+  const myPostIds = new Set((Array.isArray(pst) ? pst : [])
+    .filter(p => p.playerId === pid).map(p => p.id));
+  const missedPostActivity = [];
+  (Array.isArray(pst) ? pst : []).forEach(post => {
+    if (!myPostIds.has(post.id)) return;
+    (post.comments || [])
+      .filter(c => c.playerId !== pid && new Date(c.ts).getTime() > recentCutoff)
+      .forEach(c => {
+        const name = PLAYERS.find(p => p.id === c.playerId)?.name || "someone";
+        missedPostActivity.push({ id: c.id, fromName: name, text: "commented on your post", type: "comment", ts: c.ts });
+      });
+    (post.postReactions || [])
+      .filter(r => r.playerId !== pid && new Date(r.ts).getTime() > recentCutoff)
+      .forEach(r => {
+        const name = PLAYERS.find(p => p.id === r.playerId)?.name || "someone";
+        missedPostActivity.push({ id: r.ts, fromName: name, text: `reacted ${r.emoji} to your post`, type: "post_react", ts: r.ts });
+      });
+  });
+
+  const allCatchup = [...unseen, ...missedChats, ...missedPostActivity]
+    .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+if (allCatchup.length > 0) {
+  const newSeenIds = [...seenIds, ...allCatchup.map(e => e.id)];
+  await storeSet(`seen_toasts:${pid}`, newSeenIds);
+  setPendingActivityToasts(allCatchup);
+}
 }
 
 const savedLastSeen = await storeGet(`lastSeen:${pid}`);
@@ -7015,29 +7214,12 @@ const TABS=[
     <div style={{...s.appShell, ...bgStyle, color:theme.text, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {theme.id==="starfield" && <StarfieldBg/>}
-{pendingActivityToasts.length > 0 && (() => {
-  setTimeout(async () => {
-    pendingActivityToasts.forEach((e, i) => {
-      setTimeout(() => addToast(`${e.fromName} ${e.text}`, e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"), i * 800);
-    });
-    const af = await storeGet("activity_feed") || [];
-    const marked = af.map(e => e.to === currentPlayer ? { ...e, seen: true } : e);
-    await storeSet("activity_feed", marked);
-    setActivityFeed(marked.filter(e => e.to === currentPlayer));
-    setPendingActivityToasts([]);
-  }, 600);
-  return null;
-})()}
-      {toasts.length > 0 && (
-        <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,display:"flex",flexDirection:"column",gap:8,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"none"}}>
-          {toasts.map(t=>(
-            <div key={t.id} style={{background:"#1A1D2E",border:"1px solid rgba(184,255,77,0.25)",borderRadius:13,padding:"12px 16px",display:"flex",alignItems:"center",gap:10,boxShadow:"0 8px 32px rgba(0,0,0,0.4)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)"}}>
-              <span style={{fontSize:18}}>{t.icon}</span>
-              <span style={{fontSize:13,fontWeight:600,color:"#E8ECF4"}}>{t.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
+
+{toasts.length > 0 && (
+  <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto"}}>
+    <SwipeToast key={toasts[0].id} toast={toasts[0]} onDismiss={()=>setToasts(prev=>prev.slice(1))}/>
+  </div>
+)}
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
       {commentDay&&<CommentsModal dayKey={commentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setCommentDay(null)}/>}
  <div style={s.topBar}>
@@ -7279,7 +7461,7 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"80px",bord
   commentItem:{display:"flex",gap:8,marginBottom:14},
   newPostBtn:{display:"flex",alignItems:"center",gap:5,background:"rgba(167,139,250,0.12)",border:"1px solid rgba(167,139,250,0.3)",color:"#A78BFA",fontSize:12,fontWeight:700,padding:"7px 12px",borderRadius:99,cursor:"pointer"},
   emptyQueue:{textAlign:"center",color:"#4A5066",fontSize:13,marginTop:30,lineHeight:1.5,padding:"0 10px"},
-  postCard:{background:"#11131F",borderRadius:16,marginBottom:14,border:"1px solid rgba(255,255,255,0.05)",overflow:"hidden"},
+  postCard:{background:"#11131F",borderRadius:16,marginBottom:14,border:"1px solid rgba(255,255,255,0.05)",overflow:"hidden",position:"relative"},
   postHeader:{display:"flex",alignItems:"center",gap:8,padding:"12px 14px 10px"},
   postTime:{fontSize:11,color:"#4A5066",marginLeft:"auto"},
   postImage:{width:"100%",display:"block",maxHeight:360,objectFit:"cover",background:"#06070D"},
