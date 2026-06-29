@@ -412,7 +412,7 @@ console.log("MMR SEGMENT:", name, seg?.stats);
 
 const newRankName = rlRankFromTierValue(seg?.stats?.tier?.value);
 
-return { playlist: name, mmr, rank: rankName };
+return { playlist: name, mmr, rank: newrankName };
 });
 
 console.log("FINAL RANKS BEING SAVED:", ranks);
@@ -561,7 +561,7 @@ function SessionGroupCard({ session, allStats }) {
   const [open, setOpen] = useState(false);
   const [selectedGame, setSelectedGame] = useState(null);
   const rep = session.games[0];
-  const won = rep.ourScore > rep.theirScore;
+  const won = rep.result === "victory";
 
   return (
     <div style={{background:"#11131F",borderRadius:14,marginBottom:10,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
@@ -581,7 +581,9 @@ function SessionGroupCard({ session, allStats }) {
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div style={{textAlign:"right"}}>
-              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>{rep.ourScore}–{rep.theirScore}</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>
+                  {rep.result === "victory" ? "WIN" : "DEFEAT"}
+                {rep.ratingDelta ? ` ${rep.ratingDelta > 0 ? "+" : ""}${rep.ratingDelta} MMR` : ""}</div>
               <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A"}}>{won?"WIN":"LOSS"}</div>
             </div>
             <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s",flexShrink:0}}/>
@@ -3910,11 +3912,11 @@ console.log("RESULTS:", results);
       shots: match.stats?.shots?.value || 0,
       demos: 0,
       score: match.stats?.score?.value || 0,
-      ourScore: isWin ? 1 : 0,
-      theirScore: isWin ? 0 : 1,
-      result,
-      rating: match.stats?.rating?.value || null,
-      ratingDelta: match.stats?.rating?.metadata?.ratingDelta || 0,
+      ourScore: null,
+theirScore: null,
+result,
+rating: match.stats?.rating?.value || null,
+ratingDelta: match.stats?.rating?.metadata?.ratingDelta || 0,
       source: "parse_sessions",
     }));
 
@@ -4158,11 +4160,11 @@ await storeSet("points",{...pts,[currentPlayer]:cur});
   const activeBoosts=await storeGet("pass_active_boosts")||{};
   const mult=getActiveBoostMultiplier(currentPlayer,activeBoosts);
 const todayDk = dateKey(new Date(entry.ts));
-const todayWins = upd.filter(g => g.mode === "3v3" && g.playerId === currentPlayer && dateKey(new Date(g.ts)) === todayDk && g.ourScore > g.theirScore);
+const todayWins = upd.filter(g => g.mode === "3v3" && g.playerId === currentPlayer && dateKey(new Date(g.ts)) === todayDk && g.result === "victory");
 const allTodayGames = upd.filter(g => g.mode === "3v3" && dateKey(new Date(g.ts)) === todayDk);
 let streak = 0;
 for (let i = allTodayGames.length - 1; i >= 0; i--) {
-  if (allTodayGames[i].ourScore > allTodayGames[i].theirScore) streak++;
+if (allTodayGames[i].result === "victory") streak++;
   else break;
 }
 const heatMult = heatMultiplier(streak) * (isEventActive("heat_surge") ? 1.5 : 1);
@@ -5880,7 +5882,7 @@ function StockMarketTab({ stats, currentPlayer, points, setPoints, stocks, setSt
     const weekGames = pg.filter(g => new Date(g.ts) >= weekStart);
     const allAvgGoals = pg.length ? pg.reduce((s,g) => s+(g.goals||0),0)/pg.length : 1;
     const weekAvgGoals = weekGames.length ? weekGames.reduce((s,g) => s+(g.goals||0),0)/weekGames.length : allAvgGoals;
-    const wins = pg.filter(g => g.ourScore > g.theirScore).length;
+    const wins = pg.filter(g => g.result === "victory").length;
     const winRate = pg.length ? wins/pg.length : 0.5;
     const weekWins = weekGames.filter(g => g.ourScore > g.theirScore).length;
     const weekWinRate = weekGames.length ? weekWins/weekGames.length : winRate;
@@ -7770,51 +7772,82 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
     }
   };
 
-  // award chemistry XP for assists to teammates this week
-// award chemistry XP — only pays out for shared games not already counted (no more spam-clicking)
-  const syncChemXP = async (pid1, pid2, sharedGamesList) => {
-    const key = getChemistryKey(pid1, pid2);
-    const countKey = getSyncedCountKey(key);
-    const alreadySynced = chemistry?.[countKey] || 0;
-    const newGamesCount = sharedGamesList.length - alreadySynced;
-    if (newGamesCount <= 0) return; // nothing new to sync
-    const newGames = sharedGamesList.slice(alreadySynced);
-    const newWins = newGames.filter(p => p.p1game.ourScore > p.p1game.theirScore).length;
-    const xpGain = newWins * 5 + newGamesCount * 2;
-    const current = chemistry?.[key] || 0;
-    const upd = { ...chemistry, [key]: current + xpGain, [countKey]: sharedGamesList.length };
-    setChemistry(upd);
-    await storeSet("chemistry", upd);
-  };
-  const myPairs = CHEMISTRY_PAIRS.filter(pair => pair.includes(currentPlayer));
+// award chemistry XP — only pays out for shared games not already counted
+const syncChemXP = async (pid1, pid2, sharedGamesList) => {
+  const key = getChemistryKey(pid1, pid2);
+  const countKey = getSyncedCountKey(key);
+  const alreadySynced = chemistry?.[countKey] || 0;
+  const newGamesCount = sharedGamesList.length - alreadySynced;
 
-  // Compute chemistry from this week's shared games
-const SHARED_GAME_WINDOW_MS = 10 * 60 * 1000; // games logged within 10 min of each other count as "played together"
+  if (newGamesCount <= 0) return;
+
+  const newGames = sharedGamesList.slice(alreadySynced);
+  const newWins = newGames.filter(p => p.p1game.result === "victory").length;
+
+  const xpGain = newWins * 5 + newGamesCount * 2;
+  const current = chemistry?.[key] || 0;
+
+  const upd = {
+    ...chemistry,
+    [key]: current + xpGain,
+    [countKey]: sharedGamesList.length
+  };
+
+  setChemistry(upd);
+  await storeSet("chemistry", upd);
+};
+
+const myPairs = CHEMISTRY_PAIRS.filter(pair => pair.includes(currentPlayer));
+
+// Compute chemistry from this week's shared games
+const SHARED_GAME_WINDOW_MS = 10 * 60 * 1000;
 
 const getSharedGames = (pid1, pid2, allTime = false) => {
-    const p1Games = stats.filter(g => g.playerId === pid1 && (g.mode === "3v3" || g.mode === "2v2") && (allTime || new Date(g.ts) >= weekStart));
-    const p2Games = stats.filter(g => g.playerId === pid2 && (g.mode === "3v3" || g.mode === "2v2") && (allTime || new Date(g.ts) >= weekStart));
-    const linked = [];
-    const usedP2Ids = new Set();
-    p1Games.forEach(g1 => {
-      // Prefer an exact sessionCode match if both have one
-      let match = g1.sessionCode
-        ? p2Games.find(g2 => !usedP2Ids.has(g2.id) && g2.sessionCode === g1.sessionCode && g2.mode === g1.mode)
-        : null;
-      // Otherwise fall back to "logged within the same time window, same mode, same final score"
-      if (!match) {
-        match = p2Games.find(g2 =>
+  const p1Games = stats.filter(
+    g =>
+      g.playerId === pid1 &&
+      (g.mode === "3v3" || g.mode === "2v2") &&
+      (allTime || new Date(g.ts) >= weekStart)
+  );
+
+  const p2Games = stats.filter(
+    g =>
+      g.playerId === pid2 &&
+      (g.mode === "3v3" || g.mode === "2v2") &&
+      (allTime || new Date(g.ts) >= weekStart)
+  );
+
+  const linked = [];
+  const usedP2Ids = new Set();
+
+  p1Games.forEach(g1 => {
+    let match = g1.sessionCode
+      ? p2Games.find(
+          g2 =>
+            !usedP2Ids.has(g2.id) &&
+            g2.sessionCode === g1.sessionCode &&
+            g2.mode === g1.mode
+        )
+      : null;
+
+    if (!match) {
+      match = p2Games.find(
+        g2 =>
           !usedP2Ids.has(g2.id) &&
           g2.mode === g1.mode &&
-          g2.ourScore === g1.ourScore &&
-          g2.theirScore === g1.theirScore &&
+          g2.result === g1.result &&
           Math.abs(new Date(g2.ts) - new Date(g1.ts)) <= SHARED_GAME_WINDOW_MS
-        );
-      }
-      if (match) { linked.push({ p1game: g1, p2game: match }); usedP2Ids.add(match.id); }
-    });
-    return linked;
-  };
+      );
+    }
+
+    if (match) {
+      linked.push({ p1game: g1, p2game: match });
+      usedP2Ids.add(match.id);
+    }
+  });
+
+  return linked;
+};
 
   return (
     <div className="bb-tab-content" style={s.tabContent}>
@@ -8000,7 +8033,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
   />
 )}
 {sortedShared.map(({p1game, p2game}, i) => {
-  const won = p1game.ourScore > p1game.theirScore;
+  const won = p1game.result === "victory";
   const myAllGames = stats.filter(g => g.playerId === p1game.playerId && g.mode === p1game.mode).sort((a,b) => new Date(a.ts)-new Date(b.ts));
   return (
     <button key={p1game.id} onClick={() => setChemSelectedGame({ game: p1game, allPlayerGames: myAllGames })} className="bb-pressable"
