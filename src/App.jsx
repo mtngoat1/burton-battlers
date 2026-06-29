@@ -2029,13 +2029,15 @@ try {
 
         
         
-const co = window.DailyIframe.createCallObject({
-  audioSource: true,
-  videoSource: false,
-  subscribeToTracksAutomatically: true,
-  dailyConfig: {
-    prejoinUI: false,
-    experimentalChromeVideoMuteLightOff: true,
+const co = window.DailyIframe.createFrame({
+  showLeaveButton: false,
+  showFullscreenButton: false,
+  iframeStyle: {
+    width: "1px",
+    height: "1px",
+    position: "absolute",
+    opacity: 0,
+    pointerEvents: "none",
   },
 });
 
