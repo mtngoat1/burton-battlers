@@ -2076,6 +2076,16 @@ co.on("active-speaker-change", () => {
   startVideoOff: true,
   startAudioOff: false,
 });
+    
+    
+    Object.values(co.participants()).forEach((p) => {
+  if (!p.local && p.audioTrack) {
+    setRemoteAudioTracks(prev => ({
+      ...prev,
+      [p.session_id]: p.audioTrack,
+    }));
+  }
+});
       
 
 await co.setLocalAudio(true);    
@@ -2151,7 +2161,9 @@ setMuted(false);
         )}
 
         <button
-          onClick={joinRoom}
+    onClick={async () => {
+  await joinRoom();
+}}
           disabled={loading}
           className="bb-pressable bb-glow-lime"
           style={{
@@ -2193,17 +2205,18 @@ setMuted(false);
       boxShadow:"0 0 24px rgba(184,255,77,0.08)",
     }}>
      {Object.entries(remoteAudioTracks).map(([id, track]) => (
-  <audio
-    key={id}
-    autoPlay
-    playsInline
-    ref={(el) => {
-      if (el && track) {
-        el.srcObject = new MediaStream([track]);
-        el.play().catch(() => {});
-      }
-    }}
-  />
+<audio
+  key={id}
+  autoPlay
+  playsInline
+  controls={false}
+  ref={(el) => {
+    if (el && track) {
+      el.srcObject = new MediaStream([track]);
+      el.play().catch(() => {});
+    }
+  }}
+/>
 ))}
 
 {/* Header */}
