@@ -2090,22 +2090,6 @@ const co = window.DailyIframe.createCallObject({
 co.on("active-speaker-change", () => {
   setSpeakingMap({});
 });
-  const id =
-    e.activeSpeaker?.peerId ||
-    e.activeSpeaker?.session_id ||
-    e.activeSpeaker?.sessionId;
-
-  if (!id) {
-    setSpeakingMap({});
-    return;
-  }
-
-  setSpeakingMap({ [id]: true });
-
-  setTimeout(() => {
-    setSpeakingMap({});
-  }, 1200);
-});
       co.on("error", (e) => {
         setError("connection error — check mic permissions");
         setLoading(false);
