@@ -3797,7 +3797,7 @@ const openRoom = async () => {
 
                 
 const fetchLatest3v3ForPlayer = async (player, roomOpenedAt) => {
-  const platform = player.platform === "xbl" ? "xbox" : player.platform;
+  const platform = player.platform;
 
   const res = await fetch(
     `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${platform}&username=${player.name}`,
@@ -3805,16 +3805,22 @@ const fetchLatest3v3ForPlayer = async (player, roomOpenedAt) => {
   );
 
   const json = await res.json();
-  const items = json?.data?.items || [];
+  const sessions = json?.data?.items || [];
+const matches = sessions.flatMap(s => s.matches || []);
 
-  return items
-    .filter(item =>
-      item?.metadata?.playlist === teamRoom.playlist &&
-      item?.metadata?.isGrouped === false &&
-      item?.stats?.matchesPlayed?.value === 1 &&
-      new Date(item?.metadata?.dateCollected).getTime() >= new Date(roomOpenedAt).getTime() - 2 * 60 * 1000
-    )
-    .sort((a, b) => new Date(a.metadata.dateCollected) - new Date(b.metadata.dateCollected))[0];
+  
+return matches
+  .filter(match =>
+    match?.metadata?.playlist === teamRoom.playlist &&
+    match?.metadata?.isGrouped === false
+  )
+  .sort(
+    (a, b) =>
+      new Date(b.metadata.dateCollected) -
+      new Date(a.metadata.dateCollected)
+  )[0];
+  
+  
 };
 
 const syncRoomFromParse = async () => {
@@ -3832,6 +3838,16 @@ const syncRoomFromParse = async () => {
         match: await fetchLatest3v3ForPlayer(p, teamRoom.createdAt),
       }))
     );
+    
+    
+    console.log("========== PULLED ==========");
+console.log(pulled);
+    console.log("MATCHS FOUND:", pulled.map(x => ({
+  player: x.player.name,
+  found: !!x.match,
+  match: x.match
+})));
+    
 
     if (pulled.some(x => !x.match)) {
       setRoomSyncMsg("waiting for all 3 matches to show on tracker…");
@@ -3842,12 +3858,24 @@ const syncRoomFromParse = async () => {
     const times = pulled.map(x => new Date(x.match.metadata.dateCollected).getTime());
     const maxTime = Math.max(...times);
     const minTime = Math.min(...times);
+    
+    console.log("MATCH DATES:", pulled.map(x => ({
+  player: x.player.name,
+  date: x.match.metadata.dateCollected,
+  result: x.match.metadata.result,
+  id: x.match.id
+})));
+    
+    
     const within10Min = maxTime - minTime <= 10 * 60 * 1000;
+    console.log("WITHIN 10 MIN:", within10Min);
 
     const results = pulled.map(x => x.match.metadata.result);
     const sameResult = results.every(r => r === results[0]);
+    console.log("SAME RESULT:", sameResult);
+console.log("RESULTS:", results);
 
-    if (!within10Min || !sameResult) {
+ if (!within10Min) {
       setRoomSyncMsg("found 3 games, but they don't look like the same match yet");
       setRoomSyncing(false);
       return;
@@ -3865,6 +3893,8 @@ const syncRoomFromParse = async () => {
 
     const result = pulled[0].match.metadata.result;
     const isWin = result === "victory";
+    
+    console.log("STARTING IMPORT");
 
     const importedGames = pulled.map(({ player, match }) => ({
       id: `${teamRoom.id}_${player.id}_${match.id}`,
@@ -3889,6 +3919,10 @@ const syncRoomFromParse = async () => {
     }));
 
     const updStats = [...importedGames, ...stats];
+    
+    console.log("SUCCESS!");
+console.log(updStats);
+    
     setStats(updStats);
     await storeSet("stats", updStats);
 
