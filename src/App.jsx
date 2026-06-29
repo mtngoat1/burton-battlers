@@ -2209,11 +2209,13 @@ setMuted(false);
   key={id}
   autoPlay
   playsInline
-  controls={false}
+  controls
   ref={(el) => {
     if (el && track) {
       el.srcObject = new MediaStream([track]);
-      el.play().catch(() => {});
+      el.play().catch((err) => {
+        console.log("AUDIO PLAY BLOCKED:", err);
+      });
     }
   }}
 />
