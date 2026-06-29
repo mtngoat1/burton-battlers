@@ -2022,7 +2022,7 @@ useEffect(() => {
   let alive = true;
 
   const loadVoicePresence = async () => {
-   {Object.keys(voicePresence).length} in voice
+  const vp = await storeGet("voice_presence") || {};
     const cutoff = Date.now() - 45 * 1000;
 
     const cleaned = Object.fromEntries(
