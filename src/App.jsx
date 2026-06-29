@@ -2087,7 +2087,9 @@ const co = window.DailyIframe.createCallObject({
           return next;
         });
       });
-co.on("active-speaker-change", (e) => {
+co.on("active-speaker-change", () => {
+  setSpeakingMap({});
+});
   const id =
     e.activeSpeaker?.peerId ||
     e.activeSpeaker?.session_id ||
@@ -2116,20 +2118,11 @@ co.on("active-speaker-change", (e) => {
   startAudioOff: false,
 });
     
-    
-    Object.values(co.participants()).forEach((p) => {
-  if (!p.local && p.audioTrack) {
-    setRemoteAudioTracks(prev => ({
-      ...prev,
-      [p.session_id]: p.audioTrack,
-    }));
-  }
-});
       
 
 await co.setLocalAudio(true);   
     
-
+setParticipants(co.participants());
     
       setCallObject(co);
       setJoined(true);
@@ -2248,10 +2241,10 @@ onClick={async () => {
       boxShadow:"0 0 24px rgba(184,255,77,0.08)",
     }}>
 <audio
+  ref={remoteAudioRef}
   autoPlay
   playsInline
   style={{ display: "none" }}
-  style={{ width: "100%", marginBottom: 10 }}
 />
 
 {/* Header */}
