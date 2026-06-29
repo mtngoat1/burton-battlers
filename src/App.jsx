@@ -236,6 +236,57 @@ function SyncOverlay({ label }) {
   );
 }
 
+
+// ===================== Swipe helpers =====================
+function useSwipeRightToClose(onClose, threshold = 90) {
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
+  const isSwiping = useRef(false);
+
+  const handleTouchStart = (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    swipeStartX.current = t.clientX;
+    swipeStartY.current = t.clientY;
+    isSwiping.current = false;
+  };
+
+  const handleTouchMove = (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    const dx = t.clientX - swipeStartX.current;
+    const dy = Math.abs(t.clientY - swipeStartY.current);
+    if (dx > 8 && dx > dy * 1.25) {
+      isSwiping.current = true;
+      setSwipeOffset(Math.min(dx, 140));
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (isSwiping.current && swipeOffset > threshold) {
+      setSwipeOffset(0);
+      onClose?.();
+      return;
+    }
+    setSwipeOffset(0);
+  };
+
+  return {
+    swipeHandlers: {
+      onTouchStart: handleTouchStart,
+      onTouchMove: handleTouchMove,
+      onTouchEnd: handleTouchEnd,
+      onTouchCancel: handleTouchEnd,
+    },
+    swipeStyle: {
+      transform: `translateX(${swipeOffset}px)`,
+      transition: swipeOffset === 0 ? "transform .24s cubic-bezier(.2,.8,.2,1)" : "none",
+      willChange: "transform",
+    },
+  };
+}
+
 // ===================== Global CSS =====================
 
 function GlobalStyles() {
@@ -566,7 +617,7 @@ function getWeekStart() {
   return Object.values(groups).sort((a,b) => new Date(b.ts) - new Date(a.ts));
 }
             
-function SessionGroupCard({ session, allStats }) {
+function SessionGroupCard({ session, allStats, gameLabel }) {
   const [open, setOpen] = useState(false);
   const [selectedGame, setSelectedGame] = useState(null);
   const rep = session.games[0];
@@ -585,14 +636,11 @@ function SessionGroupCard({ session, allStats }) {
       <button onClick={()=>setOpen(v=>!v)} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
-            <div style={{fontSize:10,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>SESSION · {session.code.toUpperCase()}</div>
+            <div style={{fontSize:10,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>{gameLabel || "GAME"}</div>
             <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session.mode} · {fmtRelTime(session.ts)} · {session.games.length} player{session.games.length!==1?"s":""} logged</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div style={{textAlign:"right"}}>
-              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>
-                  {rep.result === "victory" ? "WIN" : "DEFEAT"}
-                {rep.ratingDelta ? ` ${rep.ratingDelta > 0 ? "+" : ""}${rep.ratingDelta} MMR` : ""}</div>
               <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A"}}>{won?"WIN":"LOSS"}</div>
             </div>
             <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s",flexShrink:0}}/>
@@ -1210,8 +1258,9 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
   );
 }    
             function ExpandedStatModal({ stat, record, schedule, onClose }) {
+  const expandedSwipe = useSwipeRightToClose(onClose);
   return (
-    <div style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)"}}>
+    <div {...expandedSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",...expandedSwipe.swipeStyle}}>
   <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 56px)",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><ChevronLeft size={18}/></button>
@@ -3637,8 +3686,8 @@ function TeamLinkDayGroup({ dk, sessions, allStats }) {
         </div>
         <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
       </button>
- {open && sessions.map(sess => (
-     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats}/>
+ {open && sessions.map((sess, idx) => (
+     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats} gameLabel={`GAME ${idx + 1}`}/>
 ))}
     </div>
   );
@@ -3825,6 +3874,31 @@ async function fetchLatestParseMatchForPlayer(player, playlist) {
     .sort((a,b)=>new Date(b.metadata.dateCollected)-new Date(a.metadata.dateCollected))[0];
 }
 
+
+function getMatchRatingDelta(match) {
+  const candidates = [
+    match?.stats?.rating?.metadata?.ratingDelta,
+    match?.stats?.rating?.metadata?.delta,
+    match?.stats?.rating?.metadata?.change,
+    match?.stats?.rating?.delta,
+    match?.stats?.mmr?.metadata?.ratingDelta,
+    match?.metadata?.ratingDelta,
+    match?.metadata?.mmrDelta,
+  ];
+  for (const val of candidates) {
+    const num = Number(val);
+    if (Number.isFinite(num)) return num;
+  }
+  const current = Number(match?.stats?.rating?.value);
+  const previous = Number(
+    match?.stats?.rating?.metadata?.previousRating ??
+    match?.stats?.rating?.metadata?.before ??
+    match?.stats?.rating?.metadata?.oldValue
+  );
+  if (Number.isFinite(current) && Number.isFinite(previous)) return current - previous;
+  return 0;
+}
+
 function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
   return {
     id: `${sessionCode}_${player.id}_${match.id}`,
@@ -3844,7 +3918,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     theirScore: null,
     result,
     rating: match.stats?.rating?.value || null,
-    ratingDelta: match.stats?.rating?.metadata?.ratingDelta || 0,
+    ratingDelta: getMatchRatingDelta(match),
     source: "parse_sessions",
   };
 }
@@ -4203,6 +4277,7 @@ const [matchSyncing, setMatchSyncing] = useState(false);
 const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
 const [syncMode, setSyncMode] = useState("3v3");
 const [selectedDuoIds, setSelectedDuoIds] = useState(["p1","p2"]);
+const syncPanelSwipe = useSwipeRightToClose(() => setShowSyncMatchModal(false));
 useEffect(() => {
   if (jumpDate) {
     setMode("3v3");
@@ -4357,7 +4432,7 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
       setStats(updStats);
       await storeSet("stats", updStats);
       addToast?.(`${sessionCode} ${requestedMode} synced from tracker`, "✅");
-      setShowSyncMatchModal(false);
+      setTimeout(() => setShowSyncMatchModal(false), 350);
     } catch(e) {
       console.error(e);
       addToast?.("sync match failed", "❌");
@@ -4402,7 +4477,7 @@ return (
       </div>
 
       {showSyncMatchModal && (
-        <div style={{position:"fixed",inset:0,zIndex:600,background:"#06070D",overflowY:"auto",padding:"18px",paddingTop:"max(18px, env(safe-area-inset-top))",paddingBottom:"max(24px, env(safe-area-inset-bottom))"}}>
+        <div {...syncPanelSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:600,background:"#06070D",overflowY:"auto",padding:"18px",paddingTop:"max(18px, env(safe-area-inset-top))",paddingBottom:"max(24px, env(safe-area-inset-bottom))",...syncPanelSwipe.swipeStyle}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
             <div>
               <div style={{fontSize:11,color:"#B8FF4D",fontWeight:900,letterSpacing:1}}>SYNC MATCH</div>
@@ -4536,7 +4611,7 @@ return (
     {(() => {
       const groups = getSessionGroups(stats);
       if (groups.length === 0) return <div style={s.emptyQueue}>no session-coded games yet.</div>;
-      return groups.map(grp => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats}/>);
+      return groups.map((grp, idx) => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats} gameLabel={`GAME ${idx + 1}`}/>);
     })()}
   </div>
 ) : (
@@ -8848,6 +8923,14 @@ const addToast = useCallback((text, icon = "🔔") => {
   setToasts(prev => [...prev, { id, text, icon }]);
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
 }, []);              
+const closeChatPanel = useCallback(() => {
+  setChatOpen(false);
+  const upd = { ...lastSeen, chat: messages.length };
+  setLastSeen(upd);
+  storeSet(`lastSeen:${currentPlayer}`, upd);
+}, [lastSeen, messages.length, currentPlayer]);
+const chatSwipe = useSwipeRightToClose(closeChatPanel);
+const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
 
 useEffect(() => {
   if (catchupStopped || catchupQueue.length === 0) return;
@@ -9358,7 +9441,7 @@ const TABS=[
  {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/>}
       </div>
       {showBracket && (
-        <div style={{position:"fixed",inset:0,zIndex:80,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease"}}>
+        <div {...bracketSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:80,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",...bracketSwipe.swipeStyle}}>
           <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.08)",flexShrink:0}}>
             <button onClick={()=>setShowBracket(false)} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,color:"#E8ECF4",padding:"8px 11px",cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontWeight:700}}>
               <ChevronLeft size={17}/> back
@@ -9374,13 +9457,10 @@ const TABS=[
         </div>
       )}
       {chatOpen && (
-    <div style={{position:"fixed",inset:0,zIndex:50,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",paddingBottom:0,willChange:"transform, opacity"}}>
+    <div {...chatSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:50,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",paddingBottom:0,...chatSwipe.swipeStyle}}>
           <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
-              <button onClick={()=>{
-                setChatOpen(false);
-                const upd={...lastSeen,chat:messages.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd);
-              }} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
+              <button onClick={closeChatPanel} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
                 <ChevronLeft size={18}/>
               </button>
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team chat</div>
