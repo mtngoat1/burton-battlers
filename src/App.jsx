@@ -238,39 +238,67 @@ function SyncOverlay({ label }) {
 
 
 // ===================== Swipe helpers =====================
-function useSwipeRightToClose(onClose, threshold = 90) {
+function useSwipeRightToClose(onClose, threshold = 105) {
   const [swipeOffset, setSwipeOffset] = useState(0);
+  const [isClosing, setIsClosing] = useState(false);
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
+  const swipeStartTime = useRef(0);
   const isSwiping = useRef(false);
+
+  const getScreenWidth = () => {
+    if (typeof window === "undefined") return 390;
+    return Math.max(window.innerWidth || 390, 320);
+  };
 
   const handleTouchStart = (e) => {
     const t = e.touches?.[0];
-    if (!t) return;
+    if (!t || isClosing) return;
     swipeStartX.current = t.clientX;
     swipeStartY.current = t.clientY;
+    swipeStartTime.current = Date.now();
     isSwiping.current = false;
   };
 
   const handleTouchMove = (e) => {
     const t = e.touches?.[0];
-    if (!t) return;
+    if (!t || isClosing) return;
     const dx = t.clientX - swipeStartX.current;
     const dy = Math.abs(t.clientY - swipeStartY.current);
-    if (dx > 8 && dx > dy * 1.25) {
+
+    if (dx > 10 && dx > dy * 1.15) {
       isSwiping.current = true;
-      setSwipeOffset(Math.min(dx, 140));
+      if (e.cancelable) e.preventDefault();
+      const width = getScreenWidth();
+      const softened = dx < width ? dx : width + (dx - width) * 0.15;
+      setSwipeOffset(Math.max(0, Math.min(softened, width * 1.08)));
     }
   };
 
   const handleTouchEnd = () => {
-    if (isSwiping.current && swipeOffset > threshold) {
-      setSwipeOffset(0);
-      onClose?.();
+    if (isClosing) return;
+    const elapsed = Math.max(Date.now() - swipeStartTime.current, 1);
+    const velocity = swipeOffset / elapsed;
+    const shouldClose = isSwiping.current && (swipeOffset > threshold || velocity > 0.72);
+
+    if (shouldClose) {
+      const width = getScreenWidth();
+      setIsClosing(true);
+      setSwipeOffset(width);
+      setTimeout(() => {
+        onClose?.();
+        setSwipeOffset(0);
+        setIsClosing(false);
+      }, 210);
       return;
     }
+
     setSwipeOffset(0);
+    isSwiping.current = false;
   };
+
+  const width = getScreenWidth();
+  const progress = Math.min(swipeOffset / width, 1);
 
   return {
     swipeHandlers: {
@@ -280,9 +308,18 @@ function useSwipeRightToClose(onClose, threshold = 90) {
       onTouchCancel: handleTouchEnd,
     },
     swipeStyle: {
-      transform: `translateX(${swipeOffset}px)`,
-      transition: swipeOffset === 0 ? "transform .24s cubic-bezier(.2,.8,.2,1)" : "none",
-      willChange: "transform",
+      transform: `translate3d(${swipeOffset}px, 0, 0) scale(${1 - progress * 0.025})`,
+      opacity: 1 - progress * 0.22,
+      borderTopLeftRadius: progress ? 22 * progress : 0,
+      borderBottomLeftRadius: progress ? 22 * progress : 0,
+      boxShadow: progress ? `-18px 0 44px rgba(0,0,0,${0.18 * progress})` : undefined,
+      transition: isClosing
+        ? "transform .2s cubic-bezier(.22,1,.36,1), opacity .2s ease, border-radius .2s ease"
+        : swipeOffset === 0
+          ? "transform .34s cubic-bezier(.22,1,.36,1), opacity .24s ease, border-radius .24s ease"
+          : "none",
+      willChange: "transform, opacity",
+      touchAction: isSwiping.current ? "none" : "pan-y",
     },
   };
 }
@@ -3687,7 +3724,7 @@ function TeamLinkDayGroup({ dk, sessions, allStats }) {
         <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
       </button>
  {open && sessions.map((sess, idx) => (
-     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats} gameLabel={`GAME ${idx + 1}`}/>
+     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats} gameLabel={`GAME ${sessions.length - idx}`}/>
 ))}
     </div>
   );
@@ -4611,7 +4648,7 @@ return (
     {(() => {
       const groups = getSessionGroups(stats);
       if (groups.length === 0) return <div style={s.emptyQueue}>no session-coded games yet.</div>;
-      return groups.map((grp, idx) => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats} gameLabel={`GAME ${idx + 1}`}/>);
+      return groups.map((grp, idx) => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats} gameLabel={`GAME ${groups.length - idx}`}/>);
     })()}
   </div>
 ) : (
