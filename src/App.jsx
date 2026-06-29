@@ -4966,7 +4966,7 @@ const PREMIUM_PASS_REWARDS = {
   28: { type:"coins",  value:50,  label:"+50 pts" },
   29: { type:"color",  value:"#00FFD0", label:"neon teal glow" },
   30: { type:"token",  value:"training_skip", label:"training skip token" },
-  31: { type:"text_color", value:"app_text_colors", label:"app text color kit" },
+  31: { type:"coins",  value:50, label:"+50 pts" },
   32: { type:"icon",   value:"🔮", label:"crystal ball icon" },
   33: { type:"coins",  value:50,  label:"+50 pts" },
   34: { type:"title",  value:"untouchable", label:"untouchable" },
@@ -5035,7 +5035,7 @@ const PREMIUM_PASS_REWARDS = {
   97: { type:"coins",  value:150, label:"+150 pts" },
   98: { type:"title",  value:"burton legend", label:"burton legend" },
   99: { type:"token",  value:"training_skip", label:"training skip token" },
-  100:{ type:"title",  value:"century club", label:"century club" },
+  100:{ type:"text_color", value:"app_text_colors", label:"custom app text kit" },
   // tiers 101-200 continue the grind
   110:{ type:"coins",  value:100, label:"+100 pts" },
   120:{ type:"token",  value:"double_xp", label:"double xp token" },
@@ -5539,16 +5539,6 @@ await storeSet("pings", pingUpd2);
                         {item.cost} pts
                       </button>
                     )}
-                    {reward.type === "text_color" && isEquipped && (
-                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:10,width:"100%"}}>
-                        {["main","muted","accent"].map(part => (
-                          <label key={part} style={{fontSize:9,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>
-                            {part}
-                            <input type="color" defaultValue={(points?.[currentPlayer+"_textColors"]||{})[part] || (part==="accent"?"#B8FF4D":part==="muted"?"#8B92A8":"#E8ECF4")} onChange={async(e)=>{ const cur=points?.[currentPlayer+"_textColors"]||{}; const upd={...points,[currentPlayer+"_textColors"]:{...cur,[part]:e.target.value}}; setPoints(upd); await storeSet("points",upd); }} style={{width:"100%",height:30,marginTop:4,background:"none",border:"none"}}/>
-                          </label>
-                        ))}
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -5994,6 +5984,30 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
                         style={{ background: isEquipped ? "#B8FF4D" : "rgba(255,255,255,0.06)", border: "none", borderRadius: 9, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, color: isEquipped ? "#06070D" : "#8B92A8", cursor: "pointer" }}>
                         {isEquipped ? "✓ on" : "equip"}
                       </button>
+                    )}
+                    {reward.type === "text_color" && isEquipped && (
+                      <div style={{width:"100%",marginTop:12,paddingTop:12,borderTop:"1px solid rgba(255,255,255,0.06)",display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                        {[
+                          ["main","main text", "#E8ECF4"],
+                          ["muted","small text", "#8B92A8"],
+                          ["accent","accent text", "#B8FF4D"]
+                        ].map(([part,label,fallback]) => (
+                          <label key={part} style={{fontSize:9,color:"#8B92A8",fontWeight:800,textTransform:"uppercase",letterSpacing:0.5}}>
+                            {label}
+                            <input
+                              type="color"
+                              value={(points?.[currentPlayer+"_textColors"]||{})[part] || fallback}
+                              onChange={async(e)=>{
+                                const cur = points?.[currentPlayer+"_textColors"] || {};
+                                const upd = { ...points, [currentPlayer+"_textColors"]: { ...cur, [part]: e.target.value } };
+                                setPoints(upd);
+                                await storeSet("points", upd);
+                              }}
+                              style={{width:"100%",height:34,marginTop:6,background:"none",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,padding:0,cursor:"pointer"}}
+                            />
+                          </label>
+                        ))}
+                      </div>
                     )}
                   </div>
                 );
@@ -9361,7 +9375,8 @@ const TABS=[
   const own = points?.[currentPlayer+"_owned"] || [];
   const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].includes(id));
   const customUrl = points?.[currentPlayer+"_customBg"];
-  const textColors = points?.[currentPlayer+"_textColors"] || {};
+  const hasTextKitEquipped = own.some(id => eq[id] && id.startsWith("pass_premium_") && getPassRewardForOwnedId(id)?.type === "text_color");
+  const textColors = hasTextKitEquipped ? (points?.[currentPlayer+"_textColors"] || {}) : {};
   const bgStyle = bgId==="bg_carbon" ? {backgroundImage:"repeating-linear-gradient(45deg,#0e0e0e 0px,#0e0e0e 3px,#1a1a1a 3px,#1a1a1a 6px)"}
     : bgId==="bg_spring"   ? {backgroundImage:"linear-gradient(135deg,#1a0a1a,#0a1a12,#0a1220)"}
     : bgId==="bg_aurora"   ? {backgroundImage:"linear-gradient(135deg,#040d14,#012a1a,#040818)"}
