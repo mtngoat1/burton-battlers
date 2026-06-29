@@ -481,7 +481,7 @@ function GlobalStyles() {
     * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
     html, body { margin:0; padding:0; width:100%; height:100dvh; min-height:100dvh; overflow:hidden; background:#06070D; overscroll-behavior:none; }
 #root { width:100%; height:100dvh; min-height:100dvh; background:#06070D; overflow:hidden; }
-@supports (-webkit-touch-callout: none) { html, body, #root { height:-webkit-fill-available; min-height:-webkit-fill-available; } }
+@supports (-webkit-touch-callout: none) { html, body, #root { min-height:100dvh; } }
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
@@ -4740,9 +4740,13 @@ function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate,
 const [showRoom, setShowRoom] = useState(false);
 const [matchSyncing, setMatchSyncing] = useState(false);
 const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
-const [syncMode, setSyncMode] = useState("3v3");
+const [syncMode, setSyncMode] = useState(currentPlayer === ADMIN_ID ? "3v3" : "2v2");
 const [selectedDuoIds, setSelectedDuoIds] = useState(["p1","p2"]);
 const syncPanelSwipe = useSwipeRightToClose(() => setShowSyncMatchModal(false));
+const visibleSyncModes = currentPlayer === ADMIN_ID ? ["3v3","2v2","1v1"] : ["2v2","1v1"];
+useEffect(() => {
+  if (currentPlayer !== ADMIN_ID && syncMode === "3v3") setSyncMode("2v2");
+}, [currentPlayer, syncMode]);
 useEffect(() => {
   if (!stats?.length) return;
   const groupedScores = {};
@@ -4992,8 +4996,8 @@ return (
 
           <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:18,padding:14,marginBottom:14}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:1,marginBottom:10}}>MODE</div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
-              {["3v3","2v2","1v1"].map(m => (
+            <div style={{display:"grid",gridTemplateColumns:`repeat(${visibleSyncModes.length},1fr)`,gap:8}}>
+              {visibleSyncModes.map(m => (
                 <button key={m} onClick={()=>setSyncMode(m)} className="bb-pressable" style={{
                   background:syncMode===m?"#B8FF4D":"rgba(255,255,255,0.05)",
                   border:syncMode===m?"none":"1px solid rgba(255,255,255,0.08)",
@@ -5085,7 +5089,7 @@ return (
         </div>
       )}
 
-      <button onClick={()=>setShowSyncMatchModal(true)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(184,255,77,0.18)",borderRadius:18,padding:"16px",marginBottom:14,textAlign:"left",cursor:"pointer",boxShadow:"0 12px 26px rgba(0,0,0,0.18)"}}>
+      <button onClick={()=>{ if (currentPlayer !== ADMIN_ID && syncMode === "3v3") setSyncMode("2v2"); setShowSyncMatchModal(true); }} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(184,255,77,0.18)",borderRadius:18,padding:"16px",marginBottom:14,textAlign:"left",cursor:"pointer",boxShadow:"0 12px 26px rgba(0,0,0,0.18)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
           <div>
             <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,marginBottom:4}}>SYNC MATCH</div>
@@ -10115,7 +10119,7 @@ const TABS=[
 
 // ===================== Styles =====================
 const s = {
-appShell:{display:"flex",flexDirection:"column",height:"100dvh",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:"env(safe-area-inset-bottom, 0px)"},
+appShell:{display:"flex",flexDirection:"column",height:"100dvh",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:0},
   screen:{height:"100dvh",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
 topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
@@ -10123,9 +10127,9 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(108px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(92px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.08)",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(max(14px, env(safe-area-inset-bottom, 14px)))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
+tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.08)",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px))",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
