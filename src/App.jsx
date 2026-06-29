@@ -509,7 +509,7 @@ console.log("MMR SEGMENT:", name, seg?.stats);
 
 const newRankName = rlRankFromTierValue(seg?.stats?.tier?.value);
 
-return { playlist: name, mmr, rank: newrankName };
+return { playlist: name, mmr, rank: newRankName };
 });
 
 console.log("FINAL RANKS BEING SAVED:", ranks);
@@ -9001,6 +9001,7 @@ const [toasts, setToasts] = useState([]);
   const [streamProfiles,setStreamProfiles]=useState({});
   const [stats,setStats]=useState([]);
   const [presence,setPresence]=useState({});
+  const [myMode,setMyMode]=useState(null);
   const [pings,setPings]=useState([]);
   const [points,setPoints]=useState({});
 const [parseCredits, setParseCredits] = useState({});
@@ -9386,7 +9387,16 @@ console.log("RESYNC SEGMENT:", r.playlist, seg?.stats);
 
 const newRankName =
   seg?.stats?.tier?.metadata?.name ||
+  r.rank ||
   "Unranked";
+
+return {
+  ...r,
+  prevMmr: r.mmr,
+  prevRank: r.rank,
+  mmr: newMmr,
+  rank: newRankName
+};
       });
       const updated = { ...existing, ranks: newRanks, lastSynced: new Date().toISOString(), source: existing.source === "admin" ? "admin" : "synced" };
       setMmrProfiles(prev => ({ ...prev, [pid]: updated }));
