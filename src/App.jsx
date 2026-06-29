@@ -5788,7 +5788,7 @@ await storeSet("pings", pingUpd2);
             {!purchaseReveal.opened ? (
               <button onClick={()=>setPurchaseReveal(r=>({...r,opened:true}))} className="bb-pressable" style={{background:"none",border:"none",cursor:"pointer",width:"100%"}}>
                 <div style={{fontSize:68,filter:"drop-shadow(0 14px 24px rgba(255,209,102,0.22))"}}>🎁</div>
-                <div style={{fontSize:11,color:"#FFD166",fontWeight:900,letterSpacing:1,marginTop:8}}>TAP FAST TO OPEN</div>
+                <div style={{fontSize:11,color:"#FFD166",fontWeight:900,letterSpacing:1,marginTop:8}}>TAP TO OPEN</div>
               </button>
             ) : (
               <div>
@@ -5968,8 +5968,7 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
       }
     }
 
-    setClaimResult({ tier, reward });
-    setTimeout(() => setClaimResult(null), 3000);
+    setClaimResult({ tier, reward, opened:false });
   };
 
 const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ tier: Number(tier), reward })).sort((a, b) => a.tier - b.tier);
@@ -5980,10 +5979,23 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
   return (
     <div ref={garageTopRef} className="bb-tab-content" style={s.tabContent} onTouchStart={handleTrackTouchStart} onTouchMove={handleTrackTouchMove} onTouchEnd={handleTrackTouchEnd}>
       {claimResult && (
-        <div style={{ position: "fixed", top: 80, left: 0, right: 0, margin: "0 auto", width: 220, zIndex: 300, background: "#1A1D2E", border: "1px solid rgba(184,255,77,0.4)", borderRadius: 14, padding: "14px 20px", textAlign: "center", animation: "dropDown .3s cubic-bezier(.2,.8,.2,1), dropDown .3s cubic-bezier(.2,.8,.2,1) 2.5s reverse forwards" }}>
-          <div style={{ fontSize: 22, marginBottom: 4 }}>🎁</div>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#B8FF4D" }}>tier {claimResult.tier} claimed!</div>
-          <div style={{ fontSize: 12, color: "#8B92A8", marginTop: 2 }}>{claimResult.reward.label || claimResult.reward.value}</div>
+        <div style={{position:"fixed",inset:0,zIndex:900,background:"rgba(4,8,24,0.88)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"chatFadeIn .18s ease"}}>
+          <div style={{width:"100%",maxWidth:320,textAlign:"center",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(167,139,250,0.35)",borderRadius:24,padding:22,boxShadow:"0 24px 70px rgba(0,0,0,0.45)",animation:"dropDown .32s cubic-bezier(.2,.8,.2,1)"}}>
+            {!claimResult.opened ? (
+              <button onClick={()=>setClaimResult(r=>({...r,opened:true}))} className="bb-pressable" style={{background:"none",border:"none",cursor:"pointer",width:"100%"}}>
+                <div style={{fontSize:68,filter:"drop-shadow(0 14px 24px rgba(167,139,250,0.25))"}}>🎁</div>
+                <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:1,marginTop:8}}>TAP TO OPEN</div>
+              </button>
+            ) : (
+              <div>
+                <div style={{fontSize:54,animation:"scaleFadeIn .2s ease"}}>{claimResult.reward.type === "coins" ? "🪙" : claimResult.reward.type === "icon" ? claimResult.reward.value : claimResult.reward.type === "color" || claimResult.reward.type === "text_color" ? "🎨" : claimResult.reward.type === "title" ? "📝" : "✨"}</div>
+                <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:1,marginTop:6}}>TIER {claimResult.tier} UNLOCKED</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,color:"#E8ECF4",marginTop:8}}>{claimResult.reward.label || claimResult.reward.value}</div>
+                <div style={{fontSize:12,color:"#8B92A8",marginTop:4}}>added to your pass rewards</div>
+                <button onClick={()=>setClaimResult(null)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:18}}>claim</button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -8958,8 +8970,8 @@ function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, acti
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4}}>arcade</div>
-      <div style={{fontSize:12,color:"#4A5066",marginBottom:20}}>
-        balance: <span style={{color:"#B8FF4D",fontWeight:700}}>{myPoints} pts</span>
+      <div style={{fontSize:12,color:"#B8FF4D",marginBottom:20,fontWeight:700}}>
+        balance: <span style={{color:"#B8FF4D",fontWeight:900}}>{myPoints} pts</span>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         {GAME_CARDS.map(card => (
@@ -9038,6 +9050,7 @@ const [catchupStopped, setCatchupStopped] = useState(false);
 const [flipChallenges, setFlipChallenges] = useState([]);    
 const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
 const [chatOpen, setChatOpen] = useState(false);
+const [showTopNotifs, setShowTopNotifs] = useState(false);
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
 const lastActiveRef = useRef(Date.now());
@@ -9455,6 +9468,26 @@ const TABS=[
     chat: Math.max(0, messages.length - lastSeen.chat),
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
+  const topActivityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
+    id: e.id,
+    ts: e.ts,
+    text: `${e.fromName} ${e.text}`,
+    icon: e.type==="like" ? "❤️" : e.type==="comment" ? "💬" : e.type==="comment_heart" ? "🩷" : "🔔",
+  }));
+  const topPingNotifs = (pings||[]).filter(p => p.to === currentPlayer).map(p => ({
+    id: p.id,
+    ts: p.ts,
+    text: p.type==="flower"
+      ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} sent you ${p.emoji || "🌸"} (+${p.xp || 0} xp)`
+      : `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} wants to run 2s`,
+    icon: p.type==="flower" ? "🌸" : "🎮",
+  }));
+  const topTrainingNotifs = Object.entries(completions||{})
+    .filter(([k,v]) => v?.status==="approved" && k.endsWith(`__${currentPlayer}`))
+    .map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt||new Date().toISOString(), text:"training approved — +15 pts", icon:"✅" }));
+  const topNotifs = [...topActivityNotifs, ...topPingNotifs, ...topTrainingNotifs]
+    .sort((a,b) => new Date(b.ts) - new Date(a.ts))
+    .slice(0, 40);
   const eq = points?.[currentPlayer+"_equipped"] || {};
   const own = points?.[currentPlayer+"_owned"] || [];
   const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].includes(id));
@@ -9504,7 +9537,7 @@ const TABS=[
       {isAdmin&&<Shield size={13} color="#FF5C8A"/>}
       <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
       <span style={s.youName}>{playerObj.name}</span>
-      <button onClick={()=>setTab("presence")} className="bb-pressable" style={{...s.logoutBtn,position:"relative",marginLeft:2}}><Bell size={14}/></button>
+      <button onClick={()=>setShowTopNotifs(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative",marginLeft:2}}><Bell size={14}/></button>
     </div>
   </div>
 <div style={s.topBarRight}>
@@ -9539,6 +9572,30 @@ const TABS=[
 </button>
 </div>
 </div>
+      {showTopNotifs && (
+        <div style={{position:"fixed",inset:0,zIndex:950,background:"rgba(4,8,24,0.88)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"74px 18px 18px",animation:"chatFadeIn .18s ease"}} onClick={()=>setShowTopNotifs(false)}>
+          <div onClick={(e)=>e.stopPropagation()} style={{width:"100%",maxWidth:420,maxHeight:"78vh",overflowY:"auto",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(167,139,250,0.28)",borderRadius:22,padding:16,boxShadow:"0 24px 70px rgba(0,0,0,0.45)",animation:"dropDown .24s cubic-bezier(.2,.8,.2,1)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+              <div>
+                <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:1}}>NOTIFICATIONS</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{topNotifs.length ? `${topNotifs.length} recent update${topNotifs.length!==1?"s":""}` : "nothing new yet"}</div>
+              </div>
+              <button onClick={()=>setShowTopNotifs(false)} className="bb-pressable" style={s.modalClose}><X size={18}/></button>
+            </div>
+            {topNotifs.length===0 ? (
+              <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:14,color:"#8B92A8",fontSize:13}}>No notifications yet.</div>
+            ) : topNotifs.map(n => (
+              <div key={n.id} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"11px 0",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
+                <div style={{fontSize:18,width:24,textAlign:"center",flexShrink:0}}>{n.icon}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,color:"#E8ECF4",lineHeight:1.35}}>{n.text}</div>
+                  <div style={{fontSize:10,color:"#4A5066",marginTop:3}}>{fmtRelTime(n.ts)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
 {tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
