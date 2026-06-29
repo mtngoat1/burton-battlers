@@ -1748,8 +1748,6 @@ return (
     {homeSubTab==="profile" && <ProfileHomeTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} />}
 
     {homeSubTab==="overview" && <>
-      <HomeCommandCenter currentPlayer={currentPlayer} points={points} nextMatch={nextMatch} daysUntil={daysUntil} previewDays={previewDays} completions={completions} stats={stats} onGotoTraining={onGotoTraining} onGotoStats={onGotoStats} onOpenBracket={onOpenBracket} />
-      <RecentActivityFeed stats={stats} completions={completions} trainingData={trainingData} currentPlayer={currentPlayer} onGotoStats={onGotoStats} onGotoTraining={onGotoTraining} />
       <div style={{background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
         <span style={{fontSize:26,flexShrink:0}}>{weeklyEvent.emoji}</span>
         <div>
