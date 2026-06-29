@@ -2022,7 +2022,7 @@ useEffect(() => {
   let alive = true;
 
   const loadVoicePresence = async () => {
-    const vp = await storeGet("voice_presence") || {};
+   {Object.keys(voicePresence).length} in voice
     const cutoff = Date.now() - 45 * 1000;
 
     const cleaned = Object.fromEntries(
@@ -2040,6 +2040,31 @@ useEffect(() => {
     clearInterval(timer);
   };
 }, []);              
+              
+              
+  useEffect(() => {
+  if (!joined || !currentPlayer) return;
+
+  const writePresence = async () => {
+    const vp = await storeGet("voice_presence") || {};
+    const updatedPresence = {
+      ...vp,
+      [currentPlayer]: {
+        playerId: currentPlayer,
+        name: playerObj?.name || currentPlayer,
+        ts: new Date().toISOString()
+      }
+    };
+
+    await storeSet("voice_presence", updatedPresence);
+    setVoicePresence(updatedPresence);
+  };
+
+  writePresence();
+  const timer = setInterval(writePresence, 15000);
+
+  return () => clearInterval(timer);
+}, [joined, currentPlayer]);            
               
               
               
