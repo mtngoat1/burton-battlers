@@ -20,6 +20,8 @@ const PLAYOFF_END    = new Date("2026-09-21T23:59:59");
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DAY_MS  = 24 * 60 * 60 * 1000;
 const STOCK_BASE_PRICE = 100;
+const PARSE_CREDITS_DEFAULT = 50;
+const PARSE_RESERVE_DEFAULT = 50;
 
 const WEEKLY_EVENTS = [
   { id:"double_xp", emoji:"🔥", title:"Double Pass XP Week", desc:"all pass xp from training approvals and logged games is doubled this week.", color:"#B8FF4D" },
@@ -147,6 +149,49 @@ function deterministicMMR(seed, idx) {
   for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
   return 700 + (h % 900) + idx * 60;
 }
+
+function getRankImage(rankName) {
+  if (!rankName) return null;
+
+  const r = rankName.toLowerCase();
+
+  if (r.includes("supersonic")) return "/ranks/Supersonic Legend.png";
+
+  if (r.includes("grand champion iii")) return "/ranks/Grand Champion III.png";
+  if (r.includes("grand champion ii")) return "/ranks/Grand Champion II.png";
+  if (r.includes("grand champion")) return "/ranks/Grand Champion I.png";
+
+  if (r.includes("champion iii")) return "/ranks/Champion III.png";
+  if (r.includes("champion ii")) return "/ranks/Champion II.png";
+  if (r.includes("champion")) return "/ranks/Champion I.png";
+
+  if (r.includes("diamond iii")) return "/ranks/Diamond III.png";
+  if (r.includes("diamond ii")) return "/ranks/Diamond II.png";
+  if (r.includes("diamond")) return "/ranks/Diamond I.png";
+
+  if (r.includes("platinum iii")) return "/ranks/Platinum III.png";
+  if (r.includes("platinum ii")) return "/ranks/Platinum II.png";
+  if (r.includes("platinum")) return "/ranks/Platinum I.png";
+
+  if (r.includes("gold iii")) return "/ranks/Gold III.png";
+  if (r.includes("gold ii")) return "/ranks/Gold II.png";
+  if (r.includes("gold")) return "/ranks/Gold I.png";
+
+  if (r.includes("silver iii")) return "/ranks/Silver III.png";
+  if (r.includes("silver ii")) return "/ranks/Silver II.png";
+  if (r.includes("silver")) return "/ranks/Silver I.png";
+
+  if (r.includes("bronze iii")) return "/ranks/Bronze III.png";
+  if (r.includes("bronze ii")) return "/ranks/Bronze II.png";
+  if (r.includes("bronze")) return "/ranks/Bronze I.png";
+
+  if (r.includes("unranked")) return "/ranks/Unranked.png";
+
+  return null;
+}
+
+
+
 function rankFromMMR(mmr) {
   const tiers = [
     { name:"Bronze", max:300 },{ name:"Silver", max:600 },{ name:"Gold", max:900 },
@@ -322,11 +367,15 @@ function EnterPasscodeScreen({ player, onSuccess, onBack }) {
   );
 }
 
-function TrackerSetup({ player, onComplete }) {
+function TrackerSetup({ player, onComplete, onUseCredit }) {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
 
   const finishSync = async () => {
+    if (onUseCredit) {
+      const ok = await onUseCredit();
+      if (!ok) { setError("out of parse credits — ask the captain for more"); return; }
+    }
     setSyncing(true);
     setError(null);
     try {
@@ -340,8 +389,14 @@ function TrackerSetup({ player, onComplete }) {
       const ranks = RL_PLAYLISTS.map(name => {
      const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === name);
 const mmr = seg?.stats?.rating?.value || 0;
-const rankName = seg?.stats?.tier?.metadata?.name || rankFromMMR(mmr);
-        return { playlist: name, mmr, rank: rankName };
+
+console.log("MMR SEGMENT:", name, seg?.stats);
+
+const rankName =
+  seg?.stats?.tier?.metadata?.name ||
+  "Unranked";
+
+return { playlist: name, mmr, rank: rankName };
       });
       await setMMR(player.id, { platform: player.platform, handle: player.name, ranks, lastSynced: new Date().toISOString(), source: "synced" });
       setSyncing(false);
@@ -386,13 +441,25 @@ function MMRCard({ profile, playerName, accent, onResync, resyncing, verifiedBad
         {onResync&&<button onClick={onResync} className="bb-pressable" style={s.resyncBtn} disabled={resyncing}>{resyncing?"…":"resync"}</button>}
       </div>
       <div style={s.mmrGrid}>
-        {profile.ranks.map((r) => (
-          <div key={r.playlist} style={s.mmrItem}>
-            <div style={s.mmrPlaylist}>{r.playlist.replace("Ranked ","")}</div>
-            <div style={{ ...s.mmrRank, color:accent }}>{r.rank}</div>
-            <div style={s.mmrNum}>{r.mmr} mmr</div>
-          </div>
-        ))}
+   {profile.ranks.map((r) => (
+  <div key={r.playlist} style={s.mmrItem}>
+    <div style={s.mmrPlaylist}>{r.playlist.replace("Ranked ","")}</div>
+    {getRankImage(r.rank) && (
+      <img src={getRankImage(r.rank)} alt={r.rank} style={{width:36,height:36,objectFit:"contain",margin:"4px auto",display:"block"}}/>
+    )}
+
+{console.log("Rank:", r.rank, "Image:", getRankImage(r.rank))}
+
+   <div style={{ ...s.mmrRank, color: accent }}>
+  {r.rank}
+  <br />
+  <span style={{ fontSize: 10 }}>
+    {String(getRankImage(r.rank))}
+  </span>
+</div>
+    <div style={s.mmrNum}>{r.mmr} mmr</div>
+  </div>
+))}
       </div>
       <div style={s.mmrSynced}>{profile.source==="admin"?"set by captain":"synced"} · {new Date(profile.lastSynced).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>
     </div>
@@ -1303,7 +1370,6 @@ function LiveMMRFeed({ mmrProfiles }) {
                 <div style={{fontSize:11,color:"#8B92A8",marginTop:1}}>{standardRank?.rank || "unranked"} · 3v3</div>
               </div>
               <div style={{textAlign:"right",marginRight:8}}>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{standardRank?.mmr || "—"}</div>
               </div>
               <ChevronRight size={14} color="#4A5066" style={{transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s",flexShrink:0}}/>
             </button>
@@ -1316,18 +1382,22 @@ function LiveMMRFeed({ mmrProfiles }) {
                     <div key={r.playlist} style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingBottom:10,marginBottom:10,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
                       <div>
                         <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:3}}>{label}</div>
-                        <div style={{fontSize:13,fontWeight:700,color:p.color}}>{r.rank}</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+  {getRankImage(r.rank) && (
+    <img
+      src={getRankImage(r.rank)}
+      alt={r.rank}
+      style={{width:26,height:26,objectFit:"contain",flexShrink:0}}
+    />
+  )}
+  <div style={{fontSize:13,fontWeight:700,color:p.color}}>{r.rank}</div>
+</div>
                       </div>
                       <div style={{textAlign:"right"}}>
-                        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>{r.mmr}</div>
-                        {diff !== null && diff !== 0 && (
-                          <div style={{fontSize:11,fontWeight:700,color:diff>0?"#7CFFB2":"#FF5C8A"}}>{diff>0?"+":""}{diff}</div>
-                        )}
                       </div>
                     </div>
                   );
                 })}
-                <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>synced {new Date(profile.lastSynced).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>
               </div>
             )}
           </div>
@@ -1800,21 +1870,25 @@ function seededShuffle(arr, seed) {
   return out;
 }
           
-function SwipeToast({ toast, onDismiss }) {
+function SwipeToast({ toast, onDismiss, onDismissAll }) {
   const [offset, setOffset] = useState(0);
   const [leaving, setLeaving] = useState(false);
   const startY = useRef(0);
 
-  const dismiss = () => {
-    setLeaving(true);
-    setTimeout(onDismiss, 300);
-  };
+const dismiss = () => {
+  setLeaving(true);
+  setTimeout(onDismiss, 300);
+};
+const dismissAll = () => {
+  setLeaving(true);
+  setTimeout(onDismissAll, 300);
+};
 
   return (
     <div
       onTouchStart={(e)=>{ startY.current = e.touches[0].clientY; }}
       onTouchMove={(e)=>{ const dy = e.touches[0].clientY - startY.current; if (dy < 0) setOffset(dy); }}
-      onTouchEnd={()=>{ if (offset < -40) dismiss(); else setOffset(0); }}
+      onTouchEnd={()=>{ if (offset < -40) dismissAll(); else setOffset(0); }}
       style={{
         background:"#1A1D2E",
         border:"1px solid rgba(184,255,77,0.25)",
@@ -1889,7 +1963,353 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
     </div>
   );
 }
-function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus, setTypingStatus }) {
+          
+          
+function VoiceRoom({ currentPlayer, addToast, headerOnly }) {
+  const [joined, setJoined] = useState(false);
+  const [participants, setParticipants] = useState({});
+  const [muted, setMuted] = useState(false);
+  const [callObject, setCallObject] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [speakingMap, setSpeakingMap] = useState({});
+  const playerObj = PLAYERS.find(p => p.id === currentPlayer);
+
+  // Load Daily SDK dynamically
+  useEffect(() => {
+    if (window.DailyIframe) return;
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/@daily-co/daily-js";
+    script.async = true;
+    document.head.appendChild(script);
+    return () => {};
+  }, []);
+
+  const joinRoom = async () => {
+    if (!window.DailyIframe) {
+      setError("voice SDK still loading — try again in a second");
+      return;
+    }
+    setLoading(true);
+    setError(null);
+try {
+  await navigator.mediaDevices.getUserMedia({
+    audio: true,
+    video: false,
+  });
+
+        
+        
+const co = window.DailyIframe.createCallObject({
+  audioSource: true,
+  videoSource: false,
+  dailyConfig: {
+    prejoinUI: false,
+  },
+});
+
+   co.on("participant-joined", (e) => {
+  setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
+  if (!e.participant.local) {
+    addToast(`${e.participant.user_name} joined voice`, "🎙️");
+  }
+});
+      co.on("participant-updated", (e) => {
+        setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
+      });
+      co.on("participant-left", (e) => {
+        setParticipants(prev => {
+          const next = { ...prev };
+          delete next[e.participant.session_id];
+          return next;
+        });
+      });
+      co.on("active-speaker-change", (e) => {
+        setSpeakingMap(prev => {
+          const next = {};
+          if (e.activeSpeaker?.peerId) next[e.activeSpeaker.peerId] = true;
+          return next;
+        });
+      });
+      co.on("error", (e) => {
+        setError("connection error — check mic permissions");
+        setLoading(false);
+      });
+
+  await co.join({
+  url: "https://theburtonbattlers.daily.co/burton-battlers",
+  userName: playerObj?.name || currentPlayer,
+  startVideoOff: true,
+  startAudioOff: false,
+});
+
+      setCallObject(co);
+      setJoined(true);
+      setLoading(false);
+      addToast?.(`${playerObj?.name} joined voice`, "🎙️");
+} catch (e) {
+  console.error(e);
+  setError(e.message);
+}
+  };
+
+  const leaveRoom = async () => {
+    if (callObject) {
+      await callObject.leave();
+      callObject.destroy();
+      setCallObject(null);
+    }
+    setJoined(false);
+    setParticipants({});
+    setSpeakingMap({});
+    setMuted(false);
+  };
+
+  const toggleMute = async () => {
+    if (!callObject) return;
+    const newMuted = !muted;
+    await callObject.setLocalAudio(!newMuted);
+    setMuted(newMuted);
+  };
+
+  // Map daily participant names back to our players
+  const getPlayerForName = (name) => PLAYERS.find(p => p.name === name);
+
+  const participantList = Object.values(participants);
+  const localParticipant = participantList.find(p => p.local);
+  const remoteParticipants = participantList.filter(p => !p.local);
+
+  if (!joined) {
+    return (
+      <div style={{
+        background:"linear-gradient(135deg,#080F08,#06070D)",
+        border:"1px solid rgba(184,255,77,0.25)",
+        borderRadius:16,
+        padding:18,
+        marginBottom:10,
+      }}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:"#B8FF4D",boxShadow:"0 0 8px #B8FF4D99"}}/>
+          <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,letterSpacing:0.8}}>VOICE ROOM</div>
+        </div>
+
+        {/* Player dots showing who could join */}
+        <div style={{display:"flex",gap:10,marginBottom:16}}>
+          {PLAYERS.map(p => (
+            <div key={p.id} style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:12,padding:"12px 8px",textAlign:"center",border:`1px solid ${p.color}22`}}>
+              <div style={{width:36,height:36,borderRadius:"50%",background:`${p.color}22`,border:`2px solid ${p.color}44`,margin:"0 auto 8px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
+                🎙️
+              </div>
+              <div style={{fontSize:10,fontWeight:700,color:p.color}}>{p.name}</div>
+              <div style={{fontSize:9,color:"#4A5066",marginTop:2}}>offline</div>
+            </div>
+          ))}
+        </div>
+
+        {error && (
+          <div style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#FF5C8A"}}>
+            {error}
+          </div>
+        )}
+
+        <button
+          onClick={joinRoom}
+          disabled={loading}
+          className="bb-pressable bb-glow-lime"
+          style={{
+            width:"100%",
+            background: loading ? "rgba(255,255,255,0.05)" : "#B8FF4D",
+            border:"none",
+            borderRadius:12,
+            padding:"14px 0",
+            fontSize:14,
+            fontWeight:700,
+            color: loading ? "#4A5066" : "#06070D",
+            cursor: loading ? "default" : "pointer",
+            display:"flex",
+            alignItems:"center",
+            justifyContent:"center",
+            gap:8,
+          }}>
+          {loading ? (
+            <>
+              <div style={{width:14,height:14,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.2)",borderTopColor:"#fff",animation:"spin .7s linear infinite"}}/>
+              connecting…
+            </>
+          ) : "🎙️ join voice room"}
+        </button>
+        <div style={{fontSize:10,color:"#3A4256",textAlign:"center",marginTop:8}}>
+          microphone required · audio only · no video
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      background:"linear-gradient(135deg,#080F08,#06070D)",
+      border:"1px solid rgba(184,255,77,0.4)",
+      borderRadius:16,
+      padding:18,
+      marginBottom:10,
+      boxShadow:"0 0 24px rgba(184,255,77,0.08)",
+    }}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div className="bb-live-dot" style={{width:8,height:8,borderRadius:"50%",background:"#B8FF4D",boxShadow:"0 0 8px #B8FF4D99"}}/>
+          <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,letterSpacing:0.8}}>LIVE VOICE ROOM</div>
+        </div>
+        <div style={{fontSize:10,color:"#4A5066"}}>{participantList.length} connected</div>
+      </div>
+
+      {/* Participant cards */}
+      <div style={{display:"flex",gap:10,marginBottom:16}}>
+        {PLAYERS.map(p => {
+          const dailyParticipant = participantList.find(dp => dp.user_name === p.name);
+          const isConnected = !!dailyParticipant;
+          const isMe = p.id === currentPlayer;
+          const isSpeaking = dailyParticipant && speakingMap[dailyParticipant.session_id];
+          const isMutedParticipant = dailyParticipant ? !dailyParticipant.audio : false;
+
+          return (
+            <div key={p.id} style={{
+              flex:1,
+              background: isConnected ? `${p.color}12` : "rgba(255,255,255,0.02)",
+              borderRadius:14,
+              padding:"14px 8px",
+              textAlign:"center",
+              border:`2px solid ${isSpeaking ? p.color : isConnected ? `${p.color}44` : "rgba(255,255,255,0.05)"}`,
+              boxShadow: isSpeaking ? `0 0 16px ${p.color}44` : "none",
+              transition:"all .2s ease",
+              position:"relative",
+            }}>
+              {/* Speaking ring animation */}
+              {isSpeaking && (
+                <div style={{
+                  position:"absolute",
+                  inset:-4,
+                  borderRadius:18,
+                  border:`2px solid ${p.color}`,
+                  animation:"livePulse 1s ease-in-out infinite",
+                  pointerEvents:"none",
+                }}/>
+              )}
+
+              {/* Avatar */}
+              <div style={{
+                width:44,
+                height:44,
+                borderRadius:"50%",
+                background: isConnected ? `${p.color}33` : "rgba(255,255,255,0.04)",
+                border:`2px solid ${isConnected ? p.color : "rgba(255,255,255,0.08)"}`,
+                margin:"0 auto 10px",
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                fontSize:20,
+                boxShadow: isConnected ? `0 0 12px ${p.color}66` : "none",
+              }}>
+                {isConnected ? (isMutedParticipant ? "🔇" : isSpeaking ? "🗣️" : "🎙️") : "💤"}
+              </div>
+
+              <div style={{fontSize:11,fontWeight:700,color:isConnected ? p.color : "#4A5066"}}>{p.name}</div>
+              <div style={{fontSize:9,marginTop:3,color:
+                isSpeaking ? p.color :
+                isMutedParticipant ? "#FF5C8A" :
+                isConnected ? "#7CFFB2" :
+                "#3A4256"
+              }}>
+                {isConnected
+                  ? isMutedParticipant ? "muted"
+                  : isSpeaking ? "speaking"
+                  : "listening"
+                  : "not in room"}
+              </div>
+
+              {isMe && isConnected && (
+                <div style={{fontSize:8,color:"#B8FF4D",fontWeight:700,marginTop:4,background:"rgba(184,255,77,0.1)",padding:"2px 6px",borderRadius:99,display:"inline-block"}}>
+                  YOU
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Controls */}
+      <div style={{display:"flex",gap:10}}>
+        <button
+          onClick={toggleMute}
+          className="bb-pressable"
+          style={{
+            flex:1,
+            background: muted ? "rgba(255,92,138,0.15)" : "rgba(184,255,77,0.12)",
+            border:`1px solid ${muted ? "rgba(255,92,138,0.4)" : "rgba(184,255,77,0.35)"}`,
+            borderRadius:12,
+            padding:"13px 0",
+            fontSize:13,
+            fontWeight:700,
+            color: muted ? "#FF5C8A" : "#B8FF4D",
+            cursor:"pointer",
+            display:"flex",
+            alignItems:"center",
+            justifyContent:"center",
+            gap:6,
+          }}>
+          {muted ? "🔇 unmute" : "🎙️ mute"}
+        </button>
+
+        <button
+          onClick={leaveRoom}
+          className="bb-pressable"
+          style={{
+            flex:1,
+            background:"rgba(255,92,138,0.1)",
+            border:"1px solid rgba(255,92,138,0.3)",
+            borderRadius:12,
+            padding:"13px 0",
+            fontSize:13,
+            fontWeight:700,
+            color:"#FF5C8A",
+            cursor:"pointer",
+          }}>
+          📵 leave
+        </button>
+      </div>
+
+      {/* Speaking indicator bar */}
+      {Object.keys(speakingMap).length > 0 && (
+        <div style={{marginTop:12,display:"flex",alignItems:"center",gap:8,background:"rgba(184,255,77,0.06)",borderRadius:10,padding:"8px 12px"}}>
+          <div style={{display:"flex",gap:3,alignItems:"center"}}>
+            {[0,1,2].map(i=>(
+              <div key={i} style={{
+                width:3,
+                height:[8,14,10][i],
+                background:"#B8FF4D",
+                borderRadius:99,
+                animation:`bounceDot 1s ease-in-out infinite`,
+                animationDelay:`${i*0.15}s`,
+              }}/>
+            ))}
+          </div>
+          <div style={{fontSize:11,color:"#B8FF4D",fontWeight:600}}>
+            {(() => {
+              const speakingIds = Object.keys(speakingMap);
+              const speakingNames = participantList
+                .filter(p => speakingIds.includes(p.session_id))
+                .map(p => p.user_name);
+              return speakingNames.length > 0 ? `${speakingNames.join(", ")} speaking` : "";
+            })()}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}          
+          
+          
+function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus, setTypingStatus, setTab, setChatOpen }) {
   const [text, setText] = useState("");
 useEffect(() => {
   if (!text.trim()) {
@@ -1928,36 +2348,45 @@ useEffect(() => {
     setMessages(upd); await storeSet("chat", upd);
   };
 
-  return (
+return (
     <div className="bb-tab-content" style={s.chatTabWrap}>
-      <div style={s.chatHeader}><div style={s.sectionLabel}>team chat</div><div style={s.sectionSubLabel}>long press a message to react</div></div>
+      <div style={{...s.chatHeader, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
+        <div>
+          <div style={s.sectionLabel}>team chat</div>
+          <div style={s.sectionSubLabel}>long press a message to react</div>
+        </div>
+<button onClick={()=>{ setChatOpen(false); setTab("room"); }} className="bb-pressable"
+  style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#B8FF4D",cursor:"pointer",display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+  🎙️ join vc
+</button>
+      </div>
       <div style={s.chatScroll}>
         {messages.length === 0 && <div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
         {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} />)}
-{(() => {
-  const now = Date.now();
-  const typers = Object.entries(typingStatus)
-    .filter(([pid, ts]) => pid !== currentPlayer && now - new Date(ts).getTime() < 8000)
-    .map(([pid]) => PLAYERS.find(p => p.id === pid)?.name)
-    .filter(Boolean);
-  if (!typers.length) return null;
-  return (
-    <div style={{ padding: "4px 8px 8px", display: "flex", alignItems: "center", gap: 6, animation: "fadeSlideUp .2s ease" }}>
-      <span style={{ fontSize: 11.5, color: "#4A5066", fontStyle: "italic" }}>
-        {typers.join(", ")} {typers.length === 1 ? "is" : "are"} typing
-      </span>
-      <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
-        {[0, 1, 2].map(i => (
-          <span key={i} style={{
-            width: 5, height: 5, borderRadius: "50%", background: "#4A5066", display: "inline-block",
-            animation: `bounceDot 1.2s ease-in-out infinite`,
-            animationDelay: `${i * 0.2}s`
-          }}/>
-        ))}
-      </span>
-    </div>
-  );
-})()}
+        {(() => {
+          const now = Date.now();
+          const typers = Object.entries(typingStatus)
+            .filter(([pid, ts]) => pid !== currentPlayer && now - new Date(ts).getTime() < 8000)
+            .map(([pid]) => PLAYERS.find(p => p.id === pid)?.name)
+            .filter(Boolean);
+          if (!typers.length) return null;
+          return (
+            <div style={{ padding: "4px 8px 8px", display: "flex", alignItems: "center", gap: 6, animation: "fadeSlideUp .2s ease" }}>
+              <span style={{ fontSize: 11.5, color: "#4A5066", fontStyle: "italic" }}>
+                {typers.join(", ")} {typers.length === 1 ? "is" : "are"} typing
+              </span>
+              <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
+                {[0, 1, 2].map(i => (
+                  <span key={i} style={{
+                    width: 5, height: 5, borderRadius: "50%", background: "#4A5066", display: "inline-block",
+                    animation: `bounceDot 1.2s ease-in-out infinite`,
+                    animationDelay: `${i * 0.2}s`
+                  }}/>
+                ))}
+              </span>
+            </div>
+          );
+        })()}
         <div ref={scrollRef} />
       </div>
       <div style={s.chatInputRow}>
@@ -2583,7 +3012,7 @@ function AdminSetMMR({ player, existing, onSave, onClose }) {
     </div></div>
   );
 }
-function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP }) {
+function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP, parseCredits, setParseCredits, creditRequests, setCreditRequests }) {
   const [assigning,setAssigning]=useState(null); const [settingMmrFor,setSettingMmrFor]=useState(null); const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
   const today=todayAtMidnight();
   const totalDays=Math.ceil((PLAYOFF_END-TRAINING_START)/DAY_MS);
@@ -2598,6 +3027,59 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
     <div className="bb-tab-content" style={s.tabContent}>
       {assigning&&<AdminAssignTraining dateKeyStr={assigning.dateKeyStr} player={PLAYERS.find((p)=>p.id===assigning.playerId)} existing={trainingData[tKey(assigning.dateKeyStr,assigning.playerId)]} onSave={(data)=>saveTraining(assigning.dateKeyStr,assigning.playerId,data)} onClose={()=>setAssigning(null)}/>}
   <VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP}/>
+
+{/* Credit Requests */}
+{(creditRequests||[]).filter(r=>r.status==="pending").length > 0 && (
+  <div style={{marginBottom:24}}>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+      <span style={{fontSize:13,fontWeight:700,color:"#4D9EFF"}}>⚡ parse credit requests</span>
+      <span style={{fontSize:11,color:"#4A5066"}}>{(creditRequests||[]).filter(r=>r.status==="pending").length} pending</span>
+    </div>
+    <div style={{fontSize:11,color:"#4A5066",marginBottom:10}}>
+      reserve: <span style={{color:"#4D9EFF",fontWeight:700}}>{parseCredits?.reserve ?? PARSE_RESERVE_DEFAULT}</span> credits remaining
+    </div>
+    {(creditRequests||[]).filter(r=>r.status==="pending").map(req=>(
+      <div key={req.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(77,158,255,0.25)"}}>
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#4D9EFF"}}>{req.playerName}</div>
+          <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>
+            current balance: <span style={{color:"#E8ECF4",fontWeight:700}}>{parseCredits?.[req.playerId] ?? PARSE_CREDITS_DEFAULT}</span> credits · requested {fmtRelTime(req.requestedAt)}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          {[10,25,50].map(amt=>(
+            <button key={amt} onClick={async()=>{
+              const reserve = parseCredits?.reserve ?? PARSE_RESERVE_DEFAULT;
+              if(reserve < amt){ addToast?.("not enough in reserve","❌"); return; }
+              const current = parseCredits?.[req.playerId] ?? PARSE_CREDITS_DEFAULT;
+              const upd = {...parseCredits,[req.playerId]:current+amt,reserve:reserve-amt};
+              setParseCredits(upd);
+              await storeSet("parse_credits",upd);
+              const updReqs = (creditRequests||[]).map(r=>r.id===req.id?{...r,status:"approved",approvedAt:new Date().toISOString(),amount:amt}:r);
+              setCreditRequests(updReqs);
+              await storeSet("credit_requests",updReqs);
+              addToast?.(`+${amt} credits sent to ${req.playerName}`,"✅");
+            }} className="bb-pressable bb-glow-lime"
+              style={{flex:1,background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>
+              +{amt}
+            </button>
+          ))}
+          <button onClick={async()=>{
+            const updReqs=(creditRequests||[]).map(r=>r.id===req.id?{...r,status:"denied",deniedAt:new Date().toISOString()}:r);
+            setCreditRequests(updReqs);
+            await storeSet("credit_requests",updReqs);
+            addToast?.(`denied ${req.playerName}'s credit request`,"❌");
+          }} className="bb-pressable"
+            style={{flex:1,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
+            deny
+          </button>
+        </div>
+      </div>
+    ))}
+  </div>
+)}
+
+
       <div style={s.adminHeader}><Shield size={16} color="#FF5C8A"/><span style={s.adminHeaderText}>captain controls</span></div>
       <div style={s.sectionLabel}>assign training</div>
       <div style={s.sectionSubLabel}>pick a teammate, tap a day</div>
@@ -3148,89 +3630,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
     if (swipeOffset > 80) { onClose(); setSwipeOffset(0); }
     else setSwipeOffset(0);
   };
-
-useEffect(() => {
-  if (!teamRoom) return;
-
-  const pollForGames = async () => {
-    const roomCutoff = new Date(teamRoom.createdAt).getTime();
-    const detectedGames = {};
-
-    for (const p of PLAYERS) {
-      const profile = await getMMR(p.id);
-      if (!profile) continue;
-
-      try {
-        const res = await fetch(
-          `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${profile.platform}&username=${profile.handle}`,
-          { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
-        );
-        const json = await res.json();
-        const sessions = json?.data?.sessions || [];
-        
-        // filter to sessions after room opened and matching mode
-        const playlistName = teamRoom.mode === "3v3"
-          ? "Ranked Standard 3v3"
-          : "Ranked Doubles 2v2";
-
-        const recentSession = sessions
-          .filter(s => {
-            const ts = new Date(s.date || s.metadata?.date).getTime();
-            return ts > roomCutoff && s.metadata?.playlistName === playlistName;
-          })
-          .sort((a, b) => new Date(b.date || b.metadata?.date) - new Date(a.date || a.metadata?.date))[0];
-
-        if (recentSession) {
-          detectedGames[p.id] = {
-            playerId: p.id,
-            mode: teamRoom.mode,
-            ourScore: recentSession.stats?.goals?.value || recentSession.metadata?.team1Score || 0,
-            theirScore: recentSession.metadata?.team2Score || recentSession.stats?.goalsAgainst?.value || 0,
-            goals: recentSession.stats?.goals?.value || 0,
-            assists: recentSession.stats?.assists?.value || 0,
-            saves: recentSession.stats?.saves?.value || 0,
-            shots: recentSession.stats?.shots?.value || 0,
-            score: recentSession.stats?.score?.value || 0,
-            demos: recentSession.stats?.demolitions?.value || 0,
-            ts: new Date(recentSession.date || recentSession.metadata?.date).toISOString(),
-            roomId: teamRoom.id,
-            sessionCode: teamRoom.id,
-            id: Date.now().toString() + p.id,
-          };
-        }
-      } catch(e) {
-        console.log("poll error for", p.id, e);
-      }
-    }
-
-    const expectedPlayers = teamRoom.mode === "2v2" ? 2 : 3;
-    const detectedIds = Object.keys(detectedGames);
-
-    if (detectedIds.length >= expectedPlayers) {
-      // check scores all match
-      const scores = detectedIds.map(id => `${detectedGames[id].ourScore}-${detectedGames[id].theirScore}`);
-      const allMatch = scores.every(s => s === scores[0]);
-
-      if (allMatch) {
-        // auto log all games
-        const newEntries = Object.values(detectedGames);
-        const updStats = [...newEntries, ...stats];
-        await storeSet("stats", updStats);
-        setStats(updStats);
-
-        // close the room
-        setTeamRoom(null);
-        await storeSet("team_room", { closed: true, closedAt: new Date().toISOString() });
-
-        addToast?.("🎮 game detected — stats auto-logged for everyone!", "✅");
-      }
-    }
-  };
-
-  // poll every 60 seconds
-  const iv = setInterval(pollForGames, 60000);
-  return () => clearInterval(iv);
-}, [teamRoom?.id]);              
+             
               
   return (
     <div
@@ -3360,7 +3760,7 @@ useEffect(() => {
 }
 
 
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast }) {
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit }) {
   const [mode,setMode]=useState("3v3");
   const [logging,setLogging]=useState(false);
   const [showAllGames, setShowAllGames]=useState(false);
@@ -3428,6 +3828,8 @@ return (
 <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>stats tracker</div>
         <button onClick={async () => {
+          const creditOk = useParseCredit ? await useParseCredit(currentPlayer) : true;
+          if (!creditOk) return;
           const profile = mmrProfiles?.[currentPlayer];
           if (!profile) return;
           addToast?.("syncing…", "🔄");
@@ -3928,7 +4330,94 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
     </div>
   );
 }
-function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed }) {
+
+
+function MusicShare({ currentPlayer, addToast }) {
+  const [link, setLink] = useState("");
+  const [shared, setShared] = useState([]);
+
+  useEffect(() => {
+    storeGet("music_links").then(v => { if (v) setShared(Array.isArray(v) ? v : []); });
+    const unsub = subscribeKVMulti(["music_links"], ({ value }) => {
+      setShared(Array.isArray(value) ? value : []);
+    });
+    return () => unsub?.();
+  }, []);
+
+  const detectPlatform = (url) => {
+    if (url.includes("spotify.com")) return { label:"Spotify", emoji:"S", color:"#1DB954" };
+    if (url.includes("soundcloud.com")) return { label:"SoundCloud", emoji:"SC", color:"#FF5500" };
+    if (url.includes("music.apple.com")) return { label:"Apple Music", emoji:"AM", color:"#FC3C44" };
+    if (url.includes("youtube.com")||url.includes("youtu.be")) return { label:"YouTube", emoji:"YT", color:"#FF0000" };
+    return { label:"Link", emoji:"->", color:"#B8FF4D" };
+  };
+
+  const submit = async () => {
+    if (!link.trim()) return;
+    const platform = detectPlatform(link.trim());
+    const entry = {
+      id: Date.now().toString(),
+      playerId: currentPlayer,
+      playerName: PLAYERS.find(p => p.id === currentPlayer)?.name,
+      playerColor: PLAYERS.find(p => p.id === currentPlayer)?.color,
+      url: link.trim(),
+      platform,
+      ts: new Date().toISOString(),
+    };
+    const upd = [entry, ...shared].slice(0, 20);
+    setShared(upd);
+    await storeSet("music_links", upd);
+    setLink("");
+    addToast(`${entry.playerName} shared a ${platform.label} link`);
+  };
+
+  return (
+    <div style={{marginTop:20}}>
+      <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>MUSIC SHARE</div>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        <input
+          value={link}
+          onChange={e=>setLink(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&submit()}
+          placeholder="paste spotify, soundcloud, youtube, apple music..."
+          style={{...s.chatInput,flex:1,fontSize:12}}
+        />
+        <button onClick={submit} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}>
+          <Send size={16}/>
+        </button>
+      </div>
+      {shared.length===0 && (
+        <div style={{textAlign:"center",color:"#4A5066",fontSize:13,padding:"20px 0"}}>no links shared yet</div>
+      )}
+      {shared.map(entry => {
+        const p = entry.platform;
+        return (
+          <div key={entry.id} style={{background:"#11131F",borderRadius:14,padding:"12px 14px",marginBottom:10,border:"1px solid rgba(255,255,255,0.06)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <span style={{fontSize:11,fontWeight:700,color:p.color}}>{p.label}</span>
+              <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>{fmtRelTime(entry.ts)}</span>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+              <div style={{width:6,height:6,borderRadius:99,background:entry.playerColor,flexShrink:0}}/>
+              <span style={{fontSize:11,fontWeight:700,color:entry.playerColor}}>{entry.playerName}</span>
+            </div>
+            <button
+              onClick={()=>window.open(entry.url,"_blank")}
+              style={{display:"block",width:"100%",background:"rgba(184,255,77,0.08)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:10,padding:"10px 12px",fontSize:12,color:"#B8FF4D",fontWeight:700,textAlign:"center",cursor:"pointer"}}
+            >
+              open link
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
+
+
+function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed, parseCredits, creditRequests, setCreditRequests }) {
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
@@ -4035,6 +4524,41 @@ const activityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).ma
 <button onClick={() => setShowFlowers(v => !v)} className="bb-pressable" style={{ background: "rgba(255,97,193,0.1)", border: "1px solid rgba(255,97,193,0.3)", borderRadius: 10, padding: "8px 12px", color: "#FF61C1", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>🌸 props</button>
         </div>
       </div>
+
+{/* Parse Credits */}
+<div style={{background:"#11131F",border:"1px solid rgba(77,158,255,0.2)",borderRadius:14,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+  <div>
+    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>PARSE API CREDITS</div>
+    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:600,color:"#4D9EFF"}}>
+      {parseCredits?.[currentPlayer] ?? PARSE_CREDITS_DEFAULT}
+      <span style={{fontSize:11,color:"#4A5066",marginLeft:4}}>remaining</span>
+    </div>
+    <div style={{fontSize:10,color:"#4A5066",marginTop:2}}>used for mmr syncs · rank lookups</div>
+  </div>
+  {(parseCredits?.[currentPlayer] ?? PARSE_CREDITS_DEFAULT) <= 10 && (
+    <button onClick={async () => {
+      const existing = (creditRequests||[]).find(r => r.playerId === currentPlayer && r.status === "pending");
+      if (existing) { addToast?.("request already pending — captain will approve soon", "ℹ️"); return; }
+      const req = {
+        id: Date.now().toString(),
+        playerId: currentPlayer,
+        playerName: PLAYERS.find(p=>p.id===currentPlayer)?.name,
+        requestedAt: new Date().toISOString(),
+        status: "pending",
+      };
+      const upd = [...(creditRequests||[]), req];
+      setCreditRequests(upd);
+      await storeSet("credit_requests", upd);
+      addToast?.("credit request sent to captain!", "📨");
+    }} className="bb-pressable bb-glow-lime"
+      style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 14px",fontSize:11,fontWeight:700,color:"#B8FF4D",cursor:"pointer",flexShrink:0}}>
+      request more
+    </button>
+  )}
+  {(parseCredits?.[currentPlayer] ?? PARSE_CREDITS_DEFAULT) > 10 && (
+    <div style={{fontSize:22}}>🟢</div>
+  )}
+</div>
 
       {/* Notification center */}
    {showNotifs && (
@@ -4846,7 +5370,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "typing", "activity_feed"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "typing", "activity_feed", "parse_credits", "music_links", "credit_requests"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -7267,6 +7791,8 @@ const backBtnStyle = {
   background:"none",border:"none",color:"#A78BFA",fontSize:12.5,fontWeight:700,
   cursor:"pointer",padding:"0 0 16px",display:"block",letterSpacing:0.3,
 };                  
+      
+                  
                   
                   
 export default function App() {
@@ -7288,6 +7814,8 @@ const [toasts, setToasts] = useState([]);
   const [presence,setPresence]=useState({});
   const [pings,setPings]=useState([]);
   const [points,setPoints]=useState({});
+const [parseCredits, setParseCredits] = useState({});
+const [creditRequests, setCreditRequests] = useState([]);                      
 const [bets,setBets]=useState([]);
   const [resyncingId,setResyncingId]=useState(null);
 const [passXP, setPassXP] = useState({});       // { [playerId]: number }
@@ -7323,12 +7851,13 @@ const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
 const lastActiveRef = useRef(Date.now());
 const AUTO_LOCK_MS = 10 * 60 * 1000;
+const toastDismissedAll = useRef(false);
 const addToast = useCallback((text, icon = "🔔") => {
+  if (toastDismissedAll.current) return;
   const id = Date.now().toString();
   setToasts(prev => [...prev, { id, text, icon }]);
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
-}, []);
-                      
+}, []);              
 
 useEffect(() => {
   if (catchupStopped || catchupQueue.length === 0) return;
@@ -7389,6 +7918,8 @@ if (key === "flowers") setFlowers(Array.isArray(value) ? value : []);
 if (key === "chemistry") setChemistry(value || {});
 if (key === "coin_flips") setCoinFlips(value);
 if (key === "team_room") setTeamRoom(value?.closed ? null : value);
+if (key === "parse_credits") setParseCredits(value);
+if (key === "credit_requests") setCreditRequests(Array.isArray(value) ? value : []);
 if (key === "active_race") {
   if (value?.objectiveId) {
     setActiveRace(value.objectiveId);
@@ -7422,6 +7953,8 @@ if (key === "pass_claimed") setPassClaimed(value);
 if (key === "pass_tokens")  setPassTokens(value);
 if (key === "pass_active_boosts") setPassActiveBoosts(value);
 if (key === "typing") setTypingStatus(value || {});
+if (key === "parse_credits") setParseCredits(value || {});
+if (key === "credit_requests") setCreditRequests(Array.isArray(value) ? value : []);
 if (key === "activity_feed") {
   const myFeed = (Array.isArray(value)?value:[]).filter(e=>e.to===currentPlayer);
   const prev = activityFeed || [];
@@ -7465,7 +7998,7 @@ return () => {
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af] = await Promise.all([
+  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
     storeGet("schedule"),
     storeGet("training"),
     storeGet("completions"),
@@ -7476,6 +8009,8 @@ const loadSharedData = async (pid) => {
     storeGet("stats"),
     storeGet("presence"),
     storeGet("pings"),
+storeGet("parse_credits"),
+storeGet("credit_requests"),
     storeGet("team_room"),
     storeGet("points"),
     storeGet("bets"),
@@ -7490,7 +8025,9 @@ const loadSharedData = async (pid) => {
     storeGet("active_race"),
     storeGet("chemistry"),
     storeGet("flip_challenges"),
-    storeGet("activity_feed"),
+ storeGet("activity_feed"),
+    storeGet("parse_credits"),
+    storeGet("credit_requests"),
   ]);
 
   if (sched) setSchedule(sched);
@@ -7522,9 +8059,9 @@ const loadSharedData = async (pid) => {
     const myFeed = (Array.isArray(af) ? af : []).filter(e => e.to === pid);
     setActivityFeed(myFeed);
 
-    const lastLoginAt = await storeGet(`lastLoginAt:${pid}`) || 0;
-    const newSince = new Date(lastLoginAt).getTime();
-    await storeSet(`lastLoginAt:${pid}`, new Date().toISOString());
+const lastLoginAt = await storeGet(`lastLoginAt:${pid}`);
+const newSince = lastLoginAt ? new Date(lastLoginAt).getTime() : Date.now();
+await storeSet(`lastLoginAt:${pid}`, new Date().toISOString());
 
 const unseenNew = myFeed.filter(e =>
       !e.seen && new Date(e.ts).getTime() > newSince
@@ -7558,8 +8095,14 @@ const unseenNew = myFeed.filter(e =>
       .sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
 if (allCatchup.length > 0) {
-      setPendingActivityToasts(allCatchup);
-    }
+  setPendingActivityToasts(allCatchup);
+  // immediately mark all as seen so they don't repeat
+  const allIds = new Set(allCatchup.map(e => e.id).filter(Boolean));
+  const markedAll = (Array.isArray(af) ? af : []).map(e =>
+    allIds.has(e.id) ? { ...e, seen: true } : e
+  );
+  await storeSet("activity_feed", markedAll);
+}
 
     if (unseenNew.length > 0) {
       const seenIds = new Set(unseenNew.map(e => e.id));
@@ -7567,6 +8110,10 @@ if (allCatchup.length > 0) {
       await storeSet("activity_feed", markedSeen);
     }
   }
+
+
+if (pc) setParseCredits(pc);
+if (cr) setCreditRequests(Array.isArray(cr) ? cr : []);
 
 const profiles = {};
   for (const p of PLAYERS) {
@@ -7595,7 +8142,22 @@ const profiles = {};
 };
 
 
+const useParseCredit = async (playerId) => {
+  const current = parseCredits?.[playerId] ?? PARSE_CREDITS_DEFAULT;
+  if (current <= 0) {
+    addToast("out of parse credits — request more in the squad tab", "❌");
+    return false;
+  }
+  const upd = { ...parseCredits, [playerId]: current - 1 };
+  setParseCredits(upd);
+  await storeSet("parse_credits", upd);
+  return true;
+};
+
+
 const handleResync = async (pid) => {
+  const ok = await useParseCredit(pid);
+  if (!ok) return;
   setResyncingId(pid);
   setResyncOverlay(true);
   setPendingResyncPlayer(pid);
@@ -7651,12 +8213,13 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")}/></>;
 if (loading) return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center",animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}><div style={{color:"#4A5066",fontSize:13,letterSpacing:1}}>loading team data…</div></div></>;
-  if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
+  if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onUseCredit={async()=>{ const current = parseCredits?.[selectedPlayerId] ?? PARSE_CREDITS_DEFAULT; if(current<=0) return false; const upd={...parseCredits,[selectedPlayerId]:current-1}; setParseCredits(upd); await storeSet("parse_credits",upd); return true; }} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const isAdmin=currentPlayer===ADMIN_ID;
 const TABS=[
     {id:"home",     icon:Home,       label:"home"},
     {id:"bracket",  icon:Trophy,     label:"bracket"},
+    {id:"room",     icon:MessageCircle, label:"room"},
     {id:"training", icon:Dumbbell,   label:"training"},
     {id:"social",   icon:ImageIcon,  label:"social"},
     {id:"stats",    icon:BarChart2,  label:"stats"},
@@ -7691,7 +8254,18 @@ const TABS=[
 
 {toasts.length > 0 && (
   <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto"}}>
-    <SwipeToast key={toasts[0].id} toast={toasts[0]} onDismiss={()=>setToasts(prev=>prev.slice(1))}/>
+    <SwipeToast
+      key={toasts[0].id}
+      toast={toasts[0]}
+      onDismiss={()=>setToasts(prev=>prev.slice(1))}
+      onDismissAll={()=>{
+        setToasts([]);
+        setCatchupQueue([]);
+        setCatchupStopped(true);
+        toastDismissedAll.current = true;
+        setTimeout(()=>{ toastDismissedAll.current = false; }, 30000);
+      }}
+    />
   </div>
 )}
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
@@ -7741,14 +8315,24 @@ const TABS=[
         {tab==="bracket"&&<BracketTab key={tab} schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
       {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
-        {tab==="chat"&&<ChatTab key={tab} messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
-{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast}/>}
+          
+{tab==="room"&&(
+  <div style={{display:"flex",flexDirection:"column",alignItems:"center",height:"100%",padding:"20px",overflowY:"auto"}}>
+    <div style={{width:"100%",maxWidth:480}}>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
+      <div style={{fontSize:12,color:"#4A5066",marginBottom:20,textAlign:"center"}}>audio only · no video</div>
+      <VoiceRoom currentPlayer={currentPlayer} addToast={addToast}/>
+    </div>
+  </div>
+)}    
+          
+{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit}/>}
  {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
 {tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
 
 {tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
-{tab==="presence"&&<PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed}/>}
+{tab==="presence"&&<PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/>}
 {tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
 {tab==="games"&&<GamesTab
@@ -7763,10 +8347,10 @@ const TABS=[
   raceStart={raceStart}
   setRaceStart={setRaceStart}
 />}
-   {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>}
+ {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/>}
       </div>
       {chatOpen && (
-       <div style={{position:"fixed",inset:0,zIndex:50,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease",paddingBottom:"env(safe-area-inset-bottom,0px)"}}>
+    <div style={{position:"fixed",inset:0,zIndex:50,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease",paddingBottom:0}}>
           <div style={{animation:"chatSlideIn .32s cubic-bezier(.2,.8,.2,1)",flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={()=>{
@@ -7778,7 +8362,7 @@ const TABS=[
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team chat</div>
             </div>
            <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
-  <ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus}/>
+<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus} setTab={setTab} setChatOpen={setChatOpen}/>
 </div>
           </div>
         </div>
@@ -7931,14 +8515,14 @@ modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"10
   counterVal:{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:600,minWidth:50,textAlign:"center"},
   chatTabWrap:{display:"flex",flexDirection:"column",flex:1,minHeight:0},
   chatHeader:{padding:"16px 16px 8px",flexShrink:0},
-  chatScroll:{flex:1,overflowY:"auto",padding:"0 16px",WebkitOverflowScrolling:"touch"},
+  chatScroll:{flex:1,overflowY:"auto",padding:"0 16px",WebkitOverflowScrolling:"touch", maxHeight:"calc(100dvh - 340px)"},
   chatEmpty:{textAlign:"center",color:"#4A5066",fontSize:13,marginTop:40},
   chatMsgRow:{display:"flex",marginBottom:10},
   chatBubble:{maxWidth:"78%",borderRadius:15,padding:"9px 13px"},
   chatAuthor:{fontSize:11,fontWeight:700,marginBottom:3},
   chatText:{fontSize:14.5,lineHeight:1.4},
   chatTime:{fontSize:10,marginTop:4,textAlign:"right"},
-chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"80px",borderTop:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
+chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"12px",borderTop:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
   chatInput:{flex:1,background:"#11131F",border:"1px solid rgba(255,255,255,0.1)",borderRadius:99,padding:"11px 16px",color:"#E8ECF4",fontSize:14,outline:"none"},
   chatSendBtn:{width:42,height:42,background:"#B8FF4D",border:"none",borderRadius:99,color:"#06070D",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0},
   commentItem:{display:"flex",gap:8,marginBottom:14},
