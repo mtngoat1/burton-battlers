@@ -2023,11 +2023,26 @@ const remoteStreamRef = useRef(new MediaStream());
     setLoading(true);
     setError(null);
 try {
-  await navigator.mediaDevices.getUserMedia({
-    audio: true,
-    video: false,
-  });
+await navigator.mediaDevices.getUserMedia({
+  audio: {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: false,
+  channelCount: 1,
+},
+  video: false,
+});
 
+    
+if (callObject) {
+  try {
+    await callObject.leave();
+    callObject.destroy();
+  } catch (err) {
+    console.log("old call cleanup failed", err);
+  }
+  setCallObject(null);
+}    
         
         
 const co = window.DailyIframe.createCallObject({
@@ -2072,8 +2087,22 @@ const co = window.DailyIframe.createCallObject({
           return next;
         });
       });
-co.on("active-speaker-change", () => {
-  // disabled for now — was causing stuck speaking UI on mobile
+co.on("active-speaker-change", (e) => {
+  const id =
+    e.activeSpeaker?.peerId ||
+    e.activeSpeaker?.session_id ||
+    e.activeSpeaker?.sessionId;
+
+  if (!id) {
+    setSpeakingMap({});
+    return;
+  }
+
+  setSpeakingMap({ [id]: true });
+
+  setTimeout(() => {
+    setSpeakingMap({});
+  }, 1200);
 });
       co.on("error", (e) => {
         setError("connection error — check mic permissions");
@@ -2174,7 +2203,8 @@ setMuted(false);
         )}
 
         <button
-    onClick={async () => {
+onClick={async () => {
+  if (loading || joined) return;
   await joinRoom();
 }}
           disabled={loading}
@@ -2218,10 +2248,9 @@ setMuted(false);
       boxShadow:"0 0 24px rgba(184,255,77,0.08)",
     }}>
 <audio
-  ref={remoteAudioRef}
   autoPlay
   playsInline
-  controls
+  style={{ display: "none" }}
   style={{ width: "100%", marginBottom: 10 }}
 />
 
@@ -2239,28 +2268,6 @@ setMuted(false);
   </div>
 </div>
 
-<button
-  onClick={() => {
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = remoteStreamRef.current;
-      remoteAudioRef.current.muted = false;
-      remoteAudioRef.current.volume = 1;
-      remoteAudioRef.current.play().catch(console.error);
-    }
-  }}
-  style={{
-    marginBottom: 12,
-    padding: "8px 12px",
-    borderRadius: 10,
-    background: "#B8FF4D",
-    color: "#000",
-    border: "none",
-    fontWeight: 700,
-    cursor: "pointer"
-  }}
->
-  🔊 Enable Phone Audio
-</button>
       {/* Participant cards */}
       <div style={{display:"flex",gap:10,marginBottom:16}}>
         {PLAYERS.map(p => {
@@ -2319,10 +2326,12 @@ setMuted(false);
                 "#3A4256"
               }}>
                 {isConnected
-                  ? isMutedParticipant ? "muted"
-                  : isSpeaking ? "speaking"
-                  : "listening"
-                  : "not in room"}
+  ? isMutedParticipant
+    ? "muted"
+    : isSpeaking || speakingMap[p.session_id]
+      ? "talking"
+      : "listening"
+  : "not in room"}
               </div>
 
               {isMe && isConnected && (
@@ -3698,12 +3707,29 @@ setProgress(100);
 
 function TeamRoomModal({ currentPlayer, stats, setStats, teamRoom, setTeamRoom, onClose, addToast }) {
   const [mode, setMode] = useState("3v3");
-  const [loggingInRoom, setLoggingInRoom] = useState(false);
-  const openRoom = async () => {
-    const room = { id: Date.now().toString(), mode, createdBy: currentPlayer, createdAt: new Date().toISOString(), games: [] };
-    setTeamRoom(room);
-    await storeSet("team_room", room);
+const [loggingInRoom, setLoggingInRoom] = useState(false);   
+const [roomSyncing, setRoomSyncing] = useState(false);
+const [roomSyncMsg, setRoomSyncMsg] = useState("");                
+const openRoom = async () => {
+  const room = {
+    id: Date.now().toString(),
+    mode,
+    playlist:
+      mode === "1v1" ? "Ranked Duel 1v1" :
+      mode === "2v2" ? "Ranked Doubles 2v2" :
+      "Ranked Standard 3v3",
+    players:
+      mode === "1v1" ? [currentPlayer] :
+      mode === "2v2" ? ["p1", currentPlayer].filter((v, i, a) => a.indexOf(v) === i) :
+      PLAYERS.map(p => p.id),
+    createdBy: currentPlayer,
+    createdAt: new Date().toISOString(),
+    games: []
   };
+
+  setTeamRoom(room);
+  await storeSet("team_room", room);
+};
   const closeRoom = async () => {
     setTeamRoom(null);
     await storeSet("team_room", { closed: true, closedAt: new Date().toISOString() });
@@ -3711,6 +3737,118 @@ function TeamRoomModal({ currentPlayer, stats, setStats, teamRoom, setTeamRoom, 
   };
   const roomGames = teamRoom ? stats.filter(g => g.roomId === teamRoom.id) : [];
   const byPlayer = PLAYERS.map(p => ({ player: p, game: roomGames.find(g => g.playerId === p.id) }));
+
+                
+const fetchLatest3v3ForPlayer = async (player, roomOpenedAt) => {
+  const platform = player.platform === "xbl" ? "xbox" : player.platform;
+
+  const res = await fetch(
+    `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${platform}&username=${player.name}`,
+    { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+  );
+
+  const json = await res.json();
+  const items = json?.data?.items || [];
+
+  return items
+    .filter(item =>
+      item?.metadata?.playlist === teamRoom.playlist &&
+      item?.metadata?.isGrouped === false &&
+      item?.stats?.matchesPlayed?.value === 1 &&
+      new Date(item?.metadata?.dateCollected).getTime() >= new Date(roomOpenedAt).getTime() - 2 * 60 * 1000
+    )
+    .sort((a, b) => new Date(a.metadata.dateCollected) - new Date(b.metadata.dateCollected))[0];
+};
+
+const syncRoomFromParse = async () => {
+  if (!teamRoom || roomSyncing) return;
+
+  setRoomSyncing(true);
+  setRoomSyncMsg("checking tracker…");
+
+  try {
+    const pulled = await Promise.all(
+      PLAYERS
+  .filter(p => teamRoom.players.includes(p.id))
+  .map(async (p) => ({
+        player: p,
+        match: await fetchLatest3v3ForPlayer(p, teamRoom.createdAt),
+      }))
+    );
+
+    if (pulled.some(x => !x.match)) {
+      setRoomSyncMsg("waiting for all 3 matches to show on tracker…");
+      setRoomSyncing(false);
+      return;
+    }
+
+    const times = pulled.map(x => new Date(x.match.metadata.dateCollected).getTime());
+    const maxTime = Math.max(...times);
+    const minTime = Math.min(...times);
+    const within10Min = maxTime - minTime <= 10 * 60 * 1000;
+
+    const results = pulled.map(x => x.match.metadata.result);
+    const sameResult = results.every(r => r === results[0]);
+
+    if (!within10Min || !sameResult) {
+      setRoomSyncMsg("found 3 games, but they don't look like the same match yet");
+      setRoomSyncing(false);
+      return;
+    }
+
+    const alreadyImported = pulled.some(x =>
+      stats.some(g => g.parseMatchId === x.match.id && g.playerId === x.player.id)
+    );
+
+    if (alreadyImported) {
+      setRoomSyncMsg("that match was already imported");
+      setRoomSyncing(false);
+      return;
+    }
+
+    const result = pulled[0].match.metadata.result;
+    const isWin = result === "victory";
+
+    const importedGames = pulled.map(({ player, match }) => ({
+      id: `${teamRoom.id}_${player.id}_${match.id}`,
+      parseMatchId: match.id,
+      playerId: player.id,
+      mode: teamRoom.mode,
+      ts: match.metadata.dateCollected,
+      roomId: teamRoom.id,
+      sessionCode: teamRoom.id,
+      goals: match.stats?.goals?.value || 0,
+      assists: match.stats?.assists?.value || 0,
+      saves: match.stats?.saves?.value || 0,
+      shots: match.stats?.shots?.value || 0,
+      demos: 0,
+      score: match.stats?.score?.value || 0,
+      ourScore: isWin ? 1 : 0,
+      theirScore: isWin ? 0 : 1,
+      result,
+      rating: match.stats?.rating?.value || null,
+      ratingDelta: match.stats?.rating?.metadata?.ratingDelta || 0,
+      source: "parse_sessions",
+    }));
+
+    const updStats = [...importedGames, ...stats];
+    setStats(updStats);
+    await storeSet("stats", updStats);
+
+    setTeamRoom(null);
+    await storeSet("team_room", { closed: true, closedAt: new Date().toISOString() });
+
+    addToast?.(`${teamRoom.mode} match synced + room closed`, "✅");
+    onClose();
+  } catch (e) {
+    console.error(e);
+    setRoomSyncMsg("sync failed — try again");
+  }
+
+  setRoomSyncing(false);
+};                
+                
+                
 const [swipeOffset, setSwipeOffset] = useState(0);
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
@@ -3754,7 +3892,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
             <div style={{fontSize:12,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>open a room and everyone on the team can log their stats for the same game — no session codes needed. the room stays open until you close it.</div>
             <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>GAME MODE</div>
             <div style={{display:"flex",gap:8,marginBottom:20}}>
-              {["3v3","2v2"].map(m => (
+              {["3v3","2v2","1v1"].map(m => (
                 <button key={m} onClick={() => setMode(m)} className="bb-pressable"
                   style={{flex:1,background:mode===m?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"11px 0",fontSize:13,fontWeight:700,color:mode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
                   {m}
@@ -3768,12 +3906,42 @@ const [swipeOffset, setSwipeOffset] = useState(0);
         ) : (
           <>
       <div style={{background:"linear-gradient(135deg,rgba(184,255,77,0.1),rgba(184,255,77,0.04))",border:"1px solid rgba(184,255,77,0.3)",borderRadius:16,padding:"16px",marginBottom:20,textAlign:"center"}}>
-              <div style={{fontSize:10,color:"#B8FF4D",fontWeight:700,letterSpacing:1,marginBottom:4}}>ROOM OPEN · {teamRoom.mode.toUpperCase()}</div>
-              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:700,color:"#E8ECF4",letterSpacing:4,margin:"10px 0"}}>{teamRoom.id.slice(-4).toUpperCase()}</div>
+              <div style={{fontSize:10,color:"#B8FF4D",fontWeight:700,letterSpacing:1,marginBottom:4}}>ROOM OPEN · {(teamRoom?.mode || "3v3").toUpperCase()}</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:700,color:"#E8ECF4",letterSpacing:4,margin:"10px 0"}}>{(teamRoom?.id || "ROOM").slice(-4).toUpperCase()}</div>
               <div style={{fontSize:10,color:"#4A5066",marginBottom:8}}>ROOM CODE</div>
               <div style={{fontSize:11,color:"#8B92A8",marginBottom:2}}>opened by {PLAYERS.find(p=>p.id===teamRoom.createdBy)?.name} · {fmtRelTime(teamRoom.createdAt)}</div>
               <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>logged games sync automatically to social → team link tab</div>
             </div>
+              
+              
+            <button
+  onClick={syncRoomFromParse}
+  disabled={roomSyncing}
+  className="bb-pressable bb-glow-lime"
+  style={{
+    width:"100%",
+    background:"#B8FF4D",
+    border:"none",
+    borderRadius:12,
+    padding:"13px 0",
+    fontSize:13,
+    fontWeight:700,
+    color:"#06070D",
+    cursor:"pointer",
+    marginBottom:10,
+    opacity: roomSyncing ? 0.6 : 1
+  }}
+>
+ {roomSyncing ? "checking tracker…" : `sync latest ${teamRoom.mode} match`}
+</button>
+
+{roomSyncMsg && (
+  <div style={{fontSize:11,color:"#8B92A8",textAlign:"center",marginBottom:12}}>
+    {roomSyncMsg}
+  </div>
+)}  
+              
+              
             <div style={{fontSize:11,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:12}}>LOGGED SO FAR</div>
             {byPlayer.map(({player, game}) => (
               <div key={player.id} style={{background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${game?player.color+"33":"rgba(255,255,255,0.05)"}`}}>
