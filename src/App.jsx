@@ -601,6 +601,14 @@ function SessionGroupCard({ session, allStats }) {
                 style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:10,border:"1px solid rgba(255,255,255,0.04)",cursor:"pointer",textAlign:"left",width:"100%"}}>
                 <div style={{width:7,height:7,borderRadius:99,background:p?.color,flexShrink:0}}/>
                 <span style={{fontSize:12,fontWeight:700,color:p?.color,minWidth:64}}>{p?.name}</span>
+
+<div style={{
+  fontSize:11,
+  fontWeight:700,
+  color:g.ratingDelta >= 0 ? "#7CFFB2" : "#FF5C8A"
+}}>
+  {g.ratingDelta != null ? `${g.ratingDelta > 0 ? "+" : ""}${g.ratingDelta} MMR` : "—"}
+</div>
                 <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
                   {["goals","assists","saves","shots","demos"].map(f => (
                     <div key={f} style={{textAlign:"center"}}>
@@ -1439,7 +1447,7 @@ function LiveMMRFeed({ mmrProfiles }) {
           
           
 // ===================== Home Tab =====================
-function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs }) {
+function HomeTab({ schedule, mmrProfiles, currentPlayer, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs, onOpenBracket }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
@@ -1491,7 +1499,7 @@ return (
         </div>
       </div>
 
-      <div style={s.heroCard}>
+      <div onClick={onOpenBracket} className="bb-pressable" style={{...s.heroCard,cursor:"pointer"}}>
         <div style={s.heroEyebrow}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
         {nextMatch ? (
           <>
@@ -1501,6 +1509,7 @@ return (
               <div style={s.heroTeam}><div style={{...s.heroTeamName,color:nextMatch.opponent?"#E8ECF4":"#4A5066"}}>{nextMatch.opponent||"tbd"}</div></div>
             </div>
             <div style={s.heroMeta}>{nextMatch.label} · {daysUntil===0?"this week":`in ${daysUntil}d`} · {nextMatch.dateRange}</div>
+            <div style={{fontSize:10,color:"#B8FF4D",fontWeight:700,letterSpacing:.6,marginTop:8}}>tap to open full bracket</div>
           </>
         ) : <div style={s.heroMatchup}><div style={s.heroTeamName}>gg. see you next circuit.</div></div>}
       </div>
@@ -3561,9 +3570,12 @@ function TeamLinkGames({ stats }) {
     dayMap[dk].push(g);
   });
   const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
+const recentGames = roomGames
+  .sort((a,b) => new Date(b.ts) - new Date(a.ts))
+  .slice(0,5);                
 
   if (days.length === 0) {
-    return <div style={s.emptyQueue}>no team room games logged yet — open a team room in the stats tab and log games together to see them here.</div>;
+    return <div style={s.emptyQueue}>no synced team games yet.</div>;
   }
 
   return (
@@ -4235,22 +4247,26 @@ return {
           🔄 sync ranks
         </button>
       </div>
-{teamRoom && !teamRoom.closed && (
-  <div onClick={() => setShowRoom(true)} className="bb-pressable" style={{background:"rgba(184,255,77,0.08)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:13,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
-    <div style={{width:8,height:8,borderRadius:99,background:"#B8FF4D",animation:"livePulse 1.4s ease-in-out infinite"}}/>
-    <div style={{flex:1}}>
-      <div style={{fontSize:12,fontWeight:700,color:"#B8FF4D"}}>room open · {teamRoom.mode} · code {(teamRoom.id || "ROOM").slice(-4).toUpperCase()}</div>
-      <div style={{fontSize:11,color:"#8B92A8",marginTop:1}}>tap to view team logs · games sync to social → team link</div>
-    </div>
-    <ChevronRight size={14} color="#B8FF4D"/>
-  </div>
-)}
-{(!teamRoom || teamRoom.closed) && (
-  <button onClick={() => setShowRoom(true)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.03)",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#4A5066",cursor:"pointer",marginBottom:14}}>
-    + open team room
+{currentPlayer === ADMIN_ID && (
+  <button
+    onClick={() => setLogging(true)}
+    className="bb-pressable bb-glow-lime"
+    style={{
+      width:"100%",
+      background:"#B8FF4D",
+      border:"none",
+      borderRadius:14,
+      padding:"12px 0",
+      fontSize:13,
+      fontWeight:800,
+      color:"#06070D",
+      cursor:"pointer",
+      marginBottom:14
+    }}
+  >
+    🔄 sync match
   </button>
 )}
-{showRoom && <TeamRoomModal currentPlayer={currentPlayer} stats={stats} setStats={setStats} teamRoom={teamRoom} setTeamRoom={setTeamRoom} onClose={() => setShowRoom(false)} addToast={addToast}/>}
 {mode!=="3v3" && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>log game</button></div>}
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"📊 stats"},{id:"sessions",label:"🎮 sessions"}].map(sub=>(
@@ -4288,7 +4304,7 @@ return {
         <>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
             {STAT_FIELDS.map(f=>(
-              <div key={f} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(255,255,255,0.05)"}}>
+              <div key={f} style={{background:"#11131F",borderRadius:18,padding:"16px",border:"2px solid rgba(255,255,255,0.08)"}}>
                 <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:6,textTransform:"uppercase"}}>{f}</div>
                 <div style={{fontSize:22,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:playerColor,marginBottom:6}}>{avg(myGames,f)}</div>
                 <StatsTrendLine games={myGames} field={f} color={playerColor}/>
@@ -4296,11 +4312,11 @@ return {
             ))}
           </div>
           <div style={{display:"flex",gap:8,marginBottom:20}}>
-            <div style={{flex:1,background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(255,255,255,0.05)",textAlign:"center"}}>
+            <div style={{flex:1,background:"#11131F",borderRadius:18,padding:"16px",border:"2px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
               <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:4}}>WIN RATE</div>
               <div style={{fontSize:20,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:"#7CFFB2"}}>{winRate(myGames)}</div>
             </div>
-            <div style={{flex:1,background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(255,255,255,0.05)",textAlign:"center"}}>
+            <div style={{flex:1,background:"#11131F",borderRadius:18,padding:"16px",border:"2px solid rgba(255,255,255,0.08)",textAlign:"center"}}>
               <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:4}}>GAMES</div>
               <div style={{fontSize:20,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:"#E8ECF4"}}>{myGames.length}</div>
             </div>
@@ -4381,6 +4397,27 @@ starfield: {
     accent: "#7EB8FF", accentText: "#040818", text: "#D8E8FF",
     sub: "#7A90B8", muted: "#3A4E72", tabBg: "#060C1E",
     swatch: "radial-gradient(circle at 30% 40%,#7EB8FF 0%,#040818 70%)",
+  },
+whiteout: {
+    id: "whiteout",
+    bg: "#F7F7F2", card: "#FFFFFF", border: "rgba(0,0,0,0.12)",
+    accent: "#FF61C1", accentText: "#06070D", text: "#11131F",
+    sub: "#34384A", muted: "#667085", tabBg: "#F0F0EA",
+    swatch: "linear-gradient(135deg,#FFFFFF 45%,#FF61C1 45%,#B8FF4D 70%)",
+  },
+pinkboost: {
+    id: "pinkboost",
+    bg: "#120814", card: "#1C0B22", border: "rgba(255,97,193,0.22)",
+    accent: "#FF61C1", accentText: "#06070D", text: "#FFE7F5",
+    sub: "#B98BA8", muted: "#6E4D62", tabBg: "#180A1F",
+    swatch: "linear-gradient(135deg,#FF61C1,#A78BFA,#4D9EFF)",
+  },
+matrix: {
+    id: "matrix",
+    bg: "#020806", card: "#07130C", border: "rgba(184,255,77,0.20)",
+    accent: "#B8FF4D", accentText: "#020806", text: "#D9FFD0",
+    sub: "#84A879", muted: "#3E5739", tabBg: "#030B08",
+    swatch: "repeating-linear-gradient(90deg,#020806 0px,#020806 5px,#B8FF4D 6px,#020806 10px)",
   },
 };
 
@@ -4843,7 +4880,7 @@ const toggleEquip = async (itemId) => {
     SHOP_ITEMS.filter(i => i.type === item.type).forEach(i => { delete newEquipped[i.id]; });
   } else {
     // background item — unequip all other backgrounds
-    ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_custom"].forEach(id => { delete newEquipped[id]; });
+    ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].forEach(id => { delete newEquipped[id]; });
   }
   if (!equipped[itemId]) newEquipped[itemId] = true;
   const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
@@ -4904,41 +4941,7 @@ const activityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).ma
         </div>
       </div>
 
-{/* Parse Credits */}
-<div style={{background:"#11131F",border:"1px solid rgba(77,158,255,0.2)",borderRadius:14,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-  <div>
-    <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>PARSE API CREDITS</div>
-    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:600,color:"#4D9EFF"}}>
-      {parseCredits?.[currentPlayer] ?? PARSE_CREDITS_DEFAULT}
-      <span style={{fontSize:11,color:"#4A5066",marginLeft:4}}>remaining</span>
-    </div>
-    <div style={{fontSize:10,color:"#4A5066",marginTop:2}}>used for mmr syncs · rank lookups</div>
-  </div>
-  {(parseCredits?.[currentPlayer] ?? PARSE_CREDITS_DEFAULT) <= 10 && (
-    <button onClick={async () => {
-      const existing = (creditRequests||[]).find(r => r.playerId === currentPlayer && r.status === "pending");
-      if (existing) { addToast?.("request already pending — captain will approve soon", "ℹ️"); return; }
-      const req = {
-        id: Date.now().toString(),
-        playerId: currentPlayer,
-        playerName: PLAYERS.find(p=>p.id===currentPlayer)?.name,
-        requestedAt: new Date().toISOString(),
-        status: "pending",
-      };
-      const upd = [...(creditRequests||[]), req];
-      setCreditRequests(upd);
-      await storeSet("credit_requests", upd);
-      addToast?.("credit request sent to captain!", "📨");
-    }} className="bb-pressable bb-glow-lime"
-      style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 14px",fontSize:11,fontWeight:700,color:"#B8FF4D",cursor:"pointer",flexShrink:0}}>
-      request more
-    </button>
-  )}
-  {(parseCredits?.[currentPlayer] ?? PARSE_CREDITS_DEFAULT) > 10 && (
-    <div style={{fontSize:22}}>🟢</div>
-  )}
-</div>
-
+      {/* Parse Credits hidden: sync credits are captain-controlled now. */}
       {/* Notification center */}
    {showNotifs && (
         <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(167,139,250,0.2)"}}>
@@ -5214,6 +5217,13 @@ await storeSet("pings", pingUpd2);
                 { id:"bg_spring",   label:"Soft Spring",   desc:"gentle pastel gradient",       cost:80,   value:"spring"   },
                 { id:"bg_aurora",   label:"Aurora",        desc:"shifting northern lights",     cost:100,  value:"aurora"   },
                 { id:"bg_midnight", label:"Midnight Oil",  desc:"deep navy shimmer",            cost:100,  value:"midnight" },
+                { id:"bg_whiteout", label:"Whiteout",      desc:"white app base with pink/lime pop", cost:150, value:"whiteout" },
+                { id:"bg_pinkboost",label:"Pink Boost",    desc:"pink + purple gradient arena", cost:150,  value:"pinkboost" },
+                { id:"bg_matrix",   label:"Matrix",        desc:"green black code glow",        cost:175,  value:"matrix" },
+                { id:"bg_morse",    label:"Morse Code",    desc:"animated signal-style green bars", cost:175, value:"morse" },
+                { id:"bg_turf",     label:"Grass Turf",    desc:"field grass texture",          cost:150,  value:"turf" },
+                { id:"bg_moss",     label:"Moss Stone",    desc:"dark moss textured background",cost:150,  value:"moss" },
+                { id:"bg_goalnet",  label:"Goal Net",      desc:"stadium netting overlay",      cost:150,  value:"goalnet" },
                 { id:"bg_custom",   label:"Ultimate BG",   desc:"upload your own image",        cost:5000, value:"custom"   },
 
               ].map(item => {
@@ -5228,6 +5238,13 @@ await storeSet("pings", pingUpd2);
                       item.value==="spring"?"linear-gradient(135deg,#ffd6e7,#c3f0ca,#a8d8ea)":
                       item.value==="aurora"?"linear-gradient(135deg,#0d0221,#00ff87,#60efff)":
                       item.value==="midnight"?"linear-gradient(135deg,#0a0a2e,#1a1a5e,#2d2d8f)":
+                      item.value==="whiteout"?"linear-gradient(135deg,#FFFFFF,#F7F7F2,#FF61C1)":
+                      item.value==="pinkboost"?"linear-gradient(135deg,#FF61C1,#A78BFA,#4D9EFF)":
+                      item.value==="matrix"?"repeating-linear-gradient(90deg,#020806 0 5px,#B8FF4D 5px 6px,#020806 6px 12px)":
+                      item.value==="morse"?"repeating-linear-gradient(90deg,#B8FF4D 0 8px,#020806 8px 14px,#B8FF4D 14px 17px,#020806 17px 28px)":
+                      item.value==="turf"?"repeating-linear-gradient(115deg,#15360F 0 3px,#1F4B17 3px 6px,#10280C 6px 9px)":
+                      item.value==="moss"?"radial-gradient(circle,#315D25,#081307)":
+                      item.value==="goalnet"?"linear-gradient(90deg,rgba(255,255,255,.55) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.55) 1px,transparent 1px),#101625":
                       "linear-gradient(135deg,#A78BFA,#FFD166)"
                     }}/>
                     <div style={{flex:1}}>
@@ -5354,6 +5371,10 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
   const [track, setTrack] = useState("free");
   const [claimResult, setClaimResult] = useState(null);
   const [selectedToken, setSelectedToken] = useState(null);
+  const garageTopRef = useRef(null);
+  const swipeStartX = useRef(0);
+  const swipeStartY = useRef(0);
+  const [trackSwipeOffset, setTrackSwipeOffset] = useState(0);
   const passActiveBoostsLocal = passActiveBoosts;
 
   const myXP = passXP?.[currentPlayer] || 0;
@@ -5367,6 +5388,31 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
   const currentProgress = track === "free" ? freeProgress : premiumProgress;
   const currentCap = track === "free" ? FREE_TIER_COUNT : PREMIUM_TIER_COUNT;
   const currentRewards = track === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
+
+  const switchTrack = (nextTrack) => {
+    if (nextTrack === "premium" && !isPremium) return;
+    setTrack(nextTrack);
+    setTiersExpanded(false);
+    setTrackSwipeOffset(0);
+    setTimeout(() => garageTopRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 0);
+  };
+
+  const handleTrackTouchStart = (e) => {
+    swipeStartX.current = e.touches[0].clientX;
+    swipeStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTrackTouchMove = (e) => {
+    const dx = e.touches[0].clientX - swipeStartX.current;
+    const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
+    if (Math.abs(dx) > dy && Math.abs(dx) > 12) setTrackSwipeOffset(Math.max(-70, Math.min(70, dx)));
+  };
+
+  const handleTrackTouchEnd = () => {
+    if (trackSwipeOffset < -55 && track === "free" && isPremium) switchTrack("premium");
+    else if (trackSwipeOffset > 55 && track === "premium") switchTrack("free");
+    else setTrackSwipeOffset(0);
+  };
 
   const claimKey = (t, tier) => `${currentPlayer}_${t}_${tier}`;
   const isClaimed = (t, tier) => !!(passClaimed?.[claimKey(t, tier)]);
@@ -5416,7 +5462,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
   const myTokens = passTokens?.[currentPlayer] || [];
 
   return (
-    <div className="bb-tab-content" style={s.tabContent}>
+    <div ref={garageTopRef} className="bb-tab-content" style={s.tabContent} onTouchStart={handleTrackTouchStart} onTouchMove={handleTrackTouchMove} onTouchEnd={handleTrackTouchEnd}>
       {claimResult && (
         <div style={{ position: "fixed", top: 80, left: 0, right: 0, margin: "0 auto", width: 220, zIndex: 300, background: "#1A1D2E", border: "1px solid rgba(184,255,77,0.4)", borderRadius: 14, padding: "14px 20px", textAlign: "center", animation: "dropDown .3s cubic-bezier(.2,.8,.2,1), dropDown .3s cubic-bezier(.2,.8,.2,1) 2.5s reverse forwards" }}>
           <div style={{ fontSize: 22, marginBottom: 4 }}>🎁</div>
@@ -5474,11 +5520,11 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
 
       {/* Track selector */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button onClick={() => setTrack("free")} className="bb-pressable"
+        <button onClick={() => switchTrack("free")} className="bb-pressable"
           style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: track === "free" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: track === "free" ? "#06070D" : "#8B92A8" }}>
           free track
         </button>
-        <button onClick={() => isPremium && setTrack("premium")} className="bb-pressable"
+        <button onClick={() => switchTrack("premium")} className="bb-pressable"
           style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: isPremium ? "pointer" : "default", background: track === "premium" ? "#A78BFA" : "rgba(255,255,255,0.05)", color: track === "premium" ? "#06070D" : isPremium ? "#A78BFA" : "#4A5066", opacity: isPremium ? 1 : 0.5 }}>
           {isPremium ? "premium track" : "🔒 premium"}
         </button>
@@ -5486,6 +5532,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
 
       {/* Tier reward list */}
       <div style={{ ...s.sectionLabel, marginBottom: 12 }}>tier rewards</div>
+      <div style={{ transform:`translateX(${trackSwipeOffset}px)`, transition:trackSwipeOffset===0?"transform .22s ease":"none" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {visibleTiers.map(({ tier, reward }) => {
           const unlocked = currentProgress.tier >= tier;
@@ -5531,6 +5578,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
 <button onClick={() => setTiersExpanded(v => !v)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer",marginTop:8}}>
   {tiersExpanded ? "▲ collapse tiers" : `▼ show all ${rewardTiers.length} tiers`}
 </button>
+      </div>
       </div>
 
 {/* Owned items from pass */}
@@ -6060,26 +6108,46 @@ const getStockPriceHistory = (playerId) => {
           
 // ===================== RLCS Trivia =====================
 const RLCS_QUESTIONS = [
-  { q:"Which team won the RLCS 2022 World Championship?", options:["Team BDS","Moist Esports","G2 Esports","NRG"], answer:1 },
-  { q:"Who is known as 'The Dementor' in Rocket League?", options:["Jstn","Firstkiller","GarrettG","Jstn"], answer:1 },
-  { q:"Which country does RLCS pro Fairy Peak come from?", options:["Germany","France","Sweden","Netherlands"], answer:1 },
+  { q:"Which team won the RLCS 2022 World Championship?", options:["Team BDS","Moist Esports","G2 Esports","NRG"], answer:0 },
+  { q:"Which team won RLCS Worlds 2023?", options:["Team Vitality","Karmine Corp","Team BDS","Gen.G Mobil1 Racing"], answer:0 },
+  { q:"Which team won RLCS Worlds 2024?", options:["G2 Stride","Team BDS","Gentle Mates Alpine","Team Falcons"], answer:1 },
+  { q:"Who is known as 'The Machine'?", options:["Turbopolsa","Kaydop","GarrettG","M0nkey M00n"], answer:0 },
+  { q:"Which player is commonly associated with the famous zero-second goal for NRG?", options:["jstn","Squishy","GarrettG","Chicago"], answer:0 },
+  { q:"Which country does Fairy Peak! come from?", options:["Germany","France","Sweden","Netherlands"], answer:1 },
   { q:"What is the max boost amount in Rocket League?", options:["50","75","100","150"], answer:2 },
-  { q:"Which org signed the team that won RLCS Season 9?", options:["NRG","G2 Esports","Renault Vitality","Team BDS"], answer:1 },
   { q:"What year did Rocket League go free to play?", options:["2018","2019","2020","2021"], answer:2 },
-  { q:"Which player is nicknamed 'The Flash'?", options:["Jstn","Jstn","Kaydop","Turbopolsa"], answer:2 },
   { q:"How many players are on each team in standard Rocket League?", options:["1","2","3","4"], answer:2 },
-  { q:"What is the name of the competitive Rocket League league run by Psyonix/Epic?", options:["RLCS","RLC","RLG","RLCX"], answer:0 },
-  { q:"Which arena is used most often in RLCS tournaments?", options:["Mannfield","DFH Stadium","Beckwith Park","Utopia Coliseum"], answer:1 },
-  { q:"Who won the RLCS X Championship (2021)?", options:["NRG","Team BDS","G2 Esports","Reciprocity"], answer:1 },
+  { q:"What does RLCS stand for?", options:["Rocket League Championship Series","Rocket League Cup Series","Ranked League Championship System","Rocket League Champions Split"], answer:0 },
   { q:"What is the duration of a standard Rocket League match?", options:["3 minutes","4 minutes","5 minutes","6 minutes"], answer:2 },
-  { q:"Which boost pad gives full boost in Rocket League?", options:["Small pads","Corner pads","Center pads","Goal pads"], answer:1 },
-  { q:"What rank is above Diamond in Rocket League?", options:["Platinum","Champion","Grand Champion","Supersonic Legend"], answer:1 },
-  { q:"Which player has the most RLCS World Championship titles?", options:["Kaydop","Turbopolsa","jstn","Fairy Peak"], answer:1 },
-  { q:"What is 'aerial' in Rocket League?", options:["A ground shot","Flying through the air to hit the ball","A wall shot","A ceiling shot"], answer:1 },
-  { q:"Which team color goes first in kickoff by convention?", options:["Blue","Orange","Random","Neither"], answer:0 },
-  { q:"What is 'musty flick' named after?", options:["A player named Musty","A move invented in musty weather","A pro named Gustav","A training pack"], answer:0 },
-  { q:"How many boost pads are on a standard RLCS map?", options:["22","28","34","40"], answer:2 },
-  { q:"What does 'rotation' mean in Rocket League strategy?", options:["Spinning your car","Players taking turns going for the ball","Changing positions","Boosting in circles"], answer:1 },
+  { q:"What rank is directly above Diamond?", options:["Platinum","Champion","Grand Champion","Supersonic Legend"], answer:1 },
+  { q:"What is an aerial?", options:["A ground shot","Flying through the air to hit the ball","A wall-only save","A kickoff type"], answer:1 },
+  { q:"What is a musty flick named after?", options:["A player/content creator named Musty","A weather condition","An RLCS coach","A map"], answer:0 },
+  { q:"What does rotation mean in Rocket League strategy?", options:["Spinning your car","Players cycling positions and turns","Changing camera settings","Boosting in circles"], answer:1 },
+  { q:"Which mechanic uses a second jump after leaving the wall or ground?", options:["Flip reset","Half flip","Wave dash","Ceiling pinch"], answer:0 },
+  { q:"What does a small boost pad give?", options:["6 boost","12 boost","18 boost","25 boost"], answer:1 },
+  { q:"What does a large boost pad give?", options:["50 boost","75 boost","100 boost","125 boost"], answer:2 },
+  { q:"What is a demo?", options:["Destroying another car by supersonic contact","Saving a shot","Passing midfield","Faking kickoff"], answer:0 },
+  { q:"What is a kickoff?", options:["Start/restart play from center","A postgame replay","A boost grab route","A goal explosion"], answer:0 },
+  { q:"Which mode is 2 players vs 2 players?", options:["Duel","Doubles","Standard","Chaos"], answer:1 },
+  { q:"Which mode is 1 player vs 1 player?", options:["Duel","Doubles","Standard","Dropshot"], answer:0 },
+  { q:"Which mode is 3 players vs 3 players?", options:["Hoops","Duel","Standard","Snow Day"], answer:2 },
+  { q:"What does 'OT' mean on the scoreboard?", options:["Overtime","Out Time","Open Touch","Off Target"], answer:0 },
+  { q:"What does 'GG' usually mean after a match?", options:["Good game","Great goal","Get going","Goal gap"], answer:0 },
+  { q:"Which stat tracks passes that lead to a teammate goal?", options:["Saves","Assists","Shots","Demos"], answer:1 },
+  { q:"Which stat tracks shots stopped near your goal?", options:["Goals","Assists","Saves","Demos"], answer:2 },
+  { q:"What is a shutout?", options:["Winning with opponent scoring zero","Scoring from midfield","Losing in overtime","Missing every shot"], answer:0 },
+  { q:"What does '50/50' mean?", options:["A challenge where both players contest the ball","A 50 boost pickup","A half-field shot","A tied series"], answer:0 },
+  { q:"What is a fake kickoff?", options:["Pretending to challenge kickoff but leaving it","A broken replay","A random demo","A kickoff goal"], answer:0 },
+  { q:"What is a ceiling shot?", options:["A shot after driving/falling from the ceiling","A shot that hits the floor","A save off the post","A kickoff shot"], answer:0 },
+  { q:"What is a pinch?", options:["Ball squeezed between surfaces/cars for speed","A slow dribble","A boost steal","A demo chain"], answer:0 },
+  { q:"Which button action is needed to dodge/flip?", options:["Jump twice with a direction","Only boost","Only powerslide","Only air roll"], answer:0 },
+  { q:"What does powerslide help with?", options:["Sharper ground turns/recoveries","More boost capacity","Longer jumps","Bigger demos"], answer:0 },
+  { q:"What is back-post rotation?", options:["Rotating to the far post on defense","Driving into opponent net","Only staying midfield","Chasing the ball"], answer:0 },
+  { q:"What is ball cam?", options:["Camera locks focus on the ball","A replay export","A training pack","A goal explosion"], answer:0 },
+  { q:"What is car cam?", options:["Camera follows your car direction","Camera locks the ball","A spectator view","A tournament mode"], answer:0 },
+  { q:"What does MMR affect?", options:["Matchmaking rank/rating","Car color only","Boost amount","Arena size"], answer:0 },
+  { q:"What is SSL short for?", options:["Supersonic Legend","Super Speed League","Season Score Level","Standard Solo League"], answer:0 },
+  { q:"What comes after Grand Champion in rank?", options:["Champion","Supersonic Legend","Diamond","Platinum"], answer:1 },
 ];
 
 function RLCSTrivia({ currentPlayer, points, setPoints }) {
@@ -6097,7 +6165,11 @@ function RLCSTrivia({ currentPlayer, points, setPoints }) {
 
   const startGame = () => {
     if (myPoints < wager) return;
-    const shuffled = [...RLCS_QUESTIONS].sort(() => Math.random() - 0.5).slice(0, 5);
+    const shuffled = [...RLCS_QUESTIONS]
+      .map(q => ({ q, r: Math.random() }))
+      .sort((a, b) => a.r - b.r)
+      .map(x => x.q)
+      .slice(0, 5);
     setQuestions(shuffled);
     setQIndex(0); setSelected(null); setCorrect(0); setWrong(0);
     setDone(false); setStreak(0); setStarted(true);
@@ -6553,8 +6625,6 @@ const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusS
 const [propWager, setPropWager] = useState(10);
 const [selectedProp, setSelectedProp] = useState(null);
 const [propSide, setPropSide] = useState(null);
-const [propMessage, setPropMessage] = useState("");
-const [propGameId, setPropGameId] = useState("");
   const [lineIndexByProp, setLineIndexByProp] = useState({}); // { [propId]: index into lineOptions }
 const [predWager, setPredWager] = useState(10);
 const [selectedPred, setSelectedPred] = useState(null);
@@ -6605,6 +6675,21 @@ const PROP_FIELD_CONFIG = {
   };
 
   const props = buildProps();
+
+const getLegPropKey = (leg) => leg.propKey || `${leg.playerId}_${leg.field}_${leg.line}`;
+const toggleParlayLeg = (leg) => {
+  setParlayLegs(prev => {
+    const sameLegSelected = prev.some(l => l.id === leg.id);
+    if (sameLegSelected) return prev.filter(l => l.id !== leg.id);
+
+    // only one side from the same prop can be active at once
+    const withoutSameProp = prev.filter(l => getLegPropKey(l) !== getLegPropKey(leg));
+    if (withoutSameProp.length >= 4) return withoutSameProp;
+    return [...withoutSameProp, leg];
+  });
+};
+const isParlayLegSelected = (legId) => parlayLegs.some(l => l.id === legId);
+
 const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "" }) => {
   const existing = await storeGet("activity_feed") || [];
 
@@ -6677,9 +6762,14 @@ const placeBet = async (chosenLine) => {
     odds: odds.american,
     status: "open",
     placedAt: new Date().toISOString(),
-    message: propMessage.trim(),
-    gameId: propGameId
+    targetMode: "next_3v3",
+    targetText: "next logged 3v3 game"
   };
+
+  // close the sticky wager tray immediately after tapping place bet
+  setSelectedProp(null);
+  setPropSide(null);
+  setPropWager(10);
 
   const newPts = myPoints - propWager;
   const upd = { ...points, [currentPlayer]: newPts };
@@ -6695,15 +6785,10 @@ const placeBet = async (chosenLine) => {
     type: "prop",
     fromName: PLAYERS.find(p => p.id === currentPlayer)?.name || "someone",
     text: `sent you props: ${propSide.toUpperCase()} ${line} ${card.field}`,
-    message: propMessage.trim(),
-    gameId: propGameId
+    targetMode: "next_3v3",
+    targetText: "next logged 3v3 game"
   });
 
-  setSelectedProp(null);
-  setPropSide(null);
-  setPropWager(10);
-  setPropMessage("");
-  setPropGameId("");
 };
 
   const segAngle = 360 / WHEEL_SEGMENTS.length;
@@ -6917,32 +7002,10 @@ const noBettingWeek = isEventActive("no_betting");
                       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#B8FF4D"}}>{payout} pts</div>
                     </div>
                                                                                  
-                    <input
-  value={propMessage}
-  onChange={(e) => setPropMessage(e.target.value)}
-  placeholder="add a message for them..."
-  style={{ ...s.modalInput, marginBottom: 8 }}
-/>
+                    <div style={{flex:1,fontSize:11,color:"#8B92A8",lineHeight:1.35}}>
+                      applies to {card?.playerName}'s next logged 3v3 game
+                    </div>
 
-<select
-  value={propGameId}
-  onChange={(e) => setPropGameId(e.target.value)}
-  style={{ ...s.modalInput, marginBottom: 8 }}
->
-  <option value="">link to recent game optional</option>
-  {stats
-    .filter(g => g.playerId === card?.playerId)
-    .slice(0, 8)
-    .map(g => (
-      <option key={g.id} value={g.id}>
-        {g.mode} · {g.ourScore}-{g.theirScore} · {new Date(g.ts).toLocaleDateString()}
-      </option>
-    ))}
-</select>
-                                                                                 
-                                                                                 
-                                                                                 
-                                                                                 
                     <button onClick={()=>placeBet(current?.line)} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
                       style={{flex:1,background:"#B8FF4D",border:"none",borderRadius:10,padding:"14px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",opacity:myPoints<propWager?0.4:1}}>
                       place bet
@@ -7100,7 +7163,7 @@ const noBettingWeek = isEventActive("no_betting");
                       </div>
                       <button onClick={async()=>{
                         if(parlayLegs.length<2||myPoints<parlayWager) return;
-                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({playerId:l.playerId,playerName:l.playerName,field:l.field,line:l.line,side:l.side,odds:l.odds})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString()};
+                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({propKey:l.propKey,playerId:l.playerId,playerName:l.playerName,field:l.field,line:l.line,side:l.side,odds:l.odds})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString()};
                         const upd={...points,[currentPlayer]:myPoints-parlayWager};
                         setPoints(upd); await storeSet("points",upd);
                         const updBets=[...(bets||[]),parlayBet];
@@ -7121,8 +7184,8 @@ const noBettingWeek = isEventActive("no_betting");
           {props.map(card=>{
             const lineIdx = Math.floor(card.lineOptions.length/2);
             const current = card.lineOptions[lineIdx];
-            const overLeg = {id:`${card.id}_over`,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"over",odds:current.overOdds.american};
-            const underLeg = {id:`${card.id}_under`,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"under",odds:current.underOdds.american};
+            const overLeg = {id:`${card.id}_over`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"over",odds:current.overOdds.american};
+            const underLeg = {id:`${card.id}_under`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"under",odds:current.underOdds.american};
             return (
               <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(255,255,255,0.05)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
@@ -7132,15 +7195,15 @@ const noBettingWeek = isEventActive("no_betting");
                   <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>line: {current.line}</span>
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>{if(parlayLegs.length>=4)return;if(parlayLegs.find(l=>l.id===overLeg.id)){setParlayLegs(p=>p.filter(l=>l.id!==overLeg.id));}else{setParlayLegs(p=>[...p,overLeg]);}}} className="bb-pressable"
-                    style={{flex:1,background:parlayLegs.find(l=>l.id===overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.08)",border:`1px solid ${parlayLegs.find(l=>l.id===overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
+                  <button onClick={()=>toggleParlayLeg(overLeg)} className="bb-pressable"
+                    style={{flex:1,background:isParlayLegSelected(overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.08)",border:`1px solid ${isParlayLegSelected(overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
                     <div style={{fontSize:10,color:"#4A5066",fontWeight:700}}>OVER {current.line}</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:parlayLegs.find(l=>l.id===overLeg.id)?"#06070D":"#7CFFB2"}}>{current.overOdds.american}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isParlayLegSelected(overLeg.id)?"#06070D":"#7CFFB2"}}>{current.overOdds.american}</div>
                   </button>
-                  <button onClick={()=>{if(parlayLegs.length>=4)return;if(parlayLegs.find(l=>l.id===underLeg.id)){setParlayLegs(p=>p.filter(l=>l.id!==underLeg.id));}else{setParlayLegs(p=>[...p,underLeg]);}}} className="bb-pressable"
-                    style={{flex:1,background:parlayLegs.find(l=>l.id===underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.08)",border:`1px solid ${parlayLegs.find(l=>l.id===underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
+                  <button onClick={()=>toggleParlayLeg(underLeg)} className="bb-pressable"
+                    style={{flex:1,background:isParlayLegSelected(underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.08)",border:`1px solid ${isParlayLegSelected(underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
                     <div style={{fontSize:10,color:"#4A5066",fontWeight:700}}>UNDER {current.line}</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:parlayLegs.find(l=>l.id===underLeg.id)?"#06070D":"#FF5C8A"}}>{current.underOdds.american}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isParlayLegSelected(underLeg.id)?"#06070D":"#FF5C8A"}}>{current.underOdds.american}</div>
                   </button>
                 </div>
               </div>
@@ -8075,8 +8138,12 @@ function americanToDecimal(odds) {
 }
 
 function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
+                      
+   const RLCS_LIVE_VIDEO_ID = "hzs2x4irAD0";                     
   const [wager, setWager] = useState(20);
   const [placed, setPlaced] = useState({});
+  const [showLive, setShowLive] = useState(false);
+  const RLCS_LIVE_EMBED_URL = "https://www.youtube.com/embed/live_stream?channel=UCdKuPY64fEpI4cdlBSyvEJw&autoplay=1&controls=0&modestbranding=1&rel=0&playsinline=1";
   const myPoints = points?.[currentPlayer] || 0;
 
   const myRlcsBets = (bets||[]).filter(b => b.bettorId === currentPlayer && b.isRlcs);
@@ -8114,7 +8181,36 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
       <div style={{fontSize:11,color:"#4A5066",marginBottom:14,lineHeight:1.5}}>
         bet on real RLCS matches. results update manually — captain marks winners.
       </div>
-      <div style={{background:"#11131F",borderRadius:13,padding:12,marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
+
+      <div style={{background:"linear-gradient(135deg,#180B22,#0B0E18)",border:"2px solid rgba(255,97,193,0.25)",borderRadius:20,padding:14,marginBottom:14,boxShadow:"0 14px 34px rgba(255,97,193,0.08)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:showLive?12:0}}>
+          <div>
+            <div style={{fontSize:11,color:"#FF61C1",fontWeight:900,letterSpacing:1}}>RLCS LIVE</div>
+            <div style={{fontSize:12,color:"#8B92A8",marginTop:3}}>watch the Rocket League stream while you place bets</div>
+          </div>
+          {!showLive && (
+            <button onClick={()=>setShowLive(true)} className="bb-pressable bb-glow-pink" style={{background:"#FF61C1",border:"none",borderRadius:14,padding:"10px 14px",fontSize:12,fontWeight:900,color:"#06070D",cursor:"pointer",flexShrink:0}}>
+              ▶ play
+            </button>
+          )}
+        </div>
+        {showLive && (
+          <div style={{position:"relative",paddingTop:"56.25%",borderRadius:16,overflow:"hidden",background:"#05060C",border:"1px solid rgba(255,255,255,0.08)"}}>
+       <iframe
+  src={`https://www.youtube.com/embed/${hzs2x4irAD0}?autoplay=1&controls=0&modestbranding=1&rel=0&playsinline=1`}
+  title="RLCS Live"
+  allow="autoplay; encrypted-media; picture-in-picture"
+  allowFullScreen
+  style={{
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    border: "none"
+  }}
+/>
+      </div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,padding:16,marginBottom:14,border:"2px solid rgba(255,255,255,0.08)",boxShadow:"0 12px 28px rgba(0,0,0,0.20)"}}>
         <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER</div>
         <div style={{display:"flex",gap:8}}>
           {[10,25,50,100].map(amt=>(
@@ -8309,6 +8405,7 @@ const [raceStart, setRaceStart] = useState(null);
 const [themeId, setThemeId] = useState("starfield");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const [showAllGames, setShowAllGames] = useState(false);
+const [showBracket, setShowBracket] = useState(false);
 const [statsJumpDate, setStatsJumpDate] = useState(null);
 const [stocks, setStocks] = useState({});
 const [flowers, setFlowers] = useState([]);
@@ -8704,7 +8801,6 @@ if (loading) return <><GlobalStyles/><div style={{...s.screen,alignItems:"center
   const isAdmin=currentPlayer===ADMIN_ID;
 const TABS=[
     {id:"home",     icon:Home,       label:"home"},
-    {id:"bracket",  icon:Trophy,     label:"bracket"},
     {id:"room",     icon:MessageCircle, label:"room"},
     {id:"training", icon:Dumbbell,   label:"training"},
     {id:"social",   icon:ImageIcon,  label:"social"},
@@ -8724,12 +8820,19 @@ const TABS=[
   };
   const eq = points?.[currentPlayer+"_equipped"] || {};
   const own = points?.[currentPlayer+"_owned"] || [];
-  const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_custom"].includes(id));
+  const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].includes(id));
   const customUrl = points?.[currentPlayer+"_customBg"];
   const bgStyle = bgId==="bg_carbon" ? {backgroundImage:"repeating-linear-gradient(45deg,#0e0e0e 0px,#0e0e0e 3px,#1a1a1a 3px,#1a1a1a 6px)"}
     : bgId==="bg_spring"   ? {backgroundImage:"linear-gradient(135deg,#1a0a1a,#0a1a12,#0a1220)"}
     : bgId==="bg_aurora"   ? {backgroundImage:"linear-gradient(135deg,#040d14,#012a1a,#040818)"}
     : bgId==="bg_midnight" ? {backgroundImage:"linear-gradient(135deg,#04050f,#080830,#04050f)"}
+    : bgId==="bg_matrix" ? {backgroundImage:"repeating-linear-gradient(90deg,rgba(184,255,77,.08) 0 2px,transparent 2px 12px),radial-gradient(circle at 30% 20%,rgba(184,255,77,.18),transparent 30%),linear-gradient(135deg,#020806,#06120B)"}
+    : bgId==="bg_whiteout" ? {backgroundImage:"linear-gradient(135deg,#FAFAF5,#FFFFFF,#F0F0EA)", color:"#11131F"}
+    : bgId==="bg_pinkboost" ? {backgroundImage:"linear-gradient(135deg,#220817,#4A123E,#10113A)"}
+    : bgId==="bg_morse" ? {backgroundImage:"repeating-linear-gradient(90deg,rgba(184,255,77,.14) 0 8px,transparent 8px 14px,rgba(184,255,77,.08) 14px 17px,transparent 17px 28px),linear-gradient(135deg,#020806,#03120B)"}
+    : bgId==="bg_turf" ? {backgroundImage:"repeating-linear-gradient(115deg,#15360F 0 3px,#1F4B17 3px 6px,#10280C 6px 9px)"}
+    : bgId==="bg_moss" ? {backgroundImage:"radial-gradient(circle at 20% 20%,#315D25 0 10%,transparent 11%),radial-gradient(circle at 80% 30%,#1C3A18 0 12%,transparent 13%),linear-gradient(135deg,#081307,#183115)"}
+    : bgId==="bg_goalnet" ? {backgroundImage:"linear-gradient(90deg,rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(135deg,#05070D,#101625)",backgroundSize:"34px 34px,34px 34px,cover"}
     : bgId==="bg_custom" && customUrl ? {backgroundImage:`url(${customUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
     : {background:theme.bg};
 
@@ -8816,8 +8919,7 @@ const TABS=[
 </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs}/>}
-        {tab==="bracket"&&<BracketTab key={tab} schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>}
+{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
       {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
@@ -8854,6 +8956,22 @@ const TABS=[
 />}
  {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/>}
       </div>
+      {showBracket && (
+        <div style={{position:"fixed",inset:0,zIndex:80,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.08)",flexShrink:0}}>
+            <button onClick={()=>setShowBracket(false)} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,color:"#E8ECF4",padding:"8px 11px",cursor:"pointer",display:"flex",alignItems:"center",gap:5,fontWeight:700}}>
+              <ChevronLeft size={17}/> back
+            </button>
+            <div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,letterSpacing:.5}}>bracket</div>
+              <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:.6}}>league + playoffs</div>
+            </div>
+          </div>
+          <div style={{flex:1,minHeight:0,overflowY:"auto",paddingBottom:"max(24px, env(safe-area-inset-bottom))"}}>
+            <BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>
+          </div>
+        </div>
+      )}
       {chatOpen && (
     <div style={{position:"fixed",inset:0,zIndex:50,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease",paddingBottom:0}}>
           <div style={{animation:"chatSlideIn .32s cubic-bezier(.2,.8,.2,1)",flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
