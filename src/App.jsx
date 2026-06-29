@@ -2217,29 +2217,27 @@ setMuted(false);
       marginBottom:10,
       boxShadow:"0 0 24px rgba(184,255,77,0.08)",
     }}>
-     {Object.entries(remoteAudioTracks).map(([id, track]) => (
-<audio
-  key={id}
-  autoPlay
-  playsInline
-  controls
-  ref={(el) => {
-    if (el && track) {
-     const stream = new MediaStream();
-stream.addTrack(track);
-el.srcObject = stream;
+{Object.entries(remoteAudioTracks).map(([id, track]) => (
+  <audio
+    key={id}
+    autoPlay
+    playsInline
+    controls
+    ref={(el) => {
+      if (el && track) {
+        const stream = new MediaStream();
+        stream.addTrack(track);
+        el.srcObject = stream;
 
-el.muted = false;
-el.volume = 1;
+        el.muted = false;
+        el.volume = 1;
 
-el.play().catch((err) => {
-  console.log("PHONE AUDIO PLAY FAILED:", err);
-});
-        console.log("AUDIO PLAY BLOCKED:", err);
-      });
-    }
-  }}
-/>
+        el.play().catch((err) => {
+          console.log("PHONE AUDIO PLAY FAILED:", err);
+        });
+      }
+    }}
+  />
 ))}
 
 {/* Header */}
