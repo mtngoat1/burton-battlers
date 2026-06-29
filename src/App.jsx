@@ -254,8 +254,8 @@ function GlobalStyles() {
 @keyframes floatUp { 0%{transform:translateY(0) scale(0.5); opacity:0;} 15%{opacity:1;} 100%{transform:translateY(-180px) scale(1.1); opacity:0;} }
 @keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
     * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
-    html, body { margin:0; padding:0; height:100%; min-height:-webkit-fill-available; overflow:hidden; background:#06070D; }
-#root { height:100%; min-height:-webkit-fill-available; }
+    html, body { margin:0; padding:0; width:100%; height:100%; min-height:100%; overflow:hidden; background:#06070D; overscroll-behavior:none; }
+#root { width:100%; height:100%; min-height:100%; background:#06070D; overflow:hidden; }
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
@@ -4494,6 +4494,20 @@ const SHOP_ITEMS = [
   { id:"title_rule69",     cost:69,  type:"title", value:"rule 69"             },
   { id:"title_buffalo",    cost:200, type:"title", value:"buffalo burton"      },
 
+  // daily background rotation
+  { id:"bg_carbon",    label:"Carbon Fiber", emoji:"⬛", desc:"dark carbon weave texture",       cost:80,   type:"background", value:"carbon" },
+  { id:"bg_spring",    label:"Soft Spring",  emoji:"🌸", desc:"gentle pastel gradient",          cost:80,   type:"background", value:"spring" },
+  { id:"bg_aurora",    label:"Aurora",       emoji:"🌌", desc:"shifting northern lights",        cost:100,  type:"background", value:"aurora" },
+  { id:"bg_midnight",  label:"Midnight Oil", emoji:"🌙", desc:"deep navy shimmer",               cost:100,  type:"background", value:"midnight" },
+  { id:"bg_whiteout",  label:"Whiteout",     emoji:"⚪", desc:"white base with pink/lime pop",    cost:150,  type:"background", value:"whiteout" },
+  { id:"bg_pinkboost", label:"Pink Boost",   emoji:"🌸", desc:"pink + purple gradient arena",    cost:150,  type:"background", value:"pinkboost" },
+  { id:"bg_matrix",    label:"Matrix",       emoji:"🟩", desc:"green black code glow",           cost:175,  type:"background", value:"matrix" },
+  { id:"bg_morse",     label:"Morse Code",   emoji:"📡", desc:"animated signal-style green bars",cost:175,  type:"background", value:"morse" },
+  { id:"bg_turf",      label:"Grass Turf",   emoji:"🌱", desc:"field grass texture",             cost:150,  type:"background", value:"turf" },
+  { id:"bg_moss",      label:"Moss Stone",   emoji:"🪨", desc:"dark moss textured background",   cost:150,  type:"background", value:"moss" },
+  { id:"bg_goalnet",   label:"Goal Net",     emoji:"🥅", desc:"stadium netting overlay",         cost:150,  type:"background", value:"goalnet" },
+  { id:"bg_custom",    label:"Ultimate BG",  emoji:"🖼️", desc:"upload your own image",           cost:5000, type:"background", value:"custom" },
+
 ];
 const DAILY_SPINS_MAX = 3;
 const DAILY_SLOTS_MAX = 3;
@@ -4876,10 +4890,13 @@ const upd = [...myUpd, ...others];
 const toggleEquip = async (itemId) => {
   const item = SHOP_ITEMS.find(i => i.id === itemId);
   const newEquipped = { ...equipped };
-  if (item) {
+  if (item?.type === "background") {
+    // only one background can be equipped at a time
+    SHOP_ITEMS.filter(i => i.type === "background").forEach(i => { delete newEquipped[i.id]; });
+  } else if (item) {
     SHOP_ITEMS.filter(i => i.type === item.type).forEach(i => { delete newEquipped[i.id]; });
   } else {
-    // background item — unequip all other backgrounds
+    // fallback for older saved background ids
     ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].forEach(id => { delete newEquipped[id]; });
   }
   if (!equipped[itemId]) newEquipped[itemId] = true;
@@ -5212,21 +5229,7 @@ await storeSet("pings", pingUpd2);
             </div>
 <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>BACKGROUNDS</div>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {[
-                { id:"bg_carbon",   label:"Carbon Fiber",  desc:"dark carbon weave texture",   cost:80,   value:"carbon"   },
-                { id:"bg_spring",   label:"Soft Spring",   desc:"gentle pastel gradient",       cost:80,   value:"spring"   },
-                { id:"bg_aurora",   label:"Aurora",        desc:"shifting northern lights",     cost:100,  value:"aurora"   },
-                { id:"bg_midnight", label:"Midnight Oil",  desc:"deep navy shimmer",            cost:100,  value:"midnight" },
-                { id:"bg_whiteout", label:"Whiteout",      desc:"white app base with pink/lime pop", cost:150, value:"whiteout" },
-                { id:"bg_pinkboost",label:"Pink Boost",    desc:"pink + purple gradient arena", cost:150,  value:"pinkboost" },
-                { id:"bg_matrix",   label:"Matrix",        desc:"green black code glow",        cost:175,  value:"matrix" },
-                { id:"bg_morse",    label:"Morse Code",    desc:"animated signal-style green bars", cost:175, value:"morse" },
-                { id:"bg_turf",     label:"Grass Turf",    desc:"field grass texture",          cost:150,  value:"turf" },
-                { id:"bg_moss",     label:"Moss Stone",    desc:"dark moss textured background",cost:150,  value:"moss" },
-                { id:"bg_goalnet",  label:"Goal Net",      desc:"stadium netting overlay",      cost:150,  value:"goalnet" },
-                { id:"bg_custom",   label:"Ultimate BG",   desc:"upload your own image",        cost:5000, value:"custom"   },
-
-              ].map(item => {
+              {dailyShopItems.filter(i=>i.type==="background").map(item => {
                 const isOwned = owned.includes(item.id);
                 const isEquipped = equipped[item.id];
                 const canAfford = myPoints >= item.cost;
@@ -8123,30 +8126,133 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 }  
                   
 // ===================== RLCS Bets =====================
+// Fallback matches only show if you have not synced real matches yet.
 const RLCS_MATCHES = [
-  { id:"m1", home:"NRG",          away:"G2 Esports",    league:"RLCS NA",   date:"Jul 5",  homeOdds:"-140", awayOdds:"+115" },
-  { id:"m2", home:"Team Falcons", away:"Team BDS",       league:"RLCS EU",   date:"Jul 5",  homeOdds:"+105", awayOdds:"-125" },
-  { id:"m3", home:"Moist",        away:"Complexity",     league:"RLCS NA",   date:"Jul 6",  homeOdds:"-160", awayOdds:"+130" },
-  { id:"m4", home:"Karmine Corp", away:"Vitality",       league:"RLCS EU",   date:"Jul 6",  homeOdds:"+120", awayOdds:"-145" },
-  { id:"m5", home:"SSG",          away:"Faze",           league:"RLCS NA",   date:"Jul 7",  homeOdds:"-110", awayOdds:"-110" },
-  { id:"m6", home:"FURIA",        away:"Cloud9",         league:"RLCS SAM",  date:"Jul 7",  homeOdds:"+135", awayOdds:"-160" },
+  { id:"sample_m1", home:"NRG",          away:"G2 Esports",    league:"RLCS Sample", date:"sync real matches", homeOdds:"-120", awayOdds:"+105", source:"sample" },
+  { id:"sample_m2", home:"Karmine Corp", away:"Vitality",      league:"RLCS Sample", date:"sync real matches", homeOdds:"+110", awayOdds:"-130", source:"sample" },
+  { id:"sample_m3", home:"Team Falcons", away:"Team BDS",      league:"RLCS Sample", date:"sync real matches", homeOdds:"-105", awayOdds:"-105", source:"sample" },
 ];
 
 function americanToDecimal(odds) {
-  const n = parseInt(odds.replace("+",""));
-  return odds.startsWith("+") ? (n/100)+1 : (100/Math.abs(n))+1;
+  const n = parseInt(String(odds).replace("+",""));
+  if (!Number.isFinite(n) || n === 0) return 2;
+  return String(odds).startsWith("+") ? (n/100)+1 : (100/Math.abs(n))+1;
+}
+
+function pseudoOdds(seed, side) {
+  let h = 0;
+  const str = `${seed}_${side}`;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
+  const val = 100 + (h % 65);
+  const fav = h % 2 === 0;
+  if (side === "home") return fav ? `-${val}` : `+${val}`;
+  return fav ? `+${Math.max(100, val - 10)}` : `-${Math.max(100, val - 10)}`;
+}
+
+function fmtRlcsDate(value) {
+  if (!value) return "TBD";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
+}
+
+// This accepts either your own backend's cleaned match shape OR raw PandaScore-ish objects.
+function normalizeRlcsMatch(raw, idx = 0) {
+  const opponents = raw?.opponents || raw?.teams || [];
+  const homeObj = raw?.home || raw?.team1 || opponents?.[0]?.opponent || opponents?.[0] || {};
+  const awayObj = raw?.away || raw?.team2 || opponents?.[1]?.opponent || opponents?.[1] || {};
+
+  const home =
+    raw?.homeName ||
+    raw?.home ||
+    homeObj?.name ||
+    homeObj?.acronym ||
+    raw?.team1_name ||
+    "TBD";
+
+  const away =
+    raw?.awayName ||
+    raw?.away ||
+    awayObj?.name ||
+    awayObj?.acronym ||
+    raw?.team2_name ||
+    "TBD";
+
+  const id = String(raw?.id || raw?.matchId || raw?.slug || `${home}_${away}_${raw?.begin_at || raw?.date || idx}`);
+  const league = raw?.league || raw?.league?.name || raw?.tournament?.name || raw?.serie?.name || raw?.name || "Rocket League";
+  const beginAt = raw?.begin_at || raw?.scheduled_at || raw?.date || raw?.startTime || raw?.start_time;
+  const seed = `${id}_${home}_${away}`;
+
+  return {
+    id,
+    home,
+    away,
+    league,
+    date: fmtRlcsDate(beginAt),
+    beginAt,
+    status: raw?.status || "upcoming",
+    homeOdds: raw?.homeOdds || pseudoOdds(seed, "home"),
+    awayOdds: raw?.awayOdds || pseudoOdds(seed, "away"),
+    source: raw?.source || "pandascore",
+  };
 }
 
 function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
-                      
-   const RLCS_LIVE_VIDEO_ID = "hzs2x4irAD0";                     
+  const RLCS_LIVE_VIDEO_ID = "hzs2x4irAD0";
   const [wager, setWager] = useState(20);
   const [placed, setPlaced] = useState({});
   const [showLive, setShowLive] = useState(false);
-  const RLCS_LIVE_EMBED_URL = "https://www.youtube.com/embed/live_stream?channel=UCdKuPY64fEpI4cdlBSyvEJw&autoplay=1&controls=0&modestbranding=1&rel=0&playsinline=1";
+  const [matches, setMatches] = useState(RLCS_MATCHES);
+  const [syncingMatches, setSyncingMatches] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  const [lastSynced, setLastSynced] = useState(null);
   const myPoints = points?.[currentPlayer] || 0;
+  const isCaptain = currentPlayer === ADMIN_ID;
 
   const myRlcsBets = (bets||[]).filter(b => b.bettorId === currentPlayer && b.isRlcs);
+
+  useEffect(() => {
+    let alive = true;
+    storeGet("rlcs_matches").then(saved => {
+      if (!alive || !saved?.matches?.length) return;
+      setMatches(saved.matches.map(normalizeRlcsMatch));
+      setLastSynced(saved.syncedAt || null);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const syncRealMatches = async () => {
+    if (!isCaptain || syncingMatches) return;
+    setSyncingMatches(true);
+    setSyncError("");
+
+    try {
+      // IMPORTANT:
+      // Your frontend calls YOUR backend here. Your PandaScore key should live in the backend, not inside App.jsx.
+      // Backend should return either { matches:[...] } or just an array of matches.
+      const res = await fetch("/api/rlcs/upcoming", { method:"GET" });
+      if (!res.ok) throw new Error(`sync failed (${res.status})`);
+
+      const json = await res.json();
+      const rawMatches = Array.isArray(json) ? json : (json.matches || json.data || []);
+
+      const normalized = rawMatches
+        .map((m, i) => normalizeRlcsMatch(m, i))
+        .filter(m => m.home !== "TBD" && m.away !== "TBD")
+        .slice(0, 12);
+
+      if (!normalized.length) throw new Error("no upcoming matches returned");
+
+      const payload = { matches: normalized, syncedAt: new Date().toISOString(), source:"pandascore" };
+      setMatches(normalized);
+      setLastSynced(payload.syncedAt);
+      await storeSet("rlcs_matches", payload);
+    } catch (err) {
+      setSyncError("couldn't sync real matches yet — add your backend route + PandaScore token");
+    } finally {
+      setSyncingMatches(false);
+    }
+  };
 
   const placeBet = async (match, side) => {
     if (myPoints < wager) return;
@@ -8158,16 +8264,21 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
       id: Date.now().toString(),
       bettorId: currentPlayer,
       isRlcs: true,
+      marketType: "match_winner",
       matchId: match.id,
       team,
       opponent: side === "home" ? match.away : match.home,
+      home: match.home,
+      away: match.away,
       league: match.league,
       date: match.date,
+      beginAt: match.beginAt,
       wager,
       payout,
       odds,
       status: "open",
       placedAt: new Date().toISOString(),
+      source: match.source || "manual",
     };
     const upd = { ...points, [currentPlayer]: myPoints - wager };
     setPoints(upd); await storeSet("points", upd);
@@ -8179,7 +8290,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
   return (
     <div>
       <div style={{fontSize:11,color:"#4A5066",marginBottom:14,lineHeight:1.5}}>
-        bet on real RLCS matches. results update manually — captain marks winners.
+        bet on upcoming Rocket League matches. captain sync pulls real match cards, then captain settles winners manually.
       </div>
 
       <div style={{background:"linear-gradient(135deg,#180B22,#0B0E18)",border:"2px solid rgba(255,97,193,0.25)",borderRadius:20,padding:14,marginBottom:14,boxShadow:"0 14px 34px rgba(255,97,193,0.08)"}}>
@@ -8196,22 +8307,43 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
         </div>
         {showLive && (
           <div style={{position:"relative",paddingTop:"56.25%",borderRadius:16,overflow:"hidden",background:"#05060C",border:"1px solid rgba(255,255,255,0.08)"}}>
-<iframe
-  src={`https://www.youtube.com/embed/${RLCS_LIVE_VIDEO_ID}?autoplay=1&controls=0&modestbranding=1&rel=0&playsinline=1`}
-  title="RLCS Live"
-  allow="autoplay; encrypted-media; picture-in-picture"
-  allowFullScreen
-  style={{
-    position: "absolute",
-    inset: 0,
-    width: "100%",
-    height: "100%",
-    border: "none"
-  }}
-/>
-      </div>
-              )}
+            <iframe
+              src={`https://www.youtube.com/embed/${RLCS_LIVE_VIDEO_ID}?autoplay=1&controls=0&modestbranding=1&rel=0&playsinline=1`}
+              title="RLCS Live"
+              allow="autoplay; encrypted-media; picture-in-picture"
+              allowFullScreen
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                border: "none"
+              }}
+            />
           </div>
+        )}
+      </div>
+
+      <div style={{background:"linear-gradient(135deg,#10192D,#0B0D17)",borderRadius:18,padding:16,marginBottom:14,border:"2px solid rgba(77,158,255,0.16)",boxShadow:"0 12px 28px rgba(0,0,0,0.20)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+          <div>
+            <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:0.9}}>REAL MATCH SYNC</div>
+            <div style={{fontSize:11,color:"#8B92A8",marginTop:4,lineHeight:1.45}}>
+              {lastSynced ? `last synced ${fmtRelTime(lastSynced)}` : "using sample cards until captain syncs real matches"}
+            </div>
+          </div>
+          {isCaptain ? (
+            <button onClick={syncRealMatches} disabled={syncingMatches} className="bb-pressable"
+              style={{background:syncingMatches?"rgba(77,158,255,0.16)":"#4D9EFF",border:"none",borderRadius:12,padding:"9px 12px",fontSize:11,fontWeight:900,color:syncingMatches?"#8B92A8":"#06070D",cursor:syncingMatches?"default":"pointer",flexShrink:0}}>
+              {syncingMatches ? "syncing…" : "sync real"}
+            </button>
+          ) : (
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:800}}>captain only</div>
+          )}
+        </div>
+        {syncError && <div style={{fontSize:10,color:"#FF5C8A",marginTop:10,lineHeight:1.4}}>{syncError}</div>}
+      </div>
+
       <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,padding:16,marginBottom:14,border:"2px solid rgba(255,255,255,0.08)",boxShadow:"0 12px 28px rgba(0,0,0,0.20)"}}>
         <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER</div>
         <div style={{display:"flex",gap:8}}>
@@ -8223,15 +8355,19 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
           ))}
         </div>
       </div>
-      {RLCS_MATCHES.map(match => {
-        const alreadyBet = placed[match.id] || myRlcsBets.find(b => b.matchId === match.id);
+
+      {matches.map(match => {
+        const alreadyBet = placed[match.id] || myRlcsBets.find(b => b.matchId === match.id && b.marketType === "match_winner");
         const homeDec = americanToDecimal(match.homeOdds);
         const awayDec = americanToDecimal(match.awayOdds);
         return (
-          <div key={match.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${alreadyBet?"rgba(184,255,77,0.25)":"rgba(255,255,255,0.05)"}`}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-              <div style={{fontSize:9,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>{match.league}</div>
-              <div style={{fontSize:9,color:"#4A5066"}}>{match.date}</div>
+          <div key={match.id} style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,padding:14,marginBottom:10,border:`2px solid ${alreadyBet?"rgba(184,255,77,0.25)":"rgba(255,255,255,0.07)"}`,boxShadow:"0 10px 24px rgba(0,0,0,0.18)"}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:10,gap:10}}>
+              <div>
+                <div style={{fontSize:9,color:"#A78BFA",fontWeight:800,letterSpacing:0.8}}>{match.league}</div>
+                {match.source==="sample" && <div style={{fontSize:9,color:"#FFD166",fontWeight:800,marginTop:3}}>sample · sync real matches</div>}
+              </div>
+              <div style={{fontSize:9,color:"#4A5066",textAlign:"right"}}>{match.date}</div>
             </div>
             {alreadyBet ? (
               <div style={{textAlign:"center",padding:"10px 0"}}>
@@ -8244,14 +8380,14 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
               </div>
             ) : (
               <div style={{display:"flex",gap:8}}>
-                <button onClick={()=>placeBet(match,"home")} disabled={myPoints<wager} className="bb-pressable"
+                <button onClick={()=>placeBet(match,"home")} disabled={myPoints<wager || match.home==="TBD"} className="bb-pressable"
                   style={{flex:1,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"12px 8px",cursor:myPoints>=wager?"pointer":"default",opacity:myPoints<wager?0.4:1,textAlign:"center"}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4",marginBottom:6}}>{match.home}</div>
                   <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#B8FF4D"}}>{match.homeOdds}</div>
                   <div style={{fontSize:9,color:"#4A5066",marginTop:4}}>win {Math.round(wager*homeDec)} pts</div>
                 </button>
                 <div style={{display:"flex",alignItems:"center",fontSize:11,color:"#4A5066",fontWeight:700,padding:"0 4px"}}>VS</div>
-                <button onClick={()=>placeBet(match,"away")} disabled={myPoints<wager} className="bb-pressable"
+                <button onClick={()=>placeBet(match,"away")} disabled={myPoints<wager || match.away==="TBD"} className="bb-pressable"
                   style={{flex:1,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"12px 8px",cursor:myPoints>=wager?"pointer":"default",opacity:myPoints<wager?0.4:1,textAlign:"center"}}>
                   <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4",marginBottom:6}}>{match.away}</div>
                   <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#FF61C1"}}>{match.awayOdds}</div>
@@ -8262,6 +8398,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
           </div>
         );
       })}
+
       {myRlcsBets.length > 0 && (
         <div style={{marginTop:16}}>
           <div style={{fontSize:11,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:10}}>YOUR RLCS BETS</div>
@@ -8910,13 +9047,6 @@ const TABS=[
 >
   <LogOut size={15}/>
 </button>
-  <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
-    {Object.values(THEMES).map(t=>(
-      <button key={t.id} onClick={()=>setThemeId(t.id)}
-        style={{width:16,height:16,borderRadius:"50%",border:themeId===t.id?"2px solid #fff":"2px solid transparent",background:t.swatch,cursor:"pointer",padding:0,flexShrink:0,outline:"none"}}
-      />
-    ))}
-  </div>
 </div>
 </div>
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
@@ -9014,7 +9144,7 @@ const TABS=[
 
 // ===================== Styles =====================
 const s = {
-appShell:{display:"flex",flexDirection:"column",height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",width:"100%",position:"relative",overflow:"hidden"},
+appShell:{display:"flex",flexDirection:"column",height:"100dvh",minHeight:"100svh",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden"},
   screen:{height:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
 topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
@@ -9022,9 +9152,9 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:8,WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:96,WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.06)",background:"#0A0C16",flexShrink:0,paddingBottom:"max(8px, env(safe-area-inset-bottom,0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"relative",zIndex:600},
+tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.08)",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(max(14px, env(safe-area-inset-bottom, 14px)))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 4px 4px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent"},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
