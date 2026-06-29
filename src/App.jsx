@@ -245,8 +245,11 @@ function GlobalStyles() {
       @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes fadeSlideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 @keyframes dropDown { from { transform:translateY(-100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
-      @keyframes chatSlideIn { from { transform:translateY(100%); } to { transform:translateY(0); } }
+      @keyframes chatSlideIn { from { transform:translateY(18px); opacity:.88; } to { transform:translateY(0); opacity:1; } }
       @keyframes chatFadeIn { from { opacity:0; } to { opacity:1; } }
+      @keyframes chatPanelIn { from { opacity:0; transform:translateY(14px) scale(.995); } to { opacity:1; transform:translateY(0) scale(1); } }
+      @keyframes softCardIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+      @keyframes modalSheetUp { from { transform:translateY(18px); opacity:.92; } to { transform:translateY(0); opacity:1; } }
       @keyframes heartPop { 0%{transform:scale(1)} 40%{transform:scale(1.35)} 100%{transform:scale(1)} }
    @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 @keyframes bounceDot { 0%,80%,100%{transform:translateY(0)} 40%{transform:translateY(-5px)} }
@@ -261,17 +264,23 @@ function GlobalStyles() {
       ::-webkit-scrollbar { width:0; background:transparent; }
       * { scrollbar-width:none; -ms-overflow-style:none; }
 
-      .bb-pressable { transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .2s, border-color .2s, background .2s; outline:none; -webkit-tap-highlight-color:transparent; }
-      .bb-pressable:active { transform:scale(0.97); }
+      button, .bb-pressable { transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, border-color .22s ease, background .22s ease, opacity .18s ease; outline:none; -webkit-tap-highlight-color:transparent; }
+      button:active, .bb-pressable:active { transform:scale(0.975); }
+      button:disabled { opacity:.55; cursor:not-allowed; }
+      .bb-card-polish { box-shadow:0 12px 28px rgba(0,0,0,.18); }
       @media (hover:hover) {
         .bb-pressable:hover { transform:translateY(-1px); }
         .bb-glow-lime:hover { box-shadow:0 0 0 1px rgba(184,255,77,.4),0 8px 24px rgba(184,255,77,.12); border-color:rgba(184,255,77,.4) !important; }
         .bb-glow-violet:hover { box-shadow:0 0 0 1px rgba(167,139,250,.4),0 8px 24px rgba(167,139,250,.12); border-color:rgba(167,139,250,.4) !important; }
         .bb-glow-pink:hover { box-shadow:0 0 0 1px rgba(255,92,138,.4),0 8px 24px rgba(255,92,138,.12); border-color:rgba(255,92,138,.4) !important; }
       }
-      .bb-tab-content { animation:fadeSlideUp .28s cubic-bezier(.2,.8,.2,1); }
+      .bb-tab-content { animation:fadeSlideUp .24s cubic-bezier(.2,.8,.2,1); }
+      .bb-tab-content > * { animation:softCardIn .22s cubic-bezier(.2,.8,.2,1); }
       .bb-heart-pop { animation:heartPop .32s ease; }
       .bb-live-dot { animation:livePulse 1.4s ease-in-out infinite; }
+      .bb-tab-content { color: var(--bb-main-text, #E8ECF4); }
+      .bb-tab-content [style*="#4A5066"] { color: var(--bb-muted-text, #4A5066) !important; }
+      .bb-tab-content [style*="#B8FF4D"] { color: var(--bb-accent-text, #B8FF4D) !important; }
     `}</style>
   );
 }
@@ -1671,9 +1680,25 @@ function StatusPill({ status }) {
 function TrainingDayCard({ day, isToday, isFutureLocked, completion, onSubmitNumeric, onSubmitText, onOpenComments }) {
   const training = day.training;
   const isNumeric = training?.targetAmount!=null&&training?.targetAmount!=="";
-  const [count,setCount]=useState(completion?.amount??0);
-  useEffect(()=>{ setCount(completion?.amount??0); },[completion?.amount,day.key]);
+  const [proofFile,setProofFile]=useState(null);
+  const [proofUploading,setProofUploading]=useState(false);
+  const [proofUrl,setProofUrl]=useState(completion?.proofUrl||"");
+  const fileRef=useRef(null);
+  useEffect(()=>{ setProofUrl(completion?.proofUrl||""); setProofFile(null); },[completion?.proofUrl,day.key]);
   const submitLocked = completion?.status==="pending"||completion?.status==="approved";
+  const proofReady = !!proofUrl;
+  const chooseProof = async (file) => {
+    if (!file) return;
+    setProofFile(file);
+    setProofUploading(true);
+    try {
+      const uploaded = await uploadPostImage(file);
+      setProofUrl(uploaded);
+    } catch(e) {
+      setProofUrl("");
+    }
+    setProofUploading(false);
+  };
 
   if (isFutureLocked&&training) return (
     <div style={s.trainingCard}>
@@ -1698,25 +1723,25 @@ function TrainingDayCard({ day, isToday, isFutureLocked, completion, onSubmitNum
           {completion?.status==="rejected"&&completion.note&&(
             <div style={s.rejectNote}><span style={{color:"#FF5C8A",fontWeight:700}}>captain note:</span> {completion.note}</div>
           )}
+          <input ref={fileRef} type="file" accept="image/*,video/*" style={{display:"none"}} onChange={(e)=>chooseProof(e.target.files?.[0])}/>
+          <button disabled={submitLocked || proofUploading} onClick={()=>fileRef.current?.click()} className="bb-pressable"
+            style={{width:"100%",background:proofReady?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${proofReady?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px 12px",fontSize:12,fontWeight:700,color:proofReady?"#B8FF4D":"#8B92A8",cursor:submitLocked?"default":"pointer",margin:"10px 0"}}>
+            {proofUploading?"uploading proof…":proofReady?`proof attached${proofFile?` · ${proofFile.name}`:""}`:"upload clip or screenshot proof"}
+          </button>
           {isNumeric ? (
             <div style={s.numericWrap}>
               <div style={s.numericLabel}>target: {training.targetAmount} {training.unit||"reps"}</div>
-              <div style={s.numericCounter}>
-                <button disabled={submitLocked} onClick={()=>setCount((c)=>Math.max(0,c-1))} className="bb-pressable" style={{...s.counterBtn,opacity:submitLocked?0.4:1}}><Minus size={16}/></button>
-                <div style={s.counterVal}>{count}</div>
-                <button disabled={submitLocked} onClick={()=>setCount((c)=>c+1)} className="bb-pressable" style={{...s.counterBtn,opacity:submitLocked?0.4:1}}><Plus size={16}/></button>
-              </div>
-              <button disabled={submitLocked} onClick={()=>onSubmitNumeric(day.key,count)} className="bb-pressable"
-                style={{...s.completeBtn,background:submitLocked?"rgba(255,255,255,0.04)":"#B8FF4D",color:submitLocked?"#7CFFB2":"#06070D",cursor:submitLocked?"default":"pointer",marginTop:10}}>
-                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"submit for review"}
+              <button disabled={submitLocked || proofUploading || !proofReady} onClick={()=>onSubmitNumeric(day.key, training.targetAmount, proofUrl)} className="bb-pressable"
+                style={{...s.completeBtn,background:(submitLocked?"rgba(255,255,255,0.04)":proofReady?"#B8FF4D":"rgba(255,255,255,0.05)"),color:submitLocked?"#7CFFB2":proofReady?"#06070D":"#4A5066",cursor:submitLocked||!proofReady?"default":"pointer",marginTop:10}}>
+                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"submit proof for review"}
               </button>
               <div style={{marginTop:8,display:"flex",justifyContent:"flex-end"}}><button onClick={()=>onOpenComments(day.key)} className="bb-pressable" style={s.commentBtn}><MessageCircle size={15}/></button></div>
             </div>
           ) : (
             <div style={s.trainingActions}>
-              <button disabled={submitLocked} onClick={()=>onSubmitText(day.key)} className="bb-pressable"
-                style={{...s.completeBtn,background:submitLocked?"rgba(255,255,255,0.04)":"#B8FF4D",color:submitLocked?"#7CFFB2":"#06070D",cursor:submitLocked?"default":"pointer"}}>
-                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"mark complete"}
+              <button disabled={submitLocked || proofUploading || !proofReady} onClick={()=>onSubmitText(day.key, proofUrl)} className="bb-pressable"
+                style={{...s.completeBtn,background:(submitLocked?"rgba(255,255,255,0.04)":proofReady?"#B8FF4D":"rgba(255,255,255,0.05)"),color:submitLocked?"#7CFFB2":proofReady?"#06070D":"#4A5066",cursor:submitLocked||!proofReady?"default":"pointer"}}>
+                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"submit proof"}
               </button>
               <button onClick={()=>onOpenComments(day.key)} className="bb-pressable" style={s.commentBtn}><MessageCircle size={15}/></button>
             </div>
@@ -1734,8 +1759,8 @@ function TrainingTab({ trainingData, completions, setCompletions, currentPlayer,
 
   useEffect(()=>{ if(jumpKey){ document.getElementById(`train-${jumpKey}`)?.scrollIntoView({behavior:"smooth",block:"center"}); onJumpHandled(); } },[jumpKey]);
 
-  const submitText=async(key)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"text",submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSet("completions",upd); };
-  const submitNumeric=async(key,amount)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"numeric",amount,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSet("completions",upd); };
+  const submitText=async(key,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"proof",proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSet("completions",upd); };
+  const submitNumeric=async(key,amount,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"numeric",amount,proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSet("completions",upd); };
 
   return (
     <div className="bb-tab-content" style={s.tabContent}>
@@ -1798,7 +1823,8 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
             <div key={item.key} style={s.verifyCard}>
               <div style={s.verifyCardTop}><div style={s.verifyDate}>{fmtDay(new Date(item.dayKey+"T00:00:00"))}</div><div style={s.verifySubmittedAt}>{fmtRelTime(item.completion.submittedAt)}</div></div>
               <div style={s.verifyTitle}>{item.training?.title||"(deleted)"}</div>
-              {item.completion.type==="numeric"&&<div style={s.verifyAmount}>logged <span style={{color:"#B8FF4D",fontWeight:700}}>{item.completion.amount}</span> / target {item.training?.targetAmount} {item.training?.unit||"reps"}</div>}
+              {item.completion.type==="numeric"&&<div style={s.verifyAmount}>target <span style={{color:"#B8FF4D",fontWeight:700}}>{item.training?.targetAmount}</span> {item.training?.unit||"reps"}</div>}
+              {item.completion.proofUrl&&<a href={item.completion.proofUrl} target="_blank" rel="noreferrer" style={{display:"block",fontSize:12,color:"#A78BFA",fontWeight:700,marginBottom:8}}>open proof clip/screenshot</a>}
               <input value={noteDraft[item.key]||""} onChange={(e)=>setNoteDraft((d)=>({...d,[item.key]:e.target.value}))} placeholder="optional note (shown if rejected)" style={{...s.modalInput,marginTop:10,marginBottom:10}}/>
               <div style={s.verifyActionsRow}>
                 <button onClick={()=>decide(item.key,"rejected")} className="bb-pressable" style={s.rejectBtn}><ThumbsDown size={14}/> needs redo</button>
@@ -3272,7 +3298,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
 // ===================== Stats Tab =====================
 const STAT_MODES = ["3v3","2v2","1v1"];
 const LOGGABLE_MODES = ["2v2","1v1"];
-const STAT_FIELDS = ["goals","assists","saves","shots","score"];
+const STAT_FIELDS = ["goals","assists","saves","shots"];
 
 function StatsTrendLine({ games, field, color }) {
   if (games.length < 2) return null;
@@ -3776,6 +3802,53 @@ setProgress(100);
 }
 
 
+
+function getNextAutoGameSessionCode(stats) {
+  const nums = (stats || [])
+    .map(g => String(g.sessionCode || "").match(/^game\s+(\d+)$/i))
+    .filter(Boolean)
+    .map(m => Number(m[1]));
+  const next = nums.length ? Math.max(...nums) + 1 : 1;
+  return `game ${next}`;
+}
+
+async function fetchLatestParseMatchForPlayer(player, playlist) {
+  const res = await fetch(
+    `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${player.platform}&username=${player.name}`,
+    { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+  );
+  const json = await res.json();
+  const sessions = json?.data?.items || [];
+  const matches = sessions.flatMap(s => s.matches || []);
+  return matches
+    .filter(match => match?.metadata?.playlist === playlist && match?.metadata?.isGrouped === false)
+    .sort((a,b)=>new Date(b.metadata.dateCollected)-new Date(a.metadata.dateCollected))[0];
+}
+
+function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
+  return {
+    id: `${sessionCode}_${player.id}_${match.id}`,
+    parseMatchId: match.id,
+    playerId: player.id,
+    mode,
+    ts: match.metadata.dateCollected,
+    roomId: sessionCode,
+    sessionCode,
+    goals: match.stats?.goals?.value || 0,
+    assists: match.stats?.assists?.value || 0,
+    saves: match.stats?.saves?.value || 0,
+    shots: match.stats?.shots?.value || 0,
+    demos: 0,
+    score: match.stats?.score?.value || 0,
+    ourScore: null,
+    theirScore: null,
+    result,
+    rating: match.stats?.rating?.value || null,
+    ratingDelta: match.stats?.rating?.metadata?.ratingDelta || 0,
+    source: "parse_sessions",
+  };
+}
+
 function TeamRoomModal({ currentPlayer, stats, setStats, teamRoom, setTeamRoom, onClose, addToast }) {
   const [mode, setMode] = useState("3v3");
 const [loggingInRoom, setLoggingInRoom] = useState(false);   
@@ -3910,26 +3983,13 @@ console.log("RESULTS:", results);
     
     console.log("STARTING IMPORT");
 
-    const importedGames = pulled.map(({ player, match }) => ({
-      id: `${teamRoom.id}_${player.id}_${match.id}`,
-      parseMatchId: match.id,
-      playerId: player.id,
+    const autoSessionCode = getNextAutoGameSessionCode(stats);
+    const importedGames = pulled.map(({ player, match }) => parseGameToStatEntry({
+      sessionCode: autoSessionCode,
+      player,
+      match,
       mode: teamRoom.mode,
-      ts: match.metadata.dateCollected,
-      roomId: teamRoom.id,
-      sessionCode: teamRoom.id,
-      goals: match.stats?.goals?.value || 0,
-      assists: match.stats?.assists?.value || 0,
-      saves: match.stats?.saves?.value || 0,
-      shots: match.stats?.shots?.value || 0,
-      demos: 0,
-      score: match.stats?.score?.value || 0,
-      ourScore: null,
-theirScore: null,
-result,
-rating: match.stats?.rating?.value || null,
-ratingDelta: match.stats?.rating?.metadata?.ratingDelta || 0,
-      source: "parse_sessions",
+      result,
     }));
 
     const updStats = [...importedGames, ...stats];
@@ -4082,7 +4142,8 @@ const [swipeOffset, setSwipeOffset] = useState(0);
 
   if (recentGame) return (
     <button onClick={async () => {
-  const withRoom = { ...recentGame, roomId: teamRoom.id, sessionCode: teamRoom.id };
+  const autoSessionCode = getNextAutoGameSessionCode(stats);
+  const withRoom = { ...recentGame, roomId: autoSessionCode, sessionCode: autoSessionCode };
   const updStats = stats.map(g => g.id === recentGame.id ? withRoom : g);
   await storeSet("stats", updStats);
   setStats(updStats);
@@ -4117,7 +4178,8 @@ const [swipeOffset, setSwipeOffset] = useState(0);
             )}
 {loggingInRoom && (
   <LogGameModal mode={teamRoom.mode} currentPlayer={currentPlayer} onSave={async (entry) => {
-    const withRoom = { ...entry, roomId: teamRoom.id, sessionCode: teamRoom.id };
+    const autoSessionCode = getNextAutoGameSessionCode(stats);
+    const withRoom = { ...entry, roomId: autoSessionCode, sessionCode: autoSessionCode };
     const updStats = [withRoom, ...stats];
     await storeSet("stats", updStats);
     setStats(updStats);
@@ -4137,6 +4199,10 @@ function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate,
   const [showAllGames, setShowAllGames]=useState(false);
   const [statsSubTab, setStatsSubTab] = useState("tracker");
 const [showRoom, setShowRoom] = useState(false);
+const [matchSyncing, setMatchSyncing] = useState(false);
+const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
+const [syncMode, setSyncMode] = useState("3v3");
+const [selectedDuoIds, setSelectedDuoIds] = useState(["p1","p2"]);
 useEffect(() => {
   if (jumpDate) {
     setMode("3v3");
@@ -4193,12 +4259,119 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
   const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+(Number(g[field])||0),0)/arr.length).toFixed(1):"—";
   const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>(Number(g.ourScore)||0)>(Number(g.theirScore)||0)).length/arr.length)*100)+"%"; };
   const playerColor=PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
+  const recentMyGames = [...myGames].sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,5).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+  const syncDuoOptions = [
+    ["p1","p2"],
+    ["p1","p3"],
+    ["p2","p3"],
+  ];
+
+  const syncLatestTeamMatch = async (requestedMode = syncMode, requestedPlayers = null) => {
+    if (matchSyncing) return;
+
+    const playlistByMode = {
+      "3v3": "Ranked Standard 3v3",
+      "2v2": "Ranked Doubles 2v2",
+      "1v1": "Ranked Duel 1v1",
+    };
+
+    let playersToSync = requestedPlayers;
+    if (!playersToSync) {
+      playersToSync =
+        requestedMode === "3v3" ? PLAYERS :
+        requestedMode === "2v2" ? PLAYERS.filter(p => selectedDuoIds.includes(p.id)) :
+        PLAYERS.filter(p => p.id === currentPlayer);
+    }
+
+    if (requestedMode === "3v3" && currentPlayer !== ADMIN_ID) {
+      addToast?.("only the captain can sync full team 3v3", "🔒");
+      return;
+    }
+
+    if (requestedMode === "2v2" && currentPlayer !== ADMIN_ID && !playersToSync.some(p => p.id === currentPlayer)) {
+      addToast?.("pick a duo you played in", "⚠️");
+      return;
+    }
+
+    const playlist = playlistByMode[requestedMode] || "Ranked Standard 3v3";
+    const creditsNeeded = playersToSync.length;
+
+    if (useParseCredit) {
+      for (let i = 0; i < creditsNeeded; i++) {
+        const creditOk = await useParseCredit(currentPlayer);
+        if (!creditOk) return;
+      }
+    }
+
+    setMatchSyncing(true);
+    addToast?.(`syncing latest ${requestedMode} match…`, "🔄");
+
+    try {
+      const pulled = await Promise.all(
+        playersToSync.map(async (p) => ({
+          player: p,
+          match: await fetchLatestParseMatchForPlayer(p, playlist),
+        }))
+      );
+
+      if (pulled.some(x => !x.match)) {
+        addToast?.(`waiting for ${playersToSync.length === 1 ? "your" : "all player"} ${requestedMode} match${playersToSync.length === 1 ? "" : "es"} to show on tracker`, "⏳");
+        setMatchSyncing(false);
+        return;
+      }
+
+      if (playersToSync.length > 1) {
+        const times = pulled.map(x => new Date(x.match.metadata.dateCollected).getTime());
+        if (Math.max(...times) - Math.min(...times) > 10 * 60 * 1000) {
+          addToast?.(`latest games don't look like the same ${requestedMode} match yet`, "⚠️");
+          setMatchSyncing(false);
+          return;
+        }
+
+        const results = pulled.map(x => x.match.metadata.result);
+        const sameResult = results.every(r => r === results[0]);
+        if (!sameResult) {
+          addToast?.(`latest ${requestedMode} results do not match yet`, "⚠️");
+          setMatchSyncing(false);
+          return;
+        }
+      }
+
+      const alreadyImported = pulled.some(x =>
+        stats.some(g => g.parseMatchId === x.match.id && g.playerId === x.player.id)
+      );
+
+      if (alreadyImported) {
+        addToast?.("that match was already synced", "✅");
+        setMatchSyncing(false);
+        return;
+      }
+
+      const result = pulled[0].match.metadata.result;
+      const sessionCode = getNextAutoGameSessionCode(stats);
+      const importedGames = pulled.map(({ player, match }) =>
+        parseGameToStatEntry({ sessionCode, player, match, mode: requestedMode, result })
+      );
+
+      const updStats = [...importedGames, ...stats];
+      setStats(updStats);
+      await storeSet("stats", updStats);
+      addToast?.(`${sessionCode} ${requestedMode} synced from tracker`, "✅");
+      setShowSyncMatchModal(false);
+    } catch(e) {
+      console.error(e);
+      addToast?.("sync match failed", "❌");
+    }
+
+    setMatchSyncing(false);
+  };
 return (
     <div className="bb-tab-content" style={s.tabContent}>
       {logging&&<LogGameModal mode={mode} currentPlayer={currentPlayer} onSave={saveGame} onClose={()=>setLogging(false)}/>}
 <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>stats tracker</div>
-        <button onClick={async () => {
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={async () => {
           const creditOk = useParseCredit ? await useParseCredit(currentPlayer) : true;
           if (!creditOk) return;
           const profile = mmrProfiles?.[currentPlayer];
@@ -4211,32 +4384,11 @@ return (
             );
             const json = await res.json();
             const segments = json?.data?.segments || [];
-            const playlistIds = { "Ranked Duel 1v1": 10, "Ranked Doubles 2v2": 11, "Ranked Standard 3v3": 13 };
             const newRanks = profile.ranks.map(r => {
-    const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === r.playlist);
-const newMmr = seg?.stats?.rating?.value || r.mmr;
-
-console.log({
-  playlist: r.playlist,
-  tierValue: seg?.stats?.tier?.value,
-  tierName: seg?.stats?.tier?.metadata?.name,
-  divisionValue: seg?.stats?.division?.value,
-  divisionName: seg?.stats?.division?.metadata?.name,
-  mmr: seg?.stats?.rating?.value,
-});
-
-const newRankName =
-  seg?.stats?.tier?.metadata?.name ||
-  "Unranked";
-
-return {
-  ...r,
-  prevMmr: r.mmr,
-  prevRank: r.rank,
-  mmr: newMmr,
-  rank: newRankName,
-  division: seg?.stats?.division?.metadata?.name || ""
-};
+              const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === r.playlist);
+              const newMmr = seg?.stats?.rating?.value || r.mmr;
+              const newRankName = seg?.stats?.tier?.metadata?.name || "Unranked";
+              return { ...r, prevMmr:r.mmr, prevRank:r.rank, mmr:newMmr, rank:newRankName, division:seg?.stats?.division?.metadata?.name || "" };
             });
             const updated = { ...profile, ranks: newRanks, lastSynced: new Date().toISOString() };
             setMmrProfiles(prev => ({ ...prev, [currentPlayer]: updated }));
@@ -4244,29 +4396,129 @@ return {
             addToast?.("ranks updated!", "✅");
           } catch(e) { addToast?.("sync failed", "❌"); }
         }} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>
-          🔄 sync ranks
+          sync ranks
         </button>
+        </div>
       </div>
-{currentPlayer === ADMIN_ID && (
-  <button
-    onClick={() => setLogging(true)}
-    className="bb-pressable bb-glow-lime"
-    style={{
-      width:"100%",
-      background:"#B8FF4D",
-      border:"none",
-      borderRadius:14,
-      padding:"12px 0",
-      fontSize:13,
-      fontWeight:800,
-      color:"#06070D",
-      cursor:"pointer",
-      marginBottom:14
-    }}
-  >
-    🔄 sync match
-  </button>
-)}
+
+      {showSyncMatchModal && (
+        <div style={{position:"fixed",inset:0,zIndex:600,background:"#06070D",overflowY:"auto",padding:"18px",paddingTop:"max(18px, env(safe-area-inset-top))",paddingBottom:"max(24px, env(safe-area-inset-bottom))"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+            <div>
+              <div style={{fontSize:11,color:"#B8FF4D",fontWeight:900,letterSpacing:1}}>SYNC MATCH</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:30,color:"#E8ECF4",fontWeight:700,lineHeight:1}}>pull tracker stats</div>
+            </div>
+            <button onClick={()=>setShowSyncMatchModal(false)} className="bb-pressable" style={{width:38,height:38,borderRadius:12,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.05)",color:"#E8ECF4",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}>
+              <X size={18}/>
+            </button>
+          </div>
+
+          <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:18,padding:14,marginBottom:14}}>
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:1,marginBottom:10}}>MODE</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+              {["3v3","2v2","1v1"].map(m => (
+                <button key={m} onClick={()=>setSyncMode(m)} className="bb-pressable" style={{
+                  background:syncMode===m?"#B8FF4D":"rgba(255,255,255,0.05)",
+                  border:syncMode===m?"none":"1px solid rgba(255,255,255,0.08)",
+                  borderRadius:12,
+                  padding:"11px 0",
+                  color:syncMode===m?"#06070D":"#8B92A8",
+                  fontSize:13,
+                  fontWeight:900,
+                  cursor:"pointer"
+                }}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {syncMode === "3v3" && (
+            <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:18,padding:16,marginBottom:14}}>
+              <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,marginBottom:6}}>FULL TEAM 3V3</div>
+              <div style={{fontSize:13,color:"#E8ECF4",fontWeight:800,marginBottom:6}}>maglvxx · apcards5 · tqr11le</div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Captain-only. Pulls the latest ranked 3v3 match for all three players and groups it as the next Team Link game.</div>
+              <button
+                disabled={matchSyncing || currentPlayer !== ADMIN_ID}
+                onClick={()=>syncLatestTeamMatch("3v3", PLAYERS)}
+                className="bb-pressable bb-glow-lime"
+                style={{width:"100%",background:currentPlayer===ADMIN_ID?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:currentPlayer===ADMIN_ID?"#06070D":"#4A5066",cursor:currentPlayer===ADMIN_ID?"pointer":"not-allowed",opacity:matchSyncing?0.6:1}}
+              >
+                {matchSyncing ? "syncing…" : "sync full team 3v3 · uses 3 credits"}
+              </button>
+            </div>
+          )}
+
+          {syncMode === "2v2" && (
+            <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(167,139,250,0.18)",borderRadius:18,padding:16,marginBottom:14}}>
+              <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,marginBottom:10}}>SELECT DUO</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:14}}>
+                {syncDuoOptions.map(ids => {
+                  const selected = ids.join("_") === selectedDuoIds.join("_");
+                  const label = ids.map(id => PLAYERS.find(p => p.id === id)?.name).join(" + ");
+                  return (
+                    <button key={ids.join("_")} onClick={()=>setSelectedDuoIds(ids)} className="bb-pressable" style={{
+                      width:"100%",
+                      background:selected?"rgba(167,139,250,0.16)":"rgba(255,255,255,0.04)",
+                      border:`1px solid ${selected?"rgba(167,139,250,0.45)":"rgba(255,255,255,0.08)"}`,
+                      borderRadius:13,
+                      padding:"12px",
+                      color:selected?"#E8ECF4":"#8B92A8",
+                      textAlign:"left",
+                      fontSize:13,
+                      fontWeight:800,
+                      cursor:"pointer"
+                    }}>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Only the selected duo gets pulled from ranked 2v2, so the app knows exactly which chemistry pair to update.</div>
+              <button
+                disabled={matchSyncing}
+                onClick={()=>syncLatestTeamMatch("2v2", PLAYERS.filter(p => selectedDuoIds.includes(p.id)))}
+                className="bb-pressable bb-glow-violet"
+                style={{width:"100%",background:"#A78BFA",border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
+              >
+                {matchSyncing ? "syncing…" : "sync selected duo · uses 2 credits"}
+              </button>
+            </div>
+          )}
+
+          {syncMode === "1v1" && (
+            <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(77,158,255,0.18)",borderRadius:18,padding:16,marginBottom:14}}>
+              <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:6}}>MY 1V1</div>
+              <div style={{fontSize:13,color:"#E8ECF4",fontWeight:800,marginBottom:6}}>{PLAYERS.find(p=>p.id===currentPlayer)?.name}</div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Anyone can sync their own ranked 1v1 when they are logged in. This uses the least credits because it only pulls one player.</div>
+              <button
+                disabled={matchSyncing}
+                onClick={()=>syncLatestTeamMatch("1v1", PLAYERS.filter(p => p.id === currentPlayer))}
+                className="bb-pressable bb-glow-lime"
+                style={{width:"100%",background:"#4D9EFF",border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
+              >
+                {matchSyncing ? "syncing…" : "sync my 1v1 · uses 1 credit"}
+              </button>
+            </div>
+          )}
+
+          <div style={{fontSize:11,color:"#4A5066",lineHeight:1.5}}>
+            The app skips duplicates, checks that multi-player matches happened close together, and saves the result as Game 1, Game 2, Game 3, etc.
+          </div>
+        </div>
+      )}
+
+      <button onClick={()=>setShowSyncMatchModal(true)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(184,255,77,0.18)",borderRadius:18,padding:"16px",marginBottom:14,textAlign:"left",cursor:"pointer",boxShadow:"0 12px 26px rgba(0,0,0,0.18)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+          <div>
+            <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,marginBottom:4}}>SYNC MATCH</div>
+            <div style={{fontSize:13,color:"#E8ECF4",fontWeight:800}}>3v3 team · 2v2 duo · 1v1 solo</div>
+            <div style={{fontSize:11,color:"#8B92A8",marginTop:4,lineHeight:1.4}}>choose what was played, then pull the latest Tracker game from Parse</div>
+          </div>
+          <ChevronRight size={18} color="#B8FF4D" style={{flexShrink:0}}/>
+        </div>
+      </button>
+
 {mode!=="3v3" && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>log game</button></div>}
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"📊 stats"},{id:"sessions",label:"🎮 sessions"}].map(sub=>(
@@ -4297,7 +4549,7 @@ return {
           </button>
         ))}
       </div>
-      <div style={{...s.sectionLabel,marginBottom:10}}>your averages · {myGames.length} games</div>
+      <div style={{...s.sectionLabel,marginBottom:10}}>your averages · last {Math.min(5,myGames.length)} games</div>
       {myGames.length===0 ? (
         <div style={s.emptyQueue}>no {mode} games logged yet — tap log game to add one.</div>
       ) : (
@@ -4306,8 +4558,8 @@ return {
             {STAT_FIELDS.map(f=>(
               <div key={f} style={{background:"#11131F",borderRadius:18,padding:"16px",border:"2px solid rgba(255,255,255,0.08)"}}>
                 <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:6,textTransform:"uppercase"}}>{f}</div>
-                <div style={{fontSize:22,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:playerColor,marginBottom:6}}>{avg(myGames,f)}</div>
-                <StatsTrendLine games={myGames} field={f} color={playerColor}/>
+                <div style={{fontSize:22,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:playerColor,marginBottom:6}}>{avg(recentMyGames,f)}</div>
+                <StatsTrendLine games={recentMyGames} field={f} color={playerColor}/>
               </div>
             ))}
           </div>
@@ -4327,14 +4579,14 @@ return {
         <>
           <div style={{...s.sectionLabel,marginBottom:10}}>team comparison</div>
           <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)",marginBottom:20}}>
-            <div style={{display:"grid",gridTemplateColumns:`70px repeat(6,1fr)`,gap:4,marginBottom:8}}>
+            <div style={{display:"grid",gridTemplateColumns:`70px repeat(${STAT_FIELDS.length},1fr)`,gap:4,marginBottom:8}}>
               <div/>
               {STAT_FIELDS.map(f=><div key={f} style={{fontSize:9.5,color:"#4A5066",fontWeight:700,textAlign:"center",textTransform:"uppercase",letterSpacing:0.5}}>{f}</div>)}
             </div>
             {PLAYERS.map(p=>{
-              const pg=modeGames.filter(g=>g.playerId===p.id);
+              const pg=modeGames.filter(g=>g.playerId===p.id).sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,5);
               return (
-                <div key={p.id} style={{display:"grid",gridTemplateColumns:`70px repeat(6,1fr)`,gap:4,marginBottom:8,alignItems:"center"}}>
+                <div key={p.id} style={{display:"grid",gridTemplateColumns:`70px repeat(${STAT_FIELDS.length},1fr)`,gap:4,marginBottom:8,alignItems:"center"}}>
                   <div style={{display:"flex",alignItems:"center",gap:6}}>
                     <div style={{width:7,height:7,borderRadius:99,background:p.color,flexShrink:0}}/>
                     <span style={{fontSize:11,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.name}</span>
@@ -4602,7 +4854,7 @@ const PREMIUM_PASS_REWARDS = {
   28: { type:"coins",  value:50,  label:"+50 pts" },
   29: { type:"color",  value:"#00FFD0", label:"neon teal glow" },
   30: { type:"token",  value:"training_skip", label:"training skip token" },
-  31: { type:"title",  value:"circuit royale", label:"circuit royale" },
+  31: { type:"text_color", value:"app_text_colors", label:"app text color kit" },
   32: { type:"icon",   value:"🔮", label:"crystal ball icon" },
   33: { type:"coins",  value:50,  label:"+50 pts" },
   34: { type:"title",  value:"untouchable", label:"untouchable" },
@@ -5175,6 +5427,16 @@ await storeSet("pings", pingUpd2);
                         {item.cost} pts
                       </button>
                     )}
+                    {reward.type === "text_color" && isEquipped && (
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginTop:10,width:"100%"}}>
+                        {["main","muted","accent"].map(part => (
+                          <label key={part} style={{fontSize:9,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>
+                            {part}
+                            <input type="color" defaultValue={(points?.[currentPlayer+"_textColors"]||{})[part] || (part==="accent"?"#B8FF4D":part==="muted"?"#8B92A8":"#E8ECF4")} onChange={async(e)=>{ const cur=points?.[currentPlayer+"_textColors"]||{}; const upd={...points,[currentPlayer+"_textColors"]:{...cur,[part]:e.target.value}}; setPoints(upd); await storeSet("points",upd); }} style={{width:"100%",height:30,marginTop:4,background:"none",border:"none"}}/>
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -5445,7 +5707,7 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
       await storeSet("pass_tokens", updTokens);
     }
 
-    if (reward.type === "color" || reward.type === "icon" || reward.type === "title") {
+    if (reward.type === "color" || reward.type === "icon" || reward.type === "title" || reward.type === "text_color") {
       const owned = points?.[currentPlayer + "_owned"] || [];
       const itemId = `pass_${t}_${tier}`;
       if (!owned.includes(itemId)) {
@@ -5543,7 +5805,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
           const isNext = !unlocked && currentProgress.tier === tier - 1;
 
           let rewardLabel = reward.label || reward.value;
-          let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📝" : reward.type === "car" ? "🏎️" : "🎁";
+          let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : (reward.type === "color" || reward.type === "text_color") ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📝" : reward.type === "car" ? "🏎️" : "🎁";
 
           return (
             <div key={tier} style={{ background: claimed ? "rgba(184,255,77,0.05)" : unlocked ? "#11131F" : "rgba(255,255,255,0.02)", borderRadius: 13, padding: "12px 14px", border: `1px solid ${claimed ? "rgba(184,255,77,0.2)" : isNext ? "rgba(167,139,250,0.3)" : unlocked ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"}`, display: "flex", alignItems: "center", gap: 12 }}>
@@ -5607,7 +5869,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
                 const reward = getPassRewardForOwnedId(ownedId);
                 if (!reward) return null;
                 const isEquipped = !!equipped[ownedId];
-                const emoji = reward.type === "color" ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📝" : "🎁";
+                const emoji = (reward.type === "color" || reward.type === "text_color") ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📝" : "🎁";
                 return (
                   <div key={ownedId} style={{ background: isEquipped ? "rgba(184,255,77,0.06)" : "#11131F", borderRadius: 13, padding: "12px 14px", border: `1px solid ${isEquipped ? "rgba(184,255,77,0.25)" : "rgba(255,255,255,0.06)"}`, display: "flex", alignItems: "center", gap: 12 }}>
                     <span style={{ fontSize: 20 }}>{emoji}</span>
@@ -5615,7 +5877,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
                       <div style={{ fontSize: 13, fontWeight: 700, color: isEquipped ? "#B8FF4D" : "#E8ECF4" }}>{reward.label}</div>
                       <div style={{ fontSize: 10, color: "#4A5066", textTransform: "uppercase", letterSpacing: 0.5, marginTop: 2 }}>{reward.type}</div>
                     </div>
-                    {(reward.type === "color" || reward.type === "icon" || reward.type === "title") && (
+                    {(reward.type === "color" || reward.type === "icon" || reward.type === "title" || reward.type === "text_color") && (
                       <button onClick={() => toggleEquip(ownedId, reward.type)} className="bb-pressable"
                         style={{ background: isEquipped ? "#B8FF4D" : "rgba(255,255,255,0.06)", border: "none", borderRadius: 9, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, color: isEquipped ? "#06070D" : "#8B92A8", cursor: "pointer" }}>
                         {isEquipped ? "✓ on" : "equip"}
@@ -6712,6 +6974,16 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
 };             
   const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
   const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
+  const cancelOpenBet = async (betId) => {
+    const updBets = (bets || []).filter(b => b.id !== betId);
+    setBets(updBets);
+    await storeSet("bets", updBets);
+  };
+  const cancelAllOpenBets = async () => {
+    const updBets = (bets || []).filter(b => !(b.bettorId === currentPlayer && b.status === "open"));
+    setBets(updBets);
+    await storeSet("bets", updBets);
+  };
 
 const spinWheel = async () => {
     if (spinning || wager < 1 || myPoints < wager) return;
@@ -6818,8 +7090,8 @@ const noBettingWeek = isEventActive("no_betting");
           <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
         <div style={{display:"flex",gap:12,marginTop:6}}>
-          <div style={{fontSize:11,color:"#4A5066"}}>🎡 <span style={{color:spinsLeft>0?"#B8FF4D":"#FF5C8A",fontWeight:700}}>{spinsLeft}</span> spins left</div>
-          <div style={{fontSize:11,color:"#4A5066"}}>🎰 <span style={{color:slotsLeft>0?"#A78BFA":"#FF5C8A",fontWeight:700}}>{slotsLeft}</span> slots left</div>
+          <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:spinsLeft>0?"#B8FF4D":"#FF5C8A",fontWeight:700}}>{spinsLeft}</span> spins left</div>
+          <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:slotsLeft>0?"#A78BFA":"#FF5C8A",fontWeight:700}}>{slotsLeft}</span> slots left</div>
         </div>
         </div>
         <div style={{fontSize:11,color:"#4A5066",textAlign:"right"}}>
@@ -6830,7 +7102,7 @@ const noBettingWeek = isEventActive("no_betting");
 
       {/* Section tabs */}
       <div style={{display:"flex",gap:8,marginBottom:18}}>
-     {[{id:"wheel",label:"🎡 wheel"},{id:"slots",label:"🎰 slots"},{id:"props",label:"📊 props"},{id:"parlay",label:"🃏 parlay"},{id:"predict",label:"🔮 predict"},{id:"mybets",label:"🎟 my bets"}].map(sec=>(
+     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"parlay",label:"parlay"},{id:"predict",label:"predict"},{id:"mybets",label:"my bets"}].map(sec=>(
           <button key={sec.id} onClick={()=>setSection(sec.id)} className="bb-pressable"
             style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
             {sec.label}
@@ -7347,18 +7619,26 @@ const noBettingWeek = isEventActive("no_betting");
           {myOpenBets.length===0&&mySettledBets.length===0&&<div style={s.emptyQueue}>no bets yet — head to props or spin the wheel.</div>}
           {myOpenBets.length>0&&(
             <>
-              <div style={{...s.sectionLabel,marginBottom:10}}>open bets</div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                <div style={s.sectionLabel}>open bets</div>
+                <button onClick={cancelAllOpenBets} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:9,padding:"6px 10px",fontSize:10.5,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>trash all</button>
+              </div>
               {myOpenBets.map(bet=>(
-                <div key={bet.id} style={{background:"#11131F",borderRadius:13,padding:14,marginBottom:8,border:"1px solid rgba(255,209,102,0.2)"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                    <span style={{fontSize:13,fontWeight:700,color:"#FFD166"}}>{bet.playerName} {bet.side} {bet.line} {bet.field}</span>
-                    <span style={{fontSize:11,color:"#4A5066"}}>{bet.odds}</span>
+                <div key={bet.id} style={{background:"#11131F",borderRadius:13,padding:14,marginBottom:8,border:"1px solid rgba(255,209,102,0.2)",display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                      <span style={{fontSize:13,fontWeight:700,color:"#FFD166"}}>{bet.playerName} {bet.side} {bet.line} {bet.field}</span>
+                      <span style={{fontSize:11,color:"#4A5066"}}>{bet.odds}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between"}}>
+                      <span style={{fontSize:12,color:"#8B92A8"}}>wagered {bet.wager} pts</span>
+                      <span style={{fontSize:12,color:"#B8FF4D",fontWeight:700}}>win {bet.payout} pts</span>
+                    </div>
+                    <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>waiting for {bet.playerName} to log a 3v3 game · cancelled bets are not refunded</div>
                   </div>
-                  <div style={{display:"flex",justifyContent:"space-between"}}>
-                    <span style={{fontSize:12,color:"#8B92A8"}}>wagered {bet.wager} pts</span>
-                    <span style={{fontSize:12,color:"#B8FF4D",fontWeight:700}}>win {bet.payout} pts</span>
-                  </div>
-                  <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>waiting for {bet.playerName} to log a 3v3 game</div>
+                  <button onClick={()=>cancelOpenBet(bet.id)} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:10,width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",color:"#FF5C8A",cursor:"pointer",flexShrink:0}}>
+                    <X size={16}/>
+                  </button>
                 </div>
               ))}
             </>
@@ -8961,6 +9241,7 @@ const TABS=[
   const own = points?.[currentPlayer+"_owned"] || [];
   const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].includes(id));
   const customUrl = points?.[currentPlayer+"_customBg"];
+  const textColors = points?.[currentPlayer+"_textColors"] || {};
   const bgStyle = bgId==="bg_carbon" ? {backgroundImage:"repeating-linear-gradient(45deg,#0e0e0e 0px,#0e0e0e 3px,#1a1a1a 3px,#1a1a1a 6px)"}
     : bgId==="bg_spring"   ? {backgroundImage:"linear-gradient(135deg,#1a0a1a,#0a1a12,#0a1220)"}
     : bgId==="bg_aurora"   ? {backgroundImage:"linear-gradient(135deg,#040d14,#012a1a,#040818)"}
@@ -8976,7 +9257,7 @@ const TABS=[
     : {background:theme.bg};
 
   return (
-    <div style={{...s.appShell, ...bgStyle, color:theme.text, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
+    <div style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || "#B8FF4D", animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {theme.id==="starfield" && <StarfieldBg/>}
 
@@ -9000,24 +9281,12 @@ const TABS=[
       {commentDay&&<CommentsModal dayKey={commentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setCommentDay(null)}/>}
  <div style={s.topBar}>
   <div style={s.topBarTitle}>
-    <button onClick={async()=>{ 
-      const sub = await registerPush();
-      if (sub) {
-        setPushSub(sub);
-        storeSet(`push_sub:${currentPlayer}`, JSON.stringify(sub));
-        alert('notifications enabled!');
-      } else {
-        alert('notifications blocked or not supported');
-      }
-    }} className="bb-pressable" style={{background:"none",border:"none",color:"#B8FF4D",fontSize:11,fontWeight:700,cursor:"pointer",padding:"4px 8px"}}>
-      enable notifs
-    </button>
+    <div style={{display:"flex",alignItems:"center",gap:7}}>
+      {isAdmin&&<Shield size={13} color="#FF5C8A"/>}
+      <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
+      <span style={s.youName}>{playerObj.name}</span>
+    </div>
   </div>
-<div style={{position:"absolute",left:"50%",transform:"translateX(-50%)",display:"flex",alignItems:"center",gap:6}}>
-  {isAdmin&&<Shield size={13} color="#FF5C8A"/>}
-  <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
-  <span style={s.youName}>{playerObj.name}</span>
-</div>
 <div style={s.topBarRight}>
   <button onClick={()=>setChatOpen(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
     <MessageCircle size={16}/>
@@ -9105,8 +9374,8 @@ const TABS=[
         </div>
       )}
       {chatOpen && (
-    <div style={{position:"fixed",inset:0,zIndex:50,background:"#06070D",display:"flex",flexDirection:"column",animation:"chatFadeIn .18s ease",paddingBottom:0}}>
-          <div style={{animation:"chatSlideIn .32s cubic-bezier(.2,.8,.2,1)",flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+    <div style={{position:"fixed",inset:0,zIndex:50,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",paddingBottom:0,willChange:"transform, opacity"}}>
+          <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={()=>{
                 setChatOpen(false);
@@ -9155,7 +9424,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:96,WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
 tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.08)",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(max(14px, env(safe-area-inset-bottom, 14px)))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
-tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"6px 4px 4px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent"},
+tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
   reminderTitle:{fontSize:12.5,fontWeight:700,color:"#FF5C8A"},
@@ -9188,8 +9457,8 @@ tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",
   setupRow:{display:"flex",gap:8,marginBottom:16,width:"100%"},
   platformBtn:{flex:1,border:"none",borderRadius:9,padding:"10px 0",fontSize:12,fontWeight:700,cursor:"pointer"},
   setupInput:{width:"100%",background:"#11131F",border:"1px solid rgba(255,255,255,0.1)",borderRadius:12,padding:"14px 16px",color:"#E8ECF4",fontSize:15,marginBottom:16,outline:"none",boxSizing:"border-box"},
-  primaryBtn:{width:"100%",background:"#B8FF4D",color:"#06070D",border:"none",borderRadius:12,padding:"14px",fontSize:13.5,fontWeight:700,cursor:"pointer",marginTop:4},
-  heroCard:{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:18,padding:"20px 18px",marginBottom:16},
+  primaryBtn:{width:"100%",background:"#B8FF4D",color:"#06070D",border:"none",borderRadius:14,padding:"14px",fontSize:13.5,fontWeight:800,cursor:"pointer",marginTop:4,boxShadow:"0 10px 24px rgba(184,255,77,0.14)"},
+  heroCard:{background:"linear-gradient(135deg,#121526,#090B14)",border:"1px solid rgba(184,255,77,0.18)",borderRadius:20,padding:"22px 18px",marginBottom:16,boxShadow:"0 14px 34px rgba(0,0,0,0.22)"},
   heroEyebrow:{fontSize:11,letterSpacing:1.2,color:"#B8FF4D",fontWeight:700,marginBottom:14},
   heroMatchup:{display:"flex",alignItems:"center",justifyContent:"space-between"},
   heroTeam:{flex:1,textAlign:"center"},
@@ -9198,7 +9467,7 @@ tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",
   heroBo:{fontSize:10,color:"#A78BFA",marginBottom:2,fontWeight:700},
   heroMeta:{textAlign:"center",marginTop:14,fontSize:12,color:"#8B92A8"},
   recordRow:{display:"flex",gap:10,marginBottom:24},
-  recordBox:{flex:1,background:"#11131F",borderRadius:14,padding:"14px 8px",textAlign:"center",border:"1px solid rgba(255,255,255,0.05)"},
+  recordBox:{flex:1,background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:16,padding:"15px 8px",textAlign:"center",border:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 10px 24px rgba(0,0,0,0.16)"},
   recordNum:{fontFamily:"'Oswald',sans-serif",fontSize:21,fontWeight:600},
   recordLabel:{fontSize:9.5,letterSpacing:0.6,color:"#4A5066",marginTop:4,fontWeight:700},
   sectionRowHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10},
@@ -9206,7 +9475,7 @@ tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",
   sectionSubLabel:{fontSize:12,color:"#4A5066",marginBottom:14},
   viewAllBtn:{background:"none",border:"none",color:"#A78BFA",fontSize:11.5,fontWeight:600,display:"flex",alignItems:"center",gap:2,cursor:"pointer"},
   dashTrainingScroll:{display:"flex",gap:10,overflowX:"auto",paddingBottom:6,marginBottom:4,WebkitOverflowScrolling:"touch"},
-  dashTrainingCard:{minWidth:122,background:"#11131F",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:"12px 12px",cursor:"pointer",flexShrink:0},
+  dashTrainingCard:{minWidth:122,background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.09)",borderRadius:16,padding:"13px 12px",cursor:"pointer",flexShrink:0,boxShadow:"0 10px 22px rgba(0,0,0,0.16)"},
   dashTrainingDay:{fontSize:10.5,color:"#A78BFA",fontWeight:700,textTransform:"lowercase",marginBottom:6},
   dashTrainingTitle:{fontSize:12.5,fontWeight:600,lineHeight:1.3,marginBottom:8,minHeight:32},
   dashTrainingEmpty:{fontSize:11.5,color:"#3A4256",fontStyle:"italic",minHeight:32,display:"flex",alignItems:"center"},
@@ -9216,8 +9485,8 @@ tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",
   dashRejectedTag:{fontSize:9.5,color:"#FF5C8A",fontWeight:700},
   dashLockedTag:{fontSize:9.5,color:"#4A5066",fontWeight:700},
   blurredText:{filter:"blur(5px)",userSelect:"none",pointerEvents:"none"},
-  mmrCard:{background:"#11131F",borderRadius:16,padding:14,marginBottom:10,border:"1px solid rgba(255,255,255,0.05)"},
-  mmrCardEmpty:{background:"#11131F",borderRadius:16,padding:16,marginBottom:10},
+  mmrCard:{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,padding:16,marginBottom:12,border:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 12px 28px rgba(0,0,0,0.18)"},
+  mmrCardEmpty:{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,padding:16,marginBottom:12,border:"1px solid rgba(255,255,255,0.06)",boxShadow:"0 12px 28px rgba(0,0,0,0.16)"},
   mmrCardHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12},
   verifiedBadge:{fontSize:9,color:"#FF5C8A",fontWeight:700,background:"rgba(255,92,138,0.1)",padding:"2px 6px",borderRadius:99,marginLeft:4},
   resyncBtn:{background:"rgba(255,255,255,0.06)",border:"none",color:"#8B92A8",fontSize:11,fontWeight:700,padding:"5px 10px",borderRadius:7,cursor:"pointer"},
@@ -9236,7 +9505,7 @@ tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",
   matchRowStatus:{fontSize:9.5,fontWeight:700,border:"1px solid",borderRadius:99,padding:"3px 8px",letterSpacing:0.5},
   hintText:{fontSize:12,color:"#4A5066",textAlign:"center",marginTop:16},
   modalOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200},
-modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.06)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(80px, calc(env(safe-area-inset-bottom) + 60px))"},
+modalBox:{background:"linear-gradient(180deg,#121526,#0B0D17)",borderRadius:"24px 24px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.09)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(80px, calc(env(safe-area-inset-bottom) + 60px))",boxShadow:"0 -18px 44px rgba(0,0,0,0.38)",animation:"modalSheetUp .22s cubic-bezier(.2,.8,.2,1)"},
   modalHeader:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16},
   modalTitle:{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:600},
   modalClose:{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"},
@@ -9247,7 +9516,7 @@ modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"10
   modalScoreRow:{display:"flex",gap:10},
   numericToggle:{width:"100%",display:"flex",alignItems:"center",gap:10,border:"1px solid",borderRadius:10,padding:"11px 12px",fontSize:12.5,color:"#A8B2C4",cursor:"pointer",marginTop:14,textAlign:"left",lineHeight:1.35},
   checkbox:{width:18,height:18,borderRadius:5,border:"2px solid",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0},
-  trainingCard:{background:"#11131F",borderRadius:16,padding:16,marginBottom:12,position:"relative",border:"1px solid rgba(255,255,255,0.05)"},
+  trainingCard:{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,padding:16,marginBottom:12,position:"relative",border:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 12px 28px rgba(0,0,0,0.18)"},
   trainingCardHeader:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10},
   trainingDate:{fontSize:14,fontWeight:700},
   todayBadge:{fontSize:9.5,color:"#A78BFA",fontWeight:700,letterSpacing:0.5,marginTop:2},
@@ -9261,7 +9530,7 @@ modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"10
   packCode:{fontSize:12.5,color:"#8B92A8",fontFamily:"monospace",marginBottom:12},
   rejectNote:{fontSize:12.5,color:"#E8ECF4",background:"rgba(255,92,138,0.08)",border:"1px solid rgba(255,92,138,0.2)",borderRadius:9,padding:"8px 10px",marginBottom:12,lineHeight:1.4},
   trainingActions:{display:"flex",gap:8},
-  completeBtn:{flex:1,border:"none",borderRadius:11,padding:"11px 0",fontSize:13,fontWeight:700,display:"flex",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer"},
+  completeBtn:{flex:1,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",boxShadow:"0 10px 24px rgba(0,0,0,0.14)"},
   commentBtn:{width:42,background:"rgba(255,255,255,0.05)",border:"none",borderRadius:11,color:"#8B92A8",cursor:"pointer"},
   numericWrap:{marginTop:4},
   numericLabel:{fontSize:11.5,color:"#A78BFA",fontWeight:700,marginBottom:10},
@@ -9273,17 +9542,17 @@ modalBox:{background:"#11131F",borderRadius:"22px 22px 0 0",padding:20,width:"10
   chatScroll:{flex:1,overflowY:"auto",padding:"0 16px",WebkitOverflowScrolling:"touch", maxHeight:"calc(100dvh - 340px)"},
   chatEmpty:{textAlign:"center",color:"#4A5066",fontSize:13,marginTop:40},
   chatMsgRow:{display:"flex",marginBottom:10},
-  chatBubble:{maxWidth:"78%",borderRadius:15,padding:"9px 13px"},
+  chatBubble:{maxWidth:"78%",borderRadius:17,padding:"10px 13px",boxShadow:"0 8px 18px rgba(0,0,0,0.14)"},
   chatAuthor:{fontSize:11,fontWeight:700,marginBottom:3},
   chatText:{fontSize:14.5,lineHeight:1.4},
   chatTime:{fontSize:10,marginTop:4,textAlign:"right"},
-chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"12px",borderTop:"1px solid rgba(255,255,255,0.06)",flexShrink:0},
-  chatInput:{flex:1,background:"#11131F",border:"1px solid rgba(255,255,255,0.1)",borderRadius:99,padding:"11px 16px",color:"#E8ECF4",fontSize:14,outline:"none"},
+chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, env(safe-area-inset-bottom))",borderTop:"1px solid rgba(255,255,255,0.08)",background:"rgba(6,7,13,0.96)",flexShrink:0},
+  chatInput:{flex:1,background:"#11131F",border:"1px solid rgba(255,255,255,0.12)",borderRadius:99,padding:"12px 16px",color:"#E8ECF4",fontSize:14,outline:"none",boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.02)"},
   chatSendBtn:{width:42,height:42,background:"#B8FF4D",border:"none",borderRadius:99,color:"#06070D",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0},
   commentItem:{display:"flex",gap:8,marginBottom:14},
   newPostBtn:{display:"flex",alignItems:"center",gap:5,background:"rgba(167,139,250,0.12)",border:"1px solid rgba(167,139,250,0.3)",color:"#A78BFA",fontSize:12,fontWeight:700,padding:"7px 12px",borderRadius:99,cursor:"pointer"},
   emptyQueue:{textAlign:"center",color:"#4A5066",fontSize:13,marginTop:30,lineHeight:1.5,padding:"0 10px"},
-  postCard:{background:"#11131F",borderRadius:16,marginBottom:14,border:"1px solid rgba(255,255,255,0.05)",overflow:"hidden",position:"relative"},
+  postCard:{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,marginBottom:14,border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden",position:"relative",boxShadow:"0 12px 28px rgba(0,0,0,0.18)"},
   postHeader:{display:"flex",alignItems:"center",gap:8,padding:"12px 14px 10px"},
   postTime:{fontSize:11,color:"#4A5066",marginLeft:"auto"},
   postImage:{width:"100%",display:"block",maxHeight:360,objectFit:"cover",background:"#06070D"},
@@ -9303,15 +9572,15 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"12px",bord
   adminDayMeta:{fontSize:11,color:"#A78BFA",marginTop:3},
   verifyPlayerHeader:{display:"flex",alignItems:"center",gap:8,marginBottom:10,paddingBottom:8,borderBottom:"1px solid rgba(255,255,255,0.06)"},
   verifyCount:{fontSize:11,color:"#FFD166",fontWeight:700,marginLeft:"auto"},
-  verifyCard:{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(255,255,255,0.05)"},
+  verifyCard:{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:16,padding:15,marginBottom:10,border:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 10px 24px rgba(0,0,0,0.16)"},
   verifyCardTop:{display:"flex",justifyContent:"space-between",marginBottom:6},
   verifyDate:{fontSize:12,color:"#A78BFA",fontWeight:700},
   verifySubmittedAt:{fontSize:11,color:"#4A5066"},
   verifyTitle:{fontSize:15,fontWeight:700,marginBottom:4},
   verifyAmount:{fontSize:13,color:"#8B92A8"},
   verifyActionsRow:{display:"flex",gap:8},
-  rejectBtn:{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",color:"#FF5C8A",borderRadius:10,padding:"10px 0",fontSize:12.5,fontWeight:700,cursor:"pointer"},
-  approveBtn:{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"#B8FF4D",border:"none",color:"#06070D",borderRadius:10,padding:"10px 0",fontSize:12.5,fontWeight:700,cursor:"pointer"},
+  rejectBtn:{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.32)",color:"#FF5C8A",borderRadius:12,padding:"11px 0",fontSize:12.5,fontWeight:800,cursor:"pointer",boxShadow:"0 10px 24px rgba(0,0,0,0.12)"},
+  approveBtn:{flex:1,display:"flex",alignItems:"center",justifyContent:"center",gap:6,background:"#B8FF4D",border:"none",color:"#06070D",borderRadius:12,padding:"11px 0",fontSize:12.5,fontWeight:800,cursor:"pointer",boxShadow:"0 10px 24px rgba(184,255,77,0.12)"},
   streamEmbed:{width:"100%",aspectRatio:"16/9",background:"#000",borderRadius:14,overflow:"hidden",marginBottom:12},
   streamBelowEmbed:{textAlign:"right",marginBottom:16},
   twitchLink:{color:"#9146FF",fontSize:12.5,fontWeight:700,textDecoration:"none"},
