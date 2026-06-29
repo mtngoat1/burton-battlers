@@ -2029,15 +2029,12 @@ try {
 
         
         
-const co = window.DailyIframe.createFrame({
-  showLeaveButton: false,
-  showFullscreenButton: false,
-  iframeStyle: {
-    width: "1px",
-    height: "1px",
-    position: "absolute",
-    opacity: 0,
-    pointerEvents: "none",
+const co = window.DailyIframe.createCallObject({
+  audioSource: true,
+  videoSource: false,
+  subscribeToTracksAutomatically: true,
+  dailyConfig: {
+    prejoinUI: false,
   },
 });
 
@@ -2244,13 +2241,39 @@ setMuted(false);
 
 {/* Header */}
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div className="bb-live-dot" style={{width:8,height:8,borderRadius:"50%",background:"#B8FF4D",boxShadow:"0 0 8px #B8FF4D99"}}/>
-          <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,letterSpacing:0.8}}>LIVE VOICE ROOM</div>
-        </div>
-        <div style={{fontSize:10,color:"#4A5066"}}>{participantList.length} connected</div>
-      </div>
+  <div style={{display:"flex",alignItems:"center",gap:8}}>
+    <div className="bb-live-dot" style={{width:8,height:8,borderRadius:"50%",background:"#B8FF4D",boxShadow:"0 0 8px #B8FF4D99"}} />
+    <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,letterSpacing:0.8}}>
+      LIVE VOICE ROOM
+    </div>
+  </div>
 
+  <div style={{fontSize:10,color:"#4A5066"}}>
+    {participantList.length} connected
+  </div>
+</div>
+
+<button
+  onClick={() => {
+    document.querySelectorAll("audio").forEach((a) => {
+      a.muted = false;
+      a.volume = 1;
+      a.play().catch(console.error);
+    });
+  }}
+  style={{
+    marginBottom: 12,
+    padding: "8px 12px",
+    borderRadius: 10,
+    background: "#B8FF4D",
+    color: "#000",
+    border: "none",
+    fontWeight: 700,
+    cursor: "pointer"
+  }}
+>
+  🔊 Enable Phone Audio
+</button>
       {/* Participant cards */}
       <div style={{display:"flex",gap:10,marginBottom:16}}>
         {PLAYERS.map(p => {
