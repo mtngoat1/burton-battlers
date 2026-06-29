@@ -2088,7 +2088,20 @@ co.on("active-speaker-change", () => {
 });
       
 
-await co.setLocalAudio(true);    
+await co.setLocalAudio(true);   
+    
+    
+    const currentParticipants = co.participants();
+
+Object.values(currentParticipants).forEach((p) => {
+  if (!p.local && p.audioTrack) {
+    setRemoteAudioTracks(prev => ({
+      ...prev,
+      [p.session_id]: p.audioTrack,
+    }));
+  }
+});
+    
     
       setCallObject(co);
       setJoined(true);
@@ -2212,8 +2225,16 @@ setMuted(false);
   controls
   ref={(el) => {
     if (el && track) {
-      el.srcObject = new MediaStream([track]);
-      el.play().catch((err) => {
+     const stream = new MediaStream();
+stream.addTrack(track);
+el.srcObject = stream;
+
+el.muted = false;
+el.volume = 1;
+
+el.play().catch((err) => {
+  console.log("PHONE AUDIO PLAY FAILED:", err);
+});
         console.log("AUDIO PLAY BLOCKED:", err);
       });
     }
