@@ -74,12 +74,12 @@ const DUO_BADGE_DEFS = [
 
 function getDuoBadgeStats(sharedGames) {
   const totalGames = sharedGames.length;
-  const totalWins = sharedGames.filter(g => g.p1game.ourScore > g.p1game.theirScore).length;
+  const totalWins = sharedGames.filter(g => gameIsWin(g.p1game)).length;
   let bestStreak = 0, curStreak = 0;
   // chronological order
   const sorted = [...sharedGames].sort((a,b) => new Date(a.p1game.ts) - new Date(b.p1game.ts));
   sorted.forEach(g => {
-    if (g.p1game.ourScore > g.p1game.theirScore) { curStreak++; bestStreak = Math.max(bestStreak, curStreak); }
+    if (gameIsWin(g.p1game)) { curStreak++; bestStreak = Math.max(bestStreak, curStreak); }
     else curStreak = 0;
   });
   return { totalGames, totalWins, bestStreak };
@@ -141,6 +141,30 @@ function fmtRelTime(iso) {
   return `${Math.floor(hrs/24)}d ago`;
 }
 function tKey(dk, pid) { return `${dk}__${pid}`; }
+
+function gameIsWin(game) {
+  if (game?.result) return ["victory", "win", "won"].includes(String(game.result).toLowerCase());
+  const our = Number(game?.ourScore);
+  const their = Number(game?.theirScore);
+  return Number.isFinite(our) && Number.isFinite(their) && our > their;
+}
+function formatGameScore(game) {
+  const ourRaw = game?.ourScore ?? game?.goals ?? 0;
+  const our = Number.isFinite(Number(ourRaw)) ? Number(ourRaw) : 0;
+  const theirRaw = game?.theirScore;
+  const theirKnown = theirRaw !== null && theirRaw !== undefined && theirRaw !== "" && Number.isFinite(Number(theirRaw));
+  return `${our} – ${theirKnown ? Number(theirRaw) : "?"}`;
+}
+function applySyncedTeamScores(importedGames, result) {
+  const ourScore = importedGames.reduce((sum, g) => sum + (Number(g.goals) || 0), 0);
+  return importedGames.map(g => ({
+    ...g,
+    ourScore,
+    theirScore: g.theirScore === null || g.theirScore === undefined || g.theirScore === "" ? null : Number(g.theirScore),
+    opponentScoreManual: g.opponentScoreManual || false,
+    result,
+  }));
+}
 
 // ===================== MMR helpers =====================
 const RL_PLAYLISTS = ["Ranked Duel 1v1","Ranked Doubles 2v2","Ranked Standard 3v3"];
@@ -395,9 +419,9 @@ function HomeCommandCenter({ currentPlayer, points, nextMatch, daysUntil, previe
 function RecentActivityFeed({ stats, completions, trainingData, currentPlayer, onGotoStats, onGotoTraining }) {
   const statItems = (stats || []).slice().sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,6).map(g => {
     const p = PLAYERS.find(pl => pl.id === g.playerId);
-    const won = g.ourScore > g.theirScore;
+    const won = gameIsWin(g);
     const mmr = g.ratingDelta != null ? ` · ${g.ratingDelta > 0 ? "+" : ""}${g.ratingDelta} MMR` : "";
-    return { id:`game-${g.id || g.ts}-${g.playerId}`, ts:g.ts, icon:won?"✓":"×", color:won?"#7CFFB2":"#FF5C8A", title:`${p?.name || "player"} ${won?"won":"lost"} ${g.mode || "game"}`, sub:`${g.ourScore}-${g.theirScore}${mmr}`, action:onGotoStats };
+    return { id:`game-${g.id || g.ts}-${g.playerId}`, ts:g.ts, icon:won?"✓":"×", color:won?"#7CFFB2":"#FF5C8A", title:`${p?.name || "player"} ${won?"won":"lost"} ${g.mode || "game"}`, sub:`${formatGameScore(g)}${mmr}`, action:onGotoStats };
   });
   const trainingItems = Object.entries(completions || {}).filter(([k,v])=>k.endsWith(`__${currentPlayer}`)&&v?.submittedAt).map(([k,v])=>{
     const dk = k.split("__")[0];
@@ -762,11 +786,15 @@ function getWeekStart() {
   return Object.values(groups).sort((a,b) => new Date(b.ts) - new Date(a.ts));
 }
             
-function SessionGroupCard({ session, allStats, gameLabel }) {
+function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore }) {
   const [open, setOpen] = useState(false);
   const [selectedGame, setSelectedGame] = useState(null);
   const rep = session.games[0];
-  const won = rep.result === "victory";
+  const won = gameIsWin(rep);
+  const duoIds = [...new Set(session.games.flatMap(g => g.duoIds || [g.playerId]).filter(Boolean))];
+  const duoLabel = session.mode === "2v2"
+    ? duoIds.map(id => PLAYERS.find(p => p.id === id)?.name).filter(Boolean).join(" + ")
+    : null;
 
   return (
     <div style={{background:"#11131F",borderRadius:14,marginBottom:10,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
@@ -775,6 +803,7 @@ function SessionGroupCard({ session, allStats, gameLabel }) {
           game={selectedGame}
           allPlayerGames={(allStats||[]).filter(g=>g.playerId===selectedGame.playerId&&g.mode===selectedGame.mode).sort((a,b)=>new Date(a.ts)-new Date(b.ts))}
           onClose={()=>setSelectedGame(null)}
+          onUpdateOpponentScore={onUpdateOpponentScore}
         />
       )}
       {/* Clickable header */}
@@ -782,7 +811,7 @@ function SessionGroupCard({ session, allStats, gameLabel }) {
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
             <div style={{fontSize:10,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>{gameLabel || "GAME"}</div>
-            <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session.mode} · {fmtRelTime(session.ts)} · {session.games.length} player{session.games.length!==1?"s":""} logged</div>
+            <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session.mode} · {duoLabel ? `${duoLabel} · ` : ""}{fmtRelTime(session.ts)} · {session.games.length} player{session.games.length!==1?"s":""} logged</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div style={{textAlign:"right"}}>
@@ -846,7 +875,7 @@ function getChallengeProgress(challenge, stats, playerId) {
     return { current: val, target: challenge.target, done: val >= challenge.target, display: val };
   }
   if (challenge.type === "winrate") {
-    const wins = games.filter(g => g.ourScore > g.theirScore).length;
+    const wins = games.filter(g => gameIsWin(g)).length;
     const rate = games.length ? wins/games.length : 0;
     return { current: rate, target: challenge.target, done: rate >= challenge.target, display: `${Math.round(rate*100)}%` };
   }
@@ -854,7 +883,7 @@ function getChallengeProgress(challenge, stats, playerId) {
     const sorted = [...games].sort((a,b) => new Date(a.ts)-new Date(b.ts));
     let streak = 0;
     for (let i = sorted.length-1; i >= 0; i--) {
-      if (sorted[i].ourScore > sorted[i].theirScore) streak++;
+      if (gameIsWin(sorted[i])) streak++;
       else break;
     }
     return { current: streak, target: challenge.target, done: streak >= challenge.target, display: streak };
@@ -1797,7 +1826,7 @@ return (
           const isFutureLocked = currentPlayer!==ADMIN_ID && day.date>today;
           const comp = completions[tKey(day.key,currentPlayer)];
           return (
-            <div key={day.key} onClick={onGotoTraining} className="bb-pressable bb-glow-violet"
+            <div key={day.key} onClick={()=>onGotoTraining(day.key)} className="bb-pressable bb-glow-violet"
               style={{...s.dashTrainingCard,borderColor:isToday?"rgba(167,139,250,0.4)":"rgba(255,255,255,0.07)"}}>
               <div style={s.dashTrainingDay}>{isToday?"today":fmtDayShort(day.date)}</div>
               {day.training ? isFutureLocked
@@ -2297,7 +2326,7 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
 }
           
           
-function VoiceRoom({ currentPlayer, addToast, headerOnly, points }) {
+function VoiceRoom({ currentPlayer, addToast, headerOnly, points, autoJoinNonce }) {
   const [joined, setJoined] = useState(false);
   const [participants, setParticipants] = useState({});
               
@@ -2488,6 +2517,11 @@ setLoading(false);
   setError(e.message);
 }
   };
+
+  useEffect(() => {
+    if (!autoJoinNonce || joined || loading) return;
+    joinRoom();
+  }, [autoJoinNonce]);
 
   const leaveRoom = async () => {
     if (callObject) {
@@ -3572,7 +3606,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
   );
 }
 // ===================== Stats Tab =====================
-const STAT_MODES = ["3v3","2v2","1v1"];
+const STAT_MODES = ["2v2","1v1"];
 const LOGGABLE_MODES = ["2v2","1v1"];
 const STAT_FIELDS = ["goals","assists","saves","shots"];
 
@@ -3613,10 +3647,12 @@ useEffect(() => {
   const [shots, setShots] = useState("");
   const [score, setScore] = useState("");
   const [demos, setDemos] = useState("");
+  const [teammateId, setTeammateId] = useState(PLAYERS.find(p => p.id !== currentPlayer)?.id || "");
 
 
   const submit = () => {
     if (ourScore === "" || theirScore === "") return;
+    const manualSessionCode = mode === "2v2" ? `manual_${Date.now()}` : null;
     const entry = {
       id: Date.now().toString(),
       playerId: currentPlayer,
@@ -3630,8 +3666,9 @@ useEffect(() => {
       score: Number(score) || 0,
       demos: Number(demos) || 0,
       ts: new Date().toISOString(),
+      duoIds: mode === "2v2" ? [currentPlayer, teammateId].filter(Boolean) : [currentPlayer],
 roomId: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
-sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
+sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : manualSessionCode,
     };
     onSave(entry);
     onClose();
@@ -3650,6 +3687,20 @@ sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
           <div style={{flex:1}}><div style={s.modalLabel}>us</div><input type="number" value={ourScore} onChange={e=>setOurScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
           <div style={{flex:1}}><div style={s.modalLabel}>them</div><input type="number" value={theirScore} onChange={e=>setTheirScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
         </div>
+        {mode === "2v2" && (
+          <div style={{marginBottom:12}}>
+            <div style={s.modalLabel}>duo teammate</div>
+            <div style={{display:"flex",gap:8}}>
+              {PLAYERS.filter(p=>p.id!==currentPlayer).map(p => (
+                <button key={p.id} onClick={()=>setTeammateId(p.id)} className="bb-pressable"
+                  style={{flex:1,background:teammateId===p.id?`${p.color}22`:"rgba(255,255,255,0.04)",border:`1px solid ${teammateId===p.id?p.color+"66":"rgba(255,255,255,0.08)"}`,borderRadius:10,padding:"9px 8px",fontSize:11,fontWeight:800,color:teammateId===p.id?p.color:"#8B92A8",cursor:"pointer"}}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={s.modalLabel}>your stats</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           {[["goals",goals,setGoals],["assists",assists,setAssists],["saves",saves,setSaves],["shots",shots,setShots],["score",score,setScore],["demos",demos,setDemos]].map(([label,val,setter])=>(
@@ -3673,8 +3724,16 @@ sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
 }
 
 
-function GameDetailModal({ game, allPlayerGames, onClose }) {
-  const won = game.ourScore > game.theirScore;
+function GameDetailModal({ game, allPlayerGames, onClose, onUpdateOpponentScore }) {
+  const [localTheirScore, setLocalTheirScore] = useState(game?.theirScore ?? "");
+  const displayGame = { ...game, theirScore: localTheirScore === "" ? null : Number(localTheirScore) };
+  const won = gameIsWin(game);
+  const scoreIsSynced = game?.source === "parse_sessions";
+  const saveOpponentScore = () => {
+    const val = Number(localTheirScore);
+    if (!Number.isFinite(val)) return;
+    onUpdateOpponentScore?.(game, val);
+  };
 const FIELDS = ["goals","assists","saves","shots"];
   const [swipeOffset, setSwipeOffset] = useState(0);
   const swipeStartX = useRef(0);
@@ -3718,10 +3777,21 @@ const FIELDS = ["goals","assists","saves","shots"];
      <div style={{flex:1,overflowY:"auto",padding:"20px 16px",paddingBottom:"100px"}}>
         {/* Score hero */}
         <div style={{background:`linear-gradient(135deg,${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"},#0C0E18)`,border:`1px solid ${won?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.2)"}`,borderRadius:20,padding:"24px",textAlign:"center",marginBottom:20}}>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:"#E8ECF4",letterSpacing:2}}>{game.ourScore} – {game.theirScore}</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:"#E8ECF4",letterSpacing:2}}>{formatGameScore(displayGame)}</div>
           <div style={{fontSize:13,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",letterSpacing:1,marginTop:4}}>{won?"WIN":"LOSS"}</div>
-          <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>{game.mode} · {fmtRelTime(game.ts)}</div>
+          <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>{game.mode} · {fmtRelTime(game.ts)}{scoreIsSynced ? " · live synced" : ""}</div>
         </div>
+
+        {scoreIsSynced && (
+          <div style={{background:"#11131F",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:"13px 14px",marginBottom:18}}>
+            <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>opponent score</div>
+            <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginBottom:10}}>Your score is pulled from combined goals. Add the opponent score here; win/loss still comes from Tracker.</div>
+            <div style={{display:"flex",gap:8}}>
+              <input type="number" value={localTheirScore} onChange={e=>setLocalTheirScore(e.target.value)} placeholder="them" style={{...s.modalInput,flex:1,marginBottom:0}} />
+              <button onClick={saveOpponentScore} disabled={localTheirScore===""} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:11,padding:"0 13px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:localTheirScore==="" ? .5 : 1}}>save</button>
+            </div>
+          </div>
+        )}
 
         {/* Stat bars vs personal avg */}
         <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1,marginBottom:12}}>THIS GAME VS YOUR AVG (last 10)</div>
@@ -3803,11 +3873,11 @@ const FIELDS = ["goals","assists","saves","shots"];
   );
 }
 
-function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats, currentPlayer }) {
+function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats, currentPlayer, onUpdateOpponentScore }) {
   const [open, setOpen] = useState(dk === jumpDate || false);
   const [selectedGame, setSelectedGame] = useState(null);
   const date = new Date(dk + "T00:00:00");
-  const wins = games.filter(g => g.ourScore > g.theirScore).length;
+  const wins = games.filter(g => gameIsWin(g)).length;
   const isJump = dk === jumpDate;
   useEffect(() => { if (isJump) setOpen(true); }, [isJump]);
 
@@ -3822,6 +3892,7 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
           game={selectedGame}
           allPlayerGames={myAllGames}
           onClose={() => setSelectedGame(null)}
+          onUpdateOpponentScore={onUpdateOpponentScore}
         />
       )}
       <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
@@ -3836,12 +3907,12 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
         </div>
       </button>
       {open && games.map(g => {
-        const won = g.ourScore > g.theirScore;
+        const won = gameIsWin(g);
         return (
           <button key={g.id} onClick={() => setSelectedGame(g)} className="bb-pressable"
             style={{width:"100%",background:"rgba(255,255,255,0.02)",borderRadius:11,padding:"11px 13px",marginBottom:6,border:`1px solid ${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"}`,textAlign:"left",cursor:"pointer"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:700}}>{g.ourScore} – {g.theirScore}</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:700}}>{formatGameScore(g)}</div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
                 <div style={{fontSize:10,fontWeight:700,color:won?"#7CFFB2":"#FF5C8A",background:won?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.1)",padding:"3px 8px",borderRadius:99}}>{won?"WIN":"LOSS"}</div>
                 <div style={{fontSize:10,color:"#4A5066"}}>{fmtRelTime(g.ts)}</div>
@@ -3857,6 +3928,72 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
             </div>
             <div style={{fontSize:9,color:"#4A5066",marginTop:6}}>tap for full breakdown →</div>
           </button>
+        );
+      })}
+    </div>
+  );
+}
+
+
+function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUpdateOpponentScore }) {
+  const [openModes, setOpenModes] = useState({ "2v2": true, "1v1": true });
+  const toggleMode = (mode) => setOpenModes(prev => ({ ...prev, [mode]: !prev[mode] }));
+
+  const renderModeGames = (mode) => {
+    if (mode === "2v2") {
+      const groups = getSessionGroups(stats).filter(g => g.mode === "2v2");
+      if (!groups.length) {
+        return <EmptyState icon="🎮" title="No 2v2 games synced yet" body="Use Sync Match to pull a live ranked 2v2 game for the duo you played with." />;
+      }
+      return groups.map((grp, idx) => {
+        const duoIds = [...new Set(grp.games.flatMap(g => g.duoIds || [g.playerId]).filter(Boolean))];
+        const duoNames = duoIds.map(id => PLAYERS.find(p => p.id === id)?.name).filter(Boolean).join(" + ") || "duo";
+        return <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats} gameLabel={`${duoNames} · GAME ${groups.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} />;
+      });
+    }
+
+    const myGames = (stats || [])
+      .filter(g => g.mode === "1v1" && g.playerId === currentPlayer)
+      .sort((a,b) => new Date(b.ts) - new Date(a.ts));
+
+    if (!myGames.length) {
+      return <EmptyState icon="⚔️" title="No 1v1 games synced yet" body="Use Sync Match to pull your latest ranked duel live from Tracker." />;
+    }
+
+    const dayMap = {};
+    myGames.forEach(g => {
+      const dk = dateKey(new Date(g.ts));
+      if (!dayMap[dk]) dayMap[dk] = [];
+      dayMap[dk].push(g);
+    });
+
+    return Object.entries(dayMap)
+      .sort((a,b) => b[0].localeCompare(a[0]))
+      .map(([dk, dayGames]) => (
+        <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={null} STAT_FIELDS={STAT_FIELDS} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={onUpdateOpponentScore}/>
+      ));
+  };
+
+  return (
+    <div>
+      {["2v2", "1v1"].map(mode => {
+        const isOpen = !!openModes[mode];
+        const count = mode === "2v2" ? getSessionGroups(stats).filter(g => g.mode === "2v2").length : (stats || []).filter(g => g.mode === mode && g.playerId === currentPlayer).length;
+        return (
+          <div key={mode} style={{marginBottom:12}}>
+            <button onClick={() => toggleMode(mode)} className="bb-pressable"
+              style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:16,padding:"14px 15px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:isOpen?8:0}}>
+              <div style={{textAlign:"left"}}>
+                <div style={{fontSize:13,fontWeight:900,color:mode === "2v2" ? "#FF61C1" : "#4D9EFF",letterSpacing:.5}}>{mode} dropdown</div>
+                <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>{count} logged game{count!==1?"s":""}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{fontSize:10,color:"#4A5066",fontWeight:800,textTransform:"uppercase"}}>live synced</div>
+                <ChevronRight size={15} color="#4A5066" style={{transform:isOpen?"rotate(90deg)":"none",transition:"transform .2s"}} />
+              </div>
+            </button>
+            {isOpen && renderModeGames(mode)}
+          </div>
         );
       })}
     </div>
@@ -4141,8 +4278,9 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     shots: match.stats?.shots?.value || 0,
     demos: 0,
     score: match.stats?.score?.value || 0,
-    ourScore: null,
+    ourScore: match.stats?.goals?.value || 0,
     theirScore: null,
+    opponentScoreManual: false,
     result,
     rating: match.stats?.rating?.value || null,
     ratingDelta: getMatchRatingDelta(match),
@@ -4285,13 +4423,14 @@ console.log("RESULTS:", results);
     console.log("STARTING IMPORT");
 
     const autoSessionCode = getNextAutoGameSessionCode(stats);
-    const importedGames = pulled.map(({ player, match }) => parseGameToStatEntry({
+    let importedGames = pulled.map(({ player, match }) => parseGameToStatEntry({
       sessionCode: autoSessionCode,
       player,
       match,
       mode: teamRoom.mode,
       result,
     }));
+    importedGames = applySyncedTeamScores(importedGames, result);
 
     const updStats = [...importedGames, ...stats];
     
@@ -4495,7 +4634,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
 
 
 function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit }) {
-  const [mode,setMode]=useState("3v3");
+  const [mode,setMode]=useState("2v2");
   const [logging,setLogging]=useState(false);
   const [showAllGames, setShowAllGames]=useState(false);
   const [statsSubTab, setStatsSubTab] = useState("tracker");
@@ -4506,8 +4645,31 @@ const [syncMode, setSyncMode] = useState("3v3");
 const [selectedDuoIds, setSelectedDuoIds] = useState(["p1","p2"]);
 const syncPanelSwipe = useSwipeRightToClose(() => setShowSyncMatchModal(false));
 useEffect(() => {
+  if (!stats?.length) return;
+  const groupedScores = {};
+  stats.forEach(g => {
+    if (g?.source !== "parse_sessions") return;
+    if (!g.sessionCode) return;
+    if (!groupedScores[g.sessionCode]) groupedScores[g.sessionCode] = 0;
+    groupedScores[g.sessionCode] += Number(g.goals) || 0;
+  });
+  let changed = false;
+  const normalized = stats.map(g => {
+    if (g?.source !== "parse_sessions") return g;
+    const nextOurScore = g.sessionCode ? (groupedScores[g.sessionCode] ?? (Number(g.goals) || 0)) : (Number(g.goals) || 0);
+    const nextTheirScore = g.opponentScoreManual ? g.theirScore : null;
+    if (g.ourScore === nextOurScore && g.theirScore === nextTheirScore) return g;
+    changed = true;
+    return { ...g, ourScore: nextOurScore, theirScore: nextTheirScore, opponentScoreManual: !!g.opponentScoreManual };
+  });
+  if (changed) {
+    setStats(normalized);
+    storeSet("stats", normalized);
+  }
+}, [stats?.length]);
+useEffect(() => {
   if (jumpDate) {
-    setMode("3v3");
+    setMode("2v2");
     setShowAllGames(true);
     setTimeout(() => {
       document.getElementById(`gamelog-${jumpDate}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -4556,10 +4718,23 @@ const finalMult = mult * heatMult * eventMult * statBonus;
 const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
   setPassXP(updXP); await storeSet("pass_xp",updXP);
 };
+const updateOpponentScore = async (game, theirScoreValue) => {
+  const val = Number(theirScoreValue);
+  if (!Number.isFinite(val)) return;
+  const upd = stats.map(g => {
+    const sameGroupedGame = game.mode === "2v2" && g.mode === game.mode && g.sessionCode && game.sessionCode && g.sessionCode === game.sessionCode;
+    const sameSingleGame = g.id === game.id;
+    if (!sameGroupedGame && !sameSingleGame) return g;
+    return { ...g, theirScore: val, opponentScoreManual: true };
+  });
+  setStats(upd);
+  await storeSet("stats", upd);
+  addToast?.("opponent score saved", "✅");
+};
   const modeGames=stats.filter(g=>g.mode===mode);
   const myGames=modeGames.filter(g=>g.playerId===currentPlayer).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
   const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+(Number(g[field])||0),0)/arr.length).toFixed(1):"—";
-  const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>(Number(g.ourScore)||0)>(Number(g.theirScore)||0)).length/arr.length)*100)+"%"; };
+  const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>gameIsWin(g)).length/arr.length)*100)+"%"; };
   const playerColor=PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
   const recentMyGames = [...myGames].sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,5).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
   const syncDuoOptions = [
@@ -4651,9 +4826,10 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
 
       const result = pulled[0].match.metadata.result;
       const sessionCode = getNextAutoGameSessionCode(stats);
-      const importedGames = pulled.map(({ player, match }) =>
+      let importedGames = pulled.map(({ player, match }) =>
         parseGameToStatEntry({ sessionCode, player, match, mode: requestedMode, result })
       );
+      importedGames = applySyncedTeamScores(importedGames, result);
 
       const updStats = [...importedGames, ...stats];
       setStats(updStats);
@@ -4819,7 +4995,6 @@ return (
         </div>
       </button>
 
-{mode!=="3v3" && <div style={{display:"flex",justifyContent:"flex-end",marginBottom:14}}><button onClick={()=>setLogging(true)} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>log game</button></div>}
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"stats"},{id:"sessions",label:"games"},{id:"mmr",label:"mmr"}].map(sub=>(
   <button key={sub.id} onClick={()=>setStatsSubTab(sub.id)} className="bb-pressable"
@@ -4831,13 +5006,13 @@ return (
 {statsSubTab==="mmr" ? (
   <LiveMMRFeed mmrProfiles={mmrProfiles} />
 ) : statsSubTab==="sessions" ? (
-  <div>
-    {(() => {
-      const groups = getSessionGroups(stats);
-      if (groups.length === 0) return <div style={s.emptyQueue}>no session-coded games yet.</div>;
-      return groups.map((grp, idx) => <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats} gameLabel={`GAME ${groups.length - idx}`}/>);
-    })()}
-  </div>
+  <ModeGamesSection
+    stats={stats}
+    currentPlayer={currentPlayer}
+    playerColor={playerColor}
+    STAT_FIELDS={STAT_FIELDS}
+    onUpdateOpponentScore={updateOpponentScore}
+  />
 ) : (
       <>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
@@ -4874,7 +5049,7 @@ return (
           </div>
         </>
       )}
-      {mode==="3v3"&&(
+      {false&&(
         <>
           <div style={{...s.sectionLabel,marginBottom:10}}>team comparison</div>
           <div style={{background:"#11131F",borderRadius:14,padding:14,border:"1px solid rgba(255,255,255,0.05)",marginBottom:20}}>
@@ -4917,7 +5092,7 @@ return (
         const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
         const visibleDays = showAllGames ? days : days.slice(0,3);
         return visibleDays.map(([dk, dayGames]) => (
-          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={STAT_FIELDS} allStats={stats} currentPlayer={currentPlayer}/>
+          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={STAT_FIELDS} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={updateOpponentScore}/>
         ));
       })()}
 {Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
@@ -9128,11 +9303,14 @@ const [flipChallenges, setFlipChallenges] = useState([]);
 const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
 const [chatOpen, setChatOpen] = useState(false);
 const [showTopNotifs, setShowTopNotifs] = useState(false);
+const [voiceJoinBanner, setVoiceJoinBanner] = useState(null);
+const [autoJoinVoiceNonce, setAutoJoinVoiceNonce] = useState(null);
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
 const lastActiveRef = useRef(Date.now());
 const AUTO_LOCK_MS = 10 * 60 * 1000;
 const toastDismissedAll = useRef(false);
+const lastVoicePresenceRef = useRef(null);
 const addToast = useCallback((text, icon = "🔔") => {
   if (toastDismissedAll.current) return;
   const id = Date.now().toString();
@@ -9147,6 +9325,43 @@ const closeChatPanel = useCallback(() => {
 }, [lastSeen, messages.length, currentPlayer]);
 const chatSwipe = useSwipeRightToClose(closeChatPanel);
 const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
+
+useEffect(() => {
+  if (!currentPlayer) return;
+  let alive = true;
+
+  const pollVoicePresence = async () => {
+    const vp = await storeGet("voice_presence") || {};
+    const cutoff = Date.now() - 45 * 1000;
+    const cleaned = Object.fromEntries(
+      Object.entries(vp).filter(([_, v]) => new Date(v.ts).getTime() > cutoff)
+    );
+
+    if (!alive) return;
+
+    const previous = lastVoicePresenceRef.current;
+    if (previous) {
+      Object.entries(cleaned).forEach(([pid, v]) => {
+        if (pid === currentPlayer) return;
+        if (previous[pid]) return;
+        const player = PLAYERS.find(p => p.id === pid);
+        setVoiceJoinBanner({
+          id: `${pid}_${v.ts || Date.now()}`,
+          playerId: pid,
+          name: player?.name || v.name || "someone",
+          color: player?.color || "#B8FF4D",
+          ts: v.ts || new Date().toISOString(),
+        });
+      });
+    }
+
+    lastVoicePresenceRef.current = cleaned;
+  };
+
+  pollVoicePresence();
+  const timer = setInterval(pollVoicePresence, 5000);
+  return () => { alive = false; clearInterval(timer); };
+}, [currentPlayer]);
 
 useEffect(() => {
   if (catchupStopped || catchupQueue.length === 0) return;
@@ -9562,8 +9777,11 @@ const TABS=[
   const topTrainingNotifs = Object.entries(completions||{})
     .filter(([k,v]) => v?.status==="approved" && k.endsWith(`__${currentPlayer}`))
     .map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt||new Date().toISOString(), text:"training approved — +15 pts", icon:"✅" }));
-  const topNotifs = [...topActivityNotifs, ...topPingNotifs, ...topTrainingNotifs]
-    .sort((a,b) => new Date(b.ts) - new Date(a.ts))
+  const clearedNotifIds = points?.[currentPlayer + "_clearedNotifs"] || [];
+  const topNotifsRaw = [...topActivityNotifs, ...topPingNotifs, ...topTrainingNotifs]
+    .sort((a,b) => new Date(b.ts) - new Date(a.ts));
+  const topNotifs = topNotifsRaw
+    .filter(n => !clearedNotifIds.includes(n.id))
     .slice(0, 40);
   const eq = points?.[currentPlayer+"_equipped"] || {};
   const own = points?.[currentPlayer+"_owned"] || [];
@@ -9604,6 +9822,23 @@ const TABS=[
         setTimeout(()=>{ toastDismissedAll.current = false; }, 30000);
       }}
     />
+  </div>
+)}
+{voiceJoinBanner && (
+  <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1000,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto",animation:"dropDown .22s cubic-bezier(.2,.8,.2,1)"}}>
+    <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${voiceJoinBanner.color}55`,borderRadius:18,padding:"13px 14px",boxShadow:"0 16px 44px rgba(0,0,0,0.42)",display:"flex",alignItems:"center",gap:12}}>
+      <div style={{width:34,height:34,borderRadius:12,background:`${voiceJoinBanner.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>🎙️</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:900,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{voiceJoinBanner.name} joined voice room</div>
+        <div style={{fontSize:10.5,color:"#8B92A8",marginTop:2}}>tap join now to enter the room</div>
+      </div>
+      <button onClick={()=>{ setTab("room"); setAutoJoinVoiceNonce(Date.now()); setVoiceJoinBanner(null); }} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:11,padding:"9px 11px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer",flexShrink:0}}>
+        join now
+      </button>
+      <button onClick={()=>setVoiceJoinBanner(null)} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,width:30,height:30,color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+        <X size={15}/>
+      </button>
+    </div>
   </div>
 )}
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
@@ -9657,7 +9892,27 @@ const TABS=[
                 <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:1}}>NOTIFICATIONS</div>
                 <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{topNotifs.length ? `${topNotifs.length} recent update${topNotifs.length!==1?"s":""}` : "nothing new yet"}</div>
               </div>
-              <button onClick={()=>setShowTopNotifs(false)} className="bb-pressable" style={s.modalClose}><X size={18}/></button>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {topNotifs.length > 0 && (
+                  <button onClick={async()=>{
+                    const ids = topNotifsRaw.map(n => n.id);
+                    const updPoints = { ...points, [currentPlayer + "_clearedNotifs"]: [...new Set([...(points?.[currentPlayer + "_clearedNotifs"] || []), ...ids])].slice(-300) };
+                    setPoints(updPoints);
+                    await storeSet("points", updPoints);
+
+                    const freshPings = (await storeGet("pings") || []).filter(p => p.to !== currentPlayer);
+                    setPings(freshPings);
+                    await storeSet("pings", freshPings);
+
+                    const freshActivity = (await storeGet("activity_feed") || []).filter(e => e.to !== currentPlayer);
+                    setActivityFeed(freshActivity);
+                    await storeSet("activity_feed", freshActivity);
+                  }} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:10,padding:"7px 10px",fontSize:10,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>
+                    clear all
+                  </button>
+                )}
+                <button onClick={()=>setShowTopNotifs(false)} className="bb-pressable" style={s.modalClose}><X size={18}/></button>
+              </div>
             </div>
             {topNotifs.length===0 ? (
               <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:14,color:"#8B92A8",fontSize:13}}>No notifications yet.</div>
@@ -9675,7 +9930,7 @@ const TABS=[
       )}
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setTab("training"); setJumpKey(key); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
-{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={()=>setTab("training")} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
+{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setTab("training"); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
       {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
@@ -9684,7 +9939,7 @@ const TABS=[
   <div style={{display:"flex",flexDirection:"column",alignItems:"center",height:"100%",padding:"20px",overflowY:"auto"}}>
     <div style={{width:"100%",maxWidth:480}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
-      <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points}/>
+      <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce}/>
     </div>
   </div>
 )}    
