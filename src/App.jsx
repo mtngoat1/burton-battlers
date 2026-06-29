@@ -150,6 +150,24 @@ function deterministicMMR(seed, idx) {
   return 700 + (h % 900) + idx * 60;
 }
 
+
+function rlRankFromTierValue(tierValue) {
+  const ranks = [
+    "Unranked",
+    "Bronze I", "Bronze II", "Bronze III",
+    "Silver I", "Silver II", "Silver III",
+    "Gold I", "Gold II", "Gold III",
+    "Platinum I", "Platinum II", "Platinum III",
+    "Diamond I", "Diamond II", "Diamond III",
+    "Champion I", "Champion II", "Champion III",
+    "Grand Champion I", "Grand Champion II", "Grand Champion III",
+    "Supersonic Legend"
+  ];
+
+  return ranks[tierValue] || "Unranked";
+}
+
+
 function getRankImage(rankName) {
   if (!rankName) return null;
 
@@ -392,13 +410,14 @@ const mmr = seg?.stats?.rating?.value || 0;
 
 console.log("MMR SEGMENT:", name, seg?.stats);
 
-const rankName =
-  seg?.stats?.tier?.metadata?.name ||
-  "Unranked";
+const newRankName = rlRankFromTierValue(seg?.stats?.tier?.value);
 
 return { playlist: name, mmr, rank: rankName };
-      });
-      await setMMR(player.id, { platform: player.platform, handle: player.name, ranks, lastSynced: new Date().toISOString(), source: "synced" });
+});
+
+console.log("FINAL RANKS BEING SAVED:", ranks);
+
+await setMMR(player.id, { platform: player.platform, handle: player.name, ranks, lastSynced: new Date().toISOString(), source: "synced" });
       setSyncing(false);
       onComplete();
     } catch (e) {
@@ -450,14 +469,23 @@ function MMRCard({ profile, playerName, accent, onResync, resyncing, verifiedBad
 
 {console.log("Rank:", r.rank, "Image:", getRankImage(r.rank))}
 
-   <div style={{ ...s.mmrRank, color: accent }}>
+<div style={{ ...s.mmrRank, color: accent }}>
   {r.rank}
-  <br />
-  <span style={{ fontSize: 10 }}>
-    {String(getRankImage(r.rank))}
-  </span>
 </div>
-    <div style={s.mmrNum}>{r.mmr} mmr</div>
+
+{r.division && (
+  <div
+    style={{
+      fontSize: 11,
+      color: "#7A839C",
+      marginTop: 2,
+    }}
+  >
+    {r.division}
+  </div>
+)}
+
+<div style={s.mmrNum}>{r.mmr} mmr</div>
   </div>
 ))}
       </div>
@@ -2003,8 +2031,10 @@ try {
 const co = window.DailyIframe.createCallObject({
   audioSource: true,
   videoSource: false,
+  subscribeToTracksAutomatically: true,
   dailyConfig: {
     prejoinUI: false,
+    experimentalChromeVideoMuteLightOff: true,
   },
 });
 
@@ -2024,13 +2054,9 @@ const co = window.DailyIframe.createCallObject({
           return next;
         });
       });
-      co.on("active-speaker-change", (e) => {
-        setSpeakingMap(prev => {
-          const next = {};
-          if (e.activeSpeaker?.peerId) next[e.activeSpeaker.peerId] = true;
-          return next;
-        });
-      });
+co.on("active-speaker-change", () => {
+  // disabled for now — was causing stuck speaking UI on mobile
+});
       co.on("error", (e) => {
         setError("connection error — check mic permissions");
         setLoading(false);
@@ -2043,6 +2069,8 @@ const co = window.DailyIframe.createCallObject({
   startAudioOff: false,
 });
 
+await co.setLocalAudio(true);    
+    
       setCallObject(co);
       setJoined(true);
       setLoading(false);
@@ -3844,8 +3872,28 @@ return (
             const newRanks = profile.ranks.map(r => {
     const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === r.playlist);
 const newMmr = seg?.stats?.rating?.value || r.mmr;
-const newRankName = seg?.stats?.tier?.metadata?.name || rankFromMMR(newMmr);
-              return { ...r, prevMmr: r.mmr, prevRank: r.rank, mmr: newMmr, rank: newRankName };
+
+console.log({
+  playlist: r.playlist,
+  tierValue: seg?.stats?.tier?.value,
+  tierName: seg?.stats?.tier?.metadata?.name,
+  divisionValue: seg?.stats?.division?.value,
+  divisionName: seg?.stats?.division?.metadata?.name,
+  mmr: seg?.stats?.rating?.value,
+});
+
+const newRankName =
+  seg?.stats?.tier?.metadata?.name ||
+  "Unranked";
+
+return {
+  ...r,
+  prevMmr: r.mmr,
+  prevRank: r.rank,
+  mmr: newMmr,
+  rank: newRankName,
+  division: seg?.stats?.division?.metadata?.name || ""
+};
             });
             const updated = { ...profile, ranks: newRanks, lastSynced: new Date().toISOString() };
             setMmrProfiles(prev => ({ ...prev, [currentPlayer]: updated }));
@@ -3860,7 +3908,7 @@ const newRankName = seg?.stats?.tier?.metadata?.name || rankFromMMR(newMmr);
   <div onClick={() => setShowRoom(true)} className="bb-pressable" style={{background:"rgba(184,255,77,0.08)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:13,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
     <div style={{width:8,height:8,borderRadius:99,background:"#B8FF4D",animation:"livePulse 1.4s ease-in-out infinite"}}/>
     <div style={{flex:1}}>
-      <div style={{fontSize:12,fontWeight:700,color:"#B8FF4D"}}>room open · {teamRoom.mode} · code {teamRoom.id.slice(-4).toUpperCase()}</div>
+      <div style={{fontSize:12,fontWeight:700,color:"#B8FF4D"}}>room open · {teamRoom.mode} · code {(teamRoom.id || "ROOM").slice(-4).toUpperCase()}</div>
       <div style={{fontSize:11,color:"#8B92A8",marginTop:1}}>tap to view team logs · games sync to social → team link</div>
     </div>
     <ChevronRight size={14} color="#B8FF4D"/>
@@ -8175,8 +8223,12 @@ const handleResync = async (pid) => {
       const newRanks = existing.ranks.map(r => {
 const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === r.playlist);
 const newMmr = seg?.stats?.rating?.value || r.mmr;
-const newRankName = seg?.stats?.tier?.metadata?.name || rankFromMMR(newMmr);
-        return { ...r, prevMmr: r.mmr, prevRank: r.rank, mmr: newMmr, rank: newRankName };
+
+console.log("RESYNC SEGMENT:", r.playlist, seg?.stats);
+
+const newRankName =
+  seg?.stats?.tier?.metadata?.name ||
+  "Unranked";
       });
       const updated = { ...existing, ranks: newRanks, lastSynced: new Date().toISOString(), source: existing.source === "admin" ? "admin" : "synced" };
       setMmrProfiles(prev => ({ ...prev, [pid]: updated }));
