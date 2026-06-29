@@ -2000,7 +2000,7 @@ function VoiceRoom({ currentPlayer, addToast, headerOnly }) {
   const [callObject, setCallObject] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [speakingMap, setSpeakingMap] = useState({});
+  const [speakingMap, setSpeakingMap] = useState({});          
   const [remoteAudioTracks, setRemoteAudioTracks] = useState({});            
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
@@ -2045,10 +2045,16 @@ const co = window.DailyIframe.createCallObject({
     addToast(`${e.participant.user_name} joined voice`, "🎙️");
   }
 });
-      co.on("participant-updated", (e) => {
-          console.log("UPDATED", e.participant);
-        setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
-      });
+   co.on("participant-updated", (e) => {
+  setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
+
+  if (!e.participant.local && e.participant.audioTrack) {
+    setRemoteAudioTracks(prev => ({
+      ...prev,
+      [e.participant.session_id]: e.participant.audioTrack,
+    }));
+  }
+});
       co.on("participant-left", (e) => {
         setParticipants(prev => {
           const next = { ...prev };
@@ -2070,8 +2076,7 @@ co.on("active-speaker-change", () => {
   startVideoOff: true,
   startAudioOff: false,
 });
-    
-console.log("JOINED", co.participants());    
+      
 
 await co.setLocalAudio(true);    
     
@@ -2093,8 +2098,9 @@ await co.setLocalAudio(true);
     }
     setJoined(false);
     setParticipants({});
-    setSpeakingMap({});
-    setMuted(false);
+   setSpeakingMap({});
+setRemoteAudioTracks({});
+setMuted(false);
   };
 
   const toggleMute = async () => {
@@ -2186,8 +2192,22 @@ await co.setLocalAudio(true);
       marginBottom:10,
       boxShadow:"0 0 24px rgba(184,255,77,0.08)",
     }}>
-      {/* Header */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+     {Object.entries(remoteAudioTracks).map(([id, track]) => (
+  <audio
+    key={id}
+    autoPlay
+    playsInline
+    ref={(el) => {
+      if (el && track) {
+        el.srcObject = new MediaStream([track]);
+        el.play().catch(() => {});
+      }
+    }}
+  />
+))}
+
+{/* Header */}
+<div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           <div className="bb-live-dot" style={{width:8,height:8,borderRadius:"50%",background:"#B8FF4D",boxShadow:"0 0 8px #B8FF4D99"}}/>
           <div style={{fontSize:11,color:"#B8FF4D",fontWeight:700,letterSpacing:0.8}}>LIVE VOICE ROOM</div>
