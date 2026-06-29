@@ -10083,7 +10083,7 @@ const TABS=[
         </div>
       )}
       {chatOpen && (
-    <div {...chatSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:50,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelUp .38s cubic-bezier(.16,1,.3,1)",paddingBottom:0,...chatSwipe.swipeStyle}}>
+    <div {...chatSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:1200,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelUp .38s cubic-bezier(.16,1,.3,1)",paddingBottom:0,...chatSwipe.swipeStyle}}>
           <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={closeChatPanel} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
@@ -10097,7 +10097,7 @@ const TABS=[
           </div>
         </div>
       )}
-   <div style={s.tabBar}>
+   {!chatOpen && <div style={s.tabBar}>
         {TABS.map((t)=>(
         <button key={t.id} onClick={()=>{
     setTab(t.id);
@@ -10112,7 +10112,7 @@ const TABS=[
             <span style={{color:tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066",fontSize:9,fontWeight:600}}>{t.label}</span>
           </button>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -10129,7 +10129,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(92px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.08)",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px))",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
+tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.08)",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"max(10px, env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
