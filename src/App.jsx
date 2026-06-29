@@ -324,6 +324,114 @@ function useSwipeRightToClose(onClose, threshold = 105) {
   };
 }
 
+
+function EmptyState({ icon = "○", title, body, actionLabel, onAction }) {
+  return (
+    <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:18,padding:"18px 16px",textAlign:"center",marginBottom:14,boxShadow:"0 12px 28px rgba(0,0,0,0.18)"}}>
+      <div style={{fontSize:28,marginBottom:8,opacity:.9}}>{icon}</div>
+      <div style={{fontSize:14,fontWeight:900,color:"#E8ECF4",marginBottom:5,letterSpacing:.2}}>{title}</div>
+      {body && <div style={{fontSize:11.5,color:"#8B92A8",lineHeight:1.45,maxWidth:280,margin:"0 auto"}}>{body}</div>}
+      {actionLabel && onAction && (
+        <button onClick={onAction} className="bb-pressable bb-glow-lime" style={{marginTop:14,background:"#B8FF4D",border:"none",borderRadius:12,padding:"9px 13px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function FullScreenHeader({ title, subtitle, onClose, accent = "#B8FF4D" }) {
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 14px)",borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.92)",backdropFilter:"blur(14px)",flexShrink:0}}>
+      <button onClick={onClose} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:38,height:38}}>
+        <ChevronLeft size={18}/>
+      </button>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,textTransform:"lowercase",color:"#E8ECF4",letterSpacing:.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>
+        {subtitle && <div style={{fontSize:10.5,color:accent,fontWeight:800,letterSpacing:.8,marginTop:2,textTransform:"uppercase"}}>{subtitle}</div>}
+      </div>
+      <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:.7,textTransform:"uppercase"}}>swipe →</div>
+    </div>
+  );
+}
+
+function HomeCommandCenter({ currentPlayer, points, nextMatch, daysUntil, previewDays, completions, stats, onGotoTraining, onGotoStats, onOpenBracket }) {
+  const today = todayAtMidnight();
+  const todayKey = dateKey(today);
+  const todayItem = previewDays.find(d => d.key === todayKey) || previewDays[0];
+  const todayCompletion = completions?.[tKey(todayItem?.key || todayKey, currentPlayer)];
+  const playerGames = (stats || []).filter(g => g.playerId === currentPlayer).sort((a,b)=>new Date(b.ts)-new Date(a.ts));
+  const latestGame = playerGames[0];
+  const myPoints = points?.[currentPlayer] || 0;
+  const trainingStatus = todayCompletion?.status === "approved" ? "approved" : todayCompletion?.status === "pending" ? "pending" : todayItem?.training ? "open" : "not set";
+  const resultColor = latestGame ? (latestGame.ourScore > latestGame.theirScore ? "#7CFFB2" : "#FF5C8A") : "#4A5066";
+  const miniCard = (label, value, sub, accent, onClick) => (
+    <button onClick={onClick} className="bb-pressable" style={{background:"rgba(255,255,255,0.045)",border:`1px solid ${accent}26`,borderRadius:16,padding:"13px 12px",textAlign:"left",cursor:onClick?"pointer":"default",minHeight:88}}>
+      <div style={{fontSize:9.5,color:accent,fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:7}}>{label}</div>
+      <div style={{fontSize:17,fontWeight:900,color:"#E8ECF4",lineHeight:1.05,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{value}</div>
+      <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:6}}>{sub}</div>
+    </button>
+  );
+
+  return (
+    <div style={{background:"linear-gradient(135deg,#121626,#090B14)",border:"1px solid rgba(184,255,77,0.14)",borderRadius:22,padding:16,marginBottom:16,boxShadow:"0 18px 42px rgba(0,0,0,0.28)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:14}}>
+        <div>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1.2,textTransform:"uppercase",marginBottom:4}}>today's command center</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:"#E8ECF4",lineHeight:1}}>what matters now</div>
+        </div>
+        <div style={{fontSize:10,color:"#4A5066",fontWeight:800,textTransform:"uppercase",paddingTop:4}}>{fmtRelTime(new Date().toISOString())}</div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        {miniCard("training", todayItem?.training?.title || "not assigned", trainingStatus, "#A78BFA", onGotoTraining)}
+        {miniCard("latest game", latestGame ? `${latestGame.ourScore}-${latestGame.theirScore}` : "no games", latestGame ? `${latestGame.mode} · ${fmtRelTime(latestGame.ts)}` : "sync after your next match", resultColor, latestGame ? onGotoStats : onGotoStats)}
+        {miniCard("next match", nextMatch ? (nextMatch.opponent || "TBD") : "season done", nextMatch ? `${nextMatch.label} · ${daysUntil===0?"this week":`in ${daysUntil}d`}` : "no upcoming match", "#B8FF4D", onOpenBracket)}
+        {miniCard("balance", `${myPoints} pts`, "shop · bets · rewards", "#FFD166", null)}
+      </div>
+    </div>
+  );
+}
+
+function RecentActivityFeed({ stats, completions, trainingData, currentPlayer, onGotoStats, onGotoTraining }) {
+  const statItems = (stats || []).slice().sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,6).map(g => {
+    const p = PLAYERS.find(pl => pl.id === g.playerId);
+    const won = g.ourScore > g.theirScore;
+    const mmr = g.ratingDelta != null ? ` · ${g.ratingDelta > 0 ? "+" : ""}${g.ratingDelta} MMR` : "";
+    return { id:`game-${g.id || g.ts}-${g.playerId}`, ts:g.ts, icon:won?"✓":"×", color:won?"#7CFFB2":"#FF5C8A", title:`${p?.name || "player"} ${won?"won":"lost"} ${g.mode || "game"}`, sub:`${g.ourScore}-${g.theirScore}${mmr}`, action:onGotoStats };
+  });
+  const trainingItems = Object.entries(completions || {}).filter(([k,v])=>k.endsWith(`__${currentPlayer}`)&&v?.submittedAt).map(([k,v])=>{
+    const dk = k.split("__")[0];
+    const tr = trainingData?.[tKey(dk,currentPlayer)];
+    return { id:`train-${k}`, ts:v.submittedAt, icon:v.status==="approved"?"✓":v.status==="rejected"?"!":"↑", color:v.status==="approved"?"#7CFFB2":v.status==="rejected"?"#FF5C8A":"#A78BFA", title:`training ${v.status || "submitted"}`, sub:tr?.title || fmtDay(new Date(dk+"T00:00:00")), action:onGotoTraining };
+  }).slice(0,5);
+  const items = [...statItems, ...trainingItems].sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,5);
+
+  return (
+    <div style={{marginBottom:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+        <div style={{fontSize:12,color:"#4A5066",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>recent activity</div>
+        <div style={{fontSize:10,color:"#4A5066",fontWeight:800}}>latest 5</div>
+      </div>
+      {!items.length ? (
+        <EmptyState icon="⌁" title="Nothing new yet" body="Sync a game, submit training, or claim a reward and it will show here." />
+      ) : (
+        <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:18,padding:10,boxShadow:"0 12px 28px rgba(0,0,0,0.18)"}}>
+          {items.map((item, idx)=>(
+            <button key={item.id} onClick={item.action} className="bb-pressable" style={{width:"100%",background:idx?"transparent":"rgba(255,255,255,0.035)",border:"none",borderRadius:13,padding:"10px 9px",display:"flex",alignItems:"center",gap:10,textAlign:"left",cursor:"pointer"}}>
+              <div style={{width:28,height:28,borderRadius:10,background:`${item.color}18`,color:item.color,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,flexShrink:0}}>{item.icon}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12.5,color:"#E8ECF4",fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.title}</div>
+                <div style={{fontSize:10.5,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.sub} · {fmtRelTime(item.ts)}</div>
+              </div>
+              <ChevronRight size={14} color="#4A5066" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ===================== Global CSS =====================
 
 function GlobalStyles() {
@@ -1298,13 +1406,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
   const expandedSwipe = useSwipeRightToClose(onClose);
   return (
     <div {...expandedSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",...expandedSwipe.swipeStyle}}>
-  <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 56px)",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}><ChevronLeft size={18}/></button>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>{stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"}</div>
-        </div>
-       
-      </div>
+  <FullScreenHeader title={stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"} subtitle="season detail" onClose={onClose} accent="#B8FF4D" />
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {stat === "record" && (
           <>
@@ -1391,27 +1493,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
   );
 }
 function TeamComparisonModal({ stats, currentPlayer, onClose }) {
-  const swipeStartX = useRef(0);
-  const swipeStartY = useRef(0);
-  const [swipeOffset, setSwipeOffset] = useState(0);
-
-  const handleTouchStart = (e) => {
-    swipeStartX.current = e.touches[0].clientX;
-    swipeStartY.current = e.touches[0].clientY;
-  };
-  const handleTouchMove = (e) => {
-    const dx = e.touches[0].clientX - swipeStartX.current;
-    const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
-    if (dx > 0 && dx > dy) setSwipeOffset(dx);
-  };
-  const handleTouchEnd = () => {
-    if (swipeOffset > 80) {
-      onClose();
-      setSwipeOffset(0);
-    } else {
-      setSwipeOffset(0);
-    }
-  };
+  const comparisonSwipe = useSwipeRightToClose(onClose);
 
   const modeGames = stats.filter(g => g.mode === "3v3");
   const avg = (arr, field) => arr.length ? (arr.reduce((s,g) => s+(g[field]||0),0)/arr.length).toFixed(1) : "—";
@@ -1420,23 +1502,14 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
 
   return (
    <div
-  onTouchStart={handleTouchStart}
-  onTouchMove={handleTouchMove}
-  onTouchEnd={handleTouchEnd}
+  {...comparisonSwipe.swipeHandlers}
   style={{
     position:"fixed", inset:0, zIndex:500, background:"#040818",
     display:"flex", flexDirection:"column",
-    animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",
-    transform:`translateX(${swipeOffset}px)`,
-    opacity: Math.max(0, 1 - swipeOffset / 400),
-transition: swipeOffset === 0 ? "transform .3s cubic-bezier(.25,.46,.45,.94)" : "none",
+    animation:"chatPanelIn .24s cubic-bezier(.2,.8,.2,1)",
+    ...comparisonSwipe.swipeStyle,
   }}>
-     <div style={{display:"flex",alignItems:"center",gap:10,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
-        <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
-          <ChevronLeft size={18}/>
-        </button>
-        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,textTransform:"lowercase"}}>team comparison · 3v3</div>
-      </div>
+     <FullScreenHeader title="team comparison · 3v3" subtitle="team stats" onClose={onClose} accent="#A78BFA" />
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {PLAYERS.map(p => {
           const pg = modeGames.filter(g => g.playerId === p.id);
@@ -1675,6 +1748,8 @@ return (
     {homeSubTab==="profile" && <ProfileHomeTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} />}
 
     {homeSubTab==="overview" && <>
+      <HomeCommandCenter currentPlayer={currentPlayer} points={points} nextMatch={nextMatch} daysUntil={daysUntil} previewDays={previewDays} completions={completions} stats={stats} onGotoTraining={onGotoTraining} onGotoStats={onGotoStats} onOpenBracket={onOpenBracket} />
+      <RecentActivityFeed stats={stats} completions={completions} trainingData={trainingData} currentPlayer={currentPlayer} onGotoStats={onGotoStats} onGotoTraining={onGotoTraining} />
       <div style={{background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
         <span style={{fontSize:26,flexShrink:0}}>{weeklyEvent.emoji}</span>
         <div>
@@ -1740,7 +1815,11 @@ return (
         })}
       </div>
 
-      <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
+      {stats.some(g=>g.playerId===currentPlayer&&g.mode==="3v3") ? (
+        <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
+      ) : (
+        <EmptyState icon="⌁" title="No 3v3 games synced yet" body="After your next team match, open Stats → Sync Match and your coach note + comparison data will fill in." actionLabel="open stats" onAction={onGotoStats} />
+      )}
       <button onClick={()=>{ setShowTeamComparison(true); }} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1}}>TEAM COMPARISON · 3V3</div>
