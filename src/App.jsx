@@ -2001,7 +2001,8 @@ function VoiceRoom({ currentPlayer, addToast, headerOnly }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [speakingMap, setSpeakingMap] = useState({});          
-  const [remoteAudioTracks, setRemoteAudioTracks] = useState({});            
+  const remoteAudioRef = useRef(null);
+const remoteStreamRef = useRef(new MediaStream());           
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
   // Load Daily SDK dynamically
@@ -2047,13 +2048,23 @@ const co = window.DailyIframe.createCallObject({
    co.on("participant-updated", (e) => {
   setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
 
-  if (!e.participant.local && e.participant.audioTrack) {
-    setRemoteAudioTracks(prev => ({
-      ...prev,
-      [e.participant.session_id]: e.participant.audioTrack,
-    }));
+});
+    
+    co.on("track-started", (e) => {
+  if (e.participant?.local) return;
+  if (e.track?.kind !== "audio") return;
+
+  remoteStreamRef.current.addTrack(e.track);
+
+  if (remoteAudioRef.current) {
+    remoteAudioRef.current.srcObject = remoteStreamRef.current;
+    remoteAudioRef.current.muted = false;
+    remoteAudioRef.current.volume = 1;
+    remoteAudioRef.current.play().catch(console.error);
   }
 });
+    
+    
       co.on("participant-left", (e) => {
         setParticipants(prev => {
           const next = { ...prev };
@@ -2089,18 +2100,7 @@ co.on("active-speaker-change", () => {
 
 await co.setLocalAudio(true);   
     
-    
-    const currentParticipants = co.participants();
 
-Object.values(currentParticipants).forEach((p) => {
-  if (!p.local && p.audioTrack) {
-    setRemoteAudioTracks(prev => ({
-      ...prev,
-      [p.session_id]: p.audioTrack,
-    }));
-  }
-});
-    
     
       setCallObject(co);
       setJoined(true);
@@ -2121,7 +2121,8 @@ Object.values(currentParticipants).forEach((p) => {
     setJoined(false);
     setParticipants({});
    setSpeakingMap({});
-setRemoteAudioTracks({});
+remoteStreamRef.current = new MediaStream();
+if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
 setMuted(false);
   };
 
@@ -2216,28 +2217,13 @@ setMuted(false);
       marginBottom:10,
       boxShadow:"0 0 24px rgba(184,255,77,0.08)",
     }}>
-{Object.entries(remoteAudioTracks).map(([id, track]) => (
-  <audio
-    key={id}
-    autoPlay
-    playsInline
-    controls
-    ref={(el) => {
-      if (el && track) {
-        const stream = new MediaStream();
-        stream.addTrack(track);
-        el.srcObject = stream;
-
-        el.muted = false;
-        el.volume = 1;
-
-        el.play().catch((err) => {
-          console.log("PHONE AUDIO PLAY FAILED:", err);
-        });
-      }
-    }}
-  />
-))}
+<audio
+  ref={remoteAudioRef}
+  autoPlay
+  playsInline
+  controls
+  style={{ width: "100%", marginBottom: 10 }}
+/>
 
 {/* Header */}
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
@@ -2255,11 +2241,12 @@ setMuted(false);
 
 <button
   onClick={() => {
-    document.querySelectorAll("audio").forEach((a) => {
-      a.muted = false;
-      a.volume = 1;
-      a.play().catch(console.error);
-    });
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStreamRef.current;
+      remoteAudioRef.current.muted = false;
+      remoteAudioRef.current.volume = 1;
+      remoteAudioRef.current.play().catch(console.error);
+    }
   }}
   style={{
     marginBottom: 12,
