@@ -1996,6 +1996,8 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
 function VoiceRoom({ currentPlayer, addToast, headerOnly }) {
   const [joined, setJoined] = useState(false);
   const [participants, setParticipants] = useState({});
+              
+const [voicePresence, setVoicePresence] = useState({});              
   const [muted, setMuted] = useState(false);
   const [callObject, setCallObject] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -2015,6 +2017,32 @@ const remoteStreamRef = useRef(new MediaStream());
     return () => {};
   }, []);
 
+              
+useEffect(() => {
+  let alive = true;
+
+  const loadVoicePresence = async () => {
+    const vp = await storeGet("voice_presence") || {};
+    const cutoff = Date.now() - 45 * 1000;
+
+    const cleaned = Object.fromEntries(
+      Object.entries(vp).filter(([_, v]) => new Date(v.ts).getTime() > cutoff)
+    );
+
+    if (alive) setVoicePresence(cleaned);
+  };
+
+  loadVoicePresence();
+  const timer = setInterval(loadVoicePresence, 5000);
+
+  return () => {
+    alive = false;
+    clearInterval(timer);
+  };
+}, []);              
+              
+              
+              
   const joinRoom = async () => {
     if (!window.DailyIframe) {
       setError("voice SDK still loading — try again in a second");
@@ -2109,8 +2137,22 @@ await co.setLocalAudio(true);
 setParticipants(co.participants());
     
       setCallObject(co);
-      setJoined(true);
-      setLoading(false);
+    setJoined(true);
+
+const vp = await storeGet("voice_presence") || {};
+const updatedPresence = {
+  ...vp,
+  [currentPlayer]: {
+    playerId: currentPlayer,
+    name: playerObj?.name || currentPlayer,
+    ts: new Date().toISOString()
+  }
+};
+
+await storeSet("voice_presence", updatedPresence);
+setVoicePresence(updatedPresence);
+
+setLoading(false);
       addToast?.(`${playerObj?.name} joined voice`, "🎙️");
 } catch (e) {
   console.error(e);
@@ -2124,11 +2166,14 @@ setParticipants(co.participants());
       callObject.destroy();
       setCallObject(null);
     }
-    setJoined(false);
-    setParticipants({});
-   setSpeakingMap({});
-remoteStreamRef.current = new MediaStream();
-if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+const vp = await storeGet("voice_presence") || {};
+delete vp[currentPlayer];
+await storeSet("voice_presence", vp);
+setVoicePresence(vp);
+
+setJoined(false);
+setParticipants({});
+setSpeakingMap({});
 setMuted(false);
   };
 
@@ -2308,7 +2353,7 @@ onClick={async () => {
     : isSpeaking || speakingMap[p.session_id]
       ? "talking"
       : "listening"
-  : "not in room"}
+  : voicePresence[p.id] ? "in voice" : "not in room"}
               </div>
 
               {isMe && isConnected && (
@@ -2707,12 +2752,22 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
     addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name} posted something`, "📸");
   };
 
-const pushActivity = async ({ to, type, fromName, text }) => {
-    const existing = await storeGet("activity_feed") || [];
-    const entry = { id: Date.now().toString(), to, type, fromName, text, ts: new Date().toISOString(), seen: false };
-    const upd = [entry, ...existing].slice(0, 50);
-    await storeSet("activity_feed", upd);
+const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "" }) => {
+  const existing = await storeGet("activity_feed") || [];
+  const entry = {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    to,
+    type,
+    fromName,
+    text,
+    message,
+    gameId,
+    ts: new Date().toISOString(),
+    seen: false
   };
+  const upd = [entry, ...existing].slice(0, 80);
+  await storeSet("activity_feed", upd);
+};
 
   const toggleHeart = async (postId) => {
     const post = posts.find(p => p.id === postId);
@@ -4119,7 +4174,7 @@ return {
           🔄 sync ranks
         </button>
       </div>
-{teamRoom && (
+{teamRoom && !teamRoom.closed && (
   <div onClick={() => setShowRoom(true)} className="bb-pressable" style={{background:"rgba(184,255,77,0.08)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:13,padding:"12px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
     <div style={{width:8,height:8,borderRadius:99,background:"#B8FF4D",animation:"livePulse 1.4s ease-in-out infinite"}}/>
     <div style={{flex:1}}>
@@ -4129,7 +4184,7 @@ return {
     <ChevronRight size={14} color="#B8FF4D"/>
   </div>
 )}
-{!teamRoom && (
+{(!teamRoom || teamRoom.closed) && (
   <button onClick={() => setShowRoom(true)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.03)",border:"1px dashed rgba(255,255,255,0.12)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#4A5066",cursor:"pointer",marginBottom:14}}>
     + open team room
   </button>
@@ -6435,8 +6490,10 @@ const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusS
   const [spinResult, setSpinResult] = useState(null);
   const [rotation, setRotation] = useState(0);
 const [propWager, setPropWager] = useState(10);
-  const [selectedProp, setSelectedProp] = useState(null);
-  const [propSide, setPropSide] = useState(null);
+const [selectedProp, setSelectedProp] = useState(null);
+const [propSide, setPropSide] = useState(null);
+const [propMessage, setPropMessage] = useState("");
+const [propGameId, setPropGameId] = useState("");
   const [lineIndexByProp, setLineIndexByProp] = useState({}); // { [propId]: index into lineOptions }
 const [predWager, setPredWager] = useState(10);
 const [selectedPred, setSelectedPred] = useState(null);
@@ -6487,6 +6544,23 @@ const PROP_FIELD_CONFIG = {
   };
 
   const props = buildProps();
+const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "" }) => {
+  const existing = await storeGet("activity_feed") || [];
+
+  const entry = {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+    to,
+    type,
+    fromName,
+    text,
+    message,
+    gameId,
+    ts: new Date().toISOString(),
+    seen: false
+  };
+
+  await storeSet("activity_feed", [entry, ...existing].slice(0, 80));
+};             
   const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
   const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
 
@@ -6518,40 +6592,58 @@ const spinWheel = async () => {
   };
 
 const placeBet = async (chosenLine) => {
-    if (!selectedProp || !propSide || propWager < 1 || myPoints < propWager) return;
-    const card = props.find(p => p.id === selectedProp);
-    if (!card) return;
-    const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor(card.lineOptions.length/2);
-    const current = card.lineOptions[lineIdx];
-    const line = chosenLine ?? current.line;
-    const odds = propSide === "over" ? current.overOdds : current.underOdds;
-    const payout = calcPayout(propWager, odds.decimal);
-    const bet = {
-      id: Date.now().toString(),
-      bettorId: currentPlayer,
-      playerId: card.playerId,
-      playerName: card.playerName,
-      field: card.field,
-      line,
-      side: propSide,
-      wager: propWager,
-      payout,
-      odds: odds.american,
-      status: "open",
-      placedAt: new Date().toISOString(),
+  if (!selectedProp || !propSide || propWager < 1 || myPoints < propWager) return;
 
-    };
-    const newPts = myPoints - propWager;
-    const upd = { ...points, [currentPlayer]: newPts };
-    setPoints(upd);
-    await storeSet("points", upd);
-    const updBets = [...(bets || []), bet];
-    setBets(updBets);
-    await storeSet("bets", updBets);
-    setSelectedProp(null);
-    setPropSide(null);
-    setPropWager(10);
+  const card = props.find(p => p.id === selectedProp);
+  if (!card) return;
+
+  const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor(card.lineOptions.length / 2);
+  const current = card.lineOptions[lineIdx];
+  const line = chosenLine ?? current.line;
+  const odds = propSide === "over" ? current.overOdds : current.underOdds;
+  const payout = calcPayout(propWager, odds.decimal);
+
+  const bet = {
+    id: Date.now().toString(),
+    bettorId: currentPlayer,
+    playerId: card.playerId,
+    playerName: card.playerName,
+    field: card.field,
+    line,
+    side: propSide,
+    wager: propWager,
+    payout,
+    odds: odds.american,
+    status: "open",
+    placedAt: new Date().toISOString(),
+    message: propMessage.trim(),
+    gameId: propGameId
   };
+
+  const newPts = myPoints - propWager;
+  const upd = { ...points, [currentPlayer]: newPts };
+  setPoints(upd);
+  await storeSet("points", upd);
+
+  const updBets = [...(bets || []), bet];
+  setBets(updBets);
+  await storeSet("bets", updBets);
+
+  await pushActivity({
+    to: card.playerId,
+    type: "prop",
+    fromName: PLAYERS.find(p => p.id === currentPlayer)?.name || "someone",
+    text: `sent you props: ${propSide.toUpperCase()} ${line} ${card.field}`,
+    message: propMessage.trim(),
+    gameId: propGameId
+  });
+
+  setSelectedProp(null);
+  setPropSide(null);
+  setPropWager(10);
+  setPropMessage("");
+  setPropGameId("");
+};
 
   const segAngle = 360 / WHEEL_SEGMENTS.length;
 
@@ -6763,6 +6855,33 @@ const noBettingWeek = isEventActive("no_betting");
                       <div style={{fontSize:10,color:"#4A5066",marginBottom:2}}>TO WIN</div>
                       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#B8FF4D"}}>{payout} pts</div>
                     </div>
+                                                                                 
+                    <input
+  value={propMessage}
+  onChange={(e) => setPropMessage(e.target.value)}
+  placeholder="add a message for them..."
+  style={{ ...s.modalInput, marginBottom: 8 }}
+/>
+
+<select
+  value={propGameId}
+  onChange={(e) => setPropGameId(e.target.value)}
+  style={{ ...s.modalInput, marginBottom: 8 }}
+>
+  <option value="">link to recent game optional</option>
+  {stats
+    .filter(g => g.playerId === card?.playerId)
+    .slice(0, 8)
+    .map(g => (
+      <option key={g.id} value={g.id}>
+        {g.mode} · {g.ourScore}-{g.theirScore} · {new Date(g.ts).toLocaleDateString()}
+      </option>
+    ))}
+</select>
+                                                                                 
+                                                                                 
+                                                                                 
+                                                                                 
                     <button onClick={()=>placeBet(current?.line)} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
                       style={{flex:1,background:"#B8FF4D",border:"none",borderRadius:10,padding:"14px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",opacity:myPoints<propWager?0.4:1}}>
                       place bet
@@ -7763,7 +7882,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
         const p2 = PLAYERS.find(p => p.id === pid2);
         const shared = getSharedGames(pid1, pid2);
         const sortedShared = [...shared].sort((a,b) => new Date(b.p1game.ts) - new Date(a.p1game.ts));
-        const [chemSelectedGame, setChemSelectedGame] = useState(null);
+        
 
         return (
         <div
@@ -8125,7 +8244,10 @@ const addToast = useCallback((text, icon = "🔔") => {
 useEffect(() => {
   if (catchupStopped || catchupQueue.length === 0) return;
   const [next, ...rest] = catchupQueue;
-  addToast(`${next.fromName} ${next.text}`, next.type==="like"?"❤️":next.type==="comment"?"💬":"🔔");
+ addToast(
+  `${next.fromName} ${next.text}${next.message ? ` — "${next.message}"` : ""}`,
+  next.type==="like" ? "❤️" : next.type==="comment" ? "💬" : next.type==="prop" ? "🎯" : "🔔"
+);
   const timer = setTimeout(() => setCatchupQueue(rest), 1400);
   return () => clearTimeout(timer);
 }, [catchupQueue, catchupStopped]);   
@@ -8239,15 +8361,21 @@ return () => {
 
   useEffect(() => {
   if (!currentPlayer) return;
-  const checkLock = () => {
+  const checkLock = async () => {
     if (document.hidden) return;
     const timeSinceActive = Date.now() - lastActiveRef.current;
-    if (timeSinceActive > AUTO_LOCK_MS) {
-      setCurrentPlayer(null);
-      setAuthStage("select");
-      setSelectedPlayerId(null);
-      setTab("home");
-    } else {
+   if (timeSinceActive > AUTO_LOCK_MS) {
+  const fresh = await storeGet("presence") || {};
+  const upd = { ...fresh, [currentPlayer + "_mode"]: null };
+  await storeSet("presence", upd);
+  setPresence(upd);
+
+  setMyMode(null);
+  setCurrentPlayer(null);
+  setAuthStage("select");
+  setSelectedPlayerId(null);
+  setTab("home");
+} else {
       lastActiveRef.current = Date.now();
     }
   };
@@ -8262,35 +8390,33 @@ const loadSharedData = async (pid) => {
   setLoading(true);
 
   const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
-    storeGet("schedule"),
-    storeGet("training"),
-    storeGet("completions"),
-    storeGet("chat"),
-    storeGet("comments"),
-    storeGet("posts"),
-    storeGet("stream_profiles"),
-    storeGet("stats"),
-    storeGet("presence"),
-    storeGet("pings"),
+storeGet("schedule"),
+storeGet("training"),
+storeGet("completions"),
+storeGet("chat"),
+storeGet("comments"),
+storeGet("posts"),
+storeGet("stream_profiles"),
+storeGet("stats"),
+storeGet("presence"),
+storeGet("pings"),
+storeGet("team_room"),
+storeGet("points"),
+storeGet("bets"),
+storeGet("pass_xp"),
+storeGet("pass_premium"),
+storeGet("pass_claimed"),
+storeGet("pass_tokens"),
+storeGet("pass_active_boosts"),
+storeGet("time_logs"),
+storeGet("stocks"),
+storeGet("coin_flips"),
+storeGet("active_race"),
+storeGet("chemistry"),
+storeGet("flip_challenges"),
+storeGet("activity_feed"),
 storeGet("parse_credits"),
 storeGet("credit_requests"),
-    storeGet("team_room"),
-    storeGet("points"),
-    storeGet("bets"),
-    storeGet("pass_xp"),
-    storeGet("pass_premium"),
-    storeGet("pass_claimed"),
-    storeGet("pass_tokens"),
-    storeGet("pass_active_boosts"),
-    storeGet("time_logs"),
-    storeGet("stocks"),
-    storeGet("coin_flips"),
-    storeGet("active_race"),
-    storeGet("chemistry"),
-    storeGet("flip_challenges"),
- storeGet("activity_feed"),
-    storeGet("parse_credits"),
-    storeGet("credit_requests"),
   ]);
 
   if (sched) setSchedule(sched);
@@ -8303,6 +8429,7 @@ storeGet("credit_requests"),
   if (sts) setStats(Array.isArray(sts) ? sts : []);
   if (prs) setPresence(prs);
   if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
+setTeamRoom(tr && !tr.closed ? tr : null);
   if (pts) setPoints(pts);
   if (bts) setBets(Array.isArray(bts) ? bts : []);
   if (pxp) setPassXP(pxp);
@@ -8566,7 +8693,26 @@ const TABS=[
       </div>
     )}
   </button>
-  <button onClick={()=>{ setCurrentPlayer(null); setAuthStage("select"); setSelectedPlayerId(null); setTab("home"); setBannerDismissed(false); }} className="bb-pressable" style={s.logoutBtn}><LogOut size={15}/></button>
+<button
+  onClick={async () => {
+    const fresh = await storeGet("presence") || {};
+    const upd = { ...fresh, [currentPlayer + "_mode"]: null };
+
+    await storeSet("presence", upd);
+    setPresence(upd);
+    setMyMode(null);
+
+    setCurrentPlayer(null);
+    setAuthStage("select");
+    setSelectedPlayerId(null);
+    setTab("home");
+    setBannerDismissed(false);
+  }}
+  className="bb-pressable"
+  style={s.logoutBtn}
+>
+  <LogOut size={15}/>
+</button>
   <div style={{display:"flex",gap:5,alignItems:"center",marginLeft:4}}>
     {Object.values(THEMES).map(t=>(
       <button key={t.id} onClick={()=>setThemeId(t.id)}
