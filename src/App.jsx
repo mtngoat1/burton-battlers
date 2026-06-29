@@ -2001,6 +2001,7 @@ function VoiceRoom({ currentPlayer, addToast, headerOnly }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [speakingMap, setSpeakingMap] = useState({});
+  const [remoteAudioTracks, setRemoteAudioTracks] = useState({});            
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
   // Load Daily SDK dynamically
@@ -2045,6 +2046,7 @@ const co = window.DailyIframe.createCallObject({
   }
 });
       co.on("participant-updated", (e) => {
+          console.log("UPDATED", e.participant);
         setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
       });
       co.on("participant-left", (e) => {
@@ -2068,6 +2070,8 @@ co.on("active-speaker-change", () => {
   startVideoOff: true,
   startAudioOff: false,
 });
+    
+console.log("JOINED", co.participants());    
 
 await co.setLocalAudio(true);    
     
