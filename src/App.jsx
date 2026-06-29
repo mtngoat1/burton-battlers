@@ -8196,8 +8196,8 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
         </div>
         {showLive && (
           <div style={{position:"relative",paddingTop:"56.25%",borderRadius:16,overflow:"hidden",background:"#05060C",border:"1px solid rgba(255,255,255,0.08)"}}>
-       <iframe
-  src={`https://www.youtube.com/embed/${hzs2x4irAD0}?autoplay=1&controls=0&modestbranding=1&rel=0&playsinline=1`}
+<iframe
+  src={`https://www.youtube.com/embed/${RLCS_LIVE_VIDEO_ID}?autoplay=1&controls=0&modestbranding=1&rel=0&playsinline=1`}
   title="RLCS Live"
   allow="autoplay; encrypted-media; picture-in-picture"
   allowFullScreen
@@ -8210,6 +8210,8 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
   }}
 />
       </div>
+              )}
+          </div>
       <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,padding:16,marginBottom:14,border:"2px solid rgba(255,255,255,0.08)",boxShadow:"0 12px 28px rgba(0,0,0,0.20)"}}>
         <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER</div>
         <div style={{display:"flex",gap:8}}>
