@@ -1,0 +1,33 @@
+cat > public/music/playlist.json <<'EOF'
+{
+  "tracks": [
+    ".mp3",
+    "[001] hardwired.mp3",
+    "[002] #whare.mp3",
+    "[003] RM-11.mp3",
+    "[004] #aroha.mp3",
+    "[005] slipstream.mp3",
+    "[006] THERE'S ONE IN EVERY CROWD.mp3",
+    "[007] CASH4SCRAP.mp3",
+    "[008] LAY DOWN.mp3",
+    "[009] DIRTY WERK.mp3",
+    "[010] #ASHTRAY.mp3",
+    "[011] in the pocket #footmahi.mp3",
+    "[012] kula world.mp3",
+    "[013] anti-bullying anthem #dicktation.mp3",
+    "[014] pillow fortress #5work.mp3",
+    "[015] unclaimed memory.mp3",
+    "[016] sprinz lullaby #sheepcounters.mp3",
+    "[017] leave tonite.mp3",
+    "[018] i need u close z z 1.mp3",
+    "[019] xp farm irl #error.mp3",
+    "[020] close my heart ♡ #5work.mp3",
+    "[021] #CupSong.mp3",
+    "[022] i can commit.mp3",
+    "[023] #facetime.mp3",
+    "[024] gunna miss u.mp3",
+    "[025] user not found ;(.mp3",
+    "[026] twelvie tearz.mp3"
+  ]
+}
+EOF

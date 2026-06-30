@@ -3421,441 +3421,375 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
 }
 
 
+
 function RoomMusicPlayer({ currentPlayer, addToast }) {
-  const emptyMusicState = { url:"", title:"", dj:null, djName:"", playing:false, positionMs:0, updatedAt:null, queue:[] };
+  const emptyMusicState = { url:"", title:"", dj:null, djName:"", playing:false, positionMs:0, updatedAt:null, queue:[], source:"direct", libraryIndex:0, libraryMode:true };
   const [musicState, setMusicState] = useState(emptyMusicState);
   const [trackLink, setTrackLink] = useState("");
   const [requestLink, setRequestLink] = useState("");
-  const [joinedMusic, setJoinedMusic] = useState(false);
-  const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [localMusicPaused, setLocalMusicPaused] = useState(false);
+  const [musicLibrary, setMusicLibrary] = useState([]);
+  const [libraryError, setLibraryError] = useState("");
   const [musicVolume, setMusicVolume] = useState(42);
-  const [playerReady, setPlayerReady] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
+  const [localBlocked, setLocalBlocked] = useState(false);
+
+  const audioRef = useRef(null);
+  const audioCtxRef = useRef(null);
+  const gainRef = useRef(null);
+  const sourceRef = useRef(null);
   const musicVolumeRef = useRef(42);
-  const iframeRef = useRef(null);
-  const widgetRef = useRef(null);
   const lastAppliedRef = useRef("");
-  const applyingRef = useRef(false);
-  const driftCorrectionRef = useRef(0);
-  const volumeApplyTimerRef = useRef(null);
+  const localPauseRef = useRef(false);
+  const syncTimerRef = useRef(null);
 
   const player = PLAYERS.find(p => p.id === currentPlayer);
   const isDj = !musicState?.dj || musicState.dj === currentPlayer;
   const queue = Array.isArray(musicState?.queue) ? musicState.queue : [];
   const hasTrack = !!musicState?.url;
-  const normalizeSoundCloudUrl = (url) => {
-    let raw = String(url || "").trim();
-    if (!raw) return "";
-    raw = raw.replace(/^soundcloud:\/\//i, "https://soundcloud.com/");
-    if (/^(soundcloud\.com|www\.soundcloud\.com|m\.soundcloud\.com|on\.soundcloud\.com|soundcloud\.app\.goo\.gl)\//i.test(raw)) {
-      raw = `https://${raw}`;
-    }
+
+  const cleanUrl = (url) => String(url || "").trim();
+
+  const looksLikeBlockedPageUrl = (url) => {
     try {
-      const u = new URL(raw);
-      const host = u.hostname.replace(/^www\./i, "").replace(/^m\./i, "").toLowerCase();
-      if (["soundcloud.com", "on.soundcloud.com", "soundcloud.app.goo.gl", "api.soundcloud.com"].includes(host)) {
-        return `https://${host}${u.pathname}${u.search}`;
-      }
-    } catch (_) {}
-    return raw;
-  };
-  const isSoundCloudUrl = (url) => {
-    try {
-      const u = new URL(normalizeSoundCloudUrl(url));
-      const host = u.hostname.replace(/^www\./i, "").replace(/^m\./i, "").toLowerCase();
-      return ["soundcloud.com", "on.soundcloud.com", "soundcloud.app.goo.gl", "api.soundcloud.com"].includes(host);
+      const u = new URL(cleanUrl(url), typeof window !== "undefined" ? window.location.href : "https://example.com");
+      const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+      return ["soundcloud.com", "on.soundcloud.com", "youtube.com", "youtu.be", "spotify.com", "open.spotify.com", "music.apple.com"].some(h => host === h || host.endsWith(`.${h}`));
     } catch (_) {
       return false;
     }
   };
-  const cleanUrl = (url) => normalizeSoundCloudUrl(url);
+
+  const isDirectAudioUrl = (url) => {
+    const raw = cleanUrl(url);
+    if (!raw) return false;
+    if (looksLikeBlockedPageUrl(raw)) return false;
+    if (raw.startsWith("/")) return true;
+    try {
+      const u = new URL(raw);
+      if (!["http:", "https:"].includes(u.protocol)) return false;
+      const path = u.pathname.toLowerCase();
+      if (/\.(mp3|m4a|aac|wav|ogg|oga|flac|webm)(\?.*)?$/.test(path)) return true;
+      // Some signed/CDN links hide the extension. Let them through as long as they are not a known webpage music link.
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
   const displayTrack = (url) => {
     try {
-      const u = new URL(normalizeSoundCloudUrl(url));
-      const slug = decodeURIComponent(u.pathname.split("/").filter(Boolean).slice(-1)[0] || u.hostname).replace(/[-_]+/g, " ");
-      if (u.hostname.includes("on.soundcloud") || u.hostname.includes("app.goo.gl")) return "mobile SoundCloud link";
-      return slug || "SoundCloud track";
+      const u = new URL(cleanUrl(url), typeof window !== "undefined" ? window.location.href : "https://example.com");
+      const file = decodeURIComponent(u.pathname.split("/").filter(Boolean).slice(-1)[0] || "room audio");
+      return file.replace(/\.(mp3|m4a|aac|wav|ogg|oga|flac|webm)$/i, "").replace(/[-_]+/g, " ") || "room audio";
     } catch (_) {
-      return "SoundCloud track";
+      return "room audio";
     }
   };
-  const resolveSoundCloudUrl = async (url) => {
-    const normalized = cleanUrl(url);
+
+  const normalizeLibraryEntry = (entry, idx) => {
+    let raw = "";
+    let title = "";
+    if (typeof entry === "string") raw = entry;
+    else if (entry && typeof entry === "object") {
+      raw = entry.url || entry.src || entry.file || entry.path || "";
+      title = entry.title || entry.name || "";
+    }
+    raw = cleanUrl(raw);
+    if (!raw) return null;
+    // In playlist.json you can write "song.mp3" and the app will read it from /public/music/song.mp3.
+    if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) raw = `/music/${raw.replace(/^\.?\/*/, "")}`;
+    if (!isDirectAudioUrl(raw)) return null;
+    return { id:`lib_${idx}_${raw}`, url:raw, title:title || displayTrack(raw), idx };
+  };
+
+  const loadMusicLibrary = async (silent = false) => {
     try {
-      const res = await fetch(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(normalized)}`);
-      if (!res.ok) throw new Error("oembed failed");
-      const data = await res.json();
-      const html = String(data?.html || "");
-      const match = html.match(/[?&]url=([^&"']+)/);
-      return {
-        url: match ? decodeURIComponent(match[1]) : normalized,
-        title: data?.title || displayTrack(normalized),
-      };
+      const res = await fetch(`/music/playlist.json?ts=${Date.now()}`, { cache:"no-store" });
+      if (!res.ok) throw new Error("missing playlist");
+      const json = await res.json();
+      const rawList = Array.isArray(json) ? json : Array.isArray(json?.tracks) ? json.tracks : Array.isArray(json?.files) ? json.files : [];
+      const list = rawList.map(normalizeLibraryEntry).filter(Boolean);
+      setMusicLibrary(list);
+      setLibraryError(list.length ? "" : "playlist.json has no usable audio files");
+      if (!silent) addToast?.(list.length ? `${list.length} folder tracks loaded` : "playlist.json has no usable tracks", "🎧");
+      return list;
     } catch (_) {
-      return { url: normalized, title: displayTrack(normalized) };
+      setMusicLibrary([]);
+      setLibraryError("add /public/music/playlist.json to use folder playback");
+      if (!silent) addToast?.("add public/music/playlist.json first", "🎧");
+      return [];
     }
   };
+
   const getLivePositionMs = (state = musicState) => {
     const base = Number(state?.positionMs) || 0;
     if (!state?.playing || !state?.updatedAt) return base;
     return Math.max(0, base + (Date.now() - new Date(state.updatedAt).getTime()));
   };
-  const embedSrc = hasTrack
-    ? `https://w.soundcloud.com/player/?url=${encodeURIComponent(musicState.url)}&auto_play=false&buying=false&liking=false&download=false&sharing=false&show_artwork=false&show_comments=false&show_playcount=false&show_user=false&hide_related=true&visual=false`
-    : "";
 
-  const ensureSoundCloudApi = () => new Promise((resolve, reject) => {
-    if (typeof window === "undefined") return reject(new Error("window unavailable"));
-    if (window.SC?.Widget) return resolve(window.SC.Widget);
-    const existing = document.querySelector('script[data-bb-soundcloud="true"]');
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.SC.Widget), { once:true });
-      existing.addEventListener("error", reject, { once:true });
-      return;
+  const canUseWebAudioForCurrentUrl = (url) => {
+    if (typeof window === "undefined") return false;
+    const raw = cleanUrl(url);
+    if (!raw) return false;
+    if (raw.startsWith("/")) return true;
+    try {
+      return new URL(raw, window.location.href).origin === window.location.origin;
+    } catch (_) {
+      return false;
     }
-    const script = document.createElement("script");
-    script.src = "https://w.soundcloud.com/player/api.js";
-    script.async = true;
-    script.dataset.bbSoundcloud = "true";
-    script.onload = () => resolve(window.SC.Widget);
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-
-  const getWidget = async () => {
-    const Widget = await ensureSoundCloudApi();
-    if (!iframeRef.current) return null;
-    if (!widgetRef.current) {
-      widgetRef.current = Widget(iframeRef.current);
-      widgetRef.current.bind?.(Widget.Events.READY, () => {
-        setPlayerReady(true);
-        try { widgetRef.current?.setVolume?.(Number(musicVolumeRef.current) || 0); } catch (_) {}
-      });
-      widgetRef.current.bind?.(Widget.Events.ERROR, () => addToast?.("that SoundCloud track can't be embedded", "⚠️"));
-    }
-    return widgetRef.current;
   };
 
-  const sendVolumeToIframe = (vol) => {
+  const setupAudioGraph = async () => {
+    if (typeof window === "undefined" || !audioRef.current) return false;
+    if (!canUseWebAudioForCurrentUrl(musicState?.url)) return false;
     try {
-      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method:"setVolume", value:vol }), "https://w.soundcloud.com");
-    } catch (_) {}
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return false;
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContextClass();
+      if (audioCtxRef.current.state === "suspended") await audioCtxRef.current.resume();
+      if (!gainRef.current) {
+        gainRef.current = audioCtxRef.current.createGain();
+        gainRef.current.gain.value = (Number(musicVolumeRef.current) || 0) / 100;
+        gainRef.current.connect(audioCtxRef.current.destination);
+      }
+      if (!sourceRef.current) {
+        sourceRef.current = audioCtxRef.current.createMediaElementSource(audioRef.current);
+        sourceRef.current.connect(gainRef.current);
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
   };
 
   const applyMusicVolume = async (value = musicVolumeRef.current) => {
     const vol = Math.max(0, Math.min(100, Number(value) || 0));
     musicVolumeRef.current = vol;
-    sendVolumeToIframe(vol);
-    try {
-      const widget = widgetRef.current || await getWidget();
-      widget?.setVolume?.(vol);
-      sendVolumeToIframe(vol);
-      if (volumeApplyTimerRef.current) clearTimeout(volumeApplyTimerRef.current);
-      volumeApplyTimerRef.current = setTimeout(() => {
-        try { widget?.setVolume?.(musicVolumeRef.current); } catch (_) {}
-        sendVolumeToIframe(musicVolumeRef.current);
-      }, 180);
-    } catch (_) {}
+    if (audioRef.current) {
+      try { audioRef.current.volume = vol / 100; } catch (_) {}
+    }
+    if (gainRef.current) {
+      try { gainRef.current.gain.value = vol / 100; } catch (_) {}
+    }
   };
 
   const handleMusicVolumeChange = (value) => {
     const vol = Math.max(0, Math.min(100, Number(value) || 0));
-    musicVolumeRef.current = vol;
     setMusicVolume(vol);
     applyMusicVolume(vol);
   };
 
   const updateMusicState = async (next) => {
-    setMusicState(next);
-    await storeSet("room_music", next);
+    const safeNext = { ...emptyMusicState, ...next, source:"direct", queue:Array.isArray(next?.queue)?next.queue:[] };
+    setMusicState(safeNext);
+    await storeSet("room_music", safeNext);
   };
 
-
-  useEffect(() => {
-    // Mounting this component means the user turned music room on.
-    // Keep the listener "armed" even if no track is loaded yet, so a later DJ play
-    // can start/sync on this device without needing a separate play-here button.
-    setJoinedMusic(true);
-    setLocalMusicPaused(false);
-    return () => {
-      if (volumeApplyTimerRef.current) clearTimeout(volumeApplyTimerRef.current);
-      try { widgetRef.current?.pause?.(); } catch (_) {}
-      try { iframeRef.current?.remove?.(); } catch (_) {}
-      widgetRef.current = null;
-    };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    storeGet("room_music").then(v => {
-      if (!alive) return;
-      setMusicState(v?.url || v?.queue ? { ...emptyMusicState, ...v, queue:Array.isArray(v.queue)?v.queue:[] } : emptyMusicState);
-    });
-    const unsub = subscribeKVMulti(["room_music"], ({ value }) => {
-      const next = value?.url || value?.queue ? { ...emptyMusicState, ...value, queue:Array.isArray(value.queue)?value.queue:[] } : emptyMusicState;
-      setMusicState(next);
-      if (next?.url && next?.playing) {
-        setJoinedMusic(true);
-        setLocalMusicPaused(false);
-      }
-    });
-    return () => { alive = false; unsub?.(); };
-  }, []);
-
-  useEffect(() => {
-    widgetRef.current = null;
-    setPlayerReady(false);
-    lastAppliedRef.current = "";
-  }, [musicState?.url]);
-
-  useEffect(() => {
-    if (!hasTrack || !iframeRef.current) return;
-    let cancelled = false;
-    const timers = [120, 360, 900].map(delay => setTimeout(async () => {
-      if (cancelled) return;
-      await applyMusicVolume(musicVolumeRef.current);
-    }, delay));
-    return () => { cancelled = true; timers.forEach(clearTimeout); };
-  }, [hasTrack, musicState?.url]);
-
-  useEffect(() => {
-    if (!hasTrack || !joinedMusic || localMusicPaused) return;
-    let cancelled = false;
-    const applyState = async () => {
-      const signature = `${musicState.url}|${musicState.playing}|${musicState.updatedAt}|${Math.floor((musicState.positionMs||0)/250)}`;
-      if (lastAppliedRef.current === signature || applyingRef.current) return;
-      applyingRef.current = true;
-      try {
-        const widget = await getWidget();
-        if (!widget || cancelled) return;
-        widget.setVolume?.(Number(musicVolumeRef.current) || 0);
-        const target = getLivePositionMs(musicState);
-        widget.seekTo?.(target);
-        if (musicState.playing) {
-          widget.play?.();
-        } else {
-          widget.pause?.();
-        }
-        lastAppliedRef.current = signature;
-      } catch (_) {
-        addToast?.("SoundCloud player is still loading", "🎧");
-      } finally {
-        applyingRef.current = false;
-      }
-    };
-    const timers = [180, 850, 1650].map(delay => setTimeout(applyState, delay));
-    return () => { cancelled = true; timers.forEach(clearTimeout); };
-  }, [joinedMusic, localMusicPaused, hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs]);
-
-  useEffect(() => {
-    musicVolumeRef.current = Math.max(0, Math.min(100, Number(musicVolume) || 0));
-    if (!hasTrack) return;
-    let cancelled = false;
-    const timers = [0, 120, 420, 900].map(delay => setTimeout(async () => {
-      if (cancelled) return;
-      await applyMusicVolume(musicVolumeRef.current);
-    }, delay));
-    return () => { cancelled = true; timers.forEach(clearTimeout); };
-  }, [musicVolume, hasTrack, musicState?.url, joinedMusic]);
-
-  // Do not auto-start room music just because the DJ pressed play.
-  // Mobile browsers need a local tap, and auto-retrying play caused the fading/restart bug.
-  useEffect(() => {}, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, isDj]);
-
-  useEffect(() => {
-    if (!joinedMusic || !hasTrack || !musicState.playing || isDj) return;
-    const timer = setInterval(async () => {
-      try {
-        const widget = await getWidget();
-        if (!widget) return;
-        widget.getPosition?.((pos) => {
-          const expected = getLivePositionMs(musicState);
-          const drift = Math.abs(Number(pos || 0) - expected);
-          if (drift > 9500 && Date.now() - driftCorrectionRef.current > 22000) {
-            driftCorrectionRef.current = Date.now();
-            widget.seekTo?.(expected);
-          }
-        });
-      } catch (_) {}
-    }, 12000);
-    return () => clearInterval(timer);
-  }, [joinedMusic, hasTrack, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicState?.url, isDj]);
-
-  const joinMusic = async ({ silent = false, stateOverride = null } = {}) => {
-    const activeState = stateOverride
-      ? { ...emptyMusicState, ...stateOverride, queue:Array.isArray(stateOverride.queue)?stateOverride.queue:[] }
-      : musicState;
-    if (!activeState?.url) {
-      setJoinedMusic(true);
-      setAudioUnlocked(true);
-      setLocalMusicPaused(false);
-      if (!silent) addToast?.("music room armed — it will sync when the DJ plays", "🎧");
-      return true;
-    }
-    setJoinedMusic(true);
-    setAudioUnlocked(true);
-    setLocalMusicPaused(false);
+  const syncLocalToRoom = async ({ forcePlay = false, silent = true } = {}) => {
+    if (!audioRef.current || !musicState?.url) return false;
+    const audio = audioRef.current;
     try {
-      const widget = await getWidget();
-      if (!widget) return false;
-      const target = getLivePositionMs(activeState);
+      await setupAudioGraph();
       await applyMusicVolume(musicVolumeRef.current);
-      widget.seekTo?.(target);
-      if (activeState.playing) {
-        widget.play?.();
-      } else {
-        widget.pause?.();
+      const target = getLivePositionMs(musicState) / 1000;
+      if (Number.isFinite(target)) {
+        const drift = Math.abs((audio.currentTime || 0) - target);
+        if (forcePlay || drift > 1.15) audio.currentTime = Math.max(0, target);
       }
-      lastAppliedRef.current = `${activeState.url}|${activeState.playing}|${activeState.updatedAt}|${Math.floor((activeState.positionMs||0)/250)}`;
-      if (!silent) addToast?.(activeState.playing ? "music synced" : "music room ready", "🎧");
+      if ((musicState.playing || forcePlay) && !localPauseRef.current) {
+        await audio.play();
+        setAudioReady(true);
+        setLocalBlocked(false);
+      } else if (!musicState.playing) {
+        audio.pause();
+      }
+      lastAppliedRef.current = `${musicState.url}|${musicState.playing}|${musicState.updatedAt}|${Math.floor((musicState.positionMs||0)/500)}`;
       return true;
     } catch (_) {
-      if (!silent) addToast?.("SoundCloud player is still loading", "🎧");
+      setLocalBlocked(true);
+      if (!silent) addToast?.("tap play once on this device to unlock music", "🎧");
       return false;
     }
   };
 
-  const leaveMusic = async ({ silent = false } = {}) => {
-    try {
-      const widget = widgetRef.current || await getWidget();
-      widget?.pause?.();
-    } catch (_) {}
-    setLocalMusicPaused(true);
-    setJoinedMusic(false);
-    setAudioUnlocked(false);
-    lastAppliedRef.current = "";
-    if (!silent) addToast?.("left room music", "🎧");
-  };
+  useEffect(() => {
+    musicVolumeRef.current = musicVolume;
+    let alive = true;
+    storeGet("room_music").then(v => {
+      if (!alive) return;
+      setMusicState(v?.url || v?.queue ? { ...emptyMusicState, ...v, source:v?.source || "direct", queue:Array.isArray(v.queue)?v.queue:[] } : emptyMusicState);
+    });
+    const unsub = subscribeKVMulti(["room_music"], ({ value }) => {
+      const next = value?.url || value?.queue ? { ...emptyMusicState, ...value, source:value?.source || "direct", queue:Array.isArray(value.queue)?value.queue:[] } : emptyMusicState;
+      setMusicState(next);
+      if (next?.playing) localPauseRef.current = false;
+    });
+    return () => {
+      alive = false;
+      unsub?.();
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      try { audioRef.current?.pause?.(); } catch (_) {}
+    };
+  }, []);
 
   useEffect(() => {
-    const handleVoiceMusicJoin = async () => {
-      let latestState = musicState;
-      try {
-        const stored = await storeGet("room_music");
-        if (stored?.url || stored?.queue) {
-          latestState = { ...emptyMusicState, ...stored, queue:Array.isArray(stored.queue)?stored.queue:[] };
-          setMusicState(latestState);
-        }
-      } catch (_) {}
-      if (!latestState?.url) return;
-      setTimeout(() => {
-        try { joinMusic({ silent:true, stateOverride:latestState }); } catch (_) {}
-      }, 220);
-    };
-    const handleVoiceLeft = () => {
-      leaveMusic({ silent:true });
-    };
-    const handleMusicDisabled = () => {
-      leaveMusic({ silent:true });
-    };
-    window.addEventListener("bb-voice-join-requested", handleVoiceMusicJoin);
-    window.addEventListener("bb-voice-joined", handleVoiceMusicJoin);
-    window.addEventListener("bb-voice-left", handleVoiceLeft);
-    window.addEventListener("bb-music-room-disabled", handleMusicDisabled);
+    loadMusicLibrary(true);
+  }, []);
+
+  useEffect(() => {
+    setAudioReady(false);
+    setLocalBlocked(false);
+    lastAppliedRef.current = "";
+    sourceRef.current = null;
+    gainRef.current = null;
+    audioCtxRef.current = null;
+    if (audioRef.current && musicState?.url) {
+      audioRef.current.src = musicState.url;
+      audioRef.current.load?.();
+      applyMusicVolume(musicVolumeRef.current);
+    }
+  }, [musicState?.url]);
+
+  useEffect(() => {
+    applyMusicVolume(musicVolume);
+  }, [musicVolume, musicState?.url]);
+
+  useEffect(() => {
+    if (!hasTrack) return;
+    const signature = `${musicState.url}|${musicState.playing}|${musicState.updatedAt}|${Math.floor((musicState.positionMs||0)/500)}`;
+    if (lastAppliedRef.current === signature) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      syncLocalToRoom({ silent:true });
+      // A second nudge helps listeners whose audio element was still loading.
+      setTimeout(() => syncLocalToRoom({ silent:true }), 650);
+    }, 80);
     return () => {
-      window.removeEventListener("bb-voice-join-requested", handleVoiceMusicJoin);
-      window.removeEventListener("bb-voice-joined", handleVoiceMusicJoin);
-      window.removeEventListener("bb-voice-left", handleVoiceLeft);
-      window.removeEventListener("bb-music-room-disabled", handleMusicDisabled);
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     };
-  }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicVolume, joinedMusic]);
+  }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs]);
 
-  // Track load prepares the embedded player. Because music room stays armed while enabled,
-  // listener devices can follow the next DJ play without a separate play-here button.
-  useEffect(() => {}, [hasTrack, musicState?.url]);
-
-  const loadTrack = async (urlOverride = null) => {
-    const rawUrl = cleanUrl(urlOverride || trackLink);
-    if (!isSoundCloudUrl(rawUrl)) {
-      addToast?.("paste a SoundCloud link", "⚠️");
+  const loadTrack = async () => {
+    const rawUrl = cleanUrl(trackLink);
+    if (!isDirectAudioUrl(rawUrl)) {
+      addToast?.("paste a direct audio file URL, not a SoundCloud page", "⚠️");
       return;
     }
-    const resolved = await resolveSoundCloudUrl(rawUrl);
-    const url = resolved.url || rawUrl;
     const next = {
       ...emptyMusicState,
-      url,
-      title: resolved.title || displayTrack(rawUrl),
+      url: rawUrl,
+      title: displayTrack(rawUrl),
       dj: currentPlayer,
       djName: player?.name || currentPlayer,
       playing: false,
       positionMs: 0,
       updatedAt: new Date().toISOString(),
-      queue: queue.filter(q => q.url !== url && q.url !== rawUrl),
+      queue,
     };
-    setJoinedMusic(true);
-    setLocalMusicPaused(false);
+    localPauseRef.current = false;
     await updateMusicState(next);
     setTrackLink("");
-    addToast?.("SoundCloud track loaded", "🎧");
+    addToast?.("direct audio loaded", "🎧");
   };
 
-  const getWidgetPosition = async () => new Promise(async (resolve) => {
-    try {
-      const widget = await getWidget();
-      if (!widget?.getPosition) return resolve(getLivePositionMs(musicState));
-      widget.getPosition(pos => resolve(Number(pos) || 0));
-    } catch (_) {
-      resolve(getLivePositionMs(musicState));
+  const loadLibraryTrack = async (idx = 0, autoplay = false) => {
+    let list = musicLibrary.length ? musicLibrary : await loadMusicLibrary(false);
+    if (!list.length) {
+      addToast?.("add tracks to public/music/playlist.json", "🎧");
+      return;
     }
-  });
-
-  const togglePlay = async () => {
-    if (!isDj || !hasTrack) return;
-    const nextPlaying = !musicState.playing;
-    if (nextPlaying) {
-      setJoinedMusic(true);
-      setAudioUnlocked(true);
-      setLocalMusicPaused(false);
-    }
-    let widget = null;
-    try {
-      widget = await getWidget();
-      widget?.setVolume?.(Number(musicVolume) || 0);
-    } catch (_) {}
-    const pos = joinedMusic ? await getWidgetPosition() : getLivePositionMs(musicState);
+    const safeIdx = ((Number(idx) || 0) % list.length + list.length) % list.length;
+    const entry = list[safeIdx];
     const next = {
-      ...musicState,
-      playing: nextPlaying,
-      positionMs: pos,
-      updatedAt: new Date().toISOString(),
+      ...emptyMusicState,
+      url: entry.url,
+      title: entry.title || displayTrack(entry.url),
       dj: currentPlayer,
       djName: player?.name || currentPlayer,
+      playing: !!autoplay,
+      positionMs: 0,
+      updatedAt: new Date().toISOString(),
+      queue,
+      libraryIndex: safeIdx,
+      libraryMode: true,
     };
+    localPauseRef.current = false;
     await updateMusicState(next);
-    if (widget) {
-      if (nextPlaying) {
-        widget.seekTo?.(pos);
-        widget.play?.();
-      } else {
-        widget.pause?.();
-      }
+    if (autoplay) setTimeout(() => syncLocalToRoom({ forcePlay:true, silent:false }), 80);
+  };
+
+  const playNextLibraryTrack = async () => {
+    if (queue[0]) {
+      await playQueued(queue[0]);
+      return;
     }
+    let list = musicLibrary.length ? musicLibrary : await loadMusicLibrary(false);
+    if (!list.length) {
+      addToast?.("no folder tracks found", "🎧");
+      return;
+    }
+    let currentIdx = Number.isFinite(Number(musicState?.libraryIndex)) ? Number(musicState.libraryIndex) : list.findIndex(t => t.url === musicState?.url);
+    if (currentIdx < 0) currentIdx = -1;
+    await loadLibraryTrack(currentIdx + 1, true);
+  };
+
+  const requestLibraryTrack = async (entry) => {
+    if (!entry?.url) return;
+    const queued = { id:`q_${Date.now()}_${currentPlayer}`, url:entry.url, title:entry.title || displayTrack(entry.url), requestedBy:currentPlayer, requestedByName:player?.name || currentPlayer, ts:new Date().toISOString() };
+    const next = { ...musicState, queue:[...queue, queued] };
+    await updateMusicState(next);
+    addToast?.("folder track added to queue", "🎧");
+  };
+
+  const togglePlay = async () => {
+    if (!hasTrack) {
+      addToast?.("load a direct audio URL first", "🎧");
+      return;
+    }
+    if (isDj) {
+      let livePos = getLivePositionMs(musicState);
+      if (audioRef.current && musicState.playing) livePos = Math.max(0, audioRef.current.currentTime * 1000);
+      const next = {
+        ...musicState,
+        dj: currentPlayer,
+        djName: player?.name || currentPlayer,
+        playing: !musicState.playing,
+        positionMs: musicState.playing ? livePos : Math.max(0, audioRef.current?.currentTime ? audioRef.current.currentTime * 1000 : livePos),
+        updatedAt: new Date().toISOString(),
+      };
+      localPauseRef.current = false;
+      await updateMusicState(next);
+      if (next.playing) {
+        setTimeout(() => syncLocalToRoom({ forcePlay:true, silent:false }), 30);
+      } else {
+        try { audioRef.current?.pause?.(); } catch (_) {}
+      }
+      return;
+    }
+    localPauseRef.current = false;
+    await syncLocalToRoom({ forcePlay:true, silent:false });
   };
 
   const stopMusic = async () => {
     if (!isDj) return;
     const next = { ...musicState, playing:false, positionMs:0, updatedAt:new Date().toISOString() };
     await updateMusicState(next);
-    try { widgetRef.current?.pause?.(); widgetRef.current?.seekTo?.(0); } catch (_) {}
+    try {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    } catch (_) {}
   };
 
   const addRequest = async () => {
     const rawUrl = cleanUrl(requestLink);
-    if (!isSoundCloudUrl(rawUrl)) {
-      addToast?.("request needs a SoundCloud link", "⚠️");
+    if (!isDirectAudioUrl(rawUrl)) {
+      addToast?.("request needs a direct audio file URL", "⚠️");
       return;
     }
-    const resolved = await resolveSoundCloudUrl(rawUrl);
-    const entry = {
-      id: `${Date.now()}_${currentPlayer}`,
-      url: resolved.url || rawUrl,
-      title: resolved.title || displayTrack(rawUrl),
-      requestedBy: currentPlayer,
-      requestedByName: player?.name || currentPlayer,
-      ts: new Date().toISOString(),
-    };
-    const next = { ...musicState, queue:[...queue, entry].slice(-12) };
+    const entry = { id:`q_${Date.now()}_${currentPlayer}`, url:rawUrl, title:displayTrack(rawUrl), requestedBy:currentPlayer, requestedByName:player?.name || currentPlayer, ts:new Date().toISOString() };
+    const next = { ...musicState, queue:[...queue, entry] };
     await updateMusicState(next);
     setRequestLink("");
     addToast?.("track added to queue", "🎧");
@@ -3863,53 +3797,25 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
 
   const playQueued = async (entry) => {
     if (!isDj || !entry?.url) return;
-    const rawUrl = cleanUrl(entry.url);
-    const resolved = await resolveSoundCloudUrl(rawUrl);
     const newDjId = entry.requestedBy || currentPlayer;
     const newDj = PLAYERS.find(p => p.id === newDjId);
     const next = {
       ...emptyMusicState,
-      url: resolved.url || rawUrl,
-      title: entry.title || resolved.title || displayTrack(rawUrl),
+      url: cleanUrl(entry.url),
+      title: entry.title || displayTrack(entry.url),
       dj: newDjId,
       djName: entry.requestedByName || newDj?.name || player?.name || currentPlayer,
       playing: true,
       positionMs: 0,
       updatedAt: new Date().toISOString(),
       queue: queue.filter(q => q.id !== entry.id && q.url !== entry.url),
+      libraryMode:false,
+      libraryIndex: musicState?.libraryIndex || 0,
     };
-    setJoinedMusic(true);
-    setAudioUnlocked(true);
-    setLocalMusicPaused(false);
+    localPauseRef.current = false;
     await updateMusicState(next);
-    try {
-      const widget = await getWidget();
-      widget?.setVolume?.(Number(musicVolume) || 0);
-      widget?.seekTo?.(0);
-      widget?.play?.();
-    } catch (_) {}
+    setTimeout(() => syncLocalToRoom({ forcePlay:true, silent:false }), 80);
     addToast?.(`${next.djName} is DJ now`, "🎧");
-  };
-
-  const playHere = async () => {
-    setLocalMusicPaused(false);
-    if (!hasTrack) {
-      addToast?.("load a SoundCloud track first", "🎧");
-      return;
-    }
-    const ok = await joinMusic({ silent:true });
-    if (ok) addToast?.("music playing on this device", "🎧");
-  };
-
-  const pauseHere = async () => {
-    try {
-      const widget = widgetRef.current || await getWidget();
-      widget?.pause?.();
-    } catch (_) {}
-    setLocalMusicPaused(true);
-    setJoinedMusic(false);
-    lastAppliedRef.current = "";
-    addToast?.("music paused on this device", "🎧");
   };
 
   const removeQueued = async (entryId) => {
@@ -3923,38 +3829,33 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:12}}>
         <div>
           <div style={{fontSize:11,color:"#FF5500",fontWeight:900,letterSpacing:.9}}>ROOM MUSIC</div>
-          <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>DJ BOOTH</div>
+          <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>PUBLIC/MUSIC DJ BOOTH</div>
         </div>
         <div style={{fontSize:10,color:isDj?"#B8FF4D":"#FF5500",fontWeight:900,background:isDj?"rgba(184,255,77,0.1)":"rgba(255,85,0,0.1)",border:`1px solid ${isDj?"rgba(184,255,77,0.2)":"rgba(255,85,0,0.25)"}`,borderRadius:99,padding:"6px 9px",whiteSpace:"nowrap"}}>
           DJ: {musicState?.djName || player?.name || "open"}
         </div>
       </div>
 
+      <audio
+        ref={audioRef}
+        preload="auto"
+        playsInline
+        onCanPlay={()=>{ setAudioReady(true); applyMusicVolume(musicVolumeRef.current); }}
+        onVolumeChange={()=>applyMusicVolume(musicVolumeRef.current)}
+        style={{display:"none"}}
+      />
+
       {hasTrack ? (
-        <>
-          <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
-            <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
-            <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
-            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "room is playing" : "room paused"} · hidden in-app player</div>
+        <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
+          <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
+          <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
+          <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>
+            {musicState.playing ? "room is playing" : "room paused"} · hidden in-app audio player{localBlocked ? " · tap play to unlock this phone" : audioReady ? " · ready" : ""}
           </div>
-          <div aria-hidden="true" style={{position:"absolute",left:-9999,top:-9999,width:1,height:1,overflow:"hidden",opacity:0,pointerEvents:"none"}}>
-            <iframe
-              ref={iframeRef}
-              title="SoundCloud hidden room music player"
-              width="1"
-              height="1"
-              scrolling="no"
-              frameBorder="no"
-              allow="autoplay; encrypted-media"
-              src={embedSrc}
-              onLoad={()=>setTimeout(()=>applyMusicVolume(musicVolumeRef.current), 220)}
-              style={{border:"none",width:1,height:1,display:"block"}}
-            />
-          </div>
-        </>
+        </div>
       ) : (
         <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:13,fontSize:12,color:"#8B92A8",textAlign:"center",marginBottom:10}}>
-          no SoundCloud track loaded yet
+          no folder track loaded yet
         </div>
       )}
 
@@ -3970,49 +3871,59 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           value={musicVolume}
           onInput={(e)=>handleMusicVolumeChange(e.currentTarget.value)}
           onChange={(e)=>handleMusicVolumeChange(e.currentTarget.value)}
-          onMouseUp={(e)=>applyMusicVolume(e.currentTarget.value)}
-          onTouchEnd={(e)=>applyMusicVolume(e.currentTarget.value)}
           style={{width:"100%",accentColor:"#FF5500"}}
         />
       </div>
 
       {isDj && (
-        <div style={{display:"flex",gap:8,marginBottom:10}}>
-          <input
-            value={trackLink}
-            onChange={(e)=>setTrackLink(e.target.value)}
-            onKeyDown={(e)=>e.key === "Enter" && loadTrack()}
-            placeholder="DJ paste SoundCloud link..."
-            style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 12px",fontSize:12,color:"#E8ECF4",minWidth:0}}
-          />
-          <button onClick={()=>loadTrack()} className="bb-pressable" style={{background:"#FF5500",border:"none",borderRadius:11,padding:"0 12px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>load</button>
+        <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
+          <div style={{display:"flex",gap:8,marginBottom:8}}>
+            <button onClick={()=>loadLibraryTrack(musicState?.libraryIndex || 0, false)} className="bb-pressable" style={{flex:1,background:"#FF5500",border:"none",borderRadius:11,padding:"11px 0",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>load folder track</button>
+            <button onClick={()=>loadMusicLibrary(false)} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.09)",borderRadius:11,padding:"0 12px",fontSize:11,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>refresh</button>
+          </div>
+          <div style={{fontSize:10.5,color:musicLibrary.length?"#8B92A8":"#FF5C8A",lineHeight:1.35}}>
+            {musicLibrary.length ? `${musicLibrary.length} tracks found in /music/playlist.json` : (libraryError || "add tracks to public/music/playlist.json")}
+          </div>
         </div>
       )}
 
       {hasTrack && (
         <div style={{display:"flex",gap:8,marginBottom:12}}>
-          <button onClick={isDj ? togglePlay : ()=>joinMusic({ silent:false })} className="bb-pressable" style={{flex:1,background:musicState.playing?"rgba(255,85,0,0.13)":"rgba(184,255,77,0.13)",border:`1px solid ${musicState.playing?"rgba(255,85,0,0.35)":"rgba(184,255,77,0.35)"}`,borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:musicState.playing?"#FF5500":"#B8FF4D",cursor:"pointer"}}>
+          <button onClick={togglePlay} className="bb-pressable" style={{flex:1,background:musicState.playing?"rgba(255,85,0,0.13)":"rgba(184,255,77,0.13)",border:`1px solid ${musicState.playing?"rgba(255,85,0,0.35)":"rgba(184,255,77,0.35)"}`,borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:musicState.playing?"#FF5500":"#B8FF4D",cursor:"pointer"}}>
             {isDj ? (musicState.playing ? "pause" : "play") : "play"}
           </button>
           {isDj && (
             <>
-              <button onClick={()=>queue[0] ? playQueued(queue[0]) : addToast?.("queue is empty", "🎧")} className="bb-pressable" style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>next</button>
+              <button onClick={playNextLibraryTrack} className="bb-pressable" style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>next</button>
               <button onClick={stopMusic} className="bb-pressable" style={{flex:1,background:"rgba(255,92,138,0.09)",border:"1px solid rgba(255,92,138,0.22)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>stop</button>
             </>
           )}
         </div>
       )}
 
-      <div style={{display:"flex",gap:8,marginBottom:10}}>
-        <input
-          value={requestLink}
-          onChange={(e)=>setRequestLink(e.target.value)}
-          onKeyDown={(e)=>e.key === "Enter" && addRequest()}
-          placeholder="request SoundCloud link..."
-          style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 12px",fontSize:12,color:"#E8ECF4",minWidth:0}}
-        />
-        <button onClick={addRequest} className="bb-pressable" style={{background:"rgba(255,85,0,0.12)",border:"1px solid rgba(255,85,0,0.28)",borderRadius:11,padding:"0 12px",fontSize:11,fontWeight:900,color:"#FF5500",cursor:"pointer"}}>queue</button>
+      <div style={{fontSize:10.5,color:"#4A5066",lineHeight:1.4,marginBottom:10}}>
+        Folder mode reads public/music/playlist.json. Put audio files in public/music, list their filenames there, then use next to cycle tracks.
       </div>
+
+      {musicLibrary.length ? (
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:7}}>FOLDER TRACKS</div>
+          {musicLibrary.slice(0,6).map((entry, idx) => (
+            <div key={entry.id} style={{display:"flex",alignItems:"center",gap:8,background:musicState?.url===entry.url?"rgba(255,85,0,0.10)":"rgba(255,255,255,0.035)",border:`1px solid ${musicState?.url===entry.url?"rgba(255,85,0,0.24)":"rgba(255,255,255,0.06)"}`,borderRadius:11,padding:"9px 10px",marginBottom:7}}>
+              <div style={{fontSize:10,color:"#FF5500",fontWeight:900,width:18}}>{idx+1}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11.5,color:"#E8ECF4",fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entry.title || displayTrack(entry.url)}</div>
+                <div style={{fontSize:9.5,color:"#8B92A8",marginTop:2}}>{entry.url}</div>
+              </div>
+              {isDj ? (
+                <button onClick={()=>loadLibraryTrack(idx, true)} className="bb-pressable" style={{background:"rgba(184,255,77,0.12)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:9,padding:"6px 8px",fontSize:10,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>play</button>
+              ) : (
+                <button onClick={()=>requestLibraryTrack(entry)} className="bb-pressable" style={{background:"rgba(255,85,0,0.12)",border:"1px solid rgba(255,85,0,0.25)",borderRadius:9,padding:"6px 8px",fontSize:10,fontWeight:900,color:"#FF5500",cursor:"pointer"}}>request</button>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {queue.length ? (
         <div>
