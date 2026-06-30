@@ -6262,6 +6262,36 @@ const updateOpponentScore = async (game, theirScoreValue) => {
   const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+(Number(g[field])||0),0)/arr.length).toFixed(1):"—";
   const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>gameIsWin(g)).length/arr.length)*100)+"%"; };
   const playerColor=PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
+  const statModeSwipeStart = useRef({ x: 0, y: 0 });
+  const switchStatModeBySwipe = (dir) => {
+    const idx = STAT_MODES.indexOf(mode);
+    const nextIdx = Math.max(0, Math.min(STAT_MODES.length - 1, idx + dir));
+    if (nextIdx !== idx) setMode(STAT_MODES[nextIdx]);
+  };
+  const trackerModeSwipeHandlers = {
+    onTouchStart: (e) => {
+      const t = e.touches?.[0];
+      if (!t) return;
+      statModeSwipeStart.current = { x: t.clientX, y: t.clientY };
+    },
+    onTouchMove: (e) => {
+      const t = e.touches?.[0];
+      if (!t) return;
+      const dx = t.clientX - statModeSwipeStart.current.x;
+      const dy = t.clientY - statModeSwipeStart.current.y;
+      if (Math.abs(dx) > 16 && Math.abs(dx) > Math.abs(dy) * 1.25 && e.cancelable) e.preventDefault();
+    },
+    onTouchEnd: (e) => {
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      const dx = t.clientX - statModeSwipeStart.current.x;
+      const dy = t.clientY - statModeSwipeStart.current.y;
+      if (Math.abs(dx) > 64 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+        switchStatModeBySwipe(dx < 0 ? 1 : -1);
+      }
+    },
+    onTouchCancel: () => {},
+  };
   const recentMyGames = [...myGames].sort((a,b)=>new Date(b.ts)-new Date(a.ts)).slice(0,5).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
   const syncDuoOptions = [
     ["p1","p2"],
@@ -6448,7 +6478,7 @@ return (
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:currentPlayer===ADMIN_ID?playerColor:"rgba(255,255,255,0.05)",border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:currentPlayer===ADMIN_ID?"#06070D":"#4A5066",cursor:currentPlayer===ADMIN_ID?"pointer":"not-allowed",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync full team 3v3 · uses 3 credits"}
+                {matchSyncing ? "syncing…" : "sync full team 3v3"}
               </button>
             </div>
           )}
@@ -6484,7 +6514,7 @@ return (
                 className="bb-pressable bb-glow-violet"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync selected duo · uses 2 credits"}
+                {matchSyncing ? "syncing…" : "sync selected duo"}
               </button>
             </div>
           )}
@@ -6499,7 +6529,7 @@ return (
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync my 1v1 · uses 1 credit"}
+                {matchSyncing ? "syncing…" : "sync my 1v1"}
                      </button>
             </div>
           )}
@@ -6533,11 +6563,11 @@ return (
 ) : statsSubTab==="chem" ? (
   <TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>
 ) : (
-      <>
+      <div {...trackerModeSwipeHandlers} style={{touchAction:"pan-y"}}>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
         {STAT_MODES.map(m=>(
           <button key={m} onClick={()=>setMode(m)} className="bb-pressable"
-            style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:mode===m?"#B8FF4D":"rgba(255,255,255,0.05)",color:mode===m?"#06070D":"#8B92A8"}}>
+            style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:mode===m?playerColor:"rgba(255,255,255,0.05)",color:mode===m?"#06070D":"#8B92A8",boxShadow:mode===m?`0 0 0 1px ${playerColor}55`:"none"}}>
             {m}
           </button>
         ))}
@@ -6620,7 +6650,7 @@ return (
           {showAllGames ? `▲ show less` : `▼ show all days`}
         </button>
       )}
-      </>
+      </div>
       )}
     </div>
   );
@@ -7542,7 +7572,7 @@ const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(
       <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${playerColor}33`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
           <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR POINTS</div>
-         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}</div>
+         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:playerColor}}>{myPoints}</div>
         </div>
 <div style={{display:"flex",gap:8,overflowX:"scroll",WebkitOverflowScrolling:"touch",paddingBottom:4,paddingTop:8,paddingRight:8,scrollbarWidth:"none",msOverflowStyle:"none"}}>
           <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
@@ -7919,7 +7949,7 @@ await storeSetWithPush("pings", pingUpd2);
       const upd={...safePresence,[currentPlayer+"_mode"]:m,[currentPlayer]:new Date().toISOString()};
       setPresence(upd); await storeSet("presence",upd);
     }} className="bb-pressable"
-    style={{background:myMode===m?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:myMode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
+    style={{background:myMode===m?playerColor:"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:myMode===m?"#06070D":"#8B92A8",cursor:"pointer",boxShadow:myMode===m?`0 0 0 1px ${playerColor}55`:"none"}}>
       {m??"off"}
     </button>
   ))}
