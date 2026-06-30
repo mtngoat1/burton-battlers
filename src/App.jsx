@@ -3988,7 +3988,6 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
               <div style={{fontSize:10,color:"#FF5500",fontWeight:900,width:18}}>{idx+1}</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:11.5,color:"#E8ECF4",fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entry.title || displayTrack(entry.url)}</div>
-                <div style={{fontSize:9.5,color:"#8B92A8",marginTop:2}}>{entry.url}</div>
               </div>
               {isDj ? (
                 <button onClick={()=>loadLibraryTrack(idx, true)} className="bb-pressable" style={{background:"rgba(184,255,77,0.12)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:9,padding:"6px 8px",fontSize:10,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>play</button>
