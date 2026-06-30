@@ -1202,22 +1202,22 @@ function getCoachNote(stats, playerId) {
  return { ...note, date: lastNightKey, games: lastNightGames, targetGameId: targetGame?.id, targetField };
 }
 
-function CoachNoteCard({ stats, currentPlayer, onJumpToLog }) {
+function CoachNoteCard({ stats, currentPlayer }) {
   const note = getCoachNote(stats, currentPlayer);
   if (!note) return null;
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
 
   return (
-    <button onClick={() => onJumpToLog(note.date, note.targetGameId)} className="bb-pressable" style={{ width: "100%", background: "linear-gradient(135deg,#0E1020,#0A0C1A)", border: `1px solid ${playerColor}22`, borderRadius: 16, padding: "14px 16px", marginBottom: 16, textAlign: "left", cursor: "pointer" }}>
+    <div style={{ width: "100%", background: "linear-gradient(135deg,#0E1020,#0A0C1A)", border: `1px solid ${playerColor}22`, borderRadius: 16, padding: "14px 16px", marginBottom: 16, textAlign: "left" }}>
       <div style={{ fontSize: 10, color: playerColor, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>COACH NOTE · {new Date(note.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase()}</div>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
         <span style={{ fontSize: 22, flexShrink: 0 }}>{note.emoji}</span>
         <div>
           <div style={{ fontSize: 13.5, color: "#E8ECF4", lineHeight: 1.5 }}>{note.text}</div>
-          <div style={{ fontSize: 11, color: "#4A5066", marginTop: 6 }}>{note.games.length} games logged · tap to view</div>
+          <div style={{ fontSize: 11, color: "#4A5066", marginTop: 6 }}>{note.games.length} games logged</div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }
 // ===================== Heat Streak =====================
@@ -1959,7 +1959,7 @@ return (
       </div>
 
       {stats.some(g=>g.playerId===currentPlayer&&g.mode==="3v3") ? (
-        <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date, gameId) => { setStatsJumpDate({ date, gameId }); onGotoStats(); }}/>
+        <CoachNoteCard stats={stats} currentPlayer={currentPlayer}/>
       ) : (
         <EmptyState icon="⌁" title="No 3v3 games synced yet" body="After your next team match, open Stats → Sync Match and your coach note + comparison data will fill in." actionLabel="open stats" onAction={onGotoStats} />
       )}
@@ -7128,6 +7128,85 @@ function MusicShare({ currentPlayer, addToast }) {
 
 
 
+
+class AppFatalBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorText: "" };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorText: error?.message || "app render error" };
+  }
+
+  componentDidCatch(error, info) {
+    try { console.error("Burton Battlers app crash:", error, info); } catch (_) {}
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <>
+          <GlobalStyles/>
+          <div style={{minHeight:"100dvh",background:"linear-gradient(180deg,#06070D,#0A0C16)",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+            <div style={{width:"100%",maxWidth:420,background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,92,138,0.22)",borderRadius:22,padding:18,boxShadow:"0 18px 44px rgba(0,0,0,0.38)"}}>
+              <div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1.1,textTransform:"uppercase",marginBottom:7}}>safe mode</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:700,lineHeight:1,marginBottom:8}}>app protected</div>
+              <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginBottom:12}}>Something in the page crashed, but the app caught it instead of going blank.</div>
+              {this.state.errorText && <div style={{fontSize:10.5,color:"#FF5C8A",wordBreak:"break-word",marginBottom:12}}>error: {this.state.errorText}</div>}
+              <button onClick={()=>this.setState({hasError:false,errorText:""})} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:13,padding:"12px 14px",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:8}}>try again</button>
+              <button onClick={()=>window.location.reload()} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.09)",borderRadius:13,padding:"12px 14px",fontSize:13,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>reload app</button>
+            </div>
+          </div>
+        </>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+class AppSectionBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorText: "" };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorText: error?.message || "section render error" };
+  }
+
+  componentDidCatch(error, info) {
+    try { console.error("Burton Battlers section crash:", this.props.label, error, info); } catch (_) {}
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false, errorText: "" });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      const accent = this.props.accent || "#B8FF4D";
+      return (
+        <div className="bb-tab-content" style={{padding:"16px 16px 120px"}}>
+          <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${accent}33`,borderRadius:20,padding:16,boxShadow:"0 16px 38px rgba(0,0,0,0.28)"}}>
+            <div style={{fontSize:10,color:accent,fontWeight:900,letterSpacing:1.1,textTransform:"uppercase",marginBottom:7}}>safe mode</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:"#E8ECF4",lineHeight:1}}>section recovered</div>
+            <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginTop:7}}>This section hit an error, so it was blocked from blanking the whole screen.</div>
+            {this.state.errorText && <div style={{fontSize:10.5,color:"#FF5C8A",marginTop:8,wordBreak:"break-word"}}>error: {this.state.errorText}</div>}
+            <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
+              <button onClick={()=>this.setState({hasError:false,errorText:""})} className="bb-pressable bb-glow-lime" style={{flex:1,minWidth:120,background:accent,border:"none",borderRadius:12,padding:"10px 12px",fontSize:12,fontWeight:900,color:"#06070D",cursor:"pointer"}}>try again</button>
+              <button onClick={()=>this.props.onGoHome?.()} className="bb-pressable" style={{flex:1,minWidth:120,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.09)",borderRadius:12,padding:"10px 12px",fontSize:12,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>go home</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 class SquadTabErrorBoundary extends Component {
   constructor(props) {
     super(props);
@@ -11035,7 +11114,7 @@ const backBtnStyle = {
                   
                   
                   
-export default function App() {
+function AppInner() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
   const [currentPlayer,setCurrentPlayer]=useState(null);
@@ -11683,7 +11762,7 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   };
   if (authStage==="select") return <><GlobalStyles/><NameSelectScreen onSelect={selectName}/></>;
   const selectedPlayer=PLAYERS.find((p)=>p.id===selectedPlayerId);
-  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"none",border:"none",padding:"9px 0",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/></div></div></>;
+  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"none",border:"none",padding:"9px 0",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AppSectionBoundary resetKey={`admin-standalone-${adminStandalone}`} label="admin" accent="#FF5C8A" onGoHome={()=>setAdminStandalone(false)}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/></AppSectionBoundary></div></div></>;
 
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ await loadSharedData(selectedPlayerId); setAdminStandalone(true); }:undefined}/></>;
@@ -11923,18 +12002,21 @@ const TABS=[
       )}
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setJumpKey(key); setShowTrainingFull(true); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+<AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>
 {tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
       {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
           
-<div style={{display:tab==="room"?"flex":"none",flexDirection:"column",alignItems:"center",minHeight:"100%",padding:"20px 20px max(120px, env(safe-area-inset-bottom))",overflow:"visible"}}>
+{tab==="room"&&(
+<div style={{display:"flex",flexDirection:"column",alignItems:"center",minHeight:"100%",padding:"20px 20px max(120px, env(safe-area-inset-bottom))",overflow:"visible"}}>
     <div style={{width:"100%",maxWidth:480,overflow:"visible"}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
       <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce} soundboardEvent={soundboardEvent}/>
       <TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/>
 </div>
-  </div>    
+  </div>
+)}    
           
 {tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
  {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
@@ -11946,6 +12028,7 @@ const TABS=[
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
 {tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
  {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/>}
+</AppSectionBoundary>
       </div>
 
       {showTrainingFull && (
@@ -11955,7 +12038,7 @@ const TABS=[
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,letterSpacing:.5}}>training</div>
           </div>
           <div style={{flex:1,minHeight:0,overflowY:"auto",paddingBottom:"max(24px, env(safe-area-inset-bottom))"}}>
-            <TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>
+            <AppSectionBoundary resetKey={`training-full-${jumpKey || "open"}`} label="training" accent={userColor} onGoHome={()=>setShowTrainingFull(false)}><TrainingTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/></AppSectionBoundary>
           </div>
         </div>
       )}
@@ -11971,7 +12054,7 @@ const TABS=[
             </div>
           </div>
           <div style={{flex:1,minHeight:0,overflowY:"auto",paddingBottom:"max(24px, env(safe-area-inset-bottom))"}}>
-            <BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/>
+            <AppSectionBoundary resetKey={`bracket-${showBracket}`} label="bracket" accent={userColor} onGoHome={()=>setShowBracket(false)}><BracketTab schedule={schedule} setSchedule={setSchedule} currentPlayer={currentPlayer}/></AppSectionBoundary>
           </div>
         </div>
       )}
@@ -11985,7 +12068,7 @@ const TABS=[
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team chat</div>
             </div>
            <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
-<ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus} setTab={setTab} setChatOpen={setChatOpen}/>
+<AppSectionBoundary resetKey={`chat-${chatOpen}`} label="chat" accent={userColor} onGoHome={()=>setChatOpen(false)}><ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus} setTab={setTab} setChatOpen={setChatOpen}/></AppSectionBoundary>
 </div>
           </div>
         </div>
@@ -12008,6 +12091,15 @@ const TABS=[
         ))}
       </div>}
     </div>
+  );
+}
+
+
+export default function App() {
+  return (
+    <AppFatalBoundary>
+      <AppInner />
+    </AppFatalBoundary>
   );
 }
 
