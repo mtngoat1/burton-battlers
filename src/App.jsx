@@ -141,11 +141,18 @@ function buildPlayoffRounds() {
   });
 }
 function todayAtMidnight() { const d = new Date(); d.setHours(0,0,0,0); return d; }
-function dateKey(d) { return d.toISOString().slice(0,10); }
-function fmtDay(d) { return d.toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" }); }
-function fmtDayShort(d) { return d.toLocaleDateString("en-US", { weekday:"short" }); }
+function safeDateObj(input, fallback = new Date()) {
+  const fallbackDate = fallback instanceof Date ? fallback : new Date(fallback || Date.now());
+  const d = input instanceof Date ? input : new Date(input ?? fallbackDate);
+  if (Number.isFinite(d.getTime())) return d;
+  if (Number.isFinite(fallbackDate.getTime())) return fallbackDate;
+  return new Date();
+}
+function dateKey(d) { return safeDateObj(d).toISOString().slice(0,10); }
+function fmtDay(d) { return safeDateObj(d).toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" }); }
+function fmtDayShort(d) { return safeDateObj(d).toLocaleDateString("en-US", { weekday:"short" }); }
 function fmtRelTime(iso) {
-  const diff = Date.now() - new Date(iso).getTime();
+  const diff = Date.now() - safeDateObj(iso).getTime();
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m ago`;
@@ -184,6 +191,21 @@ function applySyncedTeamScores(importedGames, result) {
     opponentScoreManual: g.opponentScoreManual || false,
     result,
   }));
+}
+
+function normalizeStatForRender(game, idx = 0) {
+  if (!game || typeof game !== "object") return null;
+  const rawTs = game.ts || game.date || game.createdAt || game.startedAt || game.matchDate || Date.now();
+  const d = safeDateObj(rawTs);
+  return {
+    ...game,
+    id: game.id || game.matchId || game.sessionCode || `restored_game_${idx}_${d.getTime()}`,
+    ts: d.toISOString(),
+    mode: game.mode || game.playlist || "3v3",
+  };
+}
+function sanitizeStatsForRender(stats) {
+  return (Array.isArray(stats) ? stats : []).map(normalizeStatForRender).filter(Boolean);
 }
 
 function isMeaningfulPointsSnapshot(pts) {
@@ -876,23 +898,25 @@ function getWeekStart() {
 
             function getSessionGroups(stats) {
   const groups = {};
-  stats.forEach(g => {
-    if (!g.sessionCode) return;
+  sanitizeStatsForRender(stats).forEach(g => {
+    if (!g?.sessionCode) return;
     if (g.mode !== "2v2" && g.mode !== "3v3") return;
     const key = `${g.sessionCode}__${g.mode}`;
-    if (!groups[key]) groups[key] = { code: g.sessionCode, mode: g.mode, games: [], ts: g.ts };
+    if (!groups[key]) groups[key] = { code: g.sessionCode, mode: g.mode, games: [], ts: g.ts || new Date().toISOString() };
     groups[key].games.push(g);
-    if (new Date(g.ts) > new Date(groups[key].ts)) groups[key].ts = g.ts;
+    if (safeDateObj(g.ts).getTime() > safeDateObj(groups[key].ts).getTime()) groups[key].ts = g.ts;
   });
-  return Object.values(groups).sort((a,b) => new Date(b.ts) - new Date(a.ts));
+  return Object.values(groups).filter(Boolean).sort((a,b) => safeDateObj(b?.ts).getTime() - safeDateObj(a?.ts).getTime());
 }
             
 function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore, jumpGameId = null }) {
-  const [open, setOpen] = useState(!!jumpGameId && (session.games || []).some(g => String(g.id) === String(jumpGameId)));
+  const safeGames = Array.isArray(session?.games) ? session.games.filter(Boolean).map(normalizeStatForRender).filter(Boolean) : [];
+  const safeSession = { ...(session || {}), games: safeGames, mode: session?.mode || safeGames[0]?.mode || "3v3", ts: session?.ts || safeGames[0]?.ts || new Date().toISOString() };
+  const [open, setOpen] = useState(!!jumpGameId && safeGames.some(g => String(g.id) === String(jumpGameId)));
   const [selectedGame, setSelectedGame] = useState(null);
   useEffect(() => {
     if (!jumpGameId) return;
-    const target = (session.games || []).find(g => String(g.id) === String(jumpGameId));
+    const target = safeGames.find(g => String(g.id) === String(jumpGameId));
     if (!target) return;
     setOpen(true);
     const timer = setTimeout(() => setSelectedGame(target), 240);
@@ -911,7 +935,7 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
       {selectedGame && (
         <GameDetailModal
           game={selectedGame}
-          allPlayerGames={(allStats||[]).filter(g=>g.playerId===selectedGame.playerId&&g.mode===selectedGame.mode).sort((a,b)=>new Date(a.ts)-new Date(b.ts))}
+          allPlayerGames={sanitizeStatsForRender(allStats).filter(g=>g.playerId===selectedGame.playerId&&g.mode===selectedGame.mode).sort((a,b)=>safeDateObj(a.ts).getTime()-safeDateObj(b.ts).getTime())}
           onClose={()=>setSelectedGame(null)}
           onUpdateOpponentScore={onUpdateOpponentScore}
         />
@@ -5674,11 +5698,8 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
 }
 
 function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
- const safeStats = Array.isArray(stats) ? stats : [];
- const safeGameDateKey = (game) => {
-   const d = new Date(game?.ts || Date.now());
-   return Number.isFinite(d.getTime()) ? d.toISOString().slice(0,10) : dateKey(new Date());
- };
+ const safeStats = sanitizeStatsForRender(stats);
+ const safeGameDateKey = (game) => dateKey(game?.ts || game?.date || Date.now());
  const roomGames = safeStats.filter(g => g && (g.roomId || g.sessionCode));
   const dayMap = {};
   roomGames.forEach(g => {
@@ -5688,7 +5709,7 @@ function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGame
   });
   const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
 const recentGames = [...roomGames]
-  .sort((a,b) => new Date(b.ts || 0) - new Date(a.ts || 0))
+  .sort((a,b) => safeDateObj(b?.ts || 0).getTime() - safeDateObj(a?.ts || 0).getTime())
   .slice(0,5);                
 
   if (days.length === 0) {
@@ -5703,11 +5724,11 @@ const recentGames = [...roomGames]
  const key = g.roomId || g.sessionCode || `${g.mode || "game"}_${g.ts || Math.random()}`;
 if (!sessionMap[key]) sessionMap[key] = { code: key, mode: g.mode || "3v3", games: [], ts: g.ts || new Date().toISOString() };
           sessionMap[key].games.push(g);
-          if (new Date(g.ts) > new Date(sessionMap[key].ts)) sessionMap[key].ts = g.ts;
+          if (safeDateObj(g?.ts).getTime() > safeDateObj(sessionMap[key]?.ts).getTime()) sessionMap[key].ts = g.ts;
         });
-        const sessions = Object.values(sessionMap).filter(s => s && Array.isArray(s.games) && s.games.length).sort((a,b) => new Date(b.ts || 0) - new Date(a.ts || 0));
+        const sessions = Object.values(sessionMap).filter(s => s && Array.isArray(s.games) && s.games.length).sort((a,b) => safeDateObj(b?.ts || 0).getTime() - safeDateObj(a?.ts || 0).getTime());
         return (
-          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={stats} onUpdateOpponentScore={onUpdateOpponentScore} jumpDate={jumpDate} jumpGameId={jumpGameId} />
+          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={safeStats} onUpdateOpponentScore={onUpdateOpponentScore} jumpDate={jumpDate} jumpGameId={jumpGameId} />
         );
       })}
     </div>
@@ -6317,6 +6338,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
 
 
 function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit, points, setPoints, chemistry, setChemistry }) {
+  stats = sanitizeStatsForRender(stats);
   const [mode,setMode]=useState("2v2");
   const [logging,setLogging]=useState(false);
   const [showAllGames, setShowAllGames]=useState(false);
@@ -12668,11 +12690,24 @@ return {
 
   const incompleteDays=(()=>{
     if (!currentPlayer) return [];
-    const today=todayAtMidnight(); const out=[];
-    Object.keys(trainingData).forEach((k)=>{ const [dk,pid]=k.split("__"); if(pid!==currentPlayer)return; const date=new Date(dk+"T00:00:00"); if(date>=today)return; const comp=completions[tKey(dk,currentPlayer)]; if(!comp) out.push({key:dk,date,training:trainingData[k]}); });
-    return out
-      .filter(x => x && x.date instanceof Date && Number.isFinite(x.date.getTime()))
-      .sort((a,b)=>a.date.getTime()-b.date.getTime());
+    try {
+      const today=todayAtMidnight(); const out=[];
+      Object.keys(trainingData || {}).forEach((k)=>{
+        if (!k || typeof k !== "string") return;
+        const [dk,pid]=k.split("__");
+        if(pid!==currentPlayer || !dk) return;
+        const date=safeDateObj(dk+"T00:00:00", null);
+        if(!Number.isFinite(date.getTime()) || date>=today) return;
+        const comp=completions?.[tKey(dk,currentPlayer)];
+        if(!comp) out.push({key:dk,date,training:trainingData[k]});
+      });
+      return out
+        .filter(x => x && x.date instanceof Date && Number.isFinite(x.date.getTime()))
+        .sort((a,b)=>(a?.date?.getTime?.() || 0)-(b?.date?.getTime?.() || 0));
+    } catch (e) {
+      console.warn("incompleteDays safe fallback", e);
+      return [];
+    }
   })();
 
 const touchStartY = useRef(0);
@@ -13213,3 +13248,5 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, 
 // EMERGENCY_BACKUP_RESTORE_PATCH
 
 // INVENTORY_RESTORE_AND_TEAMLINK_DATE_SAFE_PATCH
+
+// TEAMLINK_HARD_NULL_DATE_SAFE_PATCH
