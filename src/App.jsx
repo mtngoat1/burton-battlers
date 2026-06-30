@@ -6,6 +6,8 @@ import {
 import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti } from "./lib/storage";
 import { Component, useState, useEffect, useRef, useCallback } from "react";
 
+// APP54_BUTTON_TWITCH_AUDIO_READY_PATCH
+// APP54_NEW_SOUNDBOARD_FILES_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -652,6 +654,7 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:var(--bb-real-vh
       .bb-tab-content { color: var(--bb-main-text, #E8ECF4); }
       .bb-tab-content [style*="#4A5066"] { color: var(--bb-muted-text, #4A5066) !important; }
       .bb-tab-content [style*="#B8FF4D"] { color: var(--bb-accent-text, #B8FF4D) !important; }
+      button.bb-force-dark, button.bb-force-dark *, .bb-force-dark, .bb-force-dark * { color:#06070D !important; }
     `}</style>
   );
 }
@@ -2449,7 +2452,6 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
             />
           </div>
           <div style={s.streamBelowEmbed}>
-            <div style={{fontSize:11,color:"#8B92A8"}}>stays inside Burton Battlers · use the video fullscreen button</div>
           </div>
         </>
       ) : (
@@ -4438,7 +4440,15 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
   const submit=async()=>{ if(!file&&!caption.trim())return; setUploading(true); await onPost({caption:caption.trim(),file}); setUploading(false); onClose(); };
   return (
     <div style={s.modalOverlay} onClick={onClose}><div style={s.modalBox} onClick={(e)=>e.stopPropagation()}>
-      <div style={s.modalHeader}><div style={s.modalTitle}>new post</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
+      <div style={s.modalHeader}>
+        <div style={s.modalTitle}>new post</div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={submit} disabled={(!file&&!caption.trim())||uploading} className="bb-pressable bb-glow-lime bb-force-dark" style={{background:"#B8FF4D",border:"none",borderRadius:12,padding:"8px 12px",fontSize:11,fontWeight:900,cursor:"pointer",opacity:((!file&&!caption.trim())||uploading)?0.4:1}}>
+            {uploading?"POSTING":"POST"}
+          </button>
+          <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
+        </div>
+      </div>
       <input ref={fileRef} type="file" accept="image/*,video/*" onChange={pickFile} style={{display:"none"}}/>
       <button onClick={()=>fileRef.current?.click()} className="bb-pressable" style={s.imagePickBtn}>
         {previewUrl
@@ -4449,7 +4459,7 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
       </button>
       <div style={s.modalLabel}>caption</div>
       <textarea value={caption} onChange={(e)=>setCaption(e.target.value)} placeholder="what happened..." style={{...s.modalInput,minHeight:70,resize:"vertical"}}/>
-      <button onClick={submit} disabled={(!file&&!caption.trim())||uploading} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,opacity:((!file&&!caption.trim())||uploading)?0.4:1}}>
+      <button onClick={submit} disabled={(!file&&!caption.trim())||uploading} className="bb-pressable bb-glow-lime bb-force-dark" style={{...s.primaryBtn,background:"#B8FF4D",color:"#06070D",opacity:((!file&&!caption.trim())||uploading)?0.4:1,position:"sticky",bottom:0,zIndex:5}}>
         {uploading?"uploading...":"post to team"}
       </button>
     </div></div>
@@ -7062,6 +7072,15 @@ const SHOP_ITEMS = [
   { id:"sb_laugh",   label:"demonic laugh", desc:"the curse", cost:110, type:"sound", value:"sb_laugh", file:"demonic laugh.mp3", emoji:"😈" },
   { id:"sb_buzzer",  label:"fart", desc:"tiny toot", cost:150, type:"sound", value:"sb_buzzer", file:"fart.mp3", emoji:"💨" },
   { id:"sb_pop",     label:"bottle", desc:"fresh brewski", cost:70, type:"sound", value:"sb_pop", file:"bottle.mp3", emoji:"🍾" },
+  // added user soundboard sounds
+  { id:"sb_fart_echo", label:"fart echo", desc:"echo fart sound", cost:120, type:"sound", value:"sb_fart_echo", file:"fart-echo.mp3", emoji:"🔊" },
+  { id:"sb_wizard", label:"you're a wizard", desc:"wizard callout", cost:150, type:"sound", value:"sb_wizard", file:"your a wizard.mp3", emoji:"🧙" },
+  { id:"sb_family_guy", label:"family guy", desc:"clip sound", cost:150, type:"sound", value:"sb_family_guy", file:"family-guy.mp3", emoji:"📺" },
+  { id:"sb_spongebob_laugh", label:"spongebob laugh", desc:"laugh clip", cost:150, type:"sound", value:"sb_spongebob_laugh", file:"spongebob-laugh.mp3", emoji:"🧽" },
+  { id:"sb_catchgirls", label:"catch girls", desc:"clip sound", cost:150, type:"sound", value:"sb_catchgirls", file:"catchgirls.mp3", emoji:"🎧" },
+  { id:"sb_iconic_intro", label:"iconic intro", desc:"intro clip", cost:175, type:"sound", value:"sb_iconic_intro", file:"iconic intro.mp3", emoji:"🎬" },
+  { id:"sb_sassy_burton", label:"sassy burton", desc:"burton clip", cost:175, type:"sound", value:"sb_sassy_burton", file:"sassy burton.mp3", emoji:"💅" },
+  { id:"sb_doin_all_that_chattin", label:"doin all that chattin", desc:"chat callout", cost:175, type:"sound", value:"sb_doin_all_that_chattin", file:"doinallthatchattin.mp3", emoji:"🗣️" },
 
   // daily background rotation
   { id:"bg_carbon",    label:"Carbon Fiber", emoji:"⬛", desc:"dark carbon weave texture",       cost:80,   type:"background", value:"carbon" },
@@ -7409,6 +7428,8 @@ function getPresenceBorderVisualStyle(points, playerId, online = false) {
 }
 
 // ===================== Voice Soundboard =====================
+// To add more buyable shop sounds later, add rows here and upload the matching files to public/soundboard.
+// Example row: { id:"sb_custom_name", label:"custom name", desc:"shop sound", cost:120, type:"sound", value:"sb_custom_name", file:"exact file name.mp3", emoji:"🔊" },
 const SOUNDBOARD_SOUNDS = [
   { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:120, type:"sound", value:"sb_airhorn", file:"horn.mp3", emoji:"📣" },
   { id:"sb_sheesh", label:"cold as ice", desc:"clean shot reaction", cost:120, type:"sound", value:"sb_sheesh", file:"cold as ice.mp3", emoji:"🥶" },
@@ -7418,6 +7439,14 @@ const SOUNDBOARD_SOUNDS = [
   { id:"sb_laugh", label:"demonic laugh", desc:"the curse", cost:110, type:"sound", value:"sb_laugh", file:"demonic laugh.mp3", emoji:"😈" },
   { id:"sb_buzzer", label:"fart", desc:"tiny toot", cost:150, type:"sound", value:"sb_buzzer", file:"fart.mp3", emoji:"💨" },
   { id:"sb_pop", label:"bottle", desc:"fresh brewski", cost:70, type:"sound", value:"sb_pop", file:"bottle.mp3", emoji:"🍾" },
+  { id:"sb_fart_echo", label:"fart echo", desc:"echo fart sound", cost:120, type:"sound", value:"sb_fart_echo", file:"fart-echo.mp3", emoji:"🔊" },
+  { id:"sb_wizard", label:"you're a wizard", desc:"wizard callout", cost:150, type:"sound", value:"sb_wizard", file:"your a wizard.mp3", emoji:"🧙" },
+  { id:"sb_family_guy", label:"family guy", desc:"clip sound", cost:150, type:"sound", value:"sb_family_guy", file:"family-guy.mp3", emoji:"📺" },
+  { id:"sb_spongebob_laugh", label:"spongebob laugh", desc:"laugh clip", cost:150, type:"sound", value:"sb_spongebob_laugh", file:"spongebob-laugh.mp3", emoji:"🧽" },
+  { id:"sb_catchgirls", label:"catch girls", desc:"clip sound", cost:150, type:"sound", value:"sb_catchgirls", file:"catchgirls.mp3", emoji:"🎧" },
+  { id:"sb_iconic_intro", label:"iconic intro", desc:"intro clip", cost:175, type:"sound", value:"sb_iconic_intro", file:"iconic intro.mp3", emoji:"🎬" },
+  { id:"sb_sassy_burton", label:"sassy burton", desc:"burton clip", cost:175, type:"sound", value:"sb_sassy_burton", file:"sassy burton.mp3", emoji:"💅" },
+  { id:"sb_doin_all_that_chattin", label:"doin all that chattin", desc:"chat callout", cost:175, type:"sound", value:"sb_doin_all_that_chattin", file:"doinallthatchattin.mp3", emoji:"🗣️" },
 ];
 const DEFAULT_SOUNDBOARD_IDS = ["sb_laugh","sb_buzzer","sb_goal"];
 function getSoundboardSound(id) {
@@ -7436,6 +7465,12 @@ function getSoundboardAudioSrcs(soundId) {
   const sound = getSoundboardSound(soundId);
   const baseFile = sound?.file || `${soundId}.mp3`;
   const fallbackById = {
+    sb_fart_echo: [
+      baseFile,
+      "fart echo mp3",
+      "fart echo.mp3",
+      "fart-echo.mp3",
+    ],
     sb_goal: [
       baseFile,
       "what-a-save-rocketleague.MP3",
@@ -10398,9 +10433,9 @@ const noBettingWeek = isEventActive("no_betting");
             </div>
           )}
 
-          <button onClick={spinWheel} disabled={spinning||myPoints<wager||wager<1} className="bb-pressable bb-glow-lime"
-            style={{...s.primaryBtn,opacity:spinning||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:16,letterSpacing:1,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center",color:"#06070D"}}>
-            <span style={{position:"relative",zIndex:2}}>{spinning?"spinning…":"SPIN"}</span>
+          <button onClick={spinWheel} disabled={spinning||myPoints<wager||wager<1} className="bb-pressable bb-glow-lime bb-force-dark"
+            style={{...s.primaryBtn,background:"#B8FF4D",color:"#06070D",opacity:spinning||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:18,letterSpacing:1.3,minHeight:52,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,textTransform:"uppercase"}}>
+            {spinning?"SPINNING…":"SPIN"}
           </button>
 
           {/* Odds table */}
