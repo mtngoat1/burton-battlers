@@ -3449,6 +3449,21 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
 
   const cleanUrl = (url) => String(url || "").trim();
 
+  const isLibraryUrl = (url, list = musicLibrary) => {
+    const raw = cleanUrl(url);
+    if (!raw) return false;
+    return (list || []).some(t => cleanUrl(t?.url) === raw);
+  };
+
+  const getCurrentLibraryIndex = (list = musicLibrary, fallback = 0) => {
+    const safeList = Array.isArray(list) ? list : [];
+    if (!safeList.length) return 0;
+    const found = safeList.findIndex(t => cleanUrl(t?.url) === cleanUrl(musicState?.url));
+    if (found >= 0) return found;
+    const n = Number(fallback);
+    return ((Number.isFinite(n) ? n : 0) % safeList.length + safeList.length) % safeList.length;
+  };
+
   const looksLikeBlockedPageUrl = (url) => {
     try {
       const u = new URL(cleanUrl(url), typeof window !== "undefined" ? window.location.href : "https://example.com");
@@ -3496,8 +3511,11 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     }
     raw = cleanUrl(raw);
     if (!raw) return null;
+    const bareName = raw.split("/").pop();
+    // Skip macOS hidden/system files or accidental dot-only entries like ".mp3".
+    if (bareName?.startsWith(".") || bareName === ".mp3") return null;
     // In playlist.json you can write "song.mp3" and the app will read it from /public/music/song.mp3.
-    if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) raw = `/music/${raw.replace(/^\.?\/*/, "")}`;
+    if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) raw = `/music/${raw.replace(/^\/+/, "")}`;
     if (!isDirectAudioUrl(raw)) return null;
     return { id:`lib_${idx}_${raw}`, url:raw, title:title || displayTrack(raw), idx };
   };
@@ -3510,7 +3528,8 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       const rawList = Array.isArray(json) ? json : Array.isArray(json?.tracks) ? json.tracks : Array.isArray(json?.files) ? json.files : [];
       const list = rawList.map(normalizeLibraryEntry).filter(Boolean);
       setMusicLibrary(list);
-      setLibraryError(list.length ? "" : "playlist.json has no usable audio files");
+      const currentIsFolderTrack = !musicState?.url || list.some(t => cleanUrl(t.url) === cleanUrl(musicState.url));
+      setLibraryError(list.length ? (currentIsFolderTrack ? "" : "current room track is not in playlist — load a folder track") : "playlist.json has no usable audio files");
       if (!silent) addToast?.(list.length ? `${list.length} folder tracks loaded` : "playlist.json has no usable tracks", "🎧");
       return list;
     } catch (_) {
@@ -3698,7 +3717,13 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       addToast?.("add tracks to public/music/playlist.json", "🎧");
       return;
     }
-    const safeIdx = ((Number(idx) || 0) % list.length + list.length) % list.length;
+    // If the saved room track is old/stale and not from /public/music/playlist.json,
+    // start clean from the first folder track instead of showing an unrelated old title.
+    const currentIdx = getCurrentLibraryIndex(list, 0);
+    const requested = Number(idx);
+    const safeIdx = isLibraryUrl(musicState?.url, list)
+      ? ((Number.isFinite(requested) ? requested : currentIdx) % list.length + list.length) % list.length
+      : 0;
     const entry = list[safeIdx];
     const next = {
       ...emptyMusicState,
@@ -3731,6 +3756,16 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     let currentIdx = Number.isFinite(Number(musicState?.libraryIndex)) ? Number(musicState.libraryIndex) : list.findIndex(t => t.url === musicState?.url);
     if (currentIdx < 0) currentIdx = -1;
     await loadLibraryTrack(currentIdx + 1, true);
+  };
+
+  const loadCurrentFolderTrack = async () => {
+    let list = musicLibrary.length ? musicLibrary : await loadMusicLibrary(false);
+    if (!list.length) {
+      addToast?.("add tracks to public/music/playlist.json", "🎧");
+      return;
+    }
+    const idx = isLibraryUrl(musicState?.url, list) ? getCurrentLibraryIndex(list, musicState?.libraryIndex || 0) : 0;
+    await loadLibraryTrack(idx, false);
   };
 
   const requestLibraryTrack = async (entry) => {
@@ -3850,7 +3885,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
           <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
           <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>
-            {musicState.playing ? "room is playing" : "room paused"} · hidden in-app audio player{localBlocked ? " · tap play to unlock this phone" : audioReady ? " · ready" : ""}
+            {isLibraryUrl(musicState.url) ? (musicState.playing ? "room is playing" : "room paused") : "old room track detected"} · in-app folder audio{audioReady && isLibraryUrl(musicState.url) ? " · ready" : ""}
           </div>
         </div>
       ) : (
@@ -3878,7 +3913,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       {isDj && (
         <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
           <div style={{display:"flex",gap:8,marginBottom:8}}>
-            <button onClick={()=>loadLibraryTrack(musicState?.libraryIndex || 0, false)} className="bb-pressable" style={{flex:1,background:"#FF5500",border:"none",borderRadius:11,padding:"11px 0",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>load folder track</button>
+            <button onClick={loadCurrentFolderTrack} className="bb-pressable" style={{flex:1,background:"#FF5500",border:"none",borderRadius:11,padding:"11px 0",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>load folder track</button>
             <button onClick={()=>loadMusicLibrary(false)} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.09)",borderRadius:11,padding:"0 12px",fontSize:11,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>refresh</button>
           </div>
           <div style={{fontSize:10.5,color:musicLibrary.length?"#8B92A8":"#FF5C8A",lineHeight:1.35}}>
@@ -4869,10 +4904,11 @@ function GameDetailModal({ game, allPlayerGames, onClose, onUpdateOpponentScore 
   const displayGame = { ...game, theirScore: localTheirScore === "" ? null : Number(localTheirScore) };
   const won = gameIsWin(game);
   const scoreIsSynced = game?.source === "parse_sessions";
-  const saveOpponentScore = () => {
+  const saveOpponentScore = async () => {
     const val = Number(localTheirScore);
     if (!Number.isFinite(val)) return;
-    onUpdateOpponentScore?.(game, val);
+    await onUpdateOpponentScore?.(game, val);
+    setLocalTheirScore(String(val));
   };
 const FIELDS = ["goals","assists","saves","shots"];
   const [swipeOffset, setSwipeOffset] = useState(0);
@@ -5140,7 +5176,7 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
   );
 }
 
-function TeamLinkGames({ stats }) {
+function TeamLinkGames({ stats, onUpdateOpponentScore }) {
  const roomGames = stats.filter(g => g.roomId || g.sessionCode);
   const dayMap = {};
   roomGames.forEach(g => {
@@ -5169,14 +5205,14 @@ if (!sessionMap[key]) sessionMap[key] = { code: g.roomId || g.sessionCode, mode:
         });
         const sessions = Object.values(sessionMap).sort((a,b) => new Date(b.ts) - new Date(a.ts));
         return (
-          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={stats} />
+          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={stats} onUpdateOpponentScore={onUpdateOpponentScore} />
         );
       })}
     </div>
   );
 }
 
-function TeamLinkDayGroup({ dk, sessions, allStats }) {
+function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore }) {
   const [open, setOpen] = useState(false);
   const date = new Date(dk + "T00:00:00");
   const totalGames = sessions.length;
@@ -5191,7 +5227,7 @@ function TeamLinkDayGroup({ dk, sessions, allStats }) {
         <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
       </button>
  {open && sessions.map((sess, idx) => (
-     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats} gameLabel={`GAME ${sessions.length - idx}`}/>
+     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats} gameLabel={`GAME ${sessions.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore}/>
 ))}
     </div>
   );
@@ -5865,9 +5901,11 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
 const updateOpponentScore = async (game, theirScoreValue) => {
   const val = Number(theirScoreValue);
   if (!Number.isFinite(val)) return;
+  const gameSession = game?.roomId || game?.sessionCode;
   const upd = stats.map(g => {
-    const sameGroupedGame = game.mode === "2v2" && g.mode === game.mode && g.sessionCode && game.sessionCode && g.sessionCode === game.sessionCode;
-    const sameSingleGame = g.id === game.id;
+    const thisSession = g?.roomId || g?.sessionCode;
+    const sameGroupedGame = !!gameSession && !!thisSession && thisSession === gameSession && g.mode === game.mode;
+    const sameSingleGame = !!game?.id && g.id === game.id;
     if (!sameGroupedGame && !sameSingleGame) return g;
     return { ...g, theirScore: val, opponentScoreManual: true };
   });
@@ -6146,7 +6184,7 @@ return (
 ) : statsSubTab==="teamlink" ? (
   <div>
     <div style={{...s.sectionLabel,marginBottom:10}}>team link</div>
-    <TeamLinkGames stats={stats} />
+    <TeamLinkGames stats={stats} onUpdateOpponentScore={updateOpponentScore} />
   </div>
 ) : (
       <>
@@ -10406,12 +10444,12 @@ const GAME_CARDS = [
   { id:"stocks",   label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
 ];
 
-function TeamLinkTab({ stats }) {
+function TeamLinkTab({ stats, onUpdateOpponentScore }) {
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4}}>team link</div>
       <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginBottom:16}}>synced team games grouped by day and game.</div>
-      <TeamLinkGames stats={stats} />
+      <TeamLinkGames stats={stats} onUpdateOpponentScore={onUpdateOpponentScore} />
     </div>
   );
 }
