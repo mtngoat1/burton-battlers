@@ -3180,6 +3180,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const [trackLink, setTrackLink] = useState("");
   const [requestLink, setRequestLink] = useState("");
   const [joinedMusic, setJoinedMusic] = useState(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [musicVolume, setMusicVolume] = useState(42);
   const [playerReady, setPlayerReady] = useState(false);
   const iframeRef = useRef(null);
@@ -3331,8 +3332,12 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         widget.setVolume?.(Number(musicVolume) || 0);
         const target = getLivePositionMs(musicState);
         widget.seekTo?.(target);
-        if (musicState.playing) widget.play?.();
-        else widget.pause?.();
+        if (musicState.playing) {
+          widget.play?.();
+          setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
+        } else {
+          widget.pause?.();
+        }
         lastAppliedRef.current = signature;
       } catch (_) {
         addToast?.("SoundCloud player is still loading", "🎧");
@@ -3376,15 +3381,30 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       const widget = await getWidget();
       if (!widget) return;
       const target = getLivePositionMs(musicState);
-      widget.setVolume?.(Number(musicVolume) || 0);
+
+      // Mobile Safari/Chrome will not let a remote DJ click start audio on this phone.
+      // This tap unlocks the hidden SoundCloud iframe locally, then room play/pause can follow.
       if (musicState.playing) {
+        widget.setVolume?.(Number(musicVolume) || 0);
+        widget.seekTo?.(target);
         widget.play?.();
         setTimeout(() => { try { widget.seekTo?.(target); } catch (_) {} }, 90);
         setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
-        addToast?.("joined room music", "🎧");
+        setAudioUnlocked(true);
+        addToast?.(joinedMusic ? "reconnected room music" : "joined room music", "🎧");
       } else {
+        widget.setVolume?.(0);
         widget.seekTo?.(target);
-        addToast?.("room music ready", "🎧");
+        widget.play?.();
+        setAudioUnlocked(true);
+        setTimeout(() => {
+          try {
+            widget.pause?.();
+            widget.seekTo?.(target);
+            widget.setVolume?.(Number(musicVolume) || 0);
+          } catch (_) {}
+        }, 180);
+        addToast?.("room music unlocked — DJ can play now", "🎧");
       }
     } catch (_) {
       addToast?.("tap join music again after the player loads", "🎧");
@@ -3428,7 +3448,10 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const togglePlay = async () => {
     if (!isDj || !hasTrack) return;
     const nextPlaying = !musicState.playing;
-    if (nextPlaying) setJoinedMusic(true);
+    if (nextPlaying) {
+      setJoinedMusic(true);
+      setAudioUnlocked(true);
+    }
     let widget = null;
     try {
       widget = await getWidget();
@@ -3485,7 +3508,32 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
 
   const playQueued = async (entry) => {
     if (!isDj || !entry?.url) return;
-    await loadTrack(entry.url);
+    const rawUrl = cleanUrl(entry.url);
+    const resolved = await resolveSoundCloudUrl(rawUrl);
+    const newDjId = entry.requestedBy || currentPlayer;
+    const newDj = PLAYERS.find(p => p.id === newDjId);
+    const next = {
+      ...emptyMusicState,
+      url: resolved.url || rawUrl,
+      title: entry.title || resolved.title || displayTrack(rawUrl),
+      dj: newDjId,
+      djName: entry.requestedByName || newDj?.name || player?.name || currentPlayer,
+      playing: true,
+      positionMs: 0,
+      updatedAt: new Date().toISOString(),
+      queue: queue.filter(q => q.id !== entry.id && q.url !== entry.url),
+    };
+    setJoinedMusic(true);
+    setAudioUnlocked(true);
+    await updateMusicState(next);
+    try {
+      const widget = await getWidget();
+      widget?.setVolume?.(Number(musicVolume) || 0);
+      widget?.seekTo?.(0);
+      widget?.play?.();
+      setTimeout(() => { try { widget?.play?.(); } catch (_) {} }, 350);
+    } catch (_) {}
+    addToast?.(`${next.djName} is DJ now`, "🎧");
   };
 
   const removeQueued = async (entryId) => {
@@ -3511,7 +3559,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
             <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
             <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
-            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · tap join music once on your phone</div>
+            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · tap join/reconnect on each phone</div>
           </div>
           <div aria-hidden="true" style={{position:"fixed",left:0,bottom:0,width:1,height:1,overflow:"hidden",opacity:0.01,pointerEvents:"none",transform:"scale(0.01)",transformOrigin:"bottom left"}}>
             <iframe
@@ -3527,11 +3575,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
               style={{border:"none",width:1,height:1,opacity:0.01,pointerEvents:"none"}}
             />
           </div>
-          {!joinedMusic && (
-            <button onClick={joinMusic} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:10}}>
-              🎧 join music
-            </button>
-          )}
+          <button onClick={joinMusic} className="bb-pressable bb-glow-lime" style={{width:"100%",background:joinedMusic?"rgba(184,255,77,0.12)":"#B8FF4D",border:joinedMusic?"1px solid rgba(184,255,77,0.32)":"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:joinedMusic?"#B8FF4D":"#06070D",cursor:"pointer",marginBottom:10}}>
+            {joinedMusic ? (audioUnlocked ? "🔊 reconnect audio" : "🔊 unlock audio") : "🎧 join music"}
+          </button>
         </>
       ) : (
         <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:13,fontSize:12,color:"#8B92A8",textAlign:"center",marginBottom:10}}>
@@ -3593,7 +3639,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
               </div>
               {isDj && (
                 <>
-                  <button onClick={()=>playQueued(entry)} className="bb-pressable" style={{background:"rgba(184,255,77,0.12)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:9,padding:"6px 8px",fontSize:10,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>play</button>
+                  <button onClick={()=>playQueued(entry)} className="bb-pressable" style={{background:"rgba(184,255,77,0.12)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:9,padding:"6px 8px",fontSize:10,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>{entry.requestedBy === currentPlayer ? "play" : "accept"}</button>
                   <button onClick={()=>removeQueued(entry.id)} className="bb-pressable" style={{background:"none",border:"none",color:"#FF5C8A",fontSize:14,cursor:"pointer"}}>×</button>
                 </>
               )}
