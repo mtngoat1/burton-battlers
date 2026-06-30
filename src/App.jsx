@@ -297,11 +297,50 @@ function rlRankFromTierValue(tierValue) {
   return ranks[tierValue] || "Unranked";
 }
 
+function normalizeRankNameForDisplay(rankName, playlist = "", playerName = "") {
+  let rank = String(rankName || "Unranked").trim();
+  rank = rank.replace(/\s*[-–—]?\s*(division|div)\s+(i{1,3}|iv)$/i, "").trim();
+
+  // Old saved profiles could say things like "Silver IV" because the app mixed rank tiers with divisions.
+  // Rocket League ranks only go I, II, III at the tier level; divisions are separate.
+  rank = rank.replace(/\b(Bronze|Silver|Gold|Platinum|Diamond|Champion)\s+IV\b/i, "$1 III");
+
+  // Known repaired value after the wipe/resync issue: apcards5 2v2 is Gold III, not the invalid Silver IV.
+  if (playerName === "apcards5" && playlist === "Ranked Doubles 2v2" && /silver\s+iii?/i.test(rank)) {
+    rank = "Gold III";
+  }
+  return rank || "Unranked";
+}
+
+function getRankInfoFromSegment(seg, fallback = {}) {
+  const tierMeta =
+    seg?.stats?.tier?.metadata?.name ||
+    seg?.stats?.tier?.displayValue ||
+    seg?.stats?.tier?.metadata?.tierName ||
+    rlRankFromTierValue(seg?.stats?.tier?.value) ||
+    fallback.rank ||
+    "Unranked";
+  const divisionRaw =
+    seg?.stats?.division?.metadata?.name ||
+    seg?.stats?.division?.displayValue ||
+    seg?.stats?.division?.value ||
+    fallback.division ||
+    "";
+  const division = String(divisionRaw || "")
+    .replace(/^division\s*/i, "Div ")
+    .replace(/^div\s*/i, "Div ")
+    .trim();
+  return {
+    rank: normalizeRankNameForDisplay(tierMeta, fallback.playlist || "", fallback.playerName || ""),
+    division,
+  };
+}
+
 
 function getRankImage(rankName) {
   if (!rankName) return null;
 
-  const r = rankName.toLowerCase();
+  const r = normalizeRankNameForDisplay(rankName).toLowerCase();
 
   if (r.includes("supersonic")) return "/ranks/Supersonic Legend.png";
 
@@ -762,9 +801,9 @@ const mmr = seg?.stats?.rating?.value || 0;
 
 console.log("MMR SEGMENT:", name, seg?.stats);
 
-const newRankName = rlRankFromTierValue(seg?.stats?.tier?.value);
+const rankInfo = getRankInfoFromSegment(seg, { rank: "Unranked", division: "", playlist: name, playerName: player.name });
 
-return { playlist: name, mmr, rank: newRankName };
+return { playlist: name, mmr, rank: rankInfo.rank, division: rankInfo.division };
 });
 
 console.log("FINAL RANKS BEING SAVED:", ranks);
@@ -812,17 +851,17 @@ function MMRCard({ profile, playerName, accent, onResync, resyncing, verifiedBad
         {onResync&&<button onClick={onResync} className="bb-pressable" style={s.resyncBtn} disabled={resyncing}>{resyncing?"…":"resync"}</button>}
       </div>
       <div style={s.mmrGrid}>
-   {profile.ranks.map((r) => (
+   {profile.ranks.map((r) => {
+  const displayRank = normalizeRankNameForDisplay(r.rank, r.playlist, playerName);
+  return (
   <div key={r.playlist} style={s.mmrItem}>
     <div style={s.mmrPlaylist}>{r.playlist.replace("Ranked ","")}</div>
-    {getRankImage(r.rank) && (
-      <img src={getRankImage(r.rank)} alt={r.rank} style={{width:36,height:36,objectFit:"contain",margin:"4px auto",display:"block"}}/>
+    {getRankImage(displayRank) && (
+      <img src={getRankImage(displayRank)} alt={displayRank} style={{width:36,height:36,objectFit:"contain",margin:"4px auto",display:"block"}}/>
     )}
 
-{console.log("Rank:", r.rank, "Image:", getRankImage(r.rank))}
-
 <div style={{ ...s.mmrRank, color: accent }}>
-  {r.rank}
+  {displayRank}
 </div>
 
 {r.division && (
@@ -839,7 +878,8 @@ function MMRCard({ profile, playerName, accent, onResync, resyncing, verifiedBad
 
 <div style={s.mmrNum}>{r.mmr} mmr</div>
   </div>
-))}
+  );
+})}
       </div>
       <div style={s.mmrSynced}>{profile.source==="admin"?"set by captain":"synced"} · {new Date(profile.lastSynced).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>
     </div>
@@ -975,7 +1015,7 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
   {g.ratingDelta != null ? `${g.ratingDelta > 0 ? "+" : ""}${g.ratingDelta} MMR` : "—"}
 </div>
                 <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
-                  {["goals","assists","saves","shots","demos"].map(f => (
+                  {["goals","assists","saves","shots","score","demos"].map(f => (
                     <div key={f} style={{textAlign:"center"}}>
                       <div style={{fontSize:8,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
                       <div style={{fontSize:12,fontWeight:700,color:p?.color||"#E8ECF4"}}>{g[f]||0}</div>
@@ -1751,7 +1791,6 @@ function LiveMMRFeed({ mmrProfiles }) {
           </div>
         );
         const isOpen = expanded === p.id;
-        const standardRank = profile.ranks.find(r => r.playlist === "Ranked Standard 3v3");
         return (
           <div key={p.id}>
             <button onClick={() => setExpanded(isOpen ? null : p.id)} className="bb-pressable"
@@ -1759,7 +1798,6 @@ function LiveMMRFeed({ mmrProfiles }) {
               <div style={{width:9,height:9,borderRadius:99,background:p.color,boxShadow:`0 0 8px ${p.color}88`,flexShrink:0}}/>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:700,color:p.color}}>{p.name}</div>
-                <div style={{fontSize:11,color:"#8B92A8",marginTop:1}}>{standardRank?.rank || "unranked"} · 3v3</div>
               </div>
               <div style={{textAlign:"right",marginRight:8}}>
               </div>
@@ -1769,20 +1807,20 @@ function LiveMMRFeed({ mmrProfiles }) {
               <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderTop:"none",borderRadius:"0 0 13px 13px",padding:"12px 14px",marginBottom:8}}>
                 {profile.ranks.map(r => {
                   const label = r.playlist === "Ranked Duel 1v1" ? "1v1" : r.playlist === "Ranked Doubles 2v2" ? "2v2" : "3v3";
-                  const diff = r.prevMmr ? r.mmr - r.prevMmr : null;
+                  const displayRank = normalizeRankNameForDisplay(r.rank, r.playlist, p.name);
                   return (
                     <div key={r.playlist} style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingBottom:10,marginBottom:10,borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
                       <div>
                         <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:3}}>{label}</div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
-  {getRankImage(r.rank) && (
+  {getRankImage(displayRank) && (
     <img
-      src={getRankImage(r.rank)}
-      alt={r.rank}
+      src={getRankImage(displayRank)}
+      alt={displayRank}
       style={{width:26,height:26,objectFit:"contain",flexShrink:0}}
     />
   )}
-  <div style={{fontSize:13,fontWeight:700,color:p.color}}>{r.rank}</div>
+  <div style={{fontSize:13,fontWeight:700,color:p.color}}>{displayRank}</div>
 </div>
                       </div>
                       <div style={{textAlign:"right"}}>
@@ -1810,7 +1848,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const [kindTab, setKindTab] = useState("title");
   const profileKindTabs = sourceTab === "pass"
     ? [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"}]
-    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"}];
+    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"border",label:"borders"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"}];
   useEffect(() => {
     if (sourceTab === "pass" && kindTab === "sound") setKindTab("title");
   }, [sourceTab, kindTab]);
@@ -1835,7 +1873,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const itemType = (id) => SHOP_ITEMS.find(i => i.id === id)?.type || (id.startsWith("pass_") ? getPassRewardForOwnedId(id)?.type : null);
   const toggleEquip = async (id) => {
     const type = itemType(id);
-    if (!type || !["color","icon","title","background","text_color","sound"].includes(type)) return;
+    if (!type || !["color","icon","title","background","border","text_color","sound"].includes(type)) return;
     const newEquipped = { ...equipped };
     if (type === "sound") {
       if (newEquipped[id]) delete newEquipped[id];
@@ -1862,7 +1900,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
             <div key={id} style={{background:equipped[id]?"rgba(184,255,77,0.09)":"rgba(255,255,255,0.035)",border:`1px solid ${equipped[id]?"rgba(184,255,77,0.28)":"rgba(255,255,255,0.06)"}`,borderRadius:12,padding:"10px 8px",minHeight:64}}>
               <div style={{fontSize:18,marginBottom:5,color:player?.color}}>{itemIcon(id)}</div>
               <div style={{fontSize:11,fontWeight:800,color:"#E8ECF4",lineHeight:1.2}}>{itemLabel(id)}</div>
-              {["color","icon","title","background","text_color"].includes(itemType(id)) && (
+              {["color","icon","title","background","border","text_color"].includes(itemType(id)) && (
                 <button onClick={()=>toggleEquip(id)} className="bb-pressable" style={{marginTop:8,width:"100%",background:equipped[id]?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:10,fontWeight:800,color:equipped[id]?"#06070D":"#8B92A8",cursor:"pointer"}}>
                   {equipped[id] ? "equipped" : "equip"}
                 </button>
@@ -1995,8 +2033,7 @@ return (
     {homeSubTab==="profile" && <ProfileHomeTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} />}
 
     {homeSubTab==="overview" && <>
-      <div style={{background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:12}}>
-        <span style={{fontSize:26,flexShrink:0}}>{weeklyEvent.emoji}</span>
+      <div style={{background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16}}>
         <div>
           <div style={{fontSize:10,color:weeklyEvent.color,fontWeight:700,letterSpacing:1,marginBottom:3}}>THIS WEEK'S MODIFIER</div>
           <div style={{fontSize:14,fontWeight:700,color:"#E8ECF4",marginBottom:2}}>{weeklyEvent.title}</div>
@@ -2353,6 +2390,31 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
 }
 
 // ===================== Streaming Tab =====================
+
+function TwitchLiveDot({ handle, size = 8 }) {
+  const [isLive, setIsLive] = useState(false);
+  useEffect(() => {
+    if (!handle) { setIsLive(false); return; }
+    let alive = true;
+    const cleanHandle = String(handle).replace(/^@/, "").trim();
+    const check = async () => {
+      try {
+        const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(cleanHandle)}?t=${Date.now()}`, { cache:"no-store" });
+        const text = await res.text();
+        const live = !!text && !/offline|not live|not found|error/i.test(text);
+        if (alive) setIsLive(live);
+      } catch (_) {
+        if (alive) setIsLive(false);
+      }
+    };
+    check();
+    const timer = setInterval(check, 60000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [handle]);
+  if (!handle || !isLive) return null;
+  return <div className="bb-live-dot" title="live on twitch" style={{width:size,height:size,borderRadius:99,background:"#FF2D55",boxShadow:"0 0 8px rgba(255,45,85,0.7)",flexShrink:0}}/>;
+}
+
 function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
   const [editingTwitch,setEditingTwitch]=useState(false);
   const [draft,setDraft]=useState(streamProfiles[currentPlayer]?.twitch||"");
@@ -2414,7 +2476,7 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
                   <div style={{display:"flex",alignItems:"center",gap:10,flex:1}}>
                     <div style={{width:10,height:10,borderRadius:99,background:p.color,boxShadow:`0 0 8px ${p.color}99`}}/>
                     <div>
-                      <div style={{fontWeight:700,fontSize:14}}>{p.name}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:7}}><div style={{fontWeight:700,fontSize:14}}>{p.name}</div><TwitchLiveDot handle={handle}/></div>
                       {handle ? <div style={{fontSize:11.5,color:"#8B92A8",marginTop:2}}>twitch.tv/{handle}</div> : <div style={{fontSize:11.5,color:"#4A5066",marginTop:2}}>no twitch linked</div>}
                     </div>
                   </div>
@@ -5304,7 +5366,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
 // ===================== Stats Tab =====================
 const STAT_MODES = ["2v2","1v1"];
 const LOGGABLE_MODES = ["2v2","1v1"];
-const STAT_FIELDS = ["goals","assists","saves","shots"];
+const STAT_FIELDS = ["goals","assists","saves","shots","score"];
 
 function StatsTrendLine({ games, field, color }) {
   if (games.length < 2) return null;
@@ -5981,7 +6043,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     saves: match.stats?.saves?.value || 0,
     shots: match.stats?.shots?.value || 0,
     demos: 0,
-    score: match.stats?.score?.value || 0,
+    score: Number(match.stats?.score?.value ?? match.stats?.score?.displayValue ?? 0) || 0,
     ourScore: match.stats?.goals?.value || 0,
     theirScore: null,
     opponentScoreManual: false,
@@ -6261,7 +6323,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
                 </div>
                 {game && (
                   <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
-                    {["goals","assists","saves","shots","demos"].map(f => (
+                    {["goals","assists","saves","shots","score","demos"].map(f => (
                       <div key={f} style={{textAlign:"center",background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"6px 2px"}}>
                         <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
                         <div style={{fontSize:14,fontWeight:700,color:player.color}}>{game[f]||0}</div>
@@ -6345,6 +6407,7 @@ function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate,
   const [statsSubTab, setStatsSubTab] = useState("tracker");
 const [showRoom, setShowRoom] = useState(false);
 const [matchSyncing, setMatchSyncing] = useState(false);
+const [rankSyncing, setRankSyncing] = useState(false);
 const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
 const [syncMode, setSyncMode] = useState(currentPlayer === ADMIN_ID ? "3v3" : "2v2");
 const [selectedDuoIds, setSelectedDuoIds] = useState(["p1","p2"]);
@@ -6589,39 +6652,61 @@ const updateOpponentScore = async (game, theirScoreValue) => {
 
     setMatchSyncing(false);
   };
+
+  const syncAllRanksFromTracker = async () => {
+    if (currentPlayer !== ADMIN_ID || rankSyncing) return;
+    setRankSyncing(true);
+    addToast?.("syncing all ranks…", "🔄");
+    try {
+      const nextProfiles = { ...(mmrProfiles || {}) };
+      for (const player of PLAYERS) {
+        if (useParseCredit) {
+          const creditOk = await useParseCredit(currentPlayer);
+          if (!creditOk) break;
+        }
+        const existing = nextProfiles[player.id] || {
+          platform: player.platform,
+          handle: player.name,
+          ranks: RL_PLAYLISTS.map(playlist => ({ playlist, mmr: 0, rank: "Unranked", division: "" })),
+          source: "synced",
+        };
+        const res = await fetch(
+          `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${existing.platform || player.platform}&username=${existing.handle || player.name}`,
+          { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
+        );
+        if (!res.ok) throw new Error(`rank sync failed for ${player.name}`);
+        const json = await res.json();
+        const segments = json?.data?.segments || [];
+        const newRanks = RL_PLAYLISTS.map(playlist => {
+          const oldRank = (existing.ranks || []).find(r => r.playlist === playlist) || { playlist, mmr: 0, rank: "Unranked", division: "" };
+          const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === playlist);
+          const rankInfo = getRankInfoFromSegment(seg, { rank: oldRank.rank, division: oldRank.division, playlist, playerName: player.name });
+          const newMmr = Number(seg?.stats?.rating?.value ?? oldRank.mmr ?? 0);
+          return { ...oldRank, playlist, prevMmr: oldRank.mmr, prevRank: oldRank.rank, mmr: newMmr, rank: rankInfo.rank, division: rankInfo.division };
+        });
+        const updated = { ...existing, platform: existing.platform || player.platform, handle: existing.handle || player.name, ranks: newRanks, lastSynced: new Date().toISOString(), source: "synced" };
+        nextProfiles[player.id] = updated;
+        await setMMR(player.id, updated);
+      }
+      setMmrProfiles(nextProfiles);
+      addToast?.("all ranks updated", "✅");
+    } catch(e) {
+      console.error(e);
+      addToast?.("rank sync failed", "❌");
+    }
+    setRankSyncing(false);
+  };
 return (
     <div className="bb-tab-content" style={s.tabContent}>
       {logging&&<LogGameModal mode={mode} currentPlayer={currentPlayer} onSave={saveGame} onClose={()=>setLogging(false)}/>}
 <div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>stats tracker</div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <button onClick={async () => {
-          const creditOk = useParseCredit ? await useParseCredit(currentPlayer) : true;
-          if (!creditOk) return;
-          const profile = mmrProfiles?.[currentPlayer];
-          if (!profile) return;
-          addToast?.("syncing…", "🔄");
-          try {
-            const res = await fetch(
-             `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${profile.platform}&username=${profile.handle}`,
-              { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
-            );
-            const json = await res.json();
-            const segments = json?.data?.segments || [];
-            const newRanks = profile.ranks.map(r => {
-              const seg = segments.find(s => s.type === "playlist" && s.metadata?.name === r.playlist);
-              const newMmr = seg?.stats?.rating?.value || r.mmr;
-              const newRankName = seg?.stats?.tier?.metadata?.name || "Unranked";
-              return { ...r, prevMmr:r.mmr, prevRank:r.rank, mmr:newMmr, rank:newRankName, division:seg?.stats?.division?.metadata?.name || "" };
-            });
-            const updated = { ...profile, ranks: newRanks, lastSynced: new Date().toISOString() };
-            setMmrProfiles(prev => ({ ...prev, [currentPlayer]: updated }));
-            await setMMR(currentPlayer, updated);
-            addToast?.("ranks updated!", "✅");
-          } catch(e) { addToast?.("sync failed", "❌"); }
-        }} className="bb-pressable bb-glow-lime" style={s.newPostBtn}>
-          sync ranks
+          {currentPlayer === ADMIN_ID && (
+          <button onClick={syncAllRanksFromTracker} disabled={rankSyncing} className="bb-pressable bb-glow-lime" style={{...s.newPostBtn, opacity:rankSyncing?0.6:1}}>
+          {rankSyncing ? "syncing…" : "sync ranks"}
         </button>
+        )}
         </div>
       </div>
 
@@ -6909,8 +6994,9 @@ function getDailyShopItems() {
     return { item, sort: Math.abs(h) };
   }).sort((a, b) => a.sort - b.sort).map(x => x.item);
   const backgrounds = seeded(SHOP_ITEMS.filter(i => i.type === "background"), 9001).slice(0, 8);
-  const others = seeded(SHOP_ITEMS.filter(i => i.type !== "background"), 1337).slice(0, 14);
-  return [...others, ...backgrounds];
+  const borders = SHOP_ITEMS.filter(i => i.type === "border");
+  const others = seeded(SHOP_ITEMS.filter(i => i.type !== "background" && i.type !== "border"), 1337).slice(0, 14);
+  return [...others, ...borders, ...backgrounds];
 }
 
 function getTimeUntilNextShop() {
@@ -6931,6 +7017,12 @@ const SHOP_ITEMS = [
   { id:"teal_name",   label:"teal",     desc:"neon teal name glow",    cost:75,  type:"color", value:"#00FFD0", emoji:"🩵" },
   { id:"orange_name", label:"orange",   desc:"burnt orange name glow", cost:75,  type:"color", value:"#FF8C42" },
   { id:"blue_name",   label:"blue",     desc:"electric blue name glow",cost:50,  type:"color", value:"#4D9EFF", emoji:"🔵" },
+  // presence box borders
+  { id:"border_lime",   label:"lime frame",   desc:"glowing lime presence border",   cost:120, type:"border", value:"lime",   emoji:"▣" },
+  { id:"border_gold",   label:"gold frame",   desc:"black and gold presence border", cost:180, type:"border", value:"gold",   emoji:"▣" },
+  { id:"border_violet", label:"violet frame", desc:"purple neon presence border",   cost:150, type:"border", value:"violet", emoji:"▣" },
+  { id:"border_ice",    label:"ice frame",    desc:"icy blue presence border",      cost:150, type:"border", value:"ice",    emoji:"▣" },
+  { id:"border_danger", label:"danger frame", desc:"red alert presence border",      cost:160, type:"border", value:"danger", emoji:"▣" },
   // icons
   { id:"frog",        label:"frog",                  cost:60,  type:"icon",  value:"🐸",     emoji:"🐸" },
   { id:"icon_fire",   label:"fire",            cost:60,  type:"icon",  value:"🔥",     emoji:"🔥" },
@@ -7295,6 +7387,26 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
 
 
 
+
+
+function getEquippedShopItemByType(points, playerId, type) {
+  const owned = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
+  const equipped = points?.[playerId + "_equipped"] || {};
+  return owned.map(id => SHOP_ITEMS.find(i => i.id === id)).find(item => item?.type === type && equipped[item.id]) || null;
+}
+
+function getPresenceBorderVisualStyle(points, playerId, online = false) {
+  const item = getEquippedShopItemByType(points, playerId, "border");
+  if (!item) return { border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}` };
+  const map = {
+    lime:   { border:"1px solid rgba(184,255,77,0.62)", boxShadow:"0 0 0 1px rgba(184,255,77,0.12), 0 0 22px rgba(184,255,77,0.13)" },
+    gold:   { border:"1px solid rgba(255,209,102,0.70)", boxShadow:"0 0 0 1px rgba(255,209,102,0.15), 0 0 24px rgba(255,209,102,0.12)" },
+    violet: { border:"1px solid rgba(167,139,250,0.68)", boxShadow:"0 0 0 1px rgba(167,139,250,0.14), 0 0 24px rgba(167,139,250,0.12)" },
+    ice:    { border:"1px solid rgba(77,158,255,0.70)", boxShadow:"0 0 0 1px rgba(77,158,255,0.15), 0 0 24px rgba(77,158,255,0.13)" },
+    danger: { border:"1px solid rgba(255,92,138,0.72)", boxShadow:"0 0 0 1px rgba(255,92,138,0.14), 0 0 24px rgba(255,92,138,0.13)" },
+  };
+  return map[item.value] || map.lime;
+}
 
 // ===================== Voice Soundboard =====================
 const SOUNDBOARD_SOUNDS = [
@@ -8046,6 +8158,32 @@ await storeSetWithPush("pings", pingUpd2);
               })}
             </div>
 
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>PRESENCE BORDERS</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {dailyShopItems.filter(i=>i.type==="border").map(item=>{
+                const isOwned=owned.includes(item.id);
+                const isEquipped=equipped[item.id];
+                const canAfford=myPoints>=item.cost;
+                const previewStyle = getPresenceBorderVisualStyle({ [currentPlayer + "_owned"]:[item.id], [currentPlayer + "_equipped"]:{ [item.id]:true } }, currentPlayer, true);
+                return (
+                  <div key={item.id} style={{background:isEquipped?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",...previewStyle,textAlign:"center"}}>
+                    <div style={{height:32,borderRadius:10,marginBottom:8,background:"linear-gradient(135deg,#11131F,#0C0E18)",...previewStyle}} />
+                    <div style={{fontSize:11,fontWeight:800,color:isOwned?playerColor:"#E8ECF4",marginBottom:2}}>{item.label}</div>
+                    <div style={{fontSize:9,color:"#4A5066",marginBottom:8}}>{item.desc}</div>
+                    {isOwned?(
+                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?playerColor:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                        {isEquipped?"✓ equipped":"equip"}
+                      </button>
+                    ):(
+                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?`${playerColor}18`:"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?`${playerColor}55`:"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?playerColor:"#4A5066",cursor:canAfford?"pointer":"default"}}>
+                        {item.cost} pts
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
             <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>SOUNDBOARD SOUNDS</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
               {SHOP_ITEMS.filter(i=>i.type==="sound" && !DEFAULT_SOUNDBOARD_IDS.includes(i.id)).map(item=>{
@@ -8155,11 +8293,13 @@ await storeSetWithPush("pings", pingUpd2);
    {PLAYERS.map(p=>{
   const online = isOnline(safePresence?.[p.id]);
   const isMe = p.id === currentPlayer;
+  const twitchHandle = streamProfiles?.[p.id]?.twitch;
+  const borderVisual = getPresenceBorderVisualStyle(points, p.id, online);
   return (
-    <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
+    <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",...borderVisual,display:"flex",alignItems:"center",gap:12}}>
       <div style={{width:10,height:10,borderRadius:99,background:online?"#7CFFB2":"#2E3346",boxShadow:online?"0 0 8px #7CFFB299":""}}/>
       <div style={{flex:1}}>
-        <PlayerNameDisplay playerId={p.id} points={points}/>
+        <div style={{display:"flex",alignItems:"center",gap:7}}><PlayerNameDisplay playerId={p.id} points={points}/><TwitchLiveDot handle={twitchHandle}/></div>
         <div style={{fontSize:11,color:"#4A5066",marginTop:1}}>
           {voicePresence?.[p.id] ? "in voice room" : online ? (safePresence?.[p.id+"_mode"] ? `🎮 in ${safePresence[p.id+"_mode"]}` : "online now") : safePresence?.[p.id] ? `last seen ${fmtRelTime(safePresence[p.id])}` : "offline"}
         </div>
@@ -10259,8 +10399,8 @@ const noBettingWeek = isEventActive("no_betting");
           )}
 
           <button onClick={spinWheel} disabled={spinning||myPoints<wager||wager<1} className="bb-pressable bb-glow-lime"
-            style={{...s.primaryBtn,opacity:spinning||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:16,letterSpacing:1}}>
-            {spinning?"spinning…":"spin"}
+            style={{...s.primaryBtn,opacity:spinning||myPoints<wager?0.4:1,fontFamily:"'Oswald',sans-serif",fontSize:16,letterSpacing:1,minHeight:48,display:"flex",alignItems:"center",justifyContent:"center",color:"#06070D"}}>
+            <span style={{position:"relative",zIndex:2}}>{spinning?"spinning…":"SPIN"}</span>
           </button>
 
           {/* Odds table */}
@@ -11287,9 +11427,9 @@ const syncChemXP = async (pid1, pid2, sharedGamesList) => {
   if (newGamesCount <= 0) return;
 
   const newGames = sharedGamesList.slice(alreadySynced);
-  const newWins = newGames.filter(p => gameIsWin(p.p1game)).length;
+  const newAssists = newGames.reduce((sum, pair) => sum + (Number(pair.p1game?.assists) || 0) + (Number(pair.p2game?.assists) || 0), 0);
 
-  const xpGain = newWins * 5 + newGamesCount * 2;
+  const xpGain = newAssists * 5 + newGamesCount * 2;
   const current = chemistry?.[key] || 0;
 
   const upd = {
@@ -11348,10 +11488,6 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 
   return (
     <div className="bb-tab-content" style={s.tabContent}>
-      <div style={{ fontSize:11, color:"#4A5066", marginBottom:16, lineHeight:1.5 }}>
-        chemistry now only builds from synced 2v2 duo matches. sync a 2v2 duo in Stats first, then come here to sync chemistry fresh.
-      </div>
-
       {CHEMISTRY_PAIRS.map(([pid1, pid2]) => {
         const key = `2v2_${getChemistryKey(pid1, pid2)}`;
         const chemXP = chemistry?.[key] || 0;
@@ -11362,6 +11498,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
    const shared = getSharedGames(pid1, pid2);
         const sharedAllTime = getSharedGames(pid1, pid2, true);
         const sharedWins = shared.filter(p => gameIsWin(p.p1game)).length;
+        const sharedAssists = shared.reduce((sum, pair) => sum + (Number(pair.p1game?.assists) || 0) + (Number(pair.p2game?.assists) || 0), 0);
         const earnedBadges = getEarnedDuoBadges(sharedAllTime, lvl.level);
         const isMyPair = pid1 === currentPlayer || pid2 === currentPlayer;
         const nextLvlXP = [10,60,150,300,500,999][lvl.level];
@@ -11407,8 +11544,8 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
                 <div style={{ fontSize:14, fontWeight:700, color:lvl.color }}>{shared.length}</div>
               </div>
               <div style={{ flex:1, background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"8px", textAlign:"center" }}>
-                <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>WINS TOGETHER</div>
-                <div style={{ fontSize:14, fontWeight:700, color:"#7CFFB2" }}>{sharedWins}</div>
+                <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>ASSISTS TOGETHER</div>
+                <div style={{ fontSize:14, fontWeight:700, color:"#7CFFB2" }}>{sharedAssists}</div>
               </div>
               <div style={{ flex:1, background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"8px", textAlign:"center" }}>
                 <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>XP BONUS</div>
@@ -11436,7 +11573,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
                 <button onClick={(e) => { e.stopPropagation(); if (!isSynced) syncChemXP(pid1, pid2, shared); }} className="bb-pressable bb-glow-lime"
                   disabled={isSynced}
                   style={{ width:"100%", background: isSynced ? "rgba(255,255,255,0.04)" : `${lvl.color}18`, border:`1px solid ${isSynced ? "rgba(255,255,255,0.08)" : lvl.color+"44"}`, borderRadius:10, padding:"10px 0", fontSize:12, fontWeight:700, color: isSynced ? "#4A5066" : lvl.color, cursor: isSynced ? "default" : "pointer", marginTop:12 }}>
-                  {isSynced ? "✓ synced — up to date" : `sync chemistry (+${(() => { const newGames = shared.slice(alreadySynced); const newWins = newGames.filter(p => gameIsWin(p.p1game)).length; return newWins*5 + newCount*2; })()} xp from ${newCount} new game${newCount!==1?"s":""})`}
+                  {isSynced ? "✓ synced — up to date" : `sync chemistry (+${(() => { const newGames = shared.slice(alreadySynced); const newAssists = newGames.reduce((sum, pair) => sum + (Number(pair.p1game?.assists) || 0) + (Number(pair.p2game?.assists) || 0), 0); return newAssists*5 + newCount*2; })()} xp from assists in ${newCount} new game${newCount!==1?"s":""})`}
                 </button>
               );
             })()}
@@ -12914,6 +13051,29 @@ const TABS=[
 </button>
 </div>
 </div>
+      {!chatOpen && (
+        <div style={s.pageButtonNav}>
+          {TABS.map((t)=>{
+            const active = tab === t.id;
+            const accent = t.id === "admin" || t.id === "verify" ? "#FF5C8A" : userColor;
+            return (
+              <button key={t.id} onClick={()=>{
+                setTab(t.id);
+                setChatOpen(false);
+                setTimeout(() => scrollToTop(), 0);
+                if (t.id==="social") { const upd={...lastSeen,social:posts.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
+                if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
+              }} className="bb-pressable" style={{...s.pageButtonNavItem,background:active?`${accent}18`:"rgba(255,255,255,0.045)",border:`1px solid ${active?accent+"66":"rgba(255,255,255,0.07)"}`,boxShadow:active?`0 0 14px ${accent}22`:"none"}}>
+                <div style={{position:"relative",display:"inline-flex"}}>
+                  <t.icon size={16} color={active?accent:"#8B92A8"}/>
+                  {badges[t.id]>0&&<div style={{position:"absolute",top:-6,right:-7,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
+                </div>
+                <span style={{color:active?accent:"#8B92A8",fontSize:10,fontWeight:900,textTransform:"lowercase"}}>{t.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       {showTopNotifs && (
         <div style={{position:"fixed",inset:0,zIndex:950,background:"rgba(4,8,24,0.88)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"74px 18px 18px",animation:"chatFadeIn .18s ease"}} onClick={()=>setShowTopNotifs(false)}>
           <div onClick={(e)=>e.stopPropagation()} style={{width:"100%",maxWidth:420,maxHeight:"78vh",overflowY:"auto",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(167,139,250,0.28)",borderRadius:22,padding:16,boxShadow:"0 24px 70px rgba(0,0,0,0.45)",animation:"dropDown .24s cubic-bezier(.2,.8,.2,1)"}}>
@@ -13034,7 +13194,7 @@ const TABS=[
           </div>
         </div>
       )}
-   {!chatOpen && <div style={s.tabBar}>
+   {false && !chatOpen && <div style={s.tabBar}>
         {TABS.map((t)=>(
         <button key={t.id} onClick={()=>{
     setTab(t.id);
@@ -13074,8 +13234,10 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(84px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(22px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
+pageButtonNav:{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"10px 14px",paddingBottom:8,background:"rgba(6,7,13,0.72)",borderBottom:"1px solid rgba(255,255,255,0.06)",scrollbarWidth:"none",msOverflowStyle:"none",position:"relative",zIndex:5,flexShrink:0},
+pageButtonNavItem:{flexShrink:0,minWidth:72,borderRadius:16,padding:"10px 10px",display:"flex",alignItems:"center",justifyContent:"center",gap:7,cursor:"pointer",backdropFilter:"blur(10px)"},
 tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px) - 10px)",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_DROP_FINAL: drops buttons into bottom safe-area gap */},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
@@ -13252,3 +13414,5 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, 
 // TEAMLINK_HARD_NULL_DATE_SAFE_PATCH
 
 // JUMPDATE_NULL_SAFE_PATCH_DONE
+
+// APP54_REQUESTED_NAV_MMR_CHEM_SHOP_TWITCH_PATCH
