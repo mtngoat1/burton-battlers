@@ -2346,6 +2346,7 @@ const speakingUntilRef = useRef({});
 const activeSpeakerIdsRef = useRef([]);
 const speakingAnalyzersRef = useRef({});
 const audioContextRef = useRef(null);
+const [voiceVolume, setVoiceVolume] = useState(100);
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
   const getRemoteStream = () => {
@@ -2600,7 +2601,7 @@ window.__bbDailyCallObject = co;
   if (remoteAudioRef.current) {
     remoteAudioRef.current.srcObject = remoteStream;
     remoteAudioRef.current.muted = false;
-    remoteAudioRef.current.volume = 1;
+    remoteAudioRef.current.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
     remoteAudioRef.current.play().catch(console.error);
   }
 });
@@ -2793,6 +2794,11 @@ setError(null);
   const speakingParticipant = participantList.find(dp => !dp.local && isParticipantSpeaking(dp)) || participantList.find(dp => isParticipantSpeaking(dp));
   const speakingPlayer = speakingParticipant ? getPlayerForName(speakingParticipant.user_name) : null;
 
+  useEffect(() => {
+    if (!remoteAudioRef.current) return;
+    remoteAudioRef.current.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
+  }, [voiceVolume]);
+
   if (!joined) {
     return (
       <div style={{
@@ -2975,6 +2981,21 @@ onClick={async () => {
         })}
       </div>
 
+      <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:"11px 12px",marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:7}}>
+          <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,textTransform:"uppercase"}}>teammate voice volume</div>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900}}>{voiceVolume}%</div>
+        </div>
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={voiceVolume}
+          onChange={(e)=>setVoiceVolume(Number(e.target.value))}
+          style={{width:"100%",accentColor:"#B8FF4D"}}
+        />
+      </div>
+
       {/* Controls */}
       <div style={{display:"flex",gap:10}}>
         <button
@@ -3148,6 +3169,367 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
           </div>
         );
       })}
+    </div>
+  );
+}
+
+
+function RoomMusicPlayer({ currentPlayer, addToast }) {
+  const emptyMusicState = { url:"", title:"", dj:null, djName:"", playing:false, positionMs:0, updatedAt:null, queue:[] };
+  const [musicState, setMusicState] = useState(emptyMusicState);
+  const [trackLink, setTrackLink] = useState("");
+  const [requestLink, setRequestLink] = useState("");
+  const [joinedMusic, setJoinedMusic] = useState(false);
+  const [musicVolume, setMusicVolume] = useState(42);
+  const [playerReady, setPlayerReady] = useState(false);
+  const iframeRef = useRef(null);
+  const widgetRef = useRef(null);
+  const lastAppliedRef = useRef("");
+  const applyingRef = useRef(false);
+
+  const player = PLAYERS.find(p => p.id === currentPlayer);
+  const isDj = !musicState?.dj || musicState.dj === currentPlayer;
+  const queue = Array.isArray(musicState?.queue) ? musicState.queue : [];
+  const hasTrack = !!musicState?.url;
+  const isSoundCloudUrl = (url) => /https?:\/\/(www\.)?(soundcloud\.com|on\.soundcloud\.com)\//i.test(String(url || "").trim());
+  const cleanUrl = (url) => String(url || "").trim();
+  const displayTrack = (url) => {
+    try {
+      const u = new URL(url);
+      return decodeURIComponent(u.pathname.split("/").filter(Boolean).slice(-1)[0] || u.hostname).replace(/[-_]+/g, " ");
+    } catch (_) {
+      return "SoundCloud track";
+    }
+  };
+  const getLivePositionMs = (state = musicState) => {
+    const base = Number(state?.positionMs) || 0;
+    if (!state?.playing || !state?.updatedAt) return base;
+    return Math.max(0, base + (Date.now() - new Date(state.updatedAt).getTime()));
+  };
+  const embedSrc = hasTrack
+    ? `https://w.soundcloud.com/player/?url=${encodeURIComponent(musicState.url)}&auto_play=false&buying=false&liking=false&download=false&sharing=false&show_artwork=false&show_comments=false&show_playcount=false&show_user=false&hide_related=true&visual=false`
+    : "";
+
+  const ensureSoundCloudApi = () => new Promise((resolve, reject) => {
+    if (typeof window === "undefined") return reject(new Error("window unavailable"));
+    if (window.SC?.Widget) return resolve(window.SC.Widget);
+    const existing = document.querySelector('script[data-bb-soundcloud="true"]');
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.SC.Widget), { once:true });
+      existing.addEventListener("error", reject, { once:true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://w.soundcloud.com/player/api.js";
+    script.async = true;
+    script.dataset.bbSoundcloud = "true";
+    script.onload = () => resolve(window.SC.Widget);
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+
+  const getWidget = async () => {
+    const Widget = await ensureSoundCloudApi();
+    if (!iframeRef.current) return null;
+    if (!widgetRef.current) {
+      widgetRef.current = Widget(iframeRef.current);
+      widgetRef.current.bind?.(Widget.Events.READY, () => setPlayerReady(true));
+      widgetRef.current.bind?.(Widget.Events.ERROR, () => addToast?.("that SoundCloud track can't be embedded", "⚠️"));
+    }
+    return widgetRef.current;
+  };
+
+  const updateMusicState = async (next) => {
+    setMusicState(next);
+    await storeSet("room_music", next);
+  };
+
+  useEffect(() => {
+    let alive = true;
+    storeGet("room_music").then(v => {
+      if (!alive) return;
+      setMusicState(v?.url || v?.queue ? { ...emptyMusicState, ...v, queue:Array.isArray(v.queue)?v.queue:[] } : emptyMusicState);
+    });
+    const unsub = subscribeKVMulti(["room_music"], ({ value }) => {
+      const next = value?.url || value?.queue ? { ...emptyMusicState, ...value, queue:Array.isArray(value.queue)?value.queue:[] } : emptyMusicState;
+      setMusicState(next);
+    });
+    return () => { alive = false; unsub?.(); };
+  }, []);
+
+  useEffect(() => {
+    widgetRef.current = null;
+    setPlayerReady(false);
+    lastAppliedRef.current = "";
+  }, [musicState?.url]);
+
+  useEffect(() => {
+    if (!joinedMusic || !hasTrack) return;
+    let cancelled = false;
+    const applyState = async () => {
+      const signature = `${musicState.url}|${musicState.playing}|${musicState.updatedAt}|${Math.floor((musicState.positionMs||0)/250)}`;
+      if (lastAppliedRef.current === signature || applyingRef.current) return;
+      applyingRef.current = true;
+      try {
+        const widget = await getWidget();
+        if (!widget || cancelled) return;
+        widget.setVolume?.(Number(musicVolume) || 0);
+        const target = getLivePositionMs(musicState);
+        widget.seekTo?.(target);
+        if (musicState.playing) widget.play?.();
+        else widget.pause?.();
+        lastAppliedRef.current = signature;
+      } catch (_) {
+        addToast?.("SoundCloud player is still loading", "🎧");
+      } finally {
+        applyingRef.current = false;
+      }
+    };
+    const t = setTimeout(applyState, 250);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [joinedMusic, hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs]);
+
+  useEffect(() => {
+    if (!joinedMusic || !widgetRef.current) return;
+    try { widgetRef.current.setVolume?.(Number(musicVolume) || 0); } catch (_) {}
+  }, [musicVolume, joinedMusic]);
+
+  useEffect(() => {
+    if (!joinedMusic || !hasTrack || !musicState.playing) return;
+    const timer = setInterval(async () => {
+      try {
+        const widget = await getWidget();
+        if (!widget) return;
+        widget.getPosition?.((pos) => {
+          const expected = getLivePositionMs(musicState);
+          if (Math.abs(Number(pos || 0) - expected) > 3500) {
+            widget.seekTo?.(expected);
+          }
+        });
+      } catch (_) {}
+    }, 4500);
+    return () => clearInterval(timer);
+  }, [joinedMusic, hasTrack, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicState?.url]);
+
+  const joinMusic = async () => {
+    if (!hasTrack) {
+      addToast?.("load a SoundCloud track first", "🎧");
+      return;
+    }
+    setJoinedMusic(true);
+    setTimeout(async () => {
+      try {
+        const widget = await getWidget();
+        if (!widget) return;
+        widget.setVolume?.(Number(musicVolume) || 0);
+        widget.seekTo?.(getLivePositionMs(musicState));
+        if (musicState.playing) widget.play?.();
+        addToast?.("joined room music", "🎧");
+      } catch (_) {
+        addToast?.("tap join music again after the player loads", "🎧");
+      }
+    }, 300);
+  };
+
+  const loadTrack = async (urlOverride = null) => {
+    const url = cleanUrl(urlOverride || trackLink);
+    if (!isSoundCloudUrl(url)) {
+      addToast?.("paste a SoundCloud link", "⚠️");
+      return;
+    }
+    const next = {
+      ...emptyMusicState,
+      url,
+      title: displayTrack(url),
+      dj: currentPlayer,
+      djName: player?.name || currentPlayer,
+      playing: false,
+      positionMs: 0,
+      updatedAt: new Date().toISOString(),
+      queue: queue.filter(q => q.url !== url),
+    };
+    await updateMusicState(next);
+    setTrackLink("");
+    addToast?.("SoundCloud track loaded", "🎧");
+  };
+
+  const getWidgetPosition = async () => new Promise(async (resolve) => {
+    try {
+      const widget = await getWidget();
+      if (!widget?.getPosition) return resolve(getLivePositionMs(musicState));
+      widget.getPosition(pos => resolve(Number(pos) || 0));
+    } catch (_) {
+      resolve(getLivePositionMs(musicState));
+    }
+  });
+
+  const togglePlay = async () => {
+    if (!isDj || !hasTrack) return;
+    const pos = joinedMusic ? await getWidgetPosition() : getLivePositionMs(musicState);
+    const nextPlaying = !musicState.playing;
+    const next = {
+      ...musicState,
+      playing: nextPlaying,
+      positionMs: pos,
+      updatedAt: new Date().toISOString(),
+      dj: currentPlayer,
+      djName: player?.name || currentPlayer,
+    };
+    await updateMusicState(next);
+    if (joinedMusic) {
+      const widget = await getWidget();
+      if (nextPlaying) widget?.play?.();
+      else widget?.pause?.();
+    }
+  };
+
+  const stopMusic = async () => {
+    if (!isDj) return;
+    const next = { ...musicState, playing:false, positionMs:0, updatedAt:new Date().toISOString() };
+    await updateMusicState(next);
+    try { widgetRef.current?.pause?.(); widgetRef.current?.seekTo?.(0); } catch (_) {}
+  };
+
+  const addRequest = async () => {
+    const url = cleanUrl(requestLink);
+    if (!isSoundCloudUrl(url)) {
+      addToast?.("request needs a SoundCloud link", "⚠️");
+      return;
+    }
+    const entry = {
+      id: `${Date.now()}_${currentPlayer}`,
+      url,
+      title: displayTrack(url),
+      requestedBy: currentPlayer,
+      requestedByName: player?.name || currentPlayer,
+      ts: new Date().toISOString(),
+    };
+    const next = { ...musicState, queue:[...queue, entry].slice(-12) };
+    await updateMusicState(next);
+    setRequestLink("");
+    addToast?.("track added to queue", "🎧");
+  };
+
+  const playQueued = async (entry) => {
+    if (!isDj || !entry?.url) return;
+    await loadTrack(entry.url);
+  };
+
+  const removeQueued = async (entryId) => {
+    if (!isDj) return;
+    const next = { ...musicState, queue:queue.filter(q => q.id !== entryId) };
+    await updateMusicState(next);
+  };
+
+  return (
+    <div style={{background:"linear-gradient(135deg,#141018,#080A12)",border:"1px solid rgba(255,85,0,0.22)",borderRadius:16,padding:16,marginTop:14,boxShadow:"0 0 24px rgba(255,85,0,0.08)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:12}}>
+        <div>
+          <div style={{fontSize:11,color:"#FF5500",fontWeight:900,letterSpacing:.9}}>ROOM MUSIC</div>
+          <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>DJ BOOTH</div>
+        </div>
+        <div style={{fontSize:10,color:isDj?"#B8FF4D":"#FF5500",fontWeight:900,background:isDj?"rgba(184,255,77,0.1)":"rgba(255,85,0,0.1)",border:`1px solid ${isDj?"rgba(184,255,77,0.2)":"rgba(255,85,0,0.25)"}`,borderRadius:99,padding:"6px 9px",whiteSpace:"nowrap"}}>
+          DJ: {musicState?.djName || player?.name || "open"}
+        </div>
+      </div>
+
+      {hasTrack ? (
+        <>
+          <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
+            <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
+            <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
+            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · tap join music once on your phone</div>
+          </div>
+          <div aria-hidden="true" style={{position:"absolute",left:-9999,top:-9999,width:1,height:1,overflow:"hidden",opacity:0,pointerEvents:"none"}}>
+            <iframe
+              ref={iframeRef}
+              title="SoundCloud room music hidden player"
+              width="100%"
+              height="118"
+              scrolling="no"
+              frameBorder="no"
+              allow="autoplay"
+              src={embedSrc}
+              tabIndex={-1}
+              style={{border:"none",width:1,height:1,opacity:0,pointerEvents:"none"}}
+            />
+          </div>
+          {!joinedMusic && (
+            <button onClick={joinMusic} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:10}}>
+              🎧 join music
+            </button>
+          )}
+        </>
+      ) : (
+        <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:13,fontSize:12,color:"#8B92A8",textAlign:"center",marginBottom:10}}>
+          no SoundCloud track loaded yet
+        </div>
+      )}
+
+      <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:"11px 12px",marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:7}}>
+          <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,textTransform:"uppercase"}}>music volume</div>
+          <div style={{fontSize:10,color:"#FF5500",fontWeight:900}}>{musicVolume}%</div>
+        </div>
+        <input type="range" min="0" max="100" value={musicVolume} onChange={(e)=>setMusicVolume(Number(e.target.value))} style={{width:"100%",accentColor:"#FF5500"}} />
+      </div>
+
+      {isDj && (
+        <div style={{display:"flex",gap:8,marginBottom:10}}>
+          <input
+            value={trackLink}
+            onChange={(e)=>setTrackLink(e.target.value)}
+            onKeyDown={(e)=>e.key === "Enter" && loadTrack()}
+            placeholder="DJ paste SoundCloud link..."
+            style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 12px",fontSize:12,color:"#E8ECF4",minWidth:0}}
+          />
+          <button onClick={()=>loadTrack()} className="bb-pressable" style={{background:"#FF5500",border:"none",borderRadius:11,padding:"0 12px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>load</button>
+        </div>
+      )}
+
+      {hasTrack && isDj && (
+        <div style={{display:"flex",gap:8,marginBottom:12}}>
+          <button onClick={togglePlay} className="bb-pressable" style={{flex:1,background:musicState.playing?"rgba(255,85,0,0.13)":"rgba(184,255,77,0.13)",border:`1px solid ${musicState.playing?"rgba(255,85,0,0.35)":"rgba(184,255,77,0.35)"}`,borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:musicState.playing?"#FF5500":"#B8FF4D",cursor:"pointer"}}>
+            {musicState.playing ? "pause" : "play"}
+          </button>
+          <button onClick={()=>queue[0] ? playQueued(queue[0]) : addToast?.("queue is empty", "🎧")} className="bb-pressable" style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>next</button>
+          <button onClick={stopMusic} className="bb-pressable" style={{flex:1,background:"rgba(255,92,138,0.09)",border:"1px solid rgba(255,92,138,0.22)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>stop</button>
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:8,marginBottom:10}}>
+        <input
+          value={requestLink}
+          onChange={(e)=>setRequestLink(e.target.value)}
+          onKeyDown={(e)=>e.key === "Enter" && addRequest()}
+          placeholder="request SoundCloud link..."
+          style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 12px",fontSize:12,color:"#E8ECF4",minWidth:0}}
+        />
+        <button onClick={addRequest} className="bb-pressable" style={{background:"rgba(255,85,0,0.12)",border:"1px solid rgba(255,85,0,0.28)",borderRadius:11,padding:"0 12px",fontSize:11,fontWeight:900,color:"#FF5500",cursor:"pointer"}}>queue</button>
+      </div>
+
+      {queue.length ? (
+        <div>
+          <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:7}}>QUEUE</div>
+          {queue.slice(0,5).map((entry, idx) => (
+            <div key={entry.id} style={{display:"flex",alignItems:"center",gap:8,background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:11,padding:"9px 10px",marginBottom:7}}>
+              <div style={{fontSize:10,color:"#FF5500",fontWeight:900,width:18}}>{idx+1}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11.5,color:"#E8ECF4",fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{entry.title || displayTrack(entry.url)}</div>
+                <div style={{fontSize:9.5,color:"#8B92A8",marginTop:2}}>requested by {entry.requestedByName || entry.requestedBy}</div>
+              </div>
+              {isDj && (
+                <>
+                  <button onClick={()=>playQueued(entry)} className="bb-pressable" style={{background:"rgba(184,255,77,0.12)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:9,padding:"6px 8px",fontSize:10,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>play</button>
+                  <button onClick={()=>removeQueued(entry.id)} className="bb-pressable" style={{background:"none",border:"none",color:"#FF5C8A",fontSize:14,cursor:"pointer"}}>×</button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{fontSize:11,color:"#4A5066",textAlign:"center",padding:"4px 0 2px"}}>no requests queued</div>
+      )}
     </div>
   );
 }
@@ -6830,7 +7212,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "credit_requests"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "room_music", "credit_requests"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -10320,6 +10702,7 @@ const TABS=[
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
       <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce}/>
       <TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/>
+      <RoomMusicPlayer currentPlayer={currentPlayer} addToast={addToast}/>
     </div>
   </div>
 )}    
