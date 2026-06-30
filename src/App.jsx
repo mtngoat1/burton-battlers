@@ -17,6 +17,7 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 // APP61_PROPS_MULTIVIEW_SCORE_BOTTOM_FILL_PATCH
 // APP62_WIZARD_SOUNDBOARD_EQUIP_FIX
 // APP58_PROP_BET_PRE_MATCH_LOCK_PTS_NOTIFICATION_PATCH
+// APP63_PARSE_SCORE_SHOP_PROPS_NOTIFICATION_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -6399,12 +6400,26 @@ function propBetWasPlacedBeforeGameStarted(bet, game) {
   return placed <= lockTime;
 }
 
+function estimateRocketLeagueScoreFromStats({ goals = 0, assists = 0, saves = 0, shots = 0, demos = 0 } = {}) {
+  // Parse/Tracker sometimes omits the player score stat even when it returns the box-score stats.
+  // This fallback keeps score props usable. It is an estimate from visible RL scoring values, not hidden events like clears/centers.
+  const g = Number(goals) || 0;
+  const a = Number(assists) || 0;
+  const s = Number(saves) || 0;
+  const sh = Number(shots) || 0;
+  const d = Number(demos) || 0;
+  return Math.max(0, Math.round(g * 100 + a * 50 + s * 50 + sh * 10 + d * 0));
+}
+
 function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
   const goals = getMatchStatValue(match, "goals");
   const assists = getMatchStatValue(match, "assists");
   const saves = getMatchStatValue(match, "saves");
   const shots = getMatchStatValue(match, "shots");
-  const score = getMatchStatValue(match, "score");
+  const demos = getMatchStatValue(match, "demos") || 0;
+  const parsedScore = getMatchStatValue(match, "score");
+  const estimatedScore = estimateRocketLeagueScoreFromStats({ goals, assists, saves, shots, demos });
+  const score = Number(parsedScore) > 0 ? Number(parsedScore) : estimatedScore;
   const teamScore = getMatchTeamScoreInfo(match, player);
   const matchStart = getMatchStartInfo(match);
   const detectedOurScore = Number.isFinite(teamScore.ourScore) ? teamScore.ourScore : null;
@@ -6425,8 +6440,9 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     assists: Number(assists) || 0,
     saves: Number(saves) || 0,
     shots: Number(shots) || 0,
-    demos: getMatchStatValue(match, "demos") || 0,
+    demos,
     score: Number(score) || 0,
+    scoreSource: Number(parsedScore) > 0 ? "parse" : "estimated_from_stats",
     ourScore: Number.isFinite(detectedOurScore) ? detectedOurScore : (Number(goals) || 0),
     theirScore: Number.isFinite(detectedTheirScore) ? detectedTheirScore : null,
     parseDetectedOurScore: detectedOurScore,
@@ -6438,7 +6454,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     ratingDelta: getMatchRatingDelta(match),
     source: "parse_sessions",
     syncedAt: new Date().toISOString(),
-    parseScoreDebug: { scoreField: Number(score) || 0, hasOpponentScore: Number.isFinite(detectedTheirScore) },
+    parseScoreDebug: { parsedScore: Number(parsedScore) || 0, estimatedScore, savedScore: Number(score) || 0, hasOpponentScore: Number.isFinite(detectedTheirScore) },
   };
 }
 
@@ -7401,10 +7417,10 @@ matrix: {
 };
 
 const FLOWER_TYPES = [
-  { id: "rose",       emoji: "🌹", label: "Rose",       xp: 20, desc: "legendary play" },
-  { id: "sunflower",  emoji: "🌻", label: "Sunflower",  xp: 15, desc: "great assist" },
-  { id: "tulip",      emoji: "🌷", label: "Tulip",      xp: 10, desc: "nice save" },
-  { id: "daisy",      emoji: "🌼", label: "Daisy",      xp: 5,  desc: "solid effort" },
+  { id: "rose",       emoji: "🌹", label: "Rose",       xp: 100, desc: "legendary play" },
+  { id: "sunflower",  emoji: "🌻", label: "Sunflower",  xp: 75,  desc: "great assist" },
+  { id: "tulip",      emoji: "🌷", label: "Tulip",      xp: 50,  desc: "nice save" },
+  { id: "daisy",      emoji: "🌼", label: "Daisy",      xp: 25,  desc: "solid effort" },
 ];
 
 function getDailyShopSeed() {
@@ -7436,7 +7452,30 @@ function getTimeUntilNextShop() {
   return next.getTime() - now.getTime();
 }
 
-const SHOP_ITEMS = [
+
+function getNormalizedShopCost(item, idx = 0) {
+  const type = item?.type || "other";
+  const ranges = {
+    color: [1500, 2600],
+    sound: [1800, 4200],
+    icon: [2200, 5200],
+    title: [2500, 6500],
+    border: [3500, 7500],
+    background: [5500, 10000],
+    other: [1500, 10000],
+  };
+  const [min, max] = ranges[type] || ranges.other;
+  const seed = String(item?.id || idx).split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0) + idx * 97;
+  const step = 250;
+  const raw = min + (seed % (max - min + 1));
+  return Math.max(1500, Math.min(10000, Math.round(raw / step) * step));
+}
+
+function withNormalizedShopPrice(item, idx) {
+  return { ...item, cost: getNormalizedShopCost(item, idx) };
+}
+
+const SHOP_ITEMS_RAW = [
   // colors
   { id:"lime_name",   label:"lime",     desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
   { id:"pink_name",   label:"pink",     desc:"hot pink name glow",     cost:50,  type:"color", value:"#FF61C1", emoji:"🩷" },
@@ -7483,8 +7522,8 @@ const SHOP_ITEMS = [
 
 
   // soundboard sounds
-  { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:120, type:"sound", value:"sb_airhorn", file:"horn.mp3", emoji:"📣" },
-  { id:"sb_sheesh",  label:"cold as ice", desc:"clean shot reaction", cost:120, type:"sound", value:"sb_sheesh", file:"cold as ice.mp3", emoji:"🥶" },
+  { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:1800, type:"sound", value:"sb_airhorn", file:"horn.mp3", emoji:"📣" },
+  { id:"sb_sheesh",  label:"cold as ice", desc:"clean shot reaction", cost:1800, type:"sound", value:"sb_sheesh", file:"cold as ice.mp3", emoji:"🥶" },
   { id:"sb_nice",    label:"go bills", desc:"burton's classic catchphrase", cost:500, type:"sound", value:"sb_nice", file:"go bills.mp3", emoji:"✅" },
   { id:"sb_bruh",    label:"jordan never did that move", desc:"pick n roll", cost:200, type:"sound", value:"sb_bruh", file:"jordan never did that move.mp3", emoji:"🏀" },
   { id:"sb_goal",    label:"what a save", desc:"announcer", cost:150, type:"sound", value:"sb_goal", file:"what-a-save-rocketleague.mp3", emoji:"🚨" },
@@ -7492,7 +7531,7 @@ const SHOP_ITEMS = [
   { id:"sb_buzzer",  label:"fart", desc:"tiny toot", cost:150, type:"sound", value:"sb_buzzer", file:"fart.mp3", emoji:"💨" },
   { id:"sb_pop",     label:"bottle", desc:"fresh brewski", cost:70, type:"sound", value:"sb_pop", file:"bottle.mp3", emoji:"🍾" },
   // added user soundboard sounds
-  { id:"sb_fart_echo", label:"fart echo", desc:"echo fart sound", cost:120, type:"sound", value:"sb_fart_echo", file:"fart-echo.mp3", emoji:"🔊" },
+  { id:"sb_fart_echo", label:"fart echo", desc:"echo fart sound", cost:1800, type:"sound", value:"sb_fart_echo", file:"fart-echo.mp3", emoji:"🔊" },
   { id:"sb_wizard", label:"you're a wizard", desc:"wizard callout", cost:150, type:"sound", value:"sb_wizard", file:"your a wizard.mp3", emoji:"🧙" },
   { id:"sb_family_guy", label:"family guy", desc:"clip sound", cost:150, type:"sound", value:"sb_family_guy", file:"family-guy.mp3", emoji:"📺" },
   { id:"sb_spongebob_laugh", label:"spongebob laugh", desc:"laugh clip", cost:150, type:"sound", value:"sb_spongebob_laugh", file:"spongebob-laugh.mp3", emoji:"🧽" },
@@ -7532,6 +7571,7 @@ const SHOP_ITEMS = [
   { id:"bg_custom",    label:"Ultimate BG",  emoji:"🖼️", desc:"upload your own image",           cost:5000, type:"background", value:"custom" },
 
 ];
+const SHOP_ITEMS = SHOP_ITEMS_RAW.map(withNormalizedShopPrice);
 
 const BACKGROUND_ITEM_IDS = SHOP_ITEMS.filter(i => i.type === "background").map(i => i.id);
 function getBackgroundPreview(value) {
@@ -7848,17 +7888,17 @@ function getPresenceBorderVisualStyle(points, playerId, online = false) {
 
 // ===================== Voice Soundboard =====================
 // To add more buyable shop sounds later, add rows here and upload the matching files to public/soundboard.
-// Example row: { id:"sb_custom_name", label:"custom name", desc:"shop sound", cost:120, type:"sound", value:"sb_custom_name", file:"exact file name.mp3", emoji:"🔊" },
+// Example row: { id:"sb_custom_name", label:"custom name", desc:"shop sound", cost:1800, type:"sound", value:"sb_custom_name", file:"exact file name.mp3", emoji:"🔊" },
 const SOUNDBOARD_SOUNDS = [
-  { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:120, type:"sound", value:"sb_airhorn", file:"horn.mp3", emoji:"📣" },
-  { id:"sb_sheesh", label:"cold as ice", desc:"clean shot reaction", cost:120, type:"sound", value:"sb_sheesh", file:"cold as ice.mp3", emoji:"🥶" },
+  { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:1800, type:"sound", value:"sb_airhorn", file:"horn.mp3", emoji:"📣" },
+  { id:"sb_sheesh", label:"cold as ice", desc:"clean shot reaction", cost:1800, type:"sound", value:"sb_sheesh", file:"cold as ice.mp3", emoji:"🥶" },
   { id:"sb_nice", label:"go bills", desc:"burton's classic catchphrase", cost:500, type:"sound", value:"sb_nice", file:"go bills.mp3", emoji:"✅" },
   { id:"sb_bruh", label:"jordan never did that move", desc:"pick n roll", cost:200, type:"sound", value:"sb_bruh", file:"jordan never did that move.mp3", emoji:"🏀" },
   { id:"sb_goal", label:"what a save", desc:"announcer", cost:150, type:"sound", value:"sb_goal", file:"what-a-save-rocketleague.mp3", emoji:"🚨" },
   { id:"sb_laugh", label:"demonic laugh", desc:"the curse", cost:110, type:"sound", value:"sb_laugh", file:"demonic laugh.mp3", emoji:"😈" },
   { id:"sb_buzzer", label:"fart", desc:"tiny toot", cost:150, type:"sound", value:"sb_buzzer", file:"fart.mp3", emoji:"💨" },
   { id:"sb_pop", label:"bottle", desc:"fresh brewski", cost:70, type:"sound", value:"sb_pop", file:"bottle.mp3", emoji:"🍾" },
-  { id:"sb_fart_echo", label:"fart echo", desc:"echo fart sound", cost:120, type:"sound", value:"sb_fart_echo", file:"fart-echo.mp3", emoji:"🔊" },
+  { id:"sb_fart_echo", label:"fart echo", desc:"echo fart sound", cost:1800, type:"sound", value:"sb_fart_echo", file:"fart-echo.mp3", emoji:"🔊" },
   { id:"sb_wizard", label:"you're a wizard", desc:"wizard callout", cost:150, type:"sound", value:"sb_wizard", file:"your a wizard.mp3", emoji:"🧙" },
   { id:"sb_family_guy", label:"family guy", desc:"clip sound", cost:150, type:"sound", value:"sb_family_guy", file:"family-guy.mp3", emoji:"📺" },
   { id:"sb_spongebob_laugh", label:"spongebob laugh", desc:"laugh clip", cost:150, type:"sound", value:"sb_spongebob_laugh", file:"spongebob-laugh.mp3", emoji:"🧽" },
@@ -9488,6 +9528,10 @@ function activityToPush(entry) {
     "🔔";
   const fromName = entry?.fromName || "someone";
   const actionText = entry?.text || "sent you a notification";
+  if (entry?.type === "prop") {
+    const message = entry?.message ? ` — ${String(entry.message).slice(0, 120)}` : "";
+    return { icon, body: `${fromName} ${actionText}${message}` };
+  }
   const message = entry?.message ? ` — "${String(entry.message).slice(0, 90)}"` : "";
   return { icon, body: `${fromName} ${actionText}${message}` };
 }
@@ -10708,8 +10752,8 @@ const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusS
   const [spinResult, setSpinResult] = useState(null);
   const [rotation, setRotation] = useState(0);
   const [spinStartPoints, setSpinStartPoints] = useState(null);
-const [propWager, setPropWager] = useState(10);
-const PROP_WAGER_PRESETS = [10, 30, 50, 75];
+const [propWager, setPropWager] = useState(25);
+const PROP_WAGER_PRESETS = [25, 50, 75, 100];
 const [selectedProp, setSelectedProp] = useState(null);
 const [propSide, setPropSide] = useState(null);
 const [propPlayerFilter, setPropPlayerFilter] = useState(() => PLAYERS.find(p => p.id !== currentPlayer)?.id || PLAYERS[0]?.id || "p1");
@@ -10962,7 +11006,7 @@ const spinWheel = async () => {
   };
 
 const placeBet = async (chosenLine) => {
-  const safePropWager = clampWager(propWager, 10);
+  const safePropWager = clampWager(propWager, 25);
   if (!selectedProp || !propSide || safePropWager < 1 || myPoints < safePropWager) return;
 
   const card = props.find(p => p.id === selectedProp);
@@ -11005,7 +11049,7 @@ const placeBet = async (chosenLine) => {
   // close the sticky wager tray immediately after tapping place bet
   setSelectedProp(null);
   setPropSide(null);
-  setPropWager(10);
+  setPropWager(25);
 
   const newPts = myPoints - safePropWager;
   const upd = { ...points, [currentPlayer]: newPts };
@@ -11020,8 +11064,8 @@ const placeBet = async (chosenLine) => {
     to: card.playerId,
     type: "prop",
     fromName: PLAYERS.find(p => p.id === currentPlayer)?.name || "someone",
-    text: `sent you ${card.mode || "3v3"} props: ${propSide.toUpperCase()} ${line} ${card.fieldLabel || card.field}`,
-    message: `${card.targetText || "next logged game"} · odds ${odds.american} · to win ${payout} pts`
+    text: `sent you ${card.mode || "3v3"} props`,
+    message: `${propSide.toUpperCase()} ${line} ${card.fieldLabel || card.field} to win ${payout} pts`
   });
 
 };
