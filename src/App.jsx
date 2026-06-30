@@ -2359,7 +2359,10 @@ const speakingUntilRef = useRef({});
 const activeSpeakerIdsRef = useRef([]);
 const speakingAnalyzersRef = useRef({});
 const audioContextRef = useRef(null);
-const [voiceVolume, setVoiceVolume] = useState(100);
+const [voiceVolumes, setVoiceVolumes] = useState(() => Object.fromEntries(PLAYERS.map(p => [p.id, 100])));
+const voiceVolumesRef = useRef(voiceVolumes);
+const playerAudioRefs = useRef({});
+const playerTrackIdsRef = useRef({});
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
   const writeVoicePresenceNow = async ({ updateLocal = true } = {}) => {
@@ -2465,30 +2468,78 @@ const [voiceVolume, setVoiceVolume] = useState(100);
   };
 
   const playPersistentVoiceAudio = () => {
+    // Legacy group-audio fallback. Per-player <audio> elements below handle real teammate volume control.
     const audio = getPersistentRemoteAudio();
     const stream = getRemoteStream();
     if (!audio || !stream) return;
     audio.srcObject = stream;
+    audio.muted = true;
+    audio.volume = 0;
+  };
+
+  const getVoicePlayerIdFromParticipant = (dp) => {
+    const name = String(dp?.user_name || dp?.userName || dp?.name || "").trim();
+    return PLAYERS.find(p => p.name === name)?.id || null;
+  };
+
+  const getPersistentPlayerAudio = (pid) => {
+    if (!pid || typeof window === "undefined" || typeof document === "undefined") return null;
+    if (!window.__bbVoicePlayerAudio) window.__bbVoicePlayerAudio = {};
+    let audio = window.__bbVoicePlayerAudio[pid];
+    if (!audio) {
+      audio = document.createElement("audio");
+      audio.autoplay = true;
+      audio.playsInline = true;
+      audio.muted = false;
+      audio.dataset.bbVoicePlayer = pid;
+      audio.style.display = "none";
+      document.body.appendChild(audio);
+      window.__bbVoicePlayerAudio[pid] = audio;
+    }
+    playerAudioRefs.current[pid] = audio;
+    return audio;
+  };
+
+  const applyPlayerVoiceVolume = (pid, value) => {
+    const audio = playerAudioRefs.current[pid] || (typeof window !== "undefined" ? window.__bbVoicePlayerAudio?.[pid] : null);
+    if (!audio) return;
+    audio.volume = Math.max(0, Math.min(1, Number(value ?? 100) / 100));
+  };
+
+  const addRemoteVoiceTrack = (track, participant) => {
+    if (!track || track.kind !== "audio" || participant?.local) return;
+    const pid = getVoicePlayerIdFromParticipant(participant);
+    if (!pid) return;
+
+    const audio = getPersistentPlayerAudio(pid);
+    if (!audio || typeof MediaStream === "undefined") return;
+
+    if (playerTrackIdsRef.current[pid] !== track.id || !audio.srcObject) {
+      audio.srcObject = new MediaStream([track]);
+      playerTrackIdsRef.current[pid] = track.id;
+    }
+
     audio.muted = false;
-    audio.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
+    applyPlayerVoiceVolume(pid, voiceVolumesRef.current?.[pid] ?? 100);
     audio.play?.().catch(() => {});
   };
 
-  const addRemoteVoiceTrack = (track) => {
-    if (!track || track.kind !== "audio") return;
-    const stream = getRemoteStream();
-    if (!stream) return;
-    if (!stream.getTracks().some(t => t.id === track.id)) {
-      stream.addTrack(track);
+  const removeRemoteVoiceTrack = (participant) => {
+    const pid = getVoicePlayerIdFromParticipant(participant);
+    if (!pid) return;
+    const audio = playerAudioRefs.current[pid] || (typeof window !== "undefined" ? window.__bbVoicePlayerAudio?.[pid] : null);
+    if (audio) {
+      try { audio.pause?.(); } catch (_) {}
+      audio.srcObject = null;
     }
-    playPersistentVoiceAudio();
+    delete playerTrackIdsRef.current[pid];
   };
 
   const syncRemoteAudioFromParticipants = (allParticipants = participants) => {
     Object.values(allParticipants || {}).forEach(dp => {
       if (dp?.local) return;
       const track = dp?.tracks?.audio?.persistentTrack || dp?.tracks?.audio?.track;
-      if (track) addRemoteVoiceTrack(track);
+      if (track) addRemoteVoiceTrack(track, dp);
     });
   };
 
@@ -2679,15 +2730,19 @@ window.__bbDailyCallObject = co;
   startSpeakingAnalyzer(e.participant, e.track);
   if (e.participant?.local) return;
 
-  addRemoteVoiceTrack(e.track);
+  addRemoteVoiceTrack(e.track, e.participant);
 });
     co.on("track-stopped", (e) => {
-  if (e.track?.kind === "audio") stopParticipantAnalyzers(e.participant);
+  if (e.track?.kind === "audio") {
+    stopParticipantAnalyzers(e.participant);
+    removeRemoteVoiceTrack(e.participant);
+  }
 });
     
     
       co.on("participant-left", (e) => {
         stopParticipantAnalyzers(e.participant);
+        removeRemoteVoiceTrack(e.participant);
         setParticipants(prev => {
           const next = { ...prev };
           delete next[e.participant.session_id];
@@ -2807,6 +2862,11 @@ setLoading(false);
       remoteStreamRef.current?.getTracks?.().forEach(t => { try { t.stop?.(); } catch (_) {} });
       remoteStreamRef.current = null;
       if (typeof window !== "undefined") delete window.__bbVoiceRemoteStream;
+      Object.values(playerAudioRefs.current || {}).forEach(audio => {
+        try { audio.pause?.(); } catch (_) {}
+        try { audio.srcObject = null; } catch (_) {}
+      });
+      playerTrackIdsRef.current = {};
     } catch (_) {}
   };
 
@@ -2877,10 +2937,19 @@ setLoading(false);
   const speakingPlayer = speakingParticipant ? getPlayerForName(speakingParticipant.user_name) : null;
 
   useEffect(() => {
-    const audio = getPersistentRemoteAudio();
-    if (!audio) return;
-    audio.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
-  }, [voiceVolume]);
+    voiceVolumesRef.current = voiceVolumes;
+    Object.entries(voiceVolumes || {}).forEach(([pid, value]) => applyPlayerVoiceVolume(pid, value));
+  }, [voiceVolumes]);
+
+  const setPlayerVoiceVolume = (pid, value) => {
+    const nextValue = Math.max(0, Math.min(100, Number(value) || 0));
+    setVoiceVolumes(prev => {
+      const next = { ...(prev || {}), [pid]: nextValue };
+      voiceVolumesRef.current = next;
+      return next;
+    });
+    applyPlayerVoiceVolume(pid, nextValue);
+  };
 
   if (!joined) {
     return (
@@ -2920,6 +2989,7 @@ setLoading(false);
         <button
 onClick={async () => {
   if (loading || joined) return;
+  try { window.dispatchEvent(new CustomEvent("bb-voice-join-requested", { detail:{ playerId: currentPlayer } })); } catch (_) {}
   await joinRoom();
 }}
           disabled={loading}
@@ -2944,7 +3014,7 @@ onClick={async () => {
               <div style={{width:14,height:14,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.2)",borderTopColor:"#fff",animation:"spin .7s linear infinite"}}/>
               connecting…
             </>
-          ) : "🎙️ join voice room"}
+          ) : "🎙️ join voice + music"}
         </button>
         <div style={{fontSize:10,color:"#3A4256",textAlign:"center",marginTop:8}}>
           microphone required · audio only · no video
@@ -3060,18 +3130,28 @@ onClick={async () => {
       </div>
 
       <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:"11px 12px",marginBottom:12}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:7}}>
-          <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,textTransform:"uppercase"}}>teammate voice volume</div>
-          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900}}>{voiceVolume}%</div>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={voiceVolume}
-          onChange={(e)=>setVoiceVolume(Number(e.target.value))}
-          style={{width:"100%",accentColor:"#B8FF4D"}}
-        />
+        <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,textTransform:"uppercase",marginBottom:9}}>teammate voice volumes</div>
+        {PLAYERS.filter(p => p.id !== currentPlayer).map(p => {
+          const dailyParticipant = participantList.find(dp => dp.user_name === p.name);
+          const isConnected = !!dailyParticipant;
+          const value = voiceVolumes?.[p.id] ?? 100;
+          return (
+            <div key={p.id} style={{marginBottom:8,opacity:isConnected?1:.62}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:5}}>
+                <div style={{fontSize:10,color:isConnected?p.color:"#4A5066",fontWeight:900}}>{p.name}</div>
+                <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900}}>{value}%</div>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="100"
+                value={value}
+                onChange={(e)=>setPlayerVoiceVolume(p.id, e.target.value)}
+                style={{width:"100%",accentColor:p.color}}
+              />
+            </div>
+          );
+        })}
       </div>
 
       {/* Controls */}
@@ -3261,6 +3341,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [musicVolume, setMusicVolume] = useState(42);
   const [playerReady, setPlayerReady] = useState(false);
+  const musicVolumeRef = useRef(42);
   const iframeRef = useRef(null);
   const widgetRef = useRef(null);
   const lastAppliedRef = useRef("");
@@ -3355,10 +3436,22 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     if (!iframeRef.current) return null;
     if (!widgetRef.current) {
       widgetRef.current = Widget(iframeRef.current);
-      widgetRef.current.bind?.(Widget.Events.READY, () => setPlayerReady(true));
+      widgetRef.current.bind?.(Widget.Events.READY, () => {
+        setPlayerReady(true);
+        try { widgetRef.current?.setVolume?.(Number(musicVolumeRef.current) || 0); } catch (_) {}
+      });
       widgetRef.current.bind?.(Widget.Events.ERROR, () => addToast?.("that SoundCloud track can't be embedded", "⚠️"));
     }
     return widgetRef.current;
+  };
+
+  const applyMusicVolume = async (value = musicVolumeRef.current) => {
+    const vol = Math.max(0, Math.min(100, Number(value) || 0));
+    musicVolumeRef.current = vol;
+    try {
+      const widget = widgetRef.current || await getWidget();
+      widget?.setVolume?.(vol);
+    } catch (_) {}
   };
 
   const updateMusicState = async (next) => {
@@ -3388,14 +3481,11 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   useEffect(() => {
     if (!hasTrack || !iframeRef.current) return;
     let cancelled = false;
-    const t = setTimeout(async () => {
-      try {
-        const widget = await getWidget();
-        if (!widget || cancelled) return;
-        widget.setVolume?.(Number(musicVolume) || 0);
-      } catch (_) {}
-    }, 180);
-    return () => { cancelled = true; clearTimeout(t); };
+    const timers = [120, 360, 900].map(delay => setTimeout(async () => {
+      if (cancelled) return;
+      await applyMusicVolume(musicVolumeRef.current);
+    }, delay));
+    return () => { cancelled = true; timers.forEach(clearTimeout); };
   }, [hasTrack, musicState?.url]);
 
   useEffect(() => {
@@ -3408,7 +3498,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       try {
         const widget = await getWidget();
         if (!widget || cancelled) return;
-        widget.setVolume?.(Number(musicVolume) || 0);
+        widget.setVolume?.(Number(musicVolumeRef.current) || 0);
         const target = getLivePositionMs(musicState);
         widget.seekTo?.(target);
         if (musicState.playing) {
@@ -3429,9 +3519,15 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   }, [joinedMusic, hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs]);
 
   useEffect(() => {
-    if (!joinedMusic || !widgetRef.current) return;
-    try { widgetRef.current.setVolume?.(Number(musicVolume) || 0); } catch (_) {}
-  }, [musicVolume, joinedMusic]);
+    musicVolumeRef.current = Math.max(0, Math.min(100, Number(musicVolume) || 0));
+    if (!hasTrack) return;
+    let cancelled = false;
+    const timers = [0, 120, 420, 900].map(delay => setTimeout(async () => {
+      if (cancelled) return;
+      await applyMusicVolume(musicVolumeRef.current);
+    }, delay));
+    return () => { cancelled = true; timers.forEach(clearTimeout); };
+  }, [musicVolume, hasTrack, musicState?.url, joinedMusic]);
 
   useEffect(() => {
     if (!joinedMusic || !hasTrack || !musicState.playing || isDj) return;
@@ -3452,8 +3548,11 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     return () => clearInterval(timer);
   }, [joinedMusic, hasTrack, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicState?.url, isDj]);
 
-  const joinMusic = async ({ silent = false } = {}) => {
-    if (!hasTrack) {
+  const joinMusic = async ({ silent = false, stateOverride = null } = {}) => {
+    const activeState = stateOverride
+      ? { ...emptyMusicState, ...stateOverride, queue:Array.isArray(stateOverride.queue)?stateOverride.queue:[] }
+      : musicState;
+    if (!activeState?.url) {
       if (!silent) addToast?.("load a SoundCloud track first", "🎧");
       return false;
     }
@@ -3461,19 +3560,24 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     try {
       const widget = await getWidget();
       if (!widget) return false;
-      const target = getLivePositionMs(musicState);
-
-      // Mobile Safari/Chrome will not let a remote DJ click start audio on this phone.
-      // This tap unlocks the hidden SoundCloud iframe locally, then room play/pause can follow.
-      if (musicState.playing) {
-        widget.setVolume?.(Number(musicVolume) || 0);
+      const syncToRoom = () => {
+        const target = getLivePositionMs(activeState);
+        widget.setVolume?.(Number(musicVolumeRef.current) || 0);
         widget.seekTo?.(target);
-        widget.play?.();
-        setTimeout(() => { try { widget.seekTo?.(getLivePositionMs(musicState)); } catch (_) {} }, 90);
-        setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
+        if (activeState.playing) widget.play?.();
+        return target;
+      };
+
+      // Re-fire the same local unlock/sync a few times so the SoundCloud iframe catches up without a second tap.
+      if (activeState.playing) {
+        syncToRoom();
+        [120, 380, 850, 1600, 2600].forEach(delay => {
+          setTimeout(() => { try { syncToRoom(); } catch (_) {} }, delay);
+        });
         setAudioUnlocked(true);
         if (!silent) addToast?.(joinedMusic ? "reconnected room music" : "joined room music", "🎧");
       } else {
+        const target = getLivePositionMs(activeState);
         widget.setVolume?.(0);
         widget.seekTo?.(target);
         widget.play?.();
@@ -3482,14 +3586,14 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           try {
             widget.pause?.();
             widget.seekTo?.(target);
-            widget.setVolume?.(Number(musicVolume) || 0);
+            widget.setVolume?.(Number(musicVolumeRef.current) || 0);
           } catch (_) {}
         }, 180);
         if (!silent) addToast?.("room music unlocked — DJ can play now", "🎧");
       }
       return true;
     } catch (_) {
-      if (!silent) addToast?.("tap join music again after the player loads", "🎧");
+      if (!silent) addToast?.("syncing room music…", "🎧");
       return false;
     }
   };
@@ -3506,17 +3610,33 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   };
 
   useEffect(() => {
-    const handleVoiceJoined = () => {
-      if (!hasTrack) return;
-      setTimeout(() => { joinMusic({ silent:true }); }, 250);
+    const handleVoiceMusicJoin = async () => {
+      let latestState = musicState;
+      try {
+        const stored = await storeGet("room_music");
+        if (stored?.url || stored?.queue) {
+          latestState = { ...emptyMusicState, ...stored, queue:Array.isArray(stored.queue)?stored.queue:[] };
+          setMusicState(latestState);
+        }
+      } catch (_) {}
+      if (!latestState?.url) return;
+
+      // Treat the voice button like the old join-music button, then retry so the room locks in without extra taps.
+      [0, 180, 520, 1100, 2000, 3400].forEach(delay => {
+        setTimeout(() => {
+          try { joinMusic({ silent:true, stateOverride:latestState }); } catch (_) {}
+        }, delay);
+      });
     };
     const handleVoiceLeft = () => {
       leaveMusic({ silent:true });
     };
-    window.addEventListener("bb-voice-joined", handleVoiceJoined);
+    window.addEventListener("bb-voice-join-requested", handleVoiceMusicJoin);
+    window.addEventListener("bb-voice-joined", handleVoiceMusicJoin);
     window.addEventListener("bb-voice-left", handleVoiceLeft);
     return () => {
-      window.removeEventListener("bb-voice-joined", handleVoiceJoined);
+      window.removeEventListener("bb-voice-join-requested", handleVoiceMusicJoin);
+      window.removeEventListener("bb-voice-joined", handleVoiceMusicJoin);
       window.removeEventListener("bb-voice-left", handleVoiceLeft);
     };
   }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicVolume, joinedMusic]);
@@ -3669,7 +3789,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
             <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
             <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
-            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · join music also reconnects audio</div>
+            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · voice join reconnects audio</div>
           </div>
           <div aria-hidden="true" style={{position:"fixed",left:0,bottom:0,width:1,height:1,overflow:"hidden",opacity:0.01,pointerEvents:"none",transform:"scale(0.01)",transformOrigin:"bottom left"}}>
             <iframe
@@ -3685,9 +3805,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
               style={{border:"none",width:1,height:1,opacity:0.01,pointerEvents:"none"}}
             />
           </div>
-          <button onClick={()=>joinMusic()} className="bb-pressable bb-glow-lime" style={{width:"100%",background:joinedMusic?"rgba(184,255,77,0.12)":"#B8FF4D",border:joinedMusic?"1px solid rgba(184,255,77,0.32)":"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:joinedMusic?"#B8FF4D":"#06070D",cursor:"pointer",marginBottom:10}}>
-            🎧 join music
-          </button>
+          <div style={{background:joinedMusic?"rgba(184,255,77,0.08)":"rgba(255,85,0,0.08)",border:`1px solid ${joinedMusic?"rgba(184,255,77,0.22)":"rgba(255,85,0,0.18)"}`,borderRadius:12,padding:"10px 12px",fontSize:11,color:joinedMusic?"#B8FF4D":"#FF5500",fontWeight:900,textAlign:"center",marginBottom:10}}>
+            {joinedMusic ? "🎧 music linked to voice room" : "🎧 music auto-links when you join voice"}
+          </div>
         </>
       ) : (
         <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:13,fontSize:12,color:"#8B92A8",textAlign:"center",marginBottom:10}}>
@@ -6522,19 +6642,34 @@ function MusicShare({ currentPlayer, addToast }) {
 
 
 function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed, parseCredits, creditRequests, setCreditRequests }) {
+  const safePresence = presence && typeof presence === "object" ? presence : {};
+  const safePoints = points && typeof points === "object" ? points : {};
+  const safeCompletions = completions && typeof completions === "object" ? completions : {};
+  const safeStats = Array.isArray(stats) ? stats.filter(Boolean) : [];
+  const safePings = Array.isArray(pings) ? pings.filter(Boolean) : [];
+  const safeFlowers = Array.isArray(flowers) ? flowers.filter(Boolean) : [];
+  const safeActivityFeed = Array.isArray(activityFeed) ? activityFeed.filter(Boolean) : [];
+
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [showRecap, setShowRecap] = useState(false);
-const [showFlowers, setShowFlowers] = useState(false);
-const [shopCountdown, setShopCountdown] = useState(getTimeUntilNextShop());
-const dailyShopItems = getDailyShopItems();
+  const [showFlowers, setShowFlowers] = useState(false);
+  const [shopCountdown, setShopCountdown] = useState(getTimeUntilNextShop());
+  const dailyShopItems = getDailyShopItems();
+  const [flowerTarget, setFlowerTarget] = useState(null);
+  const [selectedFlower, setSelectedFlower] = useState(null);
+  const [showPass, setShowPass] = useState(false);
+  const customBgFileRef = useRef(null);
+  const [purchaseReveal, setPurchaseReveal] = useState(null);
+  const [myMode, setMyMode] = useState(null);
+  const [voicePresence, setVoicePresence] = useState({});
 
 useEffect(() => {
   const iv = setInterval(() => setShopCountdown(getTimeUntilNextShop()), 1000);
   return () => clearInterval(iv);
 }, []);
 useEffect(() => {
-  setMyMode(presence?.[currentPlayer + "_mode"] || null);
+  setMyMode(safePresence?.[currentPlayer + "_mode"] || null);
 }, [currentPlayer, presence]);
 
 useEffect(() => {
@@ -6551,33 +6686,25 @@ useEffect(() => {
   return () => { alive = false; clearInterval(timer); unsub?.(); };
 }, []);
 
-const [flowerTarget, setFlowerTarget] = useState(null);
-const [selectedFlower, setSelectedFlower] = useState(null);
-const [showPass, setShowPass] = useState(false);
-const customBgFileRef = useRef(null);
-const [purchaseReveal, setPurchaseReveal] = useState(null);
-const [myMode, setMyMode] = useState(null);
-const [voicePresence, setVoicePresence] = useState({});
-
   const sendPing = async (toId) => {
     const ping = { id: Date.now().toString(), from: currentPlayer, to: toId, ts: new Date().toISOString(), type: "2s" };
-const myExisting = (pings || []).filter(p => p.to === toId);
-const others = (pings || []).filter(p => p.to !== toId);
+const myExisting = safePings.filter(p => p.to === toId);
+const others = safePings.filter(p => p.to !== toId);
 const myUpd = [ping, ...myExisting].slice(0, 2);
 const upd = [...myUpd, ...others];
     setPings(upd);
     await storeSet("pings", upd);
   };
 
-  const myPings = (pings || []).filter(p => p.to === currentPlayer && Date.now() - new Date(p.ts).getTime() < 3600000);
-  const myPoints = points?.[currentPlayer] || 0;
-  const owned = points?.[currentPlayer + "_owned"] || [];
-  const equipped = points?.[currentPlayer + "_equipped"] || {};
+  const myPings = safePings.filter(p => p.to === currentPlayer && Date.now() - new Date(p.ts).getTime() < 3600000);
+  const myPoints = safePoints?.[currentPlayer] || 0;
+  const owned = Array.isArray(safePoints?.[currentPlayer + "_owned"]) ? safePoints[currentPlayer + "_owned"] : [];
+  const equipped = safePoints?.[currentPlayer + "_equipped"] && typeof safePoints[currentPlayer + "_equipped"] === "object" ? safePoints[currentPlayer + "_equipped"] : {};
 
   const buyItem = async (item) => {
     if (myPoints < item.cost) return;
     if (owned.includes(item.id)) return;
-    const upd = { ...points, [currentPlayer]: myPoints - item.cost, [currentPlayer + "_owned"]: [...owned, item.id] };
+    const upd = { ...safePoints, [currentPlayer]: myPoints - item.cost, [currentPlayer + "_owned"]: [...owned, item.id] };
     setPoints(upd); await storeSet("points", upd);
     setPurchaseReveal({ item, opened:false });
   };
@@ -6595,14 +6722,14 @@ const toggleEquip = async (itemId) => {
     ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].forEach(id => { delete newEquipped[id]; });
   }
   if (!equipped[itemId]) newEquipped[itemId] = true;
-  const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
+  const upd = { ...safePoints, [currentPlayer + "_equipped"]: newEquipped };
   setPoints(upd); await storeSet("points", upd);
 };
 
   // Weekly recap
   const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay()); weekStart.setHours(0,0,0,0);
   const weekStats = PLAYERS.map(p => {
-    const pg = stats.filter(g => g.playerId === p.id && new Date(g.ts) >= weekStart);
+    const pg = safeStats.filter(g => g.playerId === p.id && new Date(g.ts) >= weekStart);
     const avg = (f) => pg.length ? (pg.reduce((s,g) => s+(g[f]||0), 0)/pg.length).toFixed(1) : 0;
     return { player: p, games: pg.length, goals: avg("goals"), assists: avg("assists"), saves: avg("saves"), demos: avg("demos"), shots: avg("shots") };
   });
@@ -6612,14 +6739,14 @@ const toggleEquip = async (itemId) => {
   });
 
   // Notifications feed
-const activityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
+const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(e => ({
     id: e.id, ts: e.ts,
     text: `${e.fromName} ${e.text}`,
     icon: e.type==="like" ? "❤️" : e.type==="comment" ? "💬" : e.type==="comment_heart" ? "🩷" : "🔔",
     isActivity: true,
   }));
 
-  const pingNotifs = (pings||[]).filter(p => p.to === currentPlayer).map(p => ({
+  const pingNotifs = safePings.filter(p => p.to === currentPlayer).map(p => ({
     id: p.id, ts: p.ts,
     text: p.type==="flower"
       ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} sent you ${p.emoji} (+${p.xp} xp)`
@@ -6631,8 +6758,8 @@ const activityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).ma
     icon: p.type==="flower" ? "🌸" : p.type==="session" ? "⏱️" : p.type==="coinflip" ? "🪙" : "🎮",
   }));
 
-  const trainingNotifs = Object.entries(completions||{})
-    .filter(([k,v]) => v.status==="approved" && k.endsWith(`__${currentPlayer}`))
+  const trainingNotifs = Object.entries(safeCompletions)
+    .filter(([k,v]) => v?.status==="approved" && k.endsWith(`__${currentPlayer}`))
     .map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt, text:`training approved — +15 pts`, icon:"✅" }));
 
   const notifs = [...activityNotifs, ...pingNotifs, ...trainingNotifs]
@@ -6737,23 +6864,23 @@ const activityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).ma
         {selectedFlower && (() => {
           const flower = FLOWER_TYPES.find(f => f.id === selectedFlower);
         const myXP = passXP?.[currentPlayer] || 0;
-const myPtsCheck = points?.[currentPlayer] || 0;
+const myPtsCheck = safePoints?.[currentPlayer] || 0;
 const canAfford = myPtsCheck >= flower.xp;
           return (
             <button onClick={async () => {
               if (!canAfford) return;
-          const myPts = points?.[currentPlayer] || 0;
+          const myPts = safePoints?.[currentPlayer] || 0;
 const updPts = {
-  ...points,
+  ...safePoints,
   [currentPlayer]: myPts - flower.xp,
-  [flowerTarget]: (points?.[flowerTarget] || 0) + flower.xp,
+  [flowerTarget]: (safePoints?.[flowerTarget] || 0) + flower.xp,
 };
 setPoints(updPts);
 await storeSet("points", updPts);
-              const updFlowers = [...(flowers || []), { id: Date.now().toString(), from: currentPlayer, to: flowerTarget, flower: flower.id, emoji: flower.emoji, xp: flower.xp, ts: new Date().toISOString() }];
+              const updFlowers = [...safeFlowers, { id: Date.now().toString(), from: currentPlayer, to: flowerTarget, flower: flower.id, emoji: flower.emoji, xp: flower.xp, ts: new Date().toISOString() }];
               setFlowers(updFlowers);
               await storeSet("flowers", updFlowers);
-const pingUpd2 = [...(pings||[]), {id:(Date.now()+2).toString(), from:currentPlayer, to:flowerTarget, ts:new Date().toISOString(), type:"flower", emoji:flower.emoji, xp:flower.xp}];
+const pingUpd2 = [...safePings, {id:(Date.now()+2).toString(), from:currentPlayer, to:flowerTarget, ts:new Date().toISOString(), type:"flower", emoji:flower.emoji, xp:flower.xp}];
 setPings(pingUpd2);
 await storeSet("pings", pingUpd2);
               addToast?.(`${flower.emoji} sent ${flower.label} to ${PLAYERS.find(p => p.id === flowerTarget)?.name} — ${flower.xp} pts`, "🌸");
@@ -6766,10 +6893,10 @@ await storeSet("pings", pingUpd2);
         })()}
       </>
     )}
-    {(flowers || []).filter(f => f.to === currentPlayer).length > 0 && (
+    {safeFlowers.filter(f => f.to === currentPlayer).length > 0 && (
       <div style={{ marginTop: 14 }}>
         <div style={{ fontSize: 10, color: "#4A5066", fontWeight: 700, marginBottom: 8 }}>RECEIVED</div>
-        {[...(flowers || [])].filter(f => f.to === currentPlayer).reverse().slice(0, 5).map(f => (
+        {[...safeFlowers].filter(f => f.to === currentPlayer).reverse().slice(0, 5).map(f => (
           <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, fontSize: 12, color: "#8B92A8" }}>
             <span style={{ fontSize: 18 }}>{f.emoji}</span>
             <span style={{ color: "#E8ECF4", fontWeight: 700 }}>{PLAYERS.find(p => p.id === f.from)?.name}</span>
@@ -6819,9 +6946,9 @@ await storeSet("pings", pingUpd2);
                 ) : (
                   <button
                    onClick={async ()=>{
-  const myPoints = points?.[currentPlayer] || 0;
+  const myPoints = safePoints?.[currentPlayer] || 0;
   if (myPoints < PASS_PREMIUM_COST) return;
-  const updPoints = {...points, [currentPlayer]: myPoints - PASS_PREMIUM_COST};
+  const updPoints = {...safePoints, [currentPlayer]: myPoints - PASS_PREMIUM_COST};
   setPoints(updPoints); await storeSet("points", updPoints);
   const updPremium = {...passPremium, [currentPlayer]: true};
   setPassPremium(updPremium); await storeSet("pass_premium", updPremium);
@@ -7010,7 +7137,7 @@ await storeSet("pings", pingUpd2);
   {["1v1","2v2","3v3","free play",null].map(m=>(
     <button key={m??"off"} onClick={async()=>{
       setMyMode(m);
-      const upd={...presence,[currentPlayer+"_mode"]:m,[currentPlayer]:new Date().toISOString()};
+      const upd={...safePresence,[currentPlayer+"_mode"]:m,[currentPlayer]:new Date().toISOString()};
       setPresence(upd); await storeSet("presence",upd);
     }} className="bb-pressable"
     style={{background:myMode===m?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:myMode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
@@ -7023,7 +7150,7 @@ await storeSet("pings", pingUpd2);
       <div style={{...s.sectionLabel,marginBottom:10}}>online now</div>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
    {PLAYERS.map(p=>{
-  const online = isOnline(presence?.[p.id]);
+  const online = isOnline(safePresence?.[p.id]);
   const isMe = p.id === currentPlayer;
   return (
     <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
@@ -7031,7 +7158,7 @@ await storeSet("pings", pingUpd2);
       <div style={{flex:1}}>
         <PlayerNameDisplay playerId={p.id} points={points}/>
         <div style={{fontSize:11,color:"#4A5066",marginTop:1}}>
-          {voicePresence?.[p.id] ? "in voice room" : online ? (presence?.[p.id+"_mode"] ? `🎮 in ${presence[p.id+"_mode"]}` : "online now") : presence?.[p.id] ? `last seen ${fmtRelTime(presence[p.id])}` : "offline"}
+          {voicePresence?.[p.id] ? "in voice room" : online ? (safePresence?.[p.id+"_mode"] ? `🎮 in ${safePresence[p.id+"_mode"]}` : "online now") : safePresence?.[p.id] ? `last seen ${fmtRelTime(safePresence[p.id])}` : "offline"}
         </div>
       </div>
       {!isMe && online && (
