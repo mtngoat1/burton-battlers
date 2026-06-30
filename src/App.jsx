@@ -2536,44 +2536,9 @@ const [voiceVolume, setVoiceVolume] = useState(100);
   };
 
   const startSpeakingAnalyzer = async (dp, track) => {
-    if (!dp || !track || track.kind !== "audio") return;
-    const ids = getParticipantIds(dp);
-    const key = ids[0];
-    if (!key) return;
-    const existing = speakingAnalyzersRef.current[key];
-    if (existing?.trackId === track.id) return;
-    stopSpeakingAnalyzer(key);
-    const ctx = await getAudioContext();
-    if (!ctx) return;
-    try {
-      const stream = new MediaStream([track]);
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 512;
-      analyser.smoothingTimeConstant = 0.72;
-      source.connect(analyser);
-      const data = new Uint8Array(analyser.fftSize);
-      const item = { active:true, source, analyser, data, trackId:track.id };
-      speakingAnalyzersRef.current[key] = item;
-      const tick = () => {
-        if (!item.active || track.readyState === "ended") { stopSpeakingAnalyzer(key); return; }
-        analyser.getByteTimeDomainData(data);
-        let sum = 0;
-        for (let i=0; i<data.length; i++) {
-          const v = (data[i] - 128) / 128;
-          sum += v * v;
-        }
-        const rms = Math.sqrt(sum / data.length);
-        const latest = (callObject || window.__bbDailyCallObject)?.participants?.() || participants;
-        const freshDp = ids.map(id => latest?.[id]).find(Boolean) || dp;
-        if (freshDp?.audio !== false && rms > 0.025) {
-          markSpeaking(freshDp, 700);
-        }
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-      track.addEventListener?.("ended", () => stopSpeakingAnalyzer(key), { once:true });
-    } catch (_) {}
+    // Keep voice audio clean on phones: do not pipe remote mic tracks through WebAudio.
+    // Daily's active-speaker/audio-level events still update the speaking UI without touching the audio track.
+    return;
   };
 
   // Load Daily SDK dynamically
@@ -2895,7 +2860,7 @@ setLoading(false);
         setParticipants(latest);
         setMuted(co.localAudio ? !co.localAudio() : muted);
       } catch (_) {}
-    }, 180);
+    }, 900);
     return () => clearInterval(timer);
   }, [joined, callObject, muted]);
 
@@ -3704,7 +3669,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
             <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
             <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
-            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · tap join/reconnect on each phone</div>
+            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · join music also reconnects audio</div>
           </div>
           <div aria-hidden="true" style={{position:"fixed",left:0,bottom:0,width:1,height:1,overflow:"hidden",opacity:0.01,pointerEvents:"none",transform:"scale(0.01)",transformOrigin:"bottom left"}}>
             <iframe
@@ -3721,7 +3686,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
             />
           </div>
           <button onClick={()=>joinMusic()} className="bb-pressable bb-glow-lime" style={{width:"100%",background:joinedMusic?"rgba(184,255,77,0.12)":"#B8FF4D",border:joinedMusic?"1px solid rgba(184,255,77,0.32)":"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:joinedMusic?"#B8FF4D":"#06070D",cursor:"pointer",marginBottom:10}}>
-            {joinedMusic ? (audioUnlocked ? "🔊 reconnect audio" : "🔊 unlock audio") : "🎧 join music"}
+            🎧 join music
           </button>
         </>
       ) : (
@@ -5943,7 +5908,6 @@ return (
                   );
                 })}
               </div>
-              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Only the selected duo gets pulled from ranked 2v2, so the app knows exactly which chemistry pair to update.</div>
               <button
                 disabled={matchSyncing}
                 onClick={()=>syncLatestTeamMatch("2v2", PLAYERS.filter(p => selectedDuoIds.includes(p.id)))}
@@ -5959,7 +5923,6 @@ return (
             <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(77,158,255,0.18)",borderRadius:18,padding:16,marginBottom:14}}>
               <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:6}}>MY 1V1</div>
               <div style={{fontSize:13,color:"#E8ECF4",fontWeight:800,marginBottom:6}}>{PLAYERS.find(p=>p.id===currentPlayer)?.name}</div>
-              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Anyone can sync their own ranked 1v1 when they are logged in. This uses the least credits because it only pulls one player.</div>
               <button
                 disabled={matchSyncing}
                 onClick={()=>syncLatestTeamMatch("1v1", PLAYERS.filter(p => p.id === currentPlayer))}
@@ -5970,12 +5933,6 @@ return (
               </button>
             </div>
           )}
-
-          <div style={{fontSize:11,color:"#4A5066",lineHeight:1.5}}>
-            The app skips duplicates, checks that multi-player matches happened close together, and saves the result as Game 1, Game 2, Game 3, etc.
-          </div>
-        </div>
-      )}
 
       <button onClick={()=>{ if (currentPlayer !== ADMIN_ID && syncMode === "3v3") setSyncMode("2v2"); setShowSyncMatchModal(true); }} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(184,255,77,0.18)",borderRadius:18,padding:"16px",marginBottom:14,textAlign:"left",cursor:"pointer",boxShadow:"0 12px 26px rgba(0,0,0,0.18)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
@@ -10174,12 +10131,12 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
 
 // ===================== Games Hub Tab =====================
 const GAME_CARDS = [
-  { id:"trivia",   emoji:"🧠", label:"RLCS Trivia",     desc:"5 questions · up to 3x your wager",       color:"#4D9EFF" },
-  { id:"race",     emoji:"🏁", label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
-  { id:"boostgrab",emoji:"⚡", label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
-  { id:"recap",    emoji:"📊", label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
-  { id:"rlcsbets", emoji:"🏆", label:"RLCS Bets",        desc:"bet on real pro matches with live odds",    color:"#FF61C1" },
-  { id:"stocks",   emoji:"📈", label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
+  { id:"trivia",   label:"RLCS Trivia",     desc:"5 questions · up to 3x your wager",       color:"#4D9EFF" },
+  { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
+  { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
+  { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
+  { id:"rlcsbets", label:"RLCS Bets",        desc:"bet on real pro matches with live odds",    color:"#FF61C1" },
+  { id:"stocks",   label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
 ];
 
 function TeamLinkTab({ stats }) {
@@ -10377,6 +10334,12 @@ useEffect(() => {
   const timer = setInterval(pollVoicePresence, 1000);
   return () => { alive = false; clearInterval(timer); };
 }, [currentPlayer]);
+
+useEffect(() => {
+  if (!voiceJoinBanner) return;
+  const timer = setTimeout(() => setVoiceJoinBanner(null), 3000);
+  return () => clearTimeout(timer);
+}, [voiceJoinBanner?.id]);
 
 useEffect(() => {
   sessionPingSeenRef.current = new Set();
@@ -11056,16 +11019,14 @@ const TABS=[
       {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
           
-{tab==="room"&&(
-  <div style={{display:"flex",flexDirection:"column",alignItems:"center",height:"100%",padding:"20px",overflowY:"auto"}}>
+<div style={{display:tab==="room"?"flex":"none",flexDirection:"column",alignItems:"center",height:"100%",padding:"20px",overflowY:"auto"}}>
     <div style={{width:"100%",maxWidth:480}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
       <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce}/>
       <TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/>
       <RoomMusicPlayer currentPlayer={currentPlayer} addToast={addToast}/>
     </div>
-  </div>
-)}    
+  </div>    
           
 {tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit}/>}
  {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
