@@ -4,7 +4,7 @@ import {
   Heart, ClipboardCheck, Bell, ThumbsDown, ThumbsUp, Clock, Tv, Circle, BarChart2, Dice5,
 } from "lucide-react";
 import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti } from "./lib/storage";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { Component, useState, useEffect, useRef, useCallback } from "react";
 
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
@@ -2343,7 +2343,7 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
 }
           
           
-function VoiceRoom({ currentPlayer, addToast, headerOnly, points, autoJoinNonce }) {
+function VoiceRoom({ currentPlayer, addToast, headerOnly, points, autoJoinNonce, musicRoomEnabled = false, onMusicRoomToggle }) {
   const [joined, setJoined] = useState(false);
   const [participants, setParticipants] = useState({});
               
@@ -2986,10 +2986,27 @@ setLoading(false);
           </div>
         )}
 
+        <div style={{background:musicRoomEnabled?"rgba(255,85,0,0.10)":"rgba(255,255,255,0.035)",border:`1px solid ${musicRoomEnabled?"rgba(255,85,0,0.28)":"rgba(255,255,255,0.07)"}`,borderRadius:12,padding:"10px 12px",marginBottom:12,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+          <div>
+            <div style={{fontSize:10,color:musicRoomEnabled?"#FF5500":"#8B92A8",fontWeight:900,letterSpacing:.7,textTransform:"uppercase"}}>music room</div>
+            <div style={{fontSize:10,color:"#4A5066",marginTop:2}}>optional SoundCloud DJ booth for this call</div>
+          </div>
+          <button
+            type="button"
+            onClick={()=>onMusicRoomToggle?.(!musicRoomEnabled)}
+            className="bb-pressable"
+            style={{background:musicRoomEnabled?"#FF5500":"rgba(255,255,255,0.06)",border:`1px solid ${musicRoomEnabled?"rgba(255,85,0,0.45)":"rgba(255,255,255,0.09)"}`,borderRadius:99,padding:"8px 12px",fontSize:10,fontWeight:900,color:musicRoomEnabled?"#06070D":"#8B92A8",cursor:"pointer",whiteSpace:"nowrap"}}
+          >
+            {musicRoomEnabled ? "on" : "off"}
+          </button>
+        </div>
+
         <button
 onClick={async () => {
   if (loading || joined) return;
-  try { window.dispatchEvent(new CustomEvent("bb-voice-join-requested", { detail:{ playerId: currentPlayer } })); } catch (_) {}
+  if (musicRoomEnabled) {
+    try { window.dispatchEvent(new CustomEvent("bb-voice-join-requested", { detail:{ playerId: currentPlayer } })); } catch (_) {}
+  }
   await joinRoom();
 }}
           disabled={loading}
@@ -3014,7 +3031,7 @@ onClick={async () => {
               <div style={{width:14,height:14,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.2)",borderTopColor:"#fff",animation:"spin .7s linear infinite"}}/>
               connecting…
             </>
-          ) : "🎙️ join voice + music"}
+          ) : (musicRoomEnabled ? "🎙️ join voice + music" : "🎙️ join voice room")}
         </button>
         <div style={{fontSize:10,color:"#3A4256",textAlign:"center",marginTop:8}}>
           microphone required · audio only · no video
@@ -3047,6 +3064,30 @@ onClick={async () => {
     {participantList.length} connected
   </div>
 </div>
+  <div style={{background:musicRoomEnabled?"rgba(255,85,0,0.10)":"rgba(255,255,255,0.03)",border:`1px solid ${musicRoomEnabled?"rgba(255,85,0,0.28)":"rgba(255,255,255,0.06)"}`,borderRadius:12,padding:"9px 11px",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+    <div>
+      <div style={{fontSize:10,color:musicRoomEnabled?"#FF5500":"#8B92A8",fontWeight:900,letterSpacing:.7,textTransform:"uppercase"}}>music room</div>
+      <div style={{fontSize:10,color:"#4A5066",marginTop:2}}>{musicRoomEnabled ? "DJ booth is open below" : "voice only for this call"}</div>
+    </div>
+    <button
+      type="button"
+      onClick={()=>{
+        const next = !musicRoomEnabled;
+        onMusicRoomToggle?.(next);
+        if (next) {
+          setTimeout(() => {
+            try { window.dispatchEvent(new CustomEvent("bb-voice-join-requested", { detail:{ playerId: currentPlayer } })); } catch (_) {}
+          }, 80);
+        } else {
+          try { window.dispatchEvent(new CustomEvent("bb-music-room-disabled", { detail:{ playerId: currentPlayer } })); } catch (_) {}
+        }
+      }}
+      className="bb-pressable"
+      style={{background:musicRoomEnabled?"#FF5500":"rgba(255,255,255,0.06)",border:`1px solid ${musicRoomEnabled?"rgba(255,85,0,0.45)":"rgba(255,255,255,0.09)"}`,borderRadius:99,padding:"8px 12px",fontSize:10,fontWeight:900,color:musicRoomEnabled?"#06070D":"#8B92A8",cursor:"pointer",whiteSpace:"nowrap"}}
+    >
+      {musicRoomEnabled ? "on" : "off"}
+    </button>
+  </div>
 
       {speakingPlayer && (
         <div style={{background:`${speakingPlayer.color}14`,border:`1px solid ${speakingPlayer.color}55`,borderRadius:13,padding:"10px 12px",marginBottom:14,display:"flex",alignItems:"center",gap:9,boxShadow:`0 0 18px ${speakingPlayer.color}22`}}>
@@ -3347,6 +3388,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const lastAppliedRef = useRef("");
   const applyingRef = useRef(false);
   const driftCorrectionRef = useRef(0);
+  const volumeApplyTimerRef = useRef(null);
 
   const player = PLAYERS.find(p => p.id === currentPlayer);
   const isDj = !musicState?.dj || musicState.dj === currentPlayer;
@@ -3445,19 +3487,49 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     return widgetRef.current;
   };
 
+  const sendVolumeToIframe = (vol) => {
+    try {
+      iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ method:"setVolume", value:vol }), "https://w.soundcloud.com");
+    } catch (_) {}
+  };
+
   const applyMusicVolume = async (value = musicVolumeRef.current) => {
     const vol = Math.max(0, Math.min(100, Number(value) || 0));
     musicVolumeRef.current = vol;
+    sendVolumeToIframe(vol);
     try {
       const widget = widgetRef.current || await getWidget();
       widget?.setVolume?.(vol);
+      sendVolumeToIframe(vol);
+      if (volumeApplyTimerRef.current) clearTimeout(volumeApplyTimerRef.current);
+      volumeApplyTimerRef.current = setTimeout(() => {
+        try { widget?.setVolume?.(musicVolumeRef.current); } catch (_) {}
+        sendVolumeToIframe(musicVolumeRef.current);
+      }, 180);
     } catch (_) {}
+  };
+
+  const handleMusicVolumeChange = (value) => {
+    const vol = Math.max(0, Math.min(100, Number(value) || 0));
+    musicVolumeRef.current = vol;
+    setMusicVolume(vol);
+    applyMusicVolume(vol);
   };
 
   const updateMusicState = async (next) => {
     setMusicState(next);
     await storeSet("room_music", next);
   };
+
+
+  useEffect(() => {
+    return () => {
+      if (volumeApplyTimerRef.current) clearTimeout(volumeApplyTimerRef.current);
+      try { widgetRef.current?.pause?.(); } catch (_) {}
+      try { iframeRef.current?.remove?.(); } catch (_) {}
+      widgetRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -3557,43 +3629,23 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       return false;
     }
     setJoinedMusic(true);
+    setAudioUnlocked(true);
     try {
       const widget = await getWidget();
       if (!widget) return false;
-      const syncToRoom = () => {
-        const target = getLivePositionMs(activeState);
-        widget.setVolume?.(Number(musicVolumeRef.current) || 0);
-        widget.seekTo?.(target);
-        if (activeState.playing) widget.play?.();
-        return target;
-      };
-
-      // Re-fire the same local unlock/sync a few times so the SoundCloud iframe catches up without a second tap.
+      const target = getLivePositionMs(activeState);
+      await applyMusicVolume(musicVolumeRef.current);
+      widget.seekTo?.(target);
       if (activeState.playing) {
-        syncToRoom();
-        [120, 380, 850, 1600, 2600].forEach(delay => {
-          setTimeout(() => { try { syncToRoom(); } catch (_) {} }, delay);
-        });
-        setAudioUnlocked(true);
-        if (!silent) addToast?.(joinedMusic ? "reconnected room music" : "joined room music", "🎧");
-      } else {
-        const target = getLivePositionMs(activeState);
-        widget.setVolume?.(0);
-        widget.seekTo?.(target);
         widget.play?.();
-        setAudioUnlocked(true);
-        setTimeout(() => {
-          try {
-            widget.pause?.();
-            widget.seekTo?.(target);
-            widget.setVolume?.(Number(musicVolumeRef.current) || 0);
-          } catch (_) {}
-        }, 180);
-        if (!silent) addToast?.("room music unlocked — DJ can play now", "🎧");
+      } else {
+        widget.pause?.();
       }
+      lastAppliedRef.current = `${activeState.url}|${activeState.playing}|${activeState.updatedAt}|${Math.floor((activeState.positionMs||0)/250)}`;
+      if (!silent) addToast?.(activeState.playing ? "music synced" : "music room ready", "🎧");
       return true;
     } catch (_) {
-      if (!silent) addToast?.("syncing room music…", "🎧");
+      if (!silent) addToast?.("SoundCloud player is still loading", "🎧");
       return false;
     }
   };
@@ -3620,26 +3672,35 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         }
       } catch (_) {}
       if (!latestState?.url) return;
-
-      // Treat the voice button like the old join-music button, then retry so the room locks in without extra taps.
-      [0, 180, 520, 1100, 2000, 3400].forEach(delay => {
-        setTimeout(() => {
-          try { joinMusic({ silent:true, stateOverride:latestState }); } catch (_) {}
-        }, delay);
-      });
+      setTimeout(() => {
+        try { joinMusic({ silent:true, stateOverride:latestState }); } catch (_) {}
+      }, 220);
     };
     const handleVoiceLeft = () => {
+      leaveMusic({ silent:true });
+    };
+    const handleMusicDisabled = () => {
       leaveMusic({ silent:true });
     };
     window.addEventListener("bb-voice-join-requested", handleVoiceMusicJoin);
     window.addEventListener("bb-voice-joined", handleVoiceMusicJoin);
     window.addEventListener("bb-voice-left", handleVoiceLeft);
+    window.addEventListener("bb-music-room-disabled", handleMusicDisabled);
     return () => {
       window.removeEventListener("bb-voice-join-requested", handleVoiceMusicJoin);
       window.removeEventListener("bb-voice-joined", handleVoiceMusicJoin);
       window.removeEventListener("bb-voice-left", handleVoiceLeft);
+      window.removeEventListener("bb-music-room-disabled", handleMusicDisabled);
     };
   }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicVolume, joinedMusic]);
+
+  useEffect(() => {
+    if (!hasTrack || joinedMusic) return;
+    const t = setTimeout(() => {
+      try { joinMusic({ silent:true }); } catch (_) {}
+    }, 450);
+    return () => clearTimeout(t);
+  }, [hasTrack, musicState?.url]);
 
   const loadTrack = async (urlOverride = null) => {
     const rawUrl = cleanUrl(urlOverride || trackLink);
@@ -3789,7 +3850,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
             <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
             <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
-            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · voice join reconnects audio</div>
+            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · linked when music room is on</div>
           </div>
           <div aria-hidden="true" style={{position:"fixed",left:0,bottom:0,width:1,height:1,overflow:"hidden",opacity:0.01,pointerEvents:"none",transform:"scale(0.01)",transformOrigin:"bottom left"}}>
             <iframe
@@ -3802,11 +3863,12 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
               allow="autoplay; encrypted-media"
               src={embedSrc}
               tabIndex={-1}
+              onLoad={()=>setTimeout(()=>applyMusicVolume(musicVolumeRef.current), 220)}
               style={{border:"none",width:1,height:1,opacity:0.01,pointerEvents:"none"}}
             />
           </div>
           <div style={{background:joinedMusic?"rgba(184,255,77,0.08)":"rgba(255,85,0,0.08)",border:`1px solid ${joinedMusic?"rgba(184,255,77,0.22)":"rgba(255,85,0,0.18)"}`,borderRadius:12,padding:"10px 12px",fontSize:11,color:joinedMusic?"#B8FF4D":"#FF5500",fontWeight:900,textAlign:"center",marginBottom:10}}>
-            {joinedMusic ? "🎧 music linked to voice room" : "🎧 music auto-links when you join voice"}
+            {joinedMusic ? "🎧 music linked to voice room" : "🎧 music room is on — ready to link"}
           </div>
         </>
       ) : (
@@ -3820,7 +3882,15 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,textTransform:"uppercase"}}>music volume</div>
           <div style={{fontSize:10,color:"#FF5500",fontWeight:900}}>{musicVolume}%</div>
         </div>
-        <input type="range" min="0" max="100" value={musicVolume} onChange={(e)=>setMusicVolume(Number(e.target.value))} style={{width:"100%",accentColor:"#FF5500"}} />
+        <input
+          type="range"
+          min="0"
+          max="100"
+          value={musicVolume}
+          onInput={(e)=>handleMusicVolumeChange(e.currentTarget.value)}
+          onChange={(e)=>handleMusicVolumeChange(e.currentTarget.value)}
+          style={{width:"100%",accentColor:"#FF5500"}}
+        />
       </div>
 
       {isDj && (
@@ -6640,6 +6710,74 @@ function MusicShare({ currentPlayer, addToast }) {
 
 
 
+
+
+
+class SquadTabErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorText: "" };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorText: error?.message || "Squad tab render error" };
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.hasError) {
+      this.setState({ hasError: false, errorText: "" });
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return <SquadTabFallback {...this.props} errorText={this.state.errorText} />;
+    }
+    return this.props.children;
+  }
+}
+
+function SquadTabFallback({ currentPlayer, presence, voicePresence, points, setTab, errorText }) {
+  const safePresence = presence && typeof presence === "object" ? presence : {};
+  const safePoints = points && typeof points === "object" ? points : {};
+  const me = PLAYERS.find(p => p.id === currentPlayer);
+
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.18)",borderRadius:18,padding:16,marginBottom:14}}>
+        <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1.1,textTransform:"uppercase",marginBottom:5}}>squad</div>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:"#E8ECF4",lineHeight:1}}>safe mode loaded</div>
+        <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginTop:7}}>The old Squad panel hit a render error, so this backup view is showing instead of a blank page.</div>
+        {errorText && <div style={{fontSize:10.5,color:"#FF5C8A",marginTop:8,wordBreak:"break-word"}}>error: {errorText}</div>}
+      </div>
+
+      <button onClick={()=>setTab?.("room")} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:14,padding:"13px 14px",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:14}}>
+        🎙️ open voice room
+      </button>
+
+      <div style={{...s.sectionLabel,marginBottom:10}}>online now</div>
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:18}}>
+        {PLAYERS.map(p => {
+          const online = isOnline(safePresence?.[p.id]);
+          return (
+            <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:10,height:10,borderRadius:99,background:online?"#7CFFB2":"#2E3346",boxShadow:online?"0 0 8px #7CFFB299":""}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:900,color:p.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}{p.id===currentPlayer?" · you":""}</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{online ? "online now" : safePresence?.[p.id] ? `last seen ${fmtRelTime(safePresence[p.id])}` : "offline"}</div>
+              </div>
+              <div style={{fontSize:12,fontWeight:900,color:p.color}}>{safePoints?.[p.id] || 0}<span style={{fontSize:10,color:"#4A5066",marginLeft:3}}>pts</span></div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:13,color:"#8B92A8",fontSize:12,lineHeight:1.45}}>
+        {me?.name || "player"}, Squad is no longer a dead blank tab. The full panel can be repaired from the error shown above if needed.
+      </div>
+    </div>
+  );
+}
 
 function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed, parseCredits, creditRequests, setCreditRequests }) {
   const safePresence = presence && typeof presence === "object" ? presence : {};
@@ -10407,6 +10545,7 @@ const [showTopNotifs, setShowTopNotifs] = useState(false);
 const [voiceJoinBanner, setVoiceJoinBanner] = useState(null);
 const [sessionPingBanner, setSessionPingBanner] = useState(null);
 const [autoJoinVoiceNonce, setAutoJoinVoiceNonce] = useState(null);
+const [roomMusicEnabled, setRoomMusicEnabled] = useState(false);
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
 const lastActiveRef = useRef(Date.now());
@@ -11151,9 +11290,9 @@ const TABS=[
 <div style={{display:tab==="room"?"flex":"none",flexDirection:"column",alignItems:"center",height:"100%",padding:"20px",overflowY:"auto"}}>
     <div style={{width:"100%",maxWidth:480}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
-      <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce}/>
+      <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce} musicRoomEnabled={roomMusicEnabled} onMusicRoomToggle={setRoomMusicEnabled}/>
       <TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/>
-      <RoomMusicPlayer currentPlayer={currentPlayer} addToast={addToast}/>
+      {roomMusicEnabled && <RoomMusicPlayer currentPlayer={currentPlayer} addToast={addToast}/>} 
     </div>
   </div>    
           
@@ -11162,7 +11301,7 @@ const TABS=[
 {tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
 
 {tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
-{tab==="presence"&&<PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/>}
+{(tab==="presence" || tab==="squad")&&<SquadTabErrorBoundary resetKey={`${currentPlayer}-${tab}`} currentPlayer={currentPlayer} presence={presence} points={points} setTab={setTab}><PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/></SquadTabErrorBoundary>}
 {tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
 {tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
@@ -11203,6 +11342,7 @@ const TABS=[
         <button key={t.id} onClick={()=>{
     setTab(t.id);
     setChatOpen(false);
+    setTimeout(() => scrollToTop(), 0);
     if (t.id==="social") { const upd={...lastSeen,social:posts.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
     if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
   }} className="bb-pressable" style={s.tabBtn}>
