@@ -216,6 +216,40 @@ function backupHasMorePointData(backup, current) {
   return backupKeys > currentKeys || (backupHasScores && !currentHasScores);
 }
 
+function isMeaningfulGenericSnapshot(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const keys = Object.keys(v).filter(k => !String(k).startsWith("__"));
+  if (!keys.length) return false;
+  return keys.some(k => {
+    const val = v[k];
+    if (Array.isArray(val)) return val.length > 0;
+    if (val && typeof val === "object") return Object.keys(val).length > 0;
+    return val !== null && val !== undefined && val !== false && val !== 0 && val !== "";
+  });
+}
+
+function backupHasMoreGenericData(backup, current) {
+  if (!isMeaningfulGenericSnapshot(backup)) return false;
+  if (!current || typeof current !== "object" || Array.isArray(current)) return true;
+  const backupKeys = Object.keys(backup).filter(k => !String(k).startsWith("__"));
+  const currentKeys = Object.keys(current).filter(k => !String(k).startsWith("__"));
+  if (currentKeys.length === 0) return true;
+  if (backupKeys.length > currentKeys.length) return true;
+  const backupWeight = backupKeys.reduce((sum, k) => {
+    const val = backup[k];
+    if (Array.isArray(val)) return sum + val.length + 1;
+    if (val && typeof val === "object") return sum + Object.keys(val).length + 1;
+    return sum + (val ? 1 : 0);
+  }, 0);
+  const currentWeight = currentKeys.reduce((sum, k) => {
+    const val = current[k];
+    if (Array.isArray(val)) return sum + val.length + 1;
+    if (val && typeof val === "object") return sum + Object.keys(val).length + 1;
+    return sum + (val ? 1 : 0);
+  }, 0);
+  return backupWeight > currentWeight;
+}
+
 // ===================== MMR helpers =====================
 const RL_PLAYLISTS = ["Ranked Duel 1v1","Ranked Doubles 2v2","Ranked Standard 3v3"];
 function deterministicMMR(seed, idx) {
@@ -11657,6 +11691,31 @@ const [timeLogs, setTimeLogs] = useState([]);
   }, [points]);
 
   useEffect(() => {
+    if (!isMeaningfulGenericSnapshot(passXP)) return;
+    storeSet("pass_xp_backup", passXP).catch(() => {});
+  }, [passXP]);
+
+  useEffect(() => {
+    if (!isMeaningfulGenericSnapshot(passPremium)) return;
+    storeSet("pass_premium_backup", passPremium).catch(() => {});
+  }, [passPremium]);
+
+  useEffect(() => {
+    if (!isMeaningfulGenericSnapshot(passClaimed)) return;
+    storeSet("pass_claimed_backup", passClaimed).catch(() => {});
+  }, [passClaimed]);
+
+  useEffect(() => {
+    if (!isMeaningfulGenericSnapshot(passTokens)) return;
+    storeSet("pass_tokens_backup", passTokens).catch(() => {});
+  }, [passTokens]);
+
+  useEffect(() => {
+    if (!isMeaningfulGenericSnapshot(passActiveBoosts)) return;
+    storeSet("pass_active_boosts_backup", passActiveBoosts).catch(() => {});
+  }, [passActiveBoosts]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     (posts || []).forEach(post => {
       if (!post?.image || post?.isVideo || POST_IMAGE_CACHE.has(post.image)) return;
@@ -12206,24 +12265,36 @@ storeGet("credit_requests"),
   if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
 setTeamRoom(tr && !tr.closed ? tr : null);
   if (tsess) setTeamSessions(Array.isArray(tsess) ? tsess : []);
-  if (pts) {
-    let pointsToUse = pts;
-    if (looksLikeWipedPointsSnapshot(pts)) {
-      const pointsBackup = await storeGet("points_backup").catch(() => null);
-      if (backupHasMorePointData(pointsBackup, pts)) {
-        pointsToUse = pointsBackup;
-        await storeSet("points", pointsBackup);
-        addToast("points restored from backup", "↩");
-      }
+  {
+    const pointsCurrent = pts && typeof pts === "object" ? pts : {};
+    const pointsBackup = await storeGet("points_backup").catch(() => null);
+    if (backupHasMorePointData(pointsBackup, pointsCurrent)) {
+      await storeSet("points", pointsBackup);
+      setPoints(pointsBackup);
+      addToast("points restored from backup", "↩");
+    } else if (pts) {
+      setPoints(pointsCurrent);
     }
-    setPoints(pointsToUse);
   }
   if (bts) setBets(Array.isArray(bts) ? bts : []);
-  if (pxp) setPassXP(pxp);
-  if (ppm) setPassPremium(ppm);
-  if (pcl) setPassClaimed(pcl);
-  if (ptk) setPassTokens(ptk);
-  if (pab) setPassActiveBoosts(pab);
+
+  const restoreSnapshotIfBetter = async (key, currentValue, setter, label) => {
+    const current = currentValue && typeof currentValue === "object" ? currentValue : {};
+    const backup = await storeGet(`${key}_backup`).catch(() => null);
+    if (backupHasMoreGenericData(backup, current)) {
+      await storeSet(key, backup);
+      setter(backup);
+      addToast(`${label} restored from backup`, "↩");
+      return;
+    }
+    if (currentValue) setter(current);
+  };
+
+  await restoreSnapshotIfBetter("pass_xp", pxp, setPassXP, "pass xp");
+  await restoreSnapshotIfBetter("pass_premium", ppm, setPassPremium, "premium pass");
+  await restoreSnapshotIfBetter("pass_claimed", pcl, setPassClaimed, "pass claims");
+  await restoreSnapshotIfBetter("pass_tokens", ptk, setPassTokens, "pass rewards");
+  await restoreSnapshotIfBetter("pass_active_boosts", pab, setPassActiveBoosts, "pass boosts");
   if (tlogs) setTimeLogs(Array.isArray(tlogs) ? tlogs : []);
   if (stks) setStocks(stks);
   if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
@@ -12751,10 +12822,10 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:96,WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(84px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:0,overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,width:"100%",height:76,minHeight:76,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_FLUSH_FINAL: hard pins nav background to the physical bottom, no floating safe-area gap */},
-tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"7px 4px 5px",height:62,cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
+tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px) - 10px)",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_DROP_FINAL: drops buttons into bottom safe-area gap */},
+tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
   reminderTitle:{fontSize:12.5,fontWeight:700,color:"#FF5C8A"},
@@ -12922,3 +12993,4 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, 
   offlineChip:{fontSize:11,color:"#4A5066",fontWeight:700,background:"rgba(255,255,255,0.04)",padding:"4px 10px",borderRadius:99},
   streamNote:{background:"rgba(167,139,250,0.06)",border:"1px solid rgba(167,139,250,0.15)",borderRadius:14,padding:14,marginTop:20},
 };
+// EMERGENCY_BACKUP_RESTORE_PATCH
