@@ -6378,7 +6378,7 @@ useEffect(() => {
 }, [stats?.length]);
 useEffect(() => {
   if (jumpDate) {
-    const targetDate = typeof jumpDate === "object" ? jumpDate.date : jumpDate;
+    const targetDate = (jumpDate && typeof jumpDate === "object") ? jumpDate.date : jumpDate; // JUMPDATE_NULL_SAFE_PATCH
     setStatsSubTab("teamlink");
     setMode("3v3");
     setShowAllGames(true);
@@ -6748,7 +6748,7 @@ return (
 ) : statsSubTab==="teamlink" ? (
   <div>
     <div style={{...s.sectionLabel,marginBottom:10}}>team link</div>
-    <TeamLinkGames stats={stats} onUpdateOpponentScore={updateOpponentScore} jumpDate={typeof jumpDate === "object" ? jumpDate.date : jumpDate} jumpGameId={typeof jumpDate === "object" ? jumpDate.gameId : null} />
+    <TeamLinkGames stats={stats} onUpdateOpponentScore={updateOpponentScore} jumpDate={(jumpDate && typeof jumpDate === "object") ? jumpDate.date : jumpDate} jumpGameId={(jumpDate && typeof jumpDate === "object") ? jumpDate.gameId : null} />
   </div>
 ) : statsSubTab==="chem" ? (
   <TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>
@@ -13250,3 +13250,5 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, 
 // INVENTORY_RESTORE_AND_TEAMLINK_DATE_SAFE_PATCH
 
 // TEAMLINK_HARD_NULL_DATE_SAFE_PATCH
+
+// JUMPDATE_NULL_SAFE_PATCH_DONE
