@@ -2340,8 +2340,32 @@ const [voicePresence, setVoicePresence] = useState({});
   const [error, setError] = useState(null);
   const [speakingMap, setSpeakingMap] = useState({});          
   const remoteAudioRef = useRef(null);
-const remoteStreamRef = useRef(new MediaStream());           
+const remoteStreamRef = useRef(null);
+const speakingUntilRef = useRef({});
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
+
+  const getRemoteStream = () => {
+    if (!remoteStreamRef.current && typeof MediaStream !== "undefined") {
+      remoteStreamRef.current = new MediaStream();
+    }
+    return remoteStreamRef.current;
+  };
+
+  const getParticipantIds = (dp) => [dp?.session_id, dp?.id, dp?.user_id, dp?.peerId].filter(Boolean);
+  const getParticipantAudioLevel = (dp) => {
+    const raw = dp?.audioLevel ?? dp?.audio_level ?? dp?.audio_level_average ?? dp?.tracks?.audio?.audioLevel ?? 0;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : 0;
+  };
+
+  const markSpeaking = (dpOrIds, duration = 900) => {
+    const ids = Array.isArray(dpOrIds) ? dpOrIds.filter(Boolean) : getParticipantIds(dpOrIds);
+    if (!ids.length) return;
+    const until = Date.now() + duration;
+    ids.forEach(id => { speakingUntilRef.current[id] = until; });
+    const active = Object.fromEntries(Object.entries(speakingUntilRef.current).filter(([_, exp]) => exp > Date.now()).map(([id]) => [id, true]));
+    setSpeakingMap(active);
+  };
 
   // Load Daily SDK dynamically
   useEffect(() => {
@@ -2429,12 +2453,19 @@ useEffect(() => {
     const existing = callObject || window.__bbDailyCallObject;
     if (existing) {
       try {
-        setCallObject(existing);
-        setParticipants(existing.participants?.() || {});
-        setJoined(true);
-        setMuted(existing.localAudio ? !existing.localAudio() : false);
-        setError(null);
-        return;
+        const state = existing.meetingState?.();
+        const canReuse = !state || state === "joined-meeting" || state === "joining-meeting";
+        if (canReuse) {
+          setCallObject(existing);
+          setParticipants(existing.participants?.() || {});
+          setJoined(true);
+          setMuted(existing.localAudio ? !existing.localAudio() : false);
+          setError(null);
+          return;
+        }
+        try { existing.destroy?.(); } catch (_) {}
+        delete window.__bbDailyCallObject;
+        setCallObject(null);
       } catch (err) {
         try { existing.destroy?.(); } catch (_) {}
         delete window.__bbDailyCallObject;
@@ -2445,7 +2476,7 @@ useEffect(() => {
     setLoading(true);
     setError(null);
 try {
-await navigator.mediaDevices.getUserMedia({
+const micTestStream = await navigator.mediaDevices.getUserMedia({
   audio: {
   echoCancellation: true,
   noiseSuppression: true,
@@ -2454,6 +2485,7 @@ await navigator.mediaDevices.getUserMedia({
 },
   video: false,
 });
+micTestStream.getTracks().forEach(t => t.stop());
 
     
 const co = window.DailyIframe.createCallObject({
@@ -2476,6 +2508,7 @@ window.__bbDailyCallObject = co;
    co.on("participant-updated", (e) => {
   setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
   if (e.participant?.local) setMuted(!e.participant.audio);
+  if (e.participant?.audio !== false && getParticipantAudioLevel(e.participant) > 0.015) markSpeaking(e.participant, 850);
 
 });
     
@@ -2483,10 +2516,14 @@ window.__bbDailyCallObject = co;
   if (e.participant?.local) return;
   if (e.track?.kind !== "audio") return;
 
-  remoteStreamRef.current.addTrack(e.track);
+  const remoteStream = getRemoteStream();
+  if (!remoteStream) return;
+  if (!remoteStream.getTracks().some(t => t.id === e.track.id)) {
+    remoteStream.addTrack(e.track);
+  }
 
   if (remoteAudioRef.current) {
-    remoteAudioRef.current.srcObject = remoteStreamRef.current;
+    remoteAudioRef.current.srcObject = remoteStream;
     remoteAudioRef.current.muted = false;
     remoteAudioRef.current.volume = 1;
     remoteAudioRef.current.play().catch(console.error);
@@ -2510,12 +2547,9 @@ co.on("active-speaker-change", (e) => {
     active?.user_id,
     typeof active === "string" ? active : null,
   ].filter(Boolean);
-  if (!ids.length) { setSpeakingMap({}); return; }
-  const nextSpeaking = Object.fromEntries(ids.map(id => [id, true]));
-  setSpeakingMap(nextSpeaking);
-  setTimeout(() => {
-    setSpeakingMap(prev => ids.some(id => prev[id]) ? {} : prev);
-  }, 1200);
+  if (!ids.length) return;
+  markSpeaking(ids, 950);
+  try { setParticipants(co.participants?.() || {}); } catch (_) {}
 });
       co.on("error", (e) => {
         const msg = String(e?.errorMsg || e?.message || e || "").toLowerCase();
@@ -2592,7 +2626,7 @@ setLoading(false);
     }
     try {
       remoteStreamRef.current?.getTracks?.().forEach(t => t.stop());
-      remoteStreamRef.current = new MediaStream();
+      remoteStreamRef.current = null;
     } catch (_) {}
 const vp = await storeGet("voice_presence") || {};
 delete vp[currentPlayer];
@@ -2602,7 +2636,10 @@ setVoicePresence(vp);
 setJoined(false);
 setParticipants({});
 setSpeakingMap({});
+speakingUntilRef.current = {};
 setMuted(false);
+setLoading(false);
+setError(null);
   };
 
   const toggleMute = async () => {
@@ -2635,10 +2672,24 @@ setMuted(false);
       const co = callObject || window.__bbDailyCallObject;
       if (!co) return;
       try {
-        setParticipants(co.participants?.() || {});
+        const latest = co.participants?.() || {};
+        const now = Date.now();
+        Object.values(latest).forEach(dp => {
+          if (dp?.audio !== false && getParticipantAudioLevel(dp) > 0.015) {
+            getParticipantIds(dp).forEach(id => { speakingUntilRef.current[id] = now + 750; });
+          }
+        });
+        const activeSpeaking = Object.fromEntries(
+          Object.entries(speakingUntilRef.current)
+            .filter(([_, exp]) => exp > now)
+            .map(([id]) => [id, true])
+        );
+        speakingUntilRef.current = Object.fromEntries(Object.entries(speakingUntilRef.current).filter(([_, exp]) => exp > now));
+        setSpeakingMap(activeSpeaking);
+        setParticipants(latest);
         setMuted(co.localAudio ? !co.localAudio() : muted);
       } catch (_) {}
-    }, 900);
+    }, 250);
     return () => clearInterval(timer);
   }, [joined, callObject, muted]);
 
@@ -2879,37 +2930,142 @@ onClick={async () => {
         </button>
       </div>
 
-      {/* Speaking indicator bar */}
-      {Object.keys(speakingMap).length > 0 && (
-        <div style={{marginTop:12,display:"flex",alignItems:"center",gap:8,background:"rgba(184,255,77,0.06)",borderRadius:10,padding:"8px 12px"}}>
-          <div style={{display:"flex",gap:3,alignItems:"center"}}>
-            {[0,1,2].map(i=>(
-              <div key={i} style={{
-                width:3,
-                height:[8,14,10][i],
-                background:"#B8FF4D",
-                borderRadius:99,
-                animation:`bounceDot 1s ease-in-out infinite`,
-                animationDelay:`${i*0.15}s`,
-              }}/>
-            ))}
-          </div>
-          <div style={{fontSize:11,color:"#B8FF4D",fontWeight:600}}>
-            {(() => {
-              const speakingIds = Object.keys(speakingMap);
-              const speakingNames = participantList
-                .filter(p => speakingIds.includes(p.session_id))
-                .map(p => p.user_name);
-              return speakingNames.length > 0 ? `${speakingNames.join(", ")} speaking` : "";
-            })()}
-          </div>
-        </div>
-      )}
     </div>
   );
 }          
           
           
+
+
+function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, pings, setPings, addToast }) {
+  const [minutes, setMinutes] = useState(30);
+  const player = PLAYERS.find(p => p.id === currentPlayer);
+  const now = Date.now();
+  const openSessions = (teamSessions || [])
+    .filter(s => !s.cancelled && new Date(s.startsAt).getTime() > now - 2 * 60 * 60 * 1000)
+    .sort((a,b) => new Date(a.startsAt) - new Date(b.startsAt));
+
+  const makeSessionPings = (session, targets) => targets.map((pid, idx) => ({
+    id: `${session.id}_ping_${pid}_${Date.now()+idx}`,
+    from: currentPlayer,
+    to: pid,
+    ts: new Date().toISOString(),
+    type: "session",
+    mode: session.mode,
+    sessionId: session.id,
+    startsAt: session.startsAt,
+    minutesUntil: Math.max(0, Math.round((new Date(session.startsAt).getTime() - Date.now()) / 60000)),
+  }));
+
+  const sendPings = async (session, targetIds) => {
+    const targets = targetIds.filter(pid => pid && pid !== currentPlayer);
+    if (!targets.length) return;
+    const freshPings = await storeGet("pings") || [];
+    const newPings = makeSessionPings(session, targets);
+    const upd = [...freshPings, ...newPings].slice(-120);
+    setPings(upd);
+    await storeSet("pings", upd);
+    addToast?.(`session ping sent to ${targets.length === 1 ? PLAYERS.find(p=>p.id===targets[0])?.name : "everyone"}`, "⏱️");
+  };
+
+  const createSession = async () => {
+    const mins = Math.max(5, Math.min(180, Number(minutes) || 30));
+    const startsAt = new Date(Date.now() + mins * 60000).toISOString();
+    const session = {
+      id: Date.now().toString(),
+      mode: "3v3",
+      createdBy: currentPlayer,
+      createdByName: player?.name || currentPlayer,
+      createdAt: new Date().toISOString(),
+      startsAt,
+      responses: { [currentPlayer]: "accepted" },
+    };
+    const upd = [session, ...(teamSessions || []).filter(s => !s.cancelled)].slice(0, 10);
+    setTeamSessions(upd);
+    await storeSet("team_sessions", upd);
+    await sendPings(session, PLAYERS.map(p => p.id).filter(pid => pid !== currentPlayer));
+    addToast?.(`3v3 session set for ${mins} min`, "⏱️");
+  };
+
+  const acceptSession = async (session) => {
+    const upd = (teamSessions || []).map(s => s.id === session.id
+      ? { ...s, responses: { ...(s.responses || {}), [currentPlayer]: "accepted" } }
+      : s
+    );
+    setTeamSessions(upd);
+    await storeSet("team_sessions", upd);
+    const freshPings = (await storeGet("pings") || []).filter(p => !(p.type === "session" && p.sessionId === session.id && p.to === currentPlayer));
+    setPings(freshPings);
+    await storeSet("pings", freshPings);
+    addToast?.("session accepted", "✅");
+  };
+
+  const cancelSession = async (session) => {
+    const upd = (teamSessions || []).map(s => s.id === session.id ? { ...s, cancelled: true, cancelledAt: new Date().toISOString() } : s);
+    setTeamSessions(upd);
+    await storeSet("team_sessions", upd);
+    addToast?.("session cancelled", "❌");
+  };
+
+  return (
+    <div style={{background:"linear-gradient(135deg,#101421,#080A12)",border:"1px solid rgba(167,139,250,0.18)",borderRadius:16,padding:16,marginTop:14,boxShadow:"0 0 22px rgba(0,0,0,0.2)"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12}}>
+        <div>
+          <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:.9}}>3V3 SESSION</div>
+          <div style={{fontSize:11,color:"#6F7892",marginTop:2}}>schedule and ping the squad</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <input value={minutes} onChange={(e)=>setMinutes(e.target.value)} inputMode="numeric" style={{width:56,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"8px 9px",color:"#E8ECF4",fontSize:12,fontWeight:800,textAlign:"center"}} />
+          <div style={{fontSize:10,color:"#6F7892",fontWeight:800}}>min</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:12}}>
+        {[15,30,45,60].map(m => (
+          <button key={m} onClick={()=>setMinutes(m)} className="bb-pressable" style={{flex:1,background:Number(minutes)===m?"#A78BFA":"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,padding:"8px 0",fontSize:11,fontWeight:900,color:Number(minutes)===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
+            {m}
+          </button>
+        ))}
+      </div>
+      <button onClick={createSession} className="bb-pressable bb-glow-violet" style={{width:"100%",background:"#A78BFA",border:"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:14}}>
+        ping squad for 3v3
+      </button>
+
+      {openSessions.length === 0 ? (
+        <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:12,fontSize:12,color:"#6F7892",textAlign:"center"}}>no planned session yet</div>
+      ) : openSessions.slice(0,3).map(session => {
+        const minsLeft = Math.round((new Date(session.startsAt).getTime() - Date.now()) / 60000);
+        const accepted = Object.entries(session.responses || {}).filter(([_, v]) => v === "accepted").map(([pid]) => pid);
+        const iAccepted = session.responses?.[currentPlayer] === "accepted";
+        return (
+          <div key={session.id} style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(184,255,77,0.12)",borderRadius:13,padding:12,marginTop:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
+              <div>
+                <div style={{fontSize:13,fontWeight:900,color:"#E8ECF4"}}>3v3 {minsLeft > 0 ? `in ${minsLeft} min` : "starting now"}</div>
+                <div style={{fontSize:10.5,color:"#6F7892",marginTop:3}}>set by {PLAYERS.find(p=>p.id===session.createdBy)?.name || session.createdByName}</div>
+              </div>
+              {!iAccepted ? (
+                <button onClick={()=>acceptSession(session)} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:10,padding:"8px 10px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>accept</button>
+              ) : (
+                <div style={{fontSize:10,color:"#7CFFB2",fontWeight:900,background:"rgba(124,255,178,0.1)",border:"1px solid rgba(124,255,178,0.2)",borderRadius:99,padding:"6px 9px"}}>you're in</div>
+              )}
+            </div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
+              {PLAYERS.map(p => (
+                <button key={p.id} onClick={()=>sendPings(session,[p.id])} className="bb-pressable" style={{background:accepted.includes(p.id)?`${p.color}18`:"rgba(255,255,255,0.04)",border:`1px solid ${accepted.includes(p.id)?p.color+"55":"rgba(255,255,255,0.07)"}`,borderRadius:99,padding:"5px 8px",fontSize:10,fontWeight:800,color:accepted.includes(p.id)?p.color:"#8B92A8",cursor:p.id===currentPlayer?"default":"pointer"}}>
+                  {accepted.includes(p.id)?"✓ ":"ping "}{p.name}
+                </button>
+              ))}
+            </div>
+            {session.createdBy === currentPlayer && (
+              <button onClick={()=>cancelSession(session)} className="bb-pressable" style={{marginTop:9,background:"none",border:"none",color:"#FF5C8A",fontSize:10,fontWeight:800,cursor:"pointer"}}>cancel session</button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus, setTypingStatus, setTab, setChatOpen }) {
   const [text, setText] = useState("");
 useEffect(() => {
@@ -5777,8 +5933,12 @@ const activityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).ma
     id: p.id, ts: p.ts,
     text: p.type==="flower"
       ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} sent you ${p.emoji} (+${p.xp} xp)`
-      : `${PLAYERS.find(pl=>pl.id===p.from)?.name} wants to run 2s`,
-    icon: p.type==="flower" ? "🌸" : "🎮",
+      : p.type==="session"
+        ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} started a ${p.mode || "3v3"} session ${p.minutesUntil ? `in ${p.minutesUntil} min` : "soon"}`
+        : p.type==="coinflip"
+          ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} challenged you to a coin flip`
+          : `${PLAYERS.find(pl=>pl.id===p.from)?.name} wants to run 2s`,
+    icon: p.type==="flower" ? "🌸" : p.type==="session" ? "⏱️" : p.type==="coinflip" ? "🪙" : "🎮",
   }));
 
   const trainingNotifs = Object.entries(completions||{})
@@ -6584,7 +6744,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "typing", "activity_feed", "parse_credits", "music_links", "credit_requests"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "credit_requests"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -6709,7 +6869,6 @@ function StockMarketTab({ stats, currentPlayer, points, setPoints, stocks, setSt
   const myPoints = points?.[currentPlayer] || 0;
   const [investAmount, setInvestAmount] = useState(10);
   const [result, setResult] = useState(null);
-  const [showAllFlipHistory, setShowAllFlipHistory] = useState(false);
 
   const getStockPrice = (playerId) => {
     const pg = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
@@ -8214,6 +8373,7 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
   const [wager, setWager] = useState(10);
   const [flipping, setFlipping] = useState(false);
   const [result, setResult] = useState(null);
+  const [showAllFlipHistory, setShowAllFlipHistory] = useState(false);
   const myPoints = points?.[currentPlayer] || 0;
   const weekStart = getWeekStart();
   const weekFlipKey = `coinflips_used_${currentPlayer}_${dateKey(weekStart)}`;
@@ -9411,6 +9571,7 @@ const [catchupQueue, setCatchupQueue] = useState([]);
 const [catchupStopped, setCatchupStopped] = useState(false);                      
 const [flipChallenges, setFlipChallenges] = useState([]);    
 const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
+const [teamSessions, setTeamSessions] = useState([]); // planned 3v3 sessions / RSVPs
 const [chatOpen, setChatOpen] = useState(false);
 const [showTopNotifs, setShowTopNotifs] = useState(false);
 const [voiceJoinBanner, setVoiceJoinBanner] = useState(null);
@@ -9469,7 +9630,7 @@ useEffect(() => {
   };
 
   pollVoicePresence();
-  const timer = setInterval(pollVoicePresence, 5000);
+  const timer = setInterval(pollVoicePresence, 1000);
   return () => { alive = false; clearInterval(timer); };
 }, [currentPlayer]);
 
@@ -9535,6 +9696,7 @@ if (key === "flowers") setFlowers(Array.isArray(value) ? value : []);
 if (key === "chemistry") setChemistry(value || {});
 if (key === "coin_flips") setCoinFlips(value);
 if (key === "team_room") setTeamRoom(value?.closed ? null : value);
+if (key === "team_sessions") setTeamSessions(Array.isArray(value) ? value : []);
 if (key === "parse_credits") setParseCredits(value);
 if (key === "credit_requests") setCreditRequests(Array.isArray(value) ? value : []);
 if (key === "active_race") {
@@ -9622,7 +9784,7 @@ return () => {
 const loadSharedData = async (pid) => {
   setLoading(true);
 
-  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
+  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,tsess,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
 storeGet("schedule"),
 storeGet("training"),
 storeGet("completions"),
@@ -9634,6 +9796,7 @@ storeGet("stats"),
 storeGet("presence"),
 storeGet("pings"),
 storeGet("team_room"),
+storeGet("team_sessions"),
 storeGet("points"),
 storeGet("bets"),
 storeGet("pass_xp"),
@@ -9663,6 +9826,7 @@ storeGet("credit_requests"),
   if (prs) { setPresence(prs); setMyMode(prs[pid+"_mode"] || null); }
   if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
 setTeamRoom(tr && !tr.closed ? tr : null);
+  if (tsess) setTeamSessions(Array.isArray(tsess) ? tsess : []);
   if (pts) setPoints(pts);
   if (bts) setBets(Array.isArray(bts) ? bts : []);
   if (pxp) setPassXP(pxp);
@@ -9882,8 +10046,12 @@ const TABS=[
     ts: p.ts,
     text: p.type==="flower"
       ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} sent you ${p.emoji || "🌸"} (+${p.xp || 0} xp)`
-      : `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} wants to run 2s`,
-    icon: p.type==="flower" ? "🌸" : "🎮",
+      : p.type==="session"
+        ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} started a ${p.mode || "3v3"} session ${p.minutesUntil ? `in ${p.minutesUntil} min` : "soon"}`
+        : p.type==="coinflip"
+          ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} challenged you to a coin flip`
+          : `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} wants to run 2s`,
+    icon: p.type==="flower" ? "🌸" : p.type==="session" ? "⏱️" : p.type==="coinflip" ? "🪙" : "🎮",
   }));
   const topTrainingNotifs = Object.entries(completions||{})
     .filter(([k,v]) => v?.status==="approved" && k.endsWith(`__${currentPlayer}`))
@@ -10052,6 +10220,7 @@ const TABS=[
     <div style={{width:"100%",maxWidth:480}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
       <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce}/>
+      <TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/>
     </div>
   </div>
 )}    
