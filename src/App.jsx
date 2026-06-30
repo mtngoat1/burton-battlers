@@ -3447,6 +3447,37 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const queue = Array.isArray(musicState?.queue) ? musicState.queue : [];
   const hasTrack = !!musicState?.url;
 
+  // Backup playlist so folder playback still works even if /public/music/playlist.json is missing
+  // or has not deployed yet. These still require the matching MP3 files to exist in public/music.
+  const DEFAULT_FOLDER_TRACKS = [
+    "[001] hardwired.mp3",
+    "[002] #whare.mp3",
+    "[003] RM-11.mp3",
+    "[004] #aroha.mp3",
+    "[005] slipstream.mp3",
+    "[006] THERE'S ONE IN EVERY CROWD.mp3",
+    "[007] CASH4SCRAP.mp3",
+    "[008] LAY DOWN.mp3",
+    "[009] DIRTY WERK.mp3",
+    "[010] #ASHTRAY.mp3",
+    "[011] in the pocket #footmahi.mp3",
+    "[012] kula world.mp3",
+    "[013] anti-bullying anthem #dicktation.mp3",
+    "[014] pillow fortress #5work.mp3",
+    "[015] unclaimed memory.mp3",
+    "[016] sprinz lullaby #sheepcounters.mp3",
+    "[017] leave tonite.mp3",
+    "[018] i need u close z z 1.mp3",
+    "[019] xp farm irl #error.mp3",
+    "[020] close my heart ♡ #5work.mp3",
+    "[021] #CupSong.mp3",
+    "[022] i can commit.mp3",
+    "[023] #facetime.mp3",
+    "[024] gunna miss u.mp3",
+    "[025] user not found ;(.mp3",
+    "[026] twelvie tearz.mp3"
+  ];
+
   const cleanUrl = (url) => String(url || "").trim();
 
   const isLibraryUrl = (url, list = musicLibrary) => {
@@ -3515,7 +3546,15 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     // Skip macOS hidden/system files or accidental dot-only entries like ".mp3".
     if (bareName?.startsWith(".") || bareName === ".mp3") return null;
     // In playlist.json you can write "song.mp3" and the app will read it from /public/music/song.mp3.
-    if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) raw = `/music/${raw.replace(/^\/+/, "")}`;
+    // Encode each filename segment so songs with spaces, #, ♡, etc. load correctly as URLs.
+    if (!raw.startsWith("/") && !/^https?:\/\//i.test(raw)) {
+      const safePath = raw
+        .replace(/^\/+/, "")
+        .split("/")
+        .map(part => encodeURIComponent(part))
+        .join("/");
+      raw = `/music/${safePath}`;
+    }
     if (!isDirectAudioUrl(raw)) return null;
     return { id:`lib_${idx}_${raw}`, url:raw, title:title || displayTrack(raw), idx };
   };
@@ -3533,10 +3572,11 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       if (!silent) addToast?.(list.length ? `${list.length} folder tracks loaded` : "playlist.json has no usable tracks", "🎧");
       return list;
     } catch (_) {
-      setMusicLibrary([]);
-      setLibraryError("add /public/music/playlist.json to use folder playback");
-      if (!silent) addToast?.("add public/music/playlist.json first", "🎧");
-      return [];
+      const fallbackList = DEFAULT_FOLDER_TRACKS.map(normalizeLibraryEntry).filter(Boolean);
+      setMusicLibrary(fallbackList);
+      setLibraryError(fallbackList.length ? "using built-in folder list — playlist.json not found" : "add /public/music/playlist.json to use folder playback");
+      if (!silent) addToast?.(fallbackList.length ? `${fallbackList.length} built-in folder tracks loaded` : "add public/music/playlist.json first", "🎧");
+      return fallbackList;
     }
   };
 
