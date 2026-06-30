@@ -3323,7 +3323,6 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     const upd = [...freshPings, ...newPings].slice(-120);
     setPings(upd);
     await storeSetWithPush("pings", upd);
-    await Promise.allSettled(newPings.map(p => notifyPingPush(p)));
     addToast?.(`session ping sent to ${targets.length === 1 ? PLAYERS.find(p=>p.id===targets[0])?.name : "everyone"}`, "⏱️");
   };
 
@@ -4462,7 +4461,6 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
   };
   const upd = [entry, ...existing].slice(0, 80);
   await storeSetWithPush("activity_feed", upd);
-  await notifyActivityPush(entry);
 };
 
   const toggleHeart = async (postId) => {
@@ -7011,7 +7009,6 @@ const myUpd = [ping, ...myExisting].slice(0, 2);
 const upd = [...myUpd, ...others];
     setPings(upd);
     await storeSetWithPush("pings", upd);
-    await notifyPingPush(ping);
   };
 
   const myPings = safePings.filter(p => p.to === currentPlayer && Date.now() - new Date(p.ts).getTime() < 3600000);
@@ -7200,7 +7197,7 @@ await storeSet("points", updPts);
               await storeSet("flowers", updFlowers);
 const pingUpd2 = [...safePings, {id:(Date.now()+2).toString(), from:currentPlayer, to:flowerTarget, ts:new Date().toISOString(), type:"flower", emoji:flower.emoji, xp:flower.xp}];
 setPings(pingUpd2);
-await storeSetWithPush("pings", pingUpd2); await notifyPingPush(pingUpd2[pingUpd2.length - 1]);
+await storeSetWithPush("pings", pingUpd2);
               addToast?.(`${flower.emoji} sent ${flower.label} to ${PLAYERS.find(p => p.id === flowerTarget)?.name} — ${flower.xp} pts`, "🌸");
               setSelectedFlower(null); setFlowerTarget(null);
             }} disabled={!canAfford} className="bb-pressable bb-glow-lime"
@@ -7959,10 +7956,11 @@ async function registerPush(playerId, playerName) {
     updatedAt: new Date().toISOString(),
   };
   const all = await storeGet(PUSH_SUBSCRIPTIONS_KEY) || {};
-  const existing = Array.isArray(all[playerId]) ? all[playerId] : all[playerId] ? [all[playerId]] : [];
   const next = {
     ...all,
-    [playerId]: [record, ...existing.filter(s => s?.endpoint !== record.endpoint)].slice(0, 8),
+    // Keep one active phone/browser subscription per player so old Home Screen installs
+    // do not keep receiving the same alert and causing duplicate notifications.
+    [playerId]: [record],
   };
   await storeSet(PUSH_SUBSCRIPTIONS_KEY, next);
   return record;
@@ -7988,10 +7986,23 @@ async function sendPushToPlayers(targetPlayerIds, title, body, data = {}) {
   if (!ids.length) return;
   const all = await storeGet(PUSH_SUBSCRIPTIONS_KEY) || {};
   const jobs = [];
+  const seenEndpoints = new Set();
+
   ids.forEach(pid => {
-    const subs = Array.isArray(all[pid]) ? all[pid] : all[pid] ? [all[pid]] : [];
-    subs.forEach(sub => jobs.push(sendPush(sub.subscription || sub, title, body, { ...data, playerId: pid })));
+    const rawSubs = Array.isArray(all[pid]) ? all[pid] : all[pid] ? [all[pid]] : [];
+    const subs = rawSubs
+      .map(sub => sub?.subscription || sub)
+      .filter(sub => sub?.endpoint)
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+
+    // Use only the newest subscription for that player. Old iPhone Home Screen installs
+    // can stay registered with Apple and cause duplicate banners if we send to all of them.
+    const sub = subs[0];
+    if (!sub?.endpoint || seenEndpoints.has(sub.endpoint)) return;
+    seenEndpoints.add(sub.endpoint);
+    jobs.push(sendPush(sub, title, body, { ...data, playerId: pid }));
   });
+
   await Promise.allSettled(jobs);
 }
 
@@ -8121,7 +8132,13 @@ async function dispatchPushForStoreChange(key, before, after) {
     await Promise.allSettled(newItems.map(m => {
       const sender = playerNameById(m.playerId);
       const targets = PLAYERS.map(p => p.id).filter(pid => pid !== m.playerId);
-      return sendPushToPlayers(targets, "💬 Team chat", `${sender}: ${String(m.text || "").slice(0, 120)}`, { url:"/", type:"chat", id:m.id });
+      return sendPushToPlayersOnce(
+        `chat:${m.id || m.ts || JSON.stringify(m)}`,
+        targets,
+        "💬 Team chat",
+        `${sender}: ${String(m.text || "").slice(0, 120)}`,
+        { url:"/", type:"chat", id:m.id }
+      );
     }));
   }
 
@@ -8132,8 +8149,8 @@ async function dispatchPushForStoreChange(key, before, after) {
       if (!value || prev?.status === value.status) return null;
       const target = completionKey.split("__")[1];
       if (!target) return null;
-      if (value.status === "approved") return sendPushToPlayers([target], "✅ Training approved", "training approved — +15 pts", { url:"/", type:"training", id:completionKey });
-      if (value.status === "rejected") return sendPushToPlayers([target], "❌ Training needs redo", value.note ? `needs redo: ${value.note}` : "your training needs another look", { url:"/", type:"training", id:completionKey });
+      if (value.status === "approved") return sendPushToPlayersOnce(`training:${completionKey}:approved`, [target], "✅ Training approved", "training approved — +15 pts", { url:"/", type:"training", id:completionKey });
+      if (value.status === "rejected") return sendPushToPlayersOnce(`training:${completionKey}:rejected`, [target], "❌ Training needs redo", value.note ? `needs redo: ${value.note}` : "your training needs another look", { url:"/", type:"training", id:completionKey });
       return null;
     }).filter(Boolean);
     await Promise.allSettled(jobs);
@@ -8145,7 +8162,7 @@ async function dispatchPushForStoreChange(key, before, after) {
     if (newRaceId && newRaceId !== oldRaceId) {
       const obj = typeof RACE_OBJECTIVES !== "undefined" ? RACE_OBJECTIVES.find(o => o.id === newRaceId) : null;
       const targets = PLAYERS.map(p => p.id).filter(pid => pid !== after.startedBy);
-      await sendPushToPlayers(targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}`, { url:"/", type:"race", id:newRaceId });
+      await sendPushToPlayersOnce(`race:${newRaceId}`, targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}`, { url:"/", type:"race", id:newRaceId });
     }
   }
 
@@ -8157,7 +8174,7 @@ async function dispatchPushForStoreChange(key, before, after) {
         : req.status === "denied"
           ? "your parse credit request was denied"
           : `${req.playerName || "someone"} requested parse credits`;
-      return sendPushToPlayers([target], "🔔 Burton Battlers", body, { url:"/", type:"credits", id:req.id });
+      return sendPushToPlayersOnce(`credits:${req.id || req.ts || JSON.stringify(req)}:${req.status || "new"}`, [target], "🔔 Burton Battlers", body, { url:"/", type:"credits", id:req.id });
     }));
   }
 }
@@ -9046,7 +9063,6 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
   };
 
   await storeSetWithPush("activity_feed", [entry, ...existing].slice(0, 80));
-  await notifyActivityPush(entry);
 };             
   const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
   const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
@@ -9823,7 +9839,6 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
     const pingUpd = [...(pings||[]), pingEntry];
     setPings(pingUpd);
     await storeSetWithPush("pings", pingUpd);
-    await notifyPingPush(pingEntry);
     addToast?.(`challenge sent to ${PLAYERS.find(p => p.id === selectedOpponent)?.name}!`, "🪙");
   };
 
@@ -11024,7 +11039,6 @@ const GAME_CARDS = [
   { id:"trivia",   label:"RLCS Trivia",     desc:"5 questions · up to 3x your wager",       color:"#4D9EFF" },
   { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
   { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42", emoji:"🟠" },
-  { id:"hoops",    label:"Hoops Minute",     desc:"swipe shots for 60 seconds · swish = 3", color:"#FF8C42", emoji:"🏀" },
   { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
   { id:"rlcsbets", label:"RLCS Bets",        desc:"bet on real pro matches with live odds",    color:"#FF61C1" },
   { id:"stocks",   label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
@@ -11062,12 +11076,6 @@ function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, acti
       <BoostGrab currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>
     </div>
   );
-  if (active === "hoops") return (
-    <div className="bb-tab-content" style={s.tabContent}>
-      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
-      <HoopsMinuteGame currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>
-    </div>
-  );
   if (active === "recap") return (
     <div className="bb-tab-content" style={s.tabContent}>
       <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
@@ -11096,8 +11104,7 @@ function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, acti
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         {GAME_CARDS.map(card => (
           <button key={card.id} onClick={()=>setActive(card.id)} className="bb-pressable"
-            style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${card.color}33`,borderRadius:18,padding:"18px 14px",textAlign:"left",cursor:"pointer",display:"flex",flexDirection:"column",gap:0,minHeight:140}}>
-            <div style={{fontSize:32,marginBottom:10}}>{card.emoji || "🎮"}</div>
+            style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${card.color}33`,borderRadius:18,padding:"18px 14px",textAlign:"left",cursor:"pointer",display:"flex",flexDirection:"column",gap:0,minHeight:116}}>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:700,color:card.color,marginBottom:6,lineHeight:1.1}}>{card.label}</div>
             <div style={{fontSize:11,color:"#4A5066",lineHeight:1.4,flex:1}}>{card.desc}</div>
             <div style={{fontSize:10,color:card.color,fontWeight:700,marginTop:10}}>play →</div>
@@ -11155,6 +11162,7 @@ const [raceStart, setRaceStart] = useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
   const [pushStatus, setPushStatus] = useState("off");
+  const pushStatusRef = useRef("off");
 const [themeId, setThemeId] = useState("starfield");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const [showAllGames, setShowAllGames] = useState(false);
@@ -11194,7 +11202,11 @@ const addToast = useCallback((text, icon = "🔔") => {
     showLocalNotification(titleForPush(icon), String(text || ""), { type:"toast" });
   }
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
-}, []);              
+}, []);
+
+useEffect(() => {
+  pushStatusRef.current = pushStatus;
+}, [pushStatus]);              
 const closeChatPanel = useCallback(() => {
   setChatOpen(false);
   const upd = { ...lastSeen, chat: messages.length };
@@ -11275,7 +11287,7 @@ useEffect(() => {
     const selfInVoice = !!cleaned[currentPlayer];
     if (selfInVoice) setVoiceJoinBanner(null);
 
-    if (previous && !selfInVoice) {
+    if (previous && !selfInVoice && pushStatusRef.current !== "on") {
       Object.entries(cleaned).forEach(([pid, v]) => {
         if (pid === currentPlayer) return;
         if (previous[pid]) return;
@@ -11329,6 +11341,7 @@ useEffect(() => {
   const fresh = mySessionPings.find(p => !sessionPingSeenRef.current.has(p.id));
   currentIds.forEach(id => sessionPingSeenRef.current.add(id));
   if (!fresh) return;
+  if (pushStatusRef.current === "on") return;
 
   const fromPlayer = PLAYERS.find(p => p.id === fresh.from);
   setSessionPingBanner({
@@ -11357,8 +11370,10 @@ useEffect(() => {
 
 useEffect(() => {
   if (pendingActivityToasts.length === 0) return;
-  setCatchupQueue(pendingActivityToasts);
-  setCatchupStopped(false);
+  if (pushStatusRef.current !== "on") {
+    setCatchupQueue(pendingActivityToasts);
+    setCatchupStopped(false);
+  }
   setPendingActivityToasts([]);
   (async () => {
     const af = await storeGet("activity_feed") || [];
@@ -11389,10 +11404,12 @@ document.addEventListener("mousemove", updateActive, { passive: true });
       if (key === "chat") {
   setMessages(prev => {
     const newMsgs = value.filter(m => m.playerId !== currentPlayer && !prev.find(p => p.id === m.id));
-    newMsgs.forEach(m => {
-      const sender = PLAYERS.find(pl => pl.id === m.playerId);
-      addToast(`${sender?.name}: ${m.text}`, "💬");
-    });
+    if (pushStatusRef.current !== "on") {
+      newMsgs.forEach(m => {
+        const sender = PLAYERS.find(pl => pl.id === m.playerId);
+        addToast(`${sender?.name}: ${m.text}`, "💬");
+      });
+    }
     return value;
   });
 }
@@ -11451,9 +11468,11 @@ if (key === "activity_feed") {
   const myFeed = (Array.isArray(value)?value:[]).filter(e=>e.to===currentPlayer);
   const prev = activityFeed || [];
   const newEntries = myFeed.filter(e=>!prev.find(p=>p.id===e.id)&&!e.seen);
-  newEntries.forEach((e,i)=>{
-    setTimeout(()=>addToast(`${e.fromName} ${e.text}`,e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"),i*800);
-  });
+  if (pushStatusRef.current !== "on") {
+    newEntries.forEach((e,i)=>{
+      setTimeout(()=>addToast(`${e.fromName} ${e.text}`,e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"),i*800);
+    });
+  }
   setActivityFeed(myFeed);
 }
 });
@@ -11620,7 +11639,7 @@ const unseenNew = myFeed.filter(e =>
       .sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
 if (allCatchup.length > 0) {
-  setPendingActivityToasts(allCatchup);
+  if (pushStatusRef.current !== "on") setPendingActivityToasts(allCatchup);
   // immediately mark all as seen so they don't repeat
   const allIds = new Set(allCatchup.map(e => e.id).filter(Boolean));
   const markedAll = (Array.isArray(af) ? af : []).map(e =>
@@ -11773,13 +11792,14 @@ const TABS=[
     chat: Math.max(0, messages.length - lastSeen.chat),
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
-  const topActivityNotifs = (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
+  const hidePushMirroredInAppNotifs = pushStatus === "on";
+  const topActivityNotifs = hidePushMirroredInAppNotifs ? [] : (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
     id: e.id,
     ts: e.ts,
     text: `${e.fromName} ${e.text}`,
     icon: e.type==="like" ? "❤️" : e.type==="comment" ? "💬" : e.type==="comment_heart" ? "🩷" : "🔔",
   }));
-  const topPingNotifs = (pings||[]).filter(p => p.to === currentPlayer).map(p => ({
+  const topPingNotifs = hidePushMirroredInAppNotifs ? [] : (pings||[]).filter(p => p.to === currentPlayer).map(p => ({
     id: p.id,
     ts: p.ts,
     text: p.type==="flower"
@@ -11791,7 +11811,7 @@ const TABS=[
           : `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} wants to run 2s`,
     icon: p.type==="flower" ? "🌸" : p.type==="session" ? "⏱️" : p.type==="coinflip" ? "🪙" : "🎮",
   }));
-  const topTrainingNotifs = Object.entries(completions||{})
+  const topTrainingNotifs = hidePushMirroredInAppNotifs ? [] : Object.entries(completions||{})
     .filter(([k,v]) => v?.status==="approved" && k.endsWith(`__${currentPlayer}`))
     .map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt||new Date().toISOString(), text:"training approved — +15 pts", icon:"✅" }));
   const clearedNotifIds = points?.[currentPlayer + "_clearedNotifs"] || [];
@@ -11857,7 +11877,7 @@ const TABS=[
     />
   </div>
 )}
-{voiceJoinBanner && (
+{voiceJoinBanner && pushStatus !== "on" && (
   <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1000,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto",animation:"dropDown .22s cubic-bezier(.2,.8,.2,1)"}}>
     <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${voiceJoinBanner.color}55`,borderRadius:18,padding:"13px 14px",boxShadow:"0 16px 44px rgba(0,0,0,0.42)",display:"flex",alignItems:"center",gap:12}}>
       <div style={{width:34,height:34,borderRadius:12,background:`${voiceJoinBanner.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>🎙️</div>
@@ -11874,7 +11894,7 @@ const TABS=[
     </div>
   </div>
 )}
-{sessionPingBanner && (
+{sessionPingBanner && pushStatus !== "on" && (
   <div style={{position:"fixed",top:voiceJoinBanner ? "calc(env(safe-area-inset-top) + 122px)" : "max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1001,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto",animation:"dropDown .22s cubic-bezier(.2,.8,.2,1)"}}>
     <div style={{background:"linear-gradient(135deg,#141225,#0B0D17)",border:`1px solid ${sessionPingBanner.color}55`,borderRadius:18,padding:"13px 14px",boxShadow:"0 16px 44px rgba(0,0,0,0.42)",display:"flex",alignItems:"center",gap:12}}>
       <div style={{width:34,height:34,borderRadius:12,background:`${sessionPingBanner.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>⏱️</div>
