@@ -3191,14 +3191,56 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const isDj = !musicState?.dj || musicState.dj === currentPlayer;
   const queue = Array.isArray(musicState?.queue) ? musicState.queue : [];
   const hasTrack = !!musicState?.url;
-  const isSoundCloudUrl = (url) => /https?:\/\/(www\.)?(soundcloud\.com|on\.soundcloud\.com)\//i.test(String(url || "").trim());
-  const cleanUrl = (url) => String(url || "").trim();
+  const normalizeSoundCloudUrl = (url) => {
+    let raw = String(url || "").trim();
+    if (!raw) return "";
+    raw = raw.replace(/^soundcloud:\/\//i, "https://soundcloud.com/");
+    if (/^(soundcloud\.com|www\.soundcloud\.com|m\.soundcloud\.com|on\.soundcloud\.com|soundcloud\.app\.goo\.gl)\//i.test(raw)) {
+      raw = `https://${raw}`;
+    }
+    try {
+      const u = new URL(raw);
+      const host = u.hostname.replace(/^www\./i, "").replace(/^m\./i, "").toLowerCase();
+      if (["soundcloud.com", "on.soundcloud.com", "soundcloud.app.goo.gl", "api.soundcloud.com"].includes(host)) {
+        return `https://${host}${u.pathname}${u.search}`;
+      }
+    } catch (_) {}
+    return raw;
+  };
+  const isSoundCloudUrl = (url) => {
+    try {
+      const u = new URL(normalizeSoundCloudUrl(url));
+      const host = u.hostname.replace(/^www\./i, "").replace(/^m\./i, "").toLowerCase();
+      return ["soundcloud.com", "on.soundcloud.com", "soundcloud.app.goo.gl", "api.soundcloud.com"].includes(host);
+    } catch (_) {
+      return false;
+    }
+  };
+  const cleanUrl = (url) => normalizeSoundCloudUrl(url);
   const displayTrack = (url) => {
     try {
-      const u = new URL(url);
-      return decodeURIComponent(u.pathname.split("/").filter(Boolean).slice(-1)[0] || u.hostname).replace(/[-_]+/g, " ");
+      const u = new URL(normalizeSoundCloudUrl(url));
+      const slug = decodeURIComponent(u.pathname.split("/").filter(Boolean).slice(-1)[0] || u.hostname).replace(/[-_]+/g, " ");
+      if (u.hostname.includes("on.soundcloud") || u.hostname.includes("app.goo.gl")) return "mobile SoundCloud link";
+      return slug || "SoundCloud track";
     } catch (_) {
       return "SoundCloud track";
+    }
+  };
+  const resolveSoundCloudUrl = async (url) => {
+    const normalized = cleanUrl(url);
+    try {
+      const res = await fetch(`https://soundcloud.com/oembed?format=json&url=${encodeURIComponent(normalized)}`);
+      if (!res.ok) throw new Error("oembed failed");
+      const data = await res.json();
+      const html = String(data?.html || "");
+      const match = html.match(/[?&]url=([^&"']+)/);
+      return {
+        url: match ? decodeURIComponent(match[1]) : normalized,
+        title: data?.title || displayTrack(normalized),
+      };
+    } catch (_) {
+      return { url: normalized, title: displayTrack(normalized) };
     }
   };
   const getLivePositionMs = (state = musicState) => {
@@ -3264,6 +3306,19 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   }, [musicState?.url]);
 
   useEffect(() => {
+    if (!hasTrack || !iframeRef.current) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const widget = await getWidget();
+        if (!widget || cancelled) return;
+        widget.setVolume?.(Number(musicVolume) || 0);
+      } catch (_) {}
+    }, 180);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [hasTrack, musicState?.url]);
+
+  useEffect(() => {
     if (!joinedMusic || !hasTrack) return;
     let cancelled = false;
     const applyState = async () => {
@@ -3317,36 +3372,43 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       return;
     }
     setJoinedMusic(true);
-    setTimeout(async () => {
-      try {
-        const widget = await getWidget();
-        if (!widget) return;
-        widget.setVolume?.(Number(musicVolume) || 0);
-        widget.seekTo?.(getLivePositionMs(musicState));
-        if (musicState.playing) widget.play?.();
+    try {
+      const widget = await getWidget();
+      if (!widget) return;
+      const target = getLivePositionMs(musicState);
+      widget.setVolume?.(Number(musicVolume) || 0);
+      if (musicState.playing) {
+        widget.play?.();
+        setTimeout(() => { try { widget.seekTo?.(target); } catch (_) {} }, 90);
+        setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
         addToast?.("joined room music", "🎧");
-      } catch (_) {
-        addToast?.("tap join music again after the player loads", "🎧");
+      } else {
+        widget.seekTo?.(target);
+        addToast?.("room music ready", "🎧");
       }
-    }, 300);
+    } catch (_) {
+      addToast?.("tap join music again after the player loads", "🎧");
+    }
   };
 
   const loadTrack = async (urlOverride = null) => {
-    const url = cleanUrl(urlOverride || trackLink);
-    if (!isSoundCloudUrl(url)) {
+    const rawUrl = cleanUrl(urlOverride || trackLink);
+    if (!isSoundCloudUrl(rawUrl)) {
       addToast?.("paste a SoundCloud link", "⚠️");
       return;
     }
+    const resolved = await resolveSoundCloudUrl(rawUrl);
+    const url = resolved.url || rawUrl;
     const next = {
       ...emptyMusicState,
       url,
-      title: displayTrack(url),
+      title: resolved.title || displayTrack(rawUrl),
       dj: currentPlayer,
       djName: player?.name || currentPlayer,
       playing: false,
       positionMs: 0,
       updatedAt: new Date().toISOString(),
-      queue: queue.filter(q => q.url !== url),
+      queue: queue.filter(q => q.url !== url && q.url !== rawUrl),
     };
     await updateMusicState(next);
     setTrackLink("");
@@ -3365,8 +3427,14 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
 
   const togglePlay = async () => {
     if (!isDj || !hasTrack) return;
-    const pos = joinedMusic ? await getWidgetPosition() : getLivePositionMs(musicState);
     const nextPlaying = !musicState.playing;
+    if (nextPlaying) setJoinedMusic(true);
+    let widget = null;
+    try {
+      widget = await getWidget();
+      widget?.setVolume?.(Number(musicVolume) || 0);
+    } catch (_) {}
+    const pos = joinedMusic ? await getWidgetPosition() : getLivePositionMs(musicState);
     const next = {
       ...musicState,
       playing: nextPlaying,
@@ -3376,10 +3444,14 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       djName: player?.name || currentPlayer,
     };
     await updateMusicState(next);
-    if (joinedMusic) {
-      const widget = await getWidget();
-      if (nextPlaying) widget?.play?.();
-      else widget?.pause?.();
+    if (widget) {
+      if (nextPlaying) {
+        widget.seekTo?.(pos);
+        widget.play?.();
+        setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
+      } else {
+        widget.pause?.();
+      }
     }
   };
 
@@ -3391,15 +3463,16 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   };
 
   const addRequest = async () => {
-    const url = cleanUrl(requestLink);
-    if (!isSoundCloudUrl(url)) {
+    const rawUrl = cleanUrl(requestLink);
+    if (!isSoundCloudUrl(rawUrl)) {
       addToast?.("request needs a SoundCloud link", "⚠️");
       return;
     }
+    const resolved = await resolveSoundCloudUrl(rawUrl);
     const entry = {
       id: `${Date.now()}_${currentPlayer}`,
-      url,
-      title: displayTrack(url),
+      url: resolved.url || rawUrl,
+      title: resolved.title || displayTrack(rawUrl),
       requestedBy: currentPlayer,
       requestedByName: player?.name || currentPlayer,
       ts: new Date().toISOString(),
@@ -3440,18 +3513,18 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
             <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
             <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · tap join music once on your phone</div>
           </div>
-          <div aria-hidden="true" style={{position:"absolute",left:-9999,top:-9999,width:1,height:1,overflow:"hidden",opacity:0,pointerEvents:"none"}}>
+          <div aria-hidden="true" style={{position:"fixed",left:0,bottom:0,width:1,height:1,overflow:"hidden",opacity:0.01,pointerEvents:"none",transform:"scale(0.01)",transformOrigin:"bottom left"}}>
             <iframe
               ref={iframeRef}
               title="SoundCloud room music hidden player"
-              width="100%"
-              height="118"
+              width="1"
+              height="1"
               scrolling="no"
               frameBorder="no"
-              allow="autoplay"
+              allow="autoplay; encrypted-media"
               src={embedSrc}
               tabIndex={-1}
-              style={{border:"none",width:1,height:1,opacity:0,pointerEvents:"none"}}
+              style={{border:"none",width:1,height:1,opacity:0.01,pointerEvents:"none"}}
             />
           </div>
           {!joinedMusic && (
