@@ -3572,6 +3572,11 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
 
 
   useEffect(() => {
+    // Mounting this component means the user turned music room on.
+    // Keep the listener "armed" even if no track is loaded yet, so a later DJ play
+    // can start/sync on this device without needing a separate play-here button.
+    setJoinedMusic(true);
+    setLocalMusicPaused(false);
     return () => {
       if (volumeApplyTimerRef.current) clearTimeout(volumeApplyTimerRef.current);
       try { widgetRef.current?.pause?.(); } catch (_) {}
@@ -3589,6 +3594,10 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     const unsub = subscribeKVMulti(["room_music"], ({ value }) => {
       const next = value?.url || value?.queue ? { ...emptyMusicState, ...value, queue:Array.isArray(value.queue)?value.queue:[] } : emptyMusicState;
       setMusicState(next);
+      if (next?.url && next?.playing) {
+        setJoinedMusic(true);
+        setLocalMusicPaused(false);
+      }
     });
     return () => { alive = false; unsub?.(); };
   }, []);
@@ -3634,8 +3643,8 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         applyingRef.current = false;
       }
     };
-    const t = setTimeout(applyState, 180);
-    return () => { cancelled = true; clearTimeout(t); };
+    const timers = [180, 850, 1650].map(delay => setTimeout(applyState, delay));
+    return () => { cancelled = true; timers.forEach(clearTimeout); };
   }, [joinedMusic, localMusicPaused, hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs]);
 
   useEffect(() => {
@@ -3677,8 +3686,11 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       ? { ...emptyMusicState, ...stateOverride, queue:Array.isArray(stateOverride.queue)?stateOverride.queue:[] }
       : musicState;
     if (!activeState?.url) {
-      if (!silent) addToast?.("load a SoundCloud track first", "🎧");
-      return false;
+      setJoinedMusic(true);
+      setAudioUnlocked(true);
+      setLocalMusicPaused(false);
+      if (!silent) addToast?.("music room armed — it will sync when the DJ plays", "🎧");
+      return true;
     }
     setJoinedMusic(true);
     setAudioUnlocked(true);
@@ -3748,7 +3760,8 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     };
   }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicVolume, joinedMusic]);
 
-  // Track load only prepares the embedded player. It will not auto-play until this device taps play here.
+  // Track load prepares the embedded player. Because music room stays armed while enabled,
+  // listener devices can follow the next DJ play without a separate play-here button.
   useEffect(() => {}, [hasTrack, musicState?.url]);
 
   const loadTrack = async (urlOverride = null) => {
@@ -3770,6 +3783,8 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       updatedAt: new Date().toISOString(),
       queue: queue.filter(q => q.url !== url && q.url !== rawUrl),
     };
+    setJoinedMusic(true);
+    setLocalMusicPaused(false);
     await updateMusicState(next);
     setTrackLink("");
     addToast?.("SoundCloud track loaded", "🎧");
@@ -3974,13 +3989,17 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         </div>
       )}
 
-      {hasTrack && isDj && (
+      {hasTrack && (
         <div style={{display:"flex",gap:8,marginBottom:12}}>
-          <button onClick={togglePlay} className="bb-pressable" style={{flex:1,background:musicState.playing?"rgba(255,85,0,0.13)":"rgba(184,255,77,0.13)",border:`1px solid ${musicState.playing?"rgba(255,85,0,0.35)":"rgba(184,255,77,0.35)"}`,borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:musicState.playing?"#FF5500":"#B8FF4D",cursor:"pointer"}}>
-            {musicState.playing ? "pause" : "play"}
+          <button onClick={isDj ? togglePlay : ()=>joinMusic({ silent:false })} className="bb-pressable" style={{flex:1,background:musicState.playing?"rgba(255,85,0,0.13)":"rgba(184,255,77,0.13)",border:`1px solid ${musicState.playing?"rgba(255,85,0,0.35)":"rgba(184,255,77,0.35)"}`,borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:musicState.playing?"#FF5500":"#B8FF4D",cursor:"pointer"}}>
+            {isDj ? (musicState.playing ? "pause" : "play") : "play"}
           </button>
-          <button onClick={()=>queue[0] ? playQueued(queue[0]) : addToast?.("queue is empty", "🎧")} className="bb-pressable" style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>next</button>
-          <button onClick={stopMusic} className="bb-pressable" style={{flex:1,background:"rgba(255,92,138,0.09)",border:"1px solid rgba(255,92,138,0.22)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>stop</button>
+          {isDj && (
+            <>
+              <button onClick={()=>queue[0] ? playQueued(queue[0]) : addToast?.("queue is empty", "🎧")} className="bb-pressable" style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>next</button>
+              <button onClick={stopMusic} className="bb-pressable" style={{flex:1,background:"rgba(255,92,138,0.09)",border:"1px solid rgba(255,92,138,0.22)",borderRadius:11,padding:"11px 0",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>stop</button>
+            </>
+          )}
         </div>
       )}
 
