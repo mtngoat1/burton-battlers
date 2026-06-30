@@ -819,9 +819,17 @@ function getWeekStart() {
   return Object.values(groups).sort((a,b) => new Date(b.ts) - new Date(a.ts));
 }
             
-function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore }) {
-  const [open, setOpen] = useState(false);
+function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore, jumpGameId = null }) {
+  const [open, setOpen] = useState(!!jumpGameId && (session.games || []).some(g => g.id === jumpGameId));
   const [selectedGame, setSelectedGame] = useState(null);
+  useEffect(() => {
+    if (!jumpGameId) return;
+    const target = (session.games || []).find(g => g.id === jumpGameId);
+    if (!target) return;
+    setOpen(true);
+    const timer = setTimeout(() => setSelectedGame(target), 240);
+    return () => clearTimeout(timer);
+  }, [jumpGameId, session.code]);
   const rep = session.games[0];
   const won = gameIsWin(rep);
   const duoIds = [...new Set(session.games.flatMap(g => g.duoIds || [g.playerId]).filter(Boolean))];
@@ -1170,7 +1178,20 @@ function getCoachNote(stats, playerId) {
     note = { text: "solid session last night — keep building on it today.", emoji: "📈" };
   }
 
- return { ...note, date: lastNightKey, games: lastNightGames };
+ const targetField =
+    note.text.includes("shots") ? "shots" :
+    note.text.includes("assists") || note.text.includes("set up") ? "assists" :
+    note.text.includes("defending") || note.text.includes("last back") ? "saves" :
+    note.text.includes("aggressively") || note.text.includes("positioning") ? "demos" :
+    note.text.includes("on fire") || note.text.includes("goals") ? "goals" :
+    note.text.includes("numbers were good") ? "score" :
+    "score";
+  const targetGame = [...lastNightGames].sort((a, b) => {
+    if (targetField === "shots" && avgShots < 1) return (Number(a.shots)||0) - (Number(b.shots)||0);
+    return (Number(b[targetField]) || 0) - (Number(a[targetField]) || 0);
+  })[0] || lastNightGames[0];
+
+ return { ...note, date: lastNightKey, games: lastNightGames, targetGameId: targetGame?.id, targetField };
 }
 
 function CoachNoteCard({ stats, currentPlayer, onJumpToLog }) {
@@ -1179,7 +1200,7 @@ function CoachNoteCard({ stats, currentPlayer, onJumpToLog }) {
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
 
   return (
-    <button onClick={() => onJumpToLog(note.date)} className="bb-pressable" style={{ width: "100%", background: "linear-gradient(135deg,#0E1020,#0A0C1A)", border: `1px solid ${playerColor}22`, borderRadius: 16, padding: "14px 16px", marginBottom: 16, textAlign: "left", cursor: "pointer" }}>
+    <button onClick={() => onJumpToLog(note.date, note.targetGameId)} className="bb-pressable" style={{ width: "100%", background: "linear-gradient(135deg,#0E1020,#0A0C1A)", border: `1px solid ${playerColor}22`, borderRadius: 16, padding: "14px 16px", marginBottom: 16, textAlign: "left", cursor: "pointer" }}>
       <div style={{ fontSize: 10, color: playerColor, fontWeight: 700, letterSpacing: 1, marginBottom: 8 }}>COACH NOTE · {new Date(note.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }).toUpperCase()}</div>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
         <span style={{ fontSize: 22, flexShrink: 0 }}>{note.emoji}</span>
@@ -1472,7 +1493,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {stat === "record" && (
           <>
-            <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:"1px solid rgba(184,255,77,0.15)"}}>
+            <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:`1px solid ${isJumpDay ? "rgba(167,139,250,0.5)" : "rgba(184,255,77,0.15)"}`}}>
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:56,fontWeight:700,color:"#B8FF4D"}}>{record.w}-{record.l}</div>
               <div style={{fontSize:12,color:"#4A5066",letterSpacing:1,marginTop:4}}>SERIES RECORD</div>
             </div>
@@ -1887,7 +1908,7 @@ return (
       </div>
 
       {stats.some(g=>g.playerId===currentPlayer&&g.mode==="3v3") ? (
-        <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date) => { setStatsJumpDate(date); onGotoStats(); }}/>
+        <CoachNoteCard stats={stats} currentPlayer={currentPlayer} onJumpToLog={(date, gameId) => { setStatsJumpDate({ date, gameId }); onGotoStats(); }}/>
       ) : (
         <EmptyState icon="⌁" title="No 3v3 games synced yet" body="After your next team match, open Stats → Sync Match and your coach note + comparison data will fill in." actionLabel="open stats" onAction={onGotoStats} />
       )}
@@ -3096,11 +3117,8 @@ onClick={async () => {
               <div style={{width:14,height:14,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.2)",borderTopColor:"#fff",animation:"spin .7s linear infinite"}}/>
               connecting…
             </>
-          ) : "🎙️ join voice room"}
+          ) : "join voice room"}
         </button>
-        <div style={{fontSize:10,color:"#3A4256",textAlign:"center",marginTop:8}}>
-          microphone required · audio only · no video
-        </div>
       </div>
     );
   }
@@ -3375,6 +3393,22 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     addToast?.("session cancelled", "❌");
   };
 
+  const sessionSwipeRef = useRef({ x:0, y:0 });
+  const clearStartedSessions = async () => {
+    const startedIds = new Set((teamSessions || [])
+      .filter(s => !s.cancelled && s.mode === "3v3" && new Date(s.startsAt).getTime() <= Date.now())
+      .map(s => s.id));
+    if (!startedIds.size) return;
+    const nextSessions = (teamSessions || []).filter(s => !startedIds.has(s.id));
+    setTeamSessions(nextSessions);
+    await storeSet("team_sessions", nextSessions);
+    const freshPings = await storeGet("pings") || [];
+    const nextPings = freshPings.filter(p => !(p.type === "session" && startedIds.has(p.sessionId)));
+    setPings(nextPings);
+    await storeSetWithPush("pings", nextPings);
+    addToast?.("started 3v3 pings cleared", "🧹");
+  };
+
   return (
     <div style={{background:"linear-gradient(135deg,#101421,#080A12)",border:"1px solid rgba(167,139,250,0.18)",borderRadius:16,padding:16,marginTop:14,boxShadow:"0 0 22px rgba(0,0,0,0.2)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12}}>
@@ -3405,10 +3439,16 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
         const accepted = Object.entries(session.responses || {}).filter(([_, v]) => v === "accepted").map(([pid]) => pid);
         const iAccepted = session.responses?.[currentPlayer] === "accepted";
         return (
-          <div key={session.id} style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(184,255,77,0.12)",borderRadius:13,padding:12,marginTop:8}}>
+          <div
+            key={session.id}
+            onTouchStart={(e)=>{ const t=e.touches?.[0]; sessionSwipeRef.current={x:t?.clientX||0,y:t?.clientY||0}; }}
+            onTouchEnd={(e)=>{ const t=e.changedTouches?.[0]; const dx=(t?.clientX||0)-sessionSwipeRef.current.x; const dy=Math.abs((t?.clientY||0)-sessionSwipeRef.current.y); if (minsLeft <= 0 && dx < -70 && dy < 60) clearStartedSessions(); }}
+            style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(184,255,77,0.12)",borderRadius:13,padding:12,marginTop:8,touchAction:"pan-y"}}
+          >
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
               <div>
                 <div style={{fontSize:13,fontWeight:900,color:"#E8ECF4"}}>3v3 {minsLeft > 0 ? `in ${minsLeft} min` : "starting now"}</div>
+                {minsLeft <= 0 && <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:800,marginTop:3}}>swipe left to clear started sessions</div>}
                 <div style={{fontSize:10.5,color:"#6F7892",marginTop:3}}>set by {PLAYERS.find(p=>p.id===session.createdBy)?.name || session.createdByName}</div>
               </div>
               {!iAccepted ? (
@@ -5338,7 +5378,7 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
   );
 }
 
-function TeamLinkGames({ stats, onUpdateOpponentScore }) {
+function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
  const roomGames = stats.filter(g => g.roomId || g.sessionCode);
   const dayMap = {};
   roomGames.forEach(g => {
@@ -5367,21 +5407,23 @@ if (!sessionMap[key]) sessionMap[key] = { code: g.roomId || g.sessionCode, mode:
         });
         const sessions = Object.values(sessionMap).sort((a,b) => new Date(b.ts) - new Date(a.ts));
         return (
-          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={stats} onUpdateOpponentScore={onUpdateOpponentScore} />
+          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={stats} onUpdateOpponentScore={onUpdateOpponentScore} jumpDate={jumpDate} jumpGameId={jumpGameId} />
         );
       })}
     </div>
   );
 }
 
-function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore }) {
-  const [open, setOpen] = useState(false);
+function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
+  const [open, setOpen] = useState(dk === jumpDate || sessions.some(s => s.games.some(g => g.id === jumpGameId)));
   const date = new Date(dk + "T00:00:00");
+  const isJumpDay = dk === jumpDate || sessions.some(s => s.games.some(g => g.id === jumpGameId));
+  useEffect(() => { if (isJumpDay) setOpen(true); }, [isJumpDay]);
   const totalGames = sessions.length;
   return (
-    <div style={{marginBottom:10}}>
+    <div id={`teamlink-${dk}`} style={{marginBottom:10}}>
       <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
-        style={{width:"100%",background:"#11131F",borderRadius:13,padding:"12px 14px",border:"1px solid rgba(184,255,77,0.15)",display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:open?8:0}}>
+        style={{width:"100%",background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${isJumpDay ? "rgba(167,139,250,0.5)" : "rgba(184,255,77,0.15)"}`,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:open?8:0}}>
         <div style={{textAlign:"left"}}>
           <div style={{fontSize:12,fontWeight:700,color:"#B8FF4D"}}>{fmtDay(date)}</div>
           <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{totalGames} game{totalGames!==1?"s":""}</div>
@@ -5389,7 +5431,7 @@ function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore }) {
         <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
       </button>
  {open && sessions.map((sess, idx) => (
-     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats} gameLabel={`GAME ${sessions.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore}/>
+     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={allStats} gameLabel={`GAME ${sessions.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} jumpGameId={jumpGameId}/>
 ))}
     </div>
   );
@@ -6011,13 +6053,17 @@ useEffect(() => {
 }, [stats?.length]);
 useEffect(() => {
   if (jumpDate) {
+    const targetDate = typeof jumpDate === "object" ? jumpDate.date : jumpDate;
     setStatsSubTab("teamlink");
-    setMode("2v2");
+    setMode("3v3");
     setShowAllGames(true);
     setTimeout(() => {
-      document.getElementById(`gamelog-${jumpDate}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document.getElementById(`teamlink-${targetDate}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document.getElementById(`gamelog-${targetDate}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 180);
+    setTimeout(() => {
       onJumpHandled();
-    }, 100);
+    }, 900);
   }
 }, [jumpDate]);
 
@@ -6347,7 +6393,7 @@ return (
 ) : statsSubTab==="teamlink" ? (
   <div>
     <div style={{...s.sectionLabel,marginBottom:10}}>team link</div>
-    <TeamLinkGames stats={stats} onUpdateOpponentScore={updateOpponentScore} />
+    <TeamLinkGames stats={stats} onUpdateOpponentScore={updateOpponentScore} jumpDate={typeof jumpDate === "object" ? jumpDate.date : jumpDate} jumpGameId={typeof jumpDate === "object" ? jumpDate.gameId : null} />
   </div>
 ) : statsSubTab==="chem" ? (
   <TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>
@@ -6567,6 +6613,8 @@ const SHOP_ITEMS = [
   { id:"sb_bruh",    label:"Bruh",    desc:"low miss sting", cost:90, type:"sound", value:"sb_bruh", emoji:"😐" },
   { id:"sb_goal",    label:"Goal Horn",desc:"mini arena horn", cost:150, type:"sound", value:"sb_goal", emoji:"🚨" },
   { id:"sb_laugh",   label:"Laugh",   desc:"tiny laugh blip", cost:110, type:"sound", value:"sb_laugh", emoji:"🤣" },
+  { id:"sb_buzzer",  label:"Buzzer",  desc:"wrong answer buzz", cost:100, type:"sound", value:"sb_buzzer", emoji:"🚫" },
+  { id:"sb_pop",     label:"Pop",     desc:"soft click pop", cost:70, type:"sound", value:"sb_pop", emoji:"🫧" },
 
   // daily background rotation
   { id:"bg_carbon",    label:"Carbon Fiber", emoji:"⬛", desc:"dark carbon weave texture",       cost:80,   type:"background", value:"carbon" },
@@ -6853,10 +6901,13 @@ const DEFAULT_SOUNDBOARD_IDS = ["sb_airhorn","sb_sheesh","sb_nice","sb_bruh","sb
 function getSoundboardSound(id) {
   return SOUNDBOARD_SOUNDS.find(s => s.id === id) || SOUNDBOARD_SOUNDS[0];
 }
+function isSoundboardSoundId(id) {
+  return SOUNDBOARD_SOUNDS.some(s => s.id === id);
+}
 function getEquippedSoundboardIds(points, playerId) {
   const owned = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
   const equipped = points?.[playerId + "_equipped"] || {};
-  const selected = owned.filter(id => equipped[id] && getSoundboardSound(id));
+  const selected = owned.filter(id => equipped[id] && isSoundboardSoundId(id));
   return (selected.length ? selected : DEFAULT_SOUNDBOARD_IDS).slice(0,6);
 }
 function playSoundboardSound(soundId) {
@@ -6868,29 +6919,47 @@ function playSoundboardSound(soundId) {
     const sound = getSoundboardSound(soundId);
     const now = ctx.currentTime;
     const master = ctx.createGain();
-    master.gain.value = 0.08;
+    master.gain.setValueAtTime(0.001, now);
+    master.gain.linearRampToValueAtTime(0.16, now + 0.015);
+    master.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
     master.connect(ctx.destination);
-    const hit = (t, freq, dur, type="sine", vol=1) => {
+
+    const hit = (t, freq, dur, type="sine", vol=1, slideTo=null) => {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.type = type;
       o.frequency.setValueAtTime(freq, now + t);
-      g.gain.setValueAtTime(0, now + t);
+      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, now + t + dur);
+      g.gain.setValueAtTime(0.001, now + t);
       g.gain.linearRampToValueAtTime(0.75 * vol, now + t + 0.01);
       g.gain.exponentialRampToValueAtTime(0.001, now + t + dur);
       o.connect(g); g.connect(master);
-      o.start(now + t); o.stop(now + t + dur + 0.03);
+      o.start(now + t); o.stop(now + t + dur + 0.04);
     };
+    const noise = (t, dur, vol=0.4) => {
+      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+      const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+      const src = ctx.createBufferSource();
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(vol, now + t);
+      g.gain.exponentialRampToValueAtTime(0.001, now + t + dur);
+      src.buffer = buffer;
+      src.connect(g); g.connect(master);
+      src.start(now + t); src.stop(now + t + dur);
+    };
+
     const id = sound.id;
-    if (id === "sb_airhorn") { hit(0, 440, .18, "sawtooth", 1); hit(.16, 370, .20, "sawtooth", .9); }
-    else if (id === "sb_sheesh") { hit(0, 720, .10, "triangle", .75); hit(.08, 960, .14, "triangle", .85); }
-    else if (id === "sb_nice") { hit(0, 660, .09, "sine", .7); hit(.09, 880, .12, "sine", .8); }
-    else if (id === "sb_bruh") { hit(0, 180, .23, "sawtooth", .8); hit(.14, 130, .25, "sawtooth", .7); }
-    else if (id === "sb_goal") { hit(0, 520, .18, "square", .9); hit(.18, 520, .18, "square", .9); hit(.36, 660, .25, "square", 1); }
-    else if (id === "sb_laugh") { hit(0, 420, .07, "triangle", .7); hit(.08, 500, .07, "triangle", .7); hit(.16, 390, .09, "triangle", .7); }
-    else if (id === "sb_buzzer") { hit(0, 110, .35, "sawtooth", 1); }
-    else { hit(0, 900, .08, "sine", .6); }
-    setTimeout(() => ctx.close?.(), 900);
+    if (id === "sb_airhorn") { hit(0, 520, .22, "sawtooth", 1, 390); hit(.13, 650, .18, "sawtooth", .85, 500); noise(.02, .12, .12); }
+    else if (id === "sb_sheesh") { hit(0, 780, .13, "triangle", .65, 1040); hit(.10, 980, .18, "sine", .75, 1240); }
+    else if (id === "sb_nice") { hit(0, 660, .08, "sine", .6); hit(.08, 880, .10, "sine", .72); hit(.18, 1320, .08, "sine", .5); }
+    else if (id === "sb_bruh") { hit(0, 220, .18, "sawtooth", .75, 145); hit(.16, 130, .26, "triangle", .65, 95); }
+    else if (id === "sb_goal") { hit(0, 392, .16, "square", .85); hit(.16, 392, .16, "square", .85); hit(.32, 523, .28, "square", 1); noise(.02, .22, .08); }
+    else if (id === "sb_laugh") { hit(0, 420, .06, "triangle", .6); hit(.08, 540, .06, "triangle", .72); hit(.16, 460, .07, "triangle", .65); hit(.24, 600, .08, "triangle", .6); }
+    else if (id === "sb_buzzer") { hit(0, 115, .42, "sawtooth", 1, 88); noise(0, .18, .08); }
+    else if (id === "sb_pop") { hit(0, 1100, .055, "sine", .7, 580); noise(0, .035, .1); }
+    setTimeout(() => ctx.close?.(), 1100);
   } catch (_) {}
 }
 
@@ -7479,7 +7548,7 @@ await storeSetWithPush("pings", pingUpd2);
 
             <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>SOUNDBOARD SOUNDS</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {dailyShopItems.filter(i=>i.type==="sound").map(item=>{
+              {SHOP_ITEMS.filter(i=>i.type==="sound").map(item=>{
                 const isOwned=owned.includes(item.id);
                 const isEquipped=equipped[item.id];
                 const canAfford=myPoints>=item.cost;
@@ -7581,14 +7650,6 @@ await storeSetWithPush("pings", pingUpd2);
           </div>
         </div>
       )}
-      {/* squad streams section inside squad */}
-      <div style={{marginBottom:18}}>
-        <StreamTab streamProfiles={streamProfiles || {}} setStreamProfiles={setStreamProfiles || (()=>{})} currentPlayer={currentPlayer}/>
-      </div>
-
-      {/* Online now */}
-
-
 <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
   {["1v1","2v2","3v3","free play",null].map(m=>(
     <button key={m??"off"} onClick={async()=>{
@@ -7626,6 +7687,10 @@ await storeSetWithPush("pings", pingUpd2);
   );
 })}
 </div>
+      {/* squad streams section inside squad */}
+      <div style={{marginBottom:18}}>
+        <StreamTab streamProfiles={streamProfiles || {}} setStreamProfiles={setStreamProfiles || (()=>{})} currentPlayer={currentPlayer}/>
+      </div>
  {/* Incoming pings */}
 {myPings.filter(p => p.type !== "flower").length > 0 && (
   <>
@@ -9237,7 +9302,7 @@ const spinWheel = async () => {
     setRotation(newRotation);
 
     setTimeout(async () => {
-      const normalizedAngle = ((360 - (newRotation % 360)) + 360) % 360;
+      const normalizedAngle = (((0 - (newRotation % 360)) + 90 + 360) % 360);
       const segIdx = Math.floor(normalizedAngle / segAngle) % WHEEL_SEGMENTS.length;
       const seg = WHEEL_SEGMENTS[segIdx];
       const payout = Math.round(wager * seg.mult);
@@ -9363,16 +9428,13 @@ const noBettingWeek = isEventActive("no_betting");
         <div>
 
           {/* Wheel visual */}
-          <div style={{position:"relative",width:260,height:260,margin:"0 auto 24px"}}>
-            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",zIndex:10,width:32,height:32,background:"#06070D",borderRadius:"50%",border:"2px solid #B8FF4D",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>▼</div>
-            <div style={{position:"absolute",top:0,left:0,width:"100%",height:"100%",borderRadius:"50%",overflow:"hidden",border:"3px solid rgba(184,255,77,0.3)",transition:spinning?"transform 3s cubic-bezier(0.17,0.67,0.12,0.99)":"none",transform:`rotate(${rotation}deg)`}}>
-              {WHEEL_SEGMENTS.map((seg, i) => {
-                const angle = i * segAngle;
-                return (
-                  <div key={i} style={{position:"absolute",top:"50%",left:"50%",width:"50%",height:2,transformOrigin:"left center",transform:`rotate(${angle}deg)`,background:seg.color,opacity:0.6}}/>
-                );
-              })}
-              <svg viewBox="0 0 200 200" style={{width:"100%",height:"100%"}}>
+          <div style={{position:"relative",width:286,height:286,margin:"0 auto 24px",filter:"drop-shadow(0 18px 34px rgba(0,0,0,0.38))"}}>
+            <div style={{position:"absolute",top:"50%",right:-5,transform:"translateY(-50%)",zIndex:14,width:0,height:0,borderTop:"16px solid transparent",borderBottom:"16px solid transparent",borderRight:"28px solid #B8FF4D",filter:"drop-shadow(0 0 10px rgba(184,255,77,0.5))"}}/>
+            <div style={{position:"absolute",top:"50%",right:-31,transform:"translateY(-50%)",zIndex:15,fontSize:9,fontWeight:900,color:"#06070D",background:"#B8FF4D",borderRadius:99,padding:"3px 6px",letterSpacing:.6}}>LANDS</div>
+            <div style={{position:"absolute",inset:0,borderRadius:"50%",background:"radial-gradient(circle at 35% 28%,rgba(255,255,255,0.16),transparent 30%),linear-gradient(135deg,#222739,#090B14)",border:"10px solid rgba(184,255,77,0.32)",boxShadow:"inset 0 0 0 7px rgba(6,7,13,0.72), inset 0 0 30px rgba(0,0,0,0.5)"}}/>
+            <div style={{position:"absolute",top:13,left:13,width:"calc(100% - 26px)",height:"calc(100% - 26px)",borderRadius:"50%",overflow:"hidden",border:"6px solid rgba(6,7,13,0.8)",transition:spinning?"transform 3s cubic-bezier(0.17,0.67,0.12,0.99)":"none",transform:`rotate(${rotation}deg)`,boxShadow:"inset 0 0 0 4px rgba(255,255,255,0.07)"}}>
+              <svg viewBox="0 0 200 200" style={{width:"100%",height:"100%",display:"block"}}>
+                <circle cx="100" cy="100" r="100" fill="#0B0D17"/>
                 {WHEEL_SEGMENTS.map((seg, i) => {
                   const startAngle = (i * segAngle - 90) * Math.PI / 180;
                   const endAngle = ((i + 1) * segAngle - 90) * Math.PI / 180;
@@ -9381,16 +9443,24 @@ const noBettingWeek = isEventActive("no_betting");
                   const x2 = 100 + 100 * Math.cos(endAngle);
                   const y2 = 100 + 100 * Math.sin(endAngle);
                   const midAngle = ((i + 0.5) * segAngle - 90) * Math.PI / 180;
-                  const tx = 100 + 65 * Math.cos(midAngle);
-                  const ty = 100 + 65 * Math.sin(midAngle);
+                  const tx = 100 + 66 * Math.cos(midAngle);
+                  const ty = 100 + 66 * Math.sin(midAngle);
                   return (
                     <g key={i}>
-                      <path d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`} fill={seg.color} opacity="0.85"/>
-                      <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill="#06070D" fontWeight="bold" transform={`rotate(${(i+0.5)*segAngle}, ${tx}, ${ty})`}>{seg.mult}x</text>
+                      <path d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`} fill={seg.color} opacity="0.92" stroke="rgba(6,7,13,0.72)" strokeWidth="2"/>
+                      <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill="#06070D" fontWeight="900" transform={`rotate(${(i+0.5)*segAngle}, ${tx}, ${ty})`}>{seg.mult}x</text>
                     </g>
                   );
                 })}
+                <circle cx="100" cy="100" r="31" fill="#06070D" stroke="rgba(184,255,77,0.45)" strokeWidth="5"/>
+                <circle cx="100" cy="100" r="13" fill="#B8FF4D" opacity="0.92"/>
               </svg>
+              {WHEEL_SEGMENTS.map((seg, i) => {
+                const angle = i * segAngle;
+                return (
+                  <div key={`tick-${i}`} style={{position:"absolute",top:"50%",left:"50%",width:"48%",height:3,transformOrigin:"left center",transform:`rotate(${angle}deg)`,background:"rgba(6,7,13,0.72)",opacity:0.8}}/>
+                );
+              })}
             </div>
           </div>
 
@@ -10971,7 +11041,6 @@ const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, create
 const [teamSessions, setTeamSessions] = useState([]); // planned 3v3 sessions / RSVPs
 const [chatOpen, setChatOpen] = useState(false);
 const [showTopNotifs, setShowTopNotifs] = useState(false);
-const [glassNav, setGlassNav] = useState(false);
 const [showTrainingFull, setShowTrainingFull] = useState(false);
 const [adminStandalone, setAdminStandalone] = useState(false);
 const [voiceJoinBanner, setVoiceJoinBanner] = useState(null);
@@ -11655,8 +11724,6 @@ const TABS=[
       {loading&&authStage==="app"&&<div style={{position:"fixed",top:"max(12px, env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1200,width:22,height:22,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.16)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/>}
       {(points?.[currentPlayer+"_showStars"] !== false) && <StarfieldBg/>}
 
-{currentPlayer===ADMIN_ID&&<button onClick={()=>setGlassNav(v=>!v)} className="bb-pressable" style={{position:"fixed",right:14,top:"max(14px, env(safe-area-inset-top))",zIndex:850,background:glassNav?"rgba(184,255,77,0.22)":"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.14)",borderRadius:99,padding:"7px 10px",fontSize:10,fontWeight:900,color:glassNav?"#B8FF4D":"#8B92A8",backdropFilter:"blur(16px)",cursor:"pointer"}}>glass nav {glassNav?"on":"off"}</button>}
-
 {toasts.length > 0 && (
   <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto"}}>
     <SwipeToast
@@ -11716,11 +11783,11 @@ const TABS=[
       {isAdmin&&<Shield size={13} color="#FF5C8A"/>}
       <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
       <span style={s.youName}>{playerObj.name}</span>
-      <button onClick={()=>setShowTopNotifs(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative",marginLeft:2}}><Bell size={14}/></button>
     </div>
   </div>
 <div style={s.topBarRight}>
   <button onClick={async()=>{ const upd={...points,[currentPlayer+"_showStars"]: points?.[currentPlayer+"_showStars"] === false}; setPoints(upd); await storeSet("points",upd); }} className="bb-pressable" style={s.logoutBtn}>{points?.[currentPlayer+"_showStars"] === false ? "☀️" : "🌙"}</button>
+  <button onClick={()=>setShowTopNotifs(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}><Bell size={15}/>{topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}</button>
   <button onClick={()=>setChatOpen(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
     <MessageCircle size={16}/>
     {Math.max(0, messages.length - lastSeen.chat) > 0 && (
@@ -11882,7 +11949,7 @@ const TABS=[
           </div>
         </div>
       )}
-   {!chatOpen && <div style={glassNav?{...s.tabBar,background:"rgba(10,12,22,0.48)",backdropFilter:"blur(22px) saturate(1.55)",WebkitBackdropFilter:"blur(22px) saturate(1.55)",borderTop:"1px solid rgba(255,255,255,0.22)",boxShadow:"0 -14px 40px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.12)"}:s.tabBar}>
+   {!chatOpen && <div style={s.tabBar}>
         {TABS.map((t)=>(
         <button key={t.id} onClick={()=>{
     setTab(t.id);
@@ -11915,7 +11982,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(92px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"1px solid rgba(255,255,255,0.08)",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"max(10px, env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
+tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"max(10px, env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
