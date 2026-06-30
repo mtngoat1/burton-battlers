@@ -463,7 +463,8 @@ function GlobalStyles() {
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600&family=Inter:wght@400;600;700&display=swap');
       @keyframes spin { to { transform: rotate(360deg); } }
-      @keyframes coinFlipReal { 0%{ transform:translateY(0) rotateY(0deg) rotateZ(-8deg); } 22%{ transform:translateY(-18px) rotateY(520deg) rotateZ(8deg); } 48%{ transform:translateY(-28px) rotateY(1080deg) rotateZ(-6deg); } 74%{ transform:translateY(-12px) rotateY(1620deg) rotateZ(6deg); } 100%{ transform:translateY(0) rotateY(2160deg) rotateZ(0deg); } }
+      @keyframes coinFlipReal { 0%{ transform:translate3d(0,0,0) rotateX(0deg) rotateZ(-4deg); } 18%{ transform:translate3d(0,-16px,0) rotateX(360deg) rotateZ(4deg); } 40%{ transform:translate3d(0,-27px,0) rotateX(720deg) rotateZ(-3deg); } 62%{ transform:translate3d(0,-20px,0) rotateX(1080deg) rotateZ(3deg); } 82%{ transform:translate3d(0,-8px,0) rotateX(1440deg) rotateZ(-2deg); } 100%{ transform:translate3d(0,0,0) rotateX(1800deg) rotateZ(0deg); } }
+      @keyframes coinShine { 0%,100%{ opacity:.16; transform:translateX(-45%) rotate(18deg); } 50%{ opacity:.34; transform:translateX(45%) rotate(18deg); } }
       @keyframes fadeSlideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 @keyframes dropDown { from { transform:translateY(-100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
       @keyframes chatSlideIn { from { transform:translateY(18px); opacity:.88; } to { transform:translateY(0); opacity:1; } }
@@ -2342,6 +2343,9 @@ const [voicePresence, setVoicePresence] = useState({});
   const remoteAudioRef = useRef(null);
 const remoteStreamRef = useRef(null);
 const speakingUntilRef = useRef({});
+const activeSpeakerIdsRef = useRef([]);
+const speakingAnalyzersRef = useRef({});
+const audioContextRef = useRef(null);
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
   const getRemoteStream = () => {
@@ -2363,8 +2367,76 @@ const speakingUntilRef = useRef({});
     if (!ids.length) return;
     const until = Date.now() + duration;
     ids.forEach(id => { speakingUntilRef.current[id] = until; });
+    activeSpeakerIdsRef.current = ids;
     const active = Object.fromEntries(Object.entries(speakingUntilRef.current).filter(([_, exp]) => exp > Date.now()).map(([id]) => [id, true]));
     setSpeakingMap(active);
+  };
+
+  const getAudioContext = async () => {
+    if (typeof window === "undefined") return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+      audioContextRef.current = new AudioCtx();
+    }
+    if (audioContextRef.current.state === "suspended") {
+      try { await audioContextRef.current.resume(); } catch (_) {}
+    }
+    return audioContextRef.current;
+  };
+
+  const stopSpeakingAnalyzer = (key) => {
+    const item = speakingAnalyzersRef.current[key];
+    if (!item) return;
+    item.active = false;
+    try { item.source?.disconnect?.(); } catch (_) {}
+    delete speakingAnalyzersRef.current[key];
+  };
+
+  const stopParticipantAnalyzers = (dp) => {
+    const ids = getParticipantIds(dp);
+    ids.forEach(stopSpeakingAnalyzer);
+  };
+
+  const startSpeakingAnalyzer = async (dp, track) => {
+    if (!dp || !track || track.kind !== "audio") return;
+    const ids = getParticipantIds(dp);
+    const key = ids[0];
+    if (!key) return;
+    const existing = speakingAnalyzersRef.current[key];
+    if (existing?.trackId === track.id) return;
+    stopSpeakingAnalyzer(key);
+    const ctx = await getAudioContext();
+    if (!ctx) return;
+    try {
+      const stream = new MediaStream([track]);
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      analyser.smoothingTimeConstant = 0.72;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.fftSize);
+      const item = { active:true, source, analyser, data, trackId:track.id };
+      speakingAnalyzersRef.current[key] = item;
+      const tick = () => {
+        if (!item.active || track.readyState === "ended") { stopSpeakingAnalyzer(key); return; }
+        analyser.getByteTimeDomainData(data);
+        let sum = 0;
+        for (let i=0; i<data.length; i++) {
+          const v = (data[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / data.length);
+        const latest = (callObject || window.__bbDailyCallObject)?.participants?.() || participants;
+        const freshDp = ids.map(id => latest?.[id]).find(Boolean) || dp;
+        if (freshDp?.audio !== false && rms > 0.025) {
+          markSpeaking(freshDp, 700);
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+      track.addEventListener?.("ended", () => stopSpeakingAnalyzer(key), { once:true });
+    } catch (_) {}
   };
 
   // Load Daily SDK dynamically
@@ -2508,13 +2580,16 @@ window.__bbDailyCallObject = co;
    co.on("participant-updated", (e) => {
   setParticipants(prev => ({ ...prev, [e.participant.session_id]: e.participant }));
   if (e.participant?.local) setMuted(!e.participant.audio);
-  if (e.participant?.audio !== false && getParticipantAudioLevel(e.participant) > 0.015) markSpeaking(e.participant, 850);
+  const persistentTrack = e.participant?.tracks?.audio?.persistentTrack || e.participant?.tracks?.audio?.track;
+  if (persistentTrack) startSpeakingAnalyzer(e.participant, persistentTrack);
+  if (e.participant?.audio !== false && getParticipantAudioLevel(e.participant) > 0.015) markSpeaking(e.participant, 950);
 
 });
     
     co.on("track-started", (e) => {
-  if (e.participant?.local) return;
   if (e.track?.kind !== "audio") return;
+  startSpeakingAnalyzer(e.participant, e.track);
+  if (e.participant?.local) return;
 
   const remoteStream = getRemoteStream();
   if (!remoteStream) return;
@@ -2529,9 +2604,13 @@ window.__bbDailyCallObject = co;
     remoteAudioRef.current.play().catch(console.error);
   }
 });
+    co.on("track-stopped", (e) => {
+  if (e.track?.kind === "audio") stopParticipantAnalyzers(e.participant);
+});
     
     
       co.on("participant-left", (e) => {
+        stopParticipantAnalyzers(e.participant);
         setParticipants(prev => {
           const next = { ...prev };
           delete next[e.participant.session_id];
@@ -2547,8 +2626,12 @@ co.on("active-speaker-change", (e) => {
     active?.user_id,
     typeof active === "string" ? active : null,
   ].filter(Boolean);
-  if (!ids.length) return;
-  markSpeaking(ids, 950);
+  if (!ids.length) {
+    activeSpeakerIdsRef.current = [];
+    return;
+  }
+  activeSpeakerIdsRef.current = ids;
+  markSpeaking(ids, 1200);
   try { setParticipants(co.participants?.() || {}); } catch (_) {}
 });
       co.on("error", (e) => {
@@ -2625,6 +2708,9 @@ setLoading(false);
       setCallObject(null);
     }
     try {
+      Object.keys(speakingAnalyzersRef.current).forEach(stopSpeakingAnalyzer);
+      if (audioContextRef.current?.state !== "closed") audioContextRef.current?.close?.();
+      audioContextRef.current = null;
       remoteStreamRef.current?.getTracks?.().forEach(t => t.stop());
       remoteStreamRef.current = null;
     } catch (_) {}
@@ -2675,8 +2761,10 @@ setError(null);
         const latest = co.participants?.() || {};
         const now = Date.now();
         Object.values(latest).forEach(dp => {
-          if (dp?.audio !== false && getParticipantAudioLevel(dp) > 0.015) {
-            getParticipantIds(dp).forEach(id => { speakingUntilRef.current[id] = now + 750; });
+          const persistentTrack = dp?.tracks?.audio?.persistentTrack || dp?.tracks?.audio?.track;
+          if (persistentTrack) startSpeakingAnalyzer(dp, persistentTrack);
+          if (dp?.audio !== false && getParticipantAudioLevel(dp) > 0.012) {
+            getParticipantIds(dp).forEach(id => { speakingUntilRef.current[id] = now + 950; });
           }
         });
         const activeSpeaking = Object.fromEntries(
@@ -2689,7 +2777,7 @@ setError(null);
         setParticipants(latest);
         setMuted(co.localAudio ? !co.localAudio() : muted);
       } catch (_) {}
-    }, 250);
+    }, 180);
     return () => clearInterval(timer);
   }, [joined, callObject, muted]);
 
@@ -2809,7 +2897,7 @@ onClick={async () => {
       {speakingPlayer && (
         <div style={{background:`${speakingPlayer.color}14`,border:`1px solid ${speakingPlayer.color}55`,borderRadius:13,padding:"10px 12px",marginBottom:14,display:"flex",alignItems:"center",gap:9,boxShadow:`0 0 18px ${speakingPlayer.color}22`}}>
           <div style={{width:9,height:9,borderRadius:99,background:speakingPlayer.color,boxShadow:`0 0 10px ${speakingPlayer.color}`,animation:"livePulse 1s ease-in-out infinite"}} />
-          <div style={{fontSize:12,fontWeight:900,color:speakingPlayer.color}}>{speakingPlayer.name} is talking</div>
+          <div style={{fontSize:12,fontWeight:900,color:speakingPlayer.color}}>{speakingPlayer.name} is speaking</div>
         </div>
       )}
 
@@ -2873,9 +2961,7 @@ onClick={async () => {
                 {isConnected
   ? isMutedParticipant
     ? "muted"
-    : isSpeaking || speakingMap[p.session_id]
-      ? "talking"
-      : "listening"
+    : "listening"
   : voicePresence[p.id] ? "in voice" : "not in room"}
               </div>
 
@@ -8546,20 +8632,33 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
       )}
 
       {/* Coin animation */}
-      <div style={{textAlign:"center",marginBottom:20,marginTop:4}}>
+      <div style={{textAlign:"center",marginBottom:20,marginTop:4,perspective:900}}>
         <div style={{
-          fontSize: flipping ? 72 : 60,
-          transition: "font-size .2s",
-          display: "inline-block",
-          animation: flipping ? "coinFlipReal .78s cubic-bezier(.16,.78,.24,1) infinite" : "none",
-          transformStyle: "preserve-3d",
-          filter: result
+          width: flipping ? 76 : 64,
+          height: flipping ? 76 : 64,
+          borderRadius:"50%",
+          margin:"0 auto",
+          position:"relative",
+          overflow:"hidden",
+          display:"flex",
+          alignItems:"center",
+          justifyContent:"center",
+          background:"radial-gradient(circle at 32% 26%, #FFF8B8 0%, #FFD166 38%, #B97A1F 100%)",
+          border:"3px solid rgba(255,255,255,0.28)",
+          boxShadow: result
             ? result.won
-              ? "drop-shadow(0 0 20px #FFD166)"
-              : "drop-shadow(0 0 20px #FF5C8A)"
-            : "none",
+              ? "0 0 24px rgba(255,209,102,.75), inset 0 0 18px rgba(255,255,255,.22)"
+              : "0 0 24px rgba(255,92,138,.55), inset 0 0 18px rgba(255,255,255,.18)"
+            : "0 12px 28px rgba(0,0,0,.28), inset 0 0 18px rgba(255,255,255,.18)",
+          animation: flipping ? "coinFlipReal .78s linear infinite" : "none",
+          transformStyle:"preserve-3d",
+          backfaceVisibility:"hidden",
+          willChange:"transform",
+          transition:"width .18s ease, height .18s ease, box-shadow .2s ease",
         }}>
-          🪙
+          <div style={{position:"absolute",inset:7,borderRadius:"50%",border:"2px solid rgba(86,52,10,.28)"}} />
+          <div style={{position:"absolute",top:-18,bottom:-18,width:18,background:"rgba(255,255,255,.65)",filter:"blur(8px)",animation:flipping?"coinShine .78s linear infinite":"none"}} />
+          <div style={{fontSize:22,fontWeight:900,color:"#5C3908",textShadow:"0 1px 0 rgba(255,255,255,.35)",letterSpacing:.5}}>BB</div>
         </div>
       </div>
 
