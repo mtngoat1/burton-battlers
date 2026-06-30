@@ -10,6 +10,9 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 // APP54_NEW_SOUNDBOARD_FILES_PATCH
 // APP55_PROPS_ALL_MODES_PUSH_PATCH
 // APP55_PROPS_WATCH_STREAM_PATCH
+// APP56_PROPS_PRESET_WAGER_NEXT_SYNC_SETTLE_PATCH
+// APP57_SCORE_PARSE_OPPONENT_NOTIFICATION_PATCH
+// APP58_PROP_BET_PRE_MATCH_LOCK_PTS_NOTIFICATION_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -187,14 +190,40 @@ function formatGameScore(game) {
   return `${our} – ${theirKnown ? Number(theirRaw) : "?"}`;
 }
 function applySyncedTeamScores(importedGames, result) {
-  const ourScore = importedGames.reduce((sum, g) => sum + (Number(g.goals) || 0), 0);
-  return importedGames.map(g => ({
-    ...g,
-    ourScore,
-    theirScore: g.theirScore === null || g.theirScore === undefined || g.theirScore === "" ? null : Number(g.theirScore),
-    opponentScoreManual: g.opponentScoreManual || false,
-    result,
-  }));
+  const games = Array.isArray(importedGames) ? importedGames : [];
+  const detectedOurScores = games
+    .map(g => Number(g?.parseDetectedOurScore))
+    .filter(n => Number.isFinite(n));
+  const detectedTheirScores = games
+    .map(g => Number(g?.parseDetectedTheirScore))
+    .filter(n => Number.isFinite(n));
+  const detectedOurScore = detectedOurScores.length && detectedOurScores.every(n => n === detectedOurScores[0])
+    ? detectedOurScores[0]
+    : null;
+  const detectedTheirScore = detectedTheirScores.length && detectedTheirScores.every(n => n === detectedTheirScores[0])
+    ? detectedTheirScores[0]
+    : null;
+  const summedGoals = games.reduce((sum, g) => sum + (Number(g?.goals) || 0), 0);
+  const fallbackOurScore = Number.isFinite(detectedOurScore) ? detectedOurScore : summedGoals;
+  return games.map(g => {
+    const ownDetected = Number(g?.parseDetectedOurScore);
+    const theirDetected = Number(g?.parseDetectedTheirScore);
+    const nextOurScore = Number.isFinite(ownDetected) ? ownDetected : fallbackOurScore;
+    const nextTheirScore = g.opponentScoreManual
+      ? (g.theirScore === null || g.theirScore === undefined || g.theirScore === "" ? null : Number(g.theirScore))
+      : Number.isFinite(theirDetected)
+        ? theirDetected
+        : Number.isFinite(detectedTheirScore)
+          ? detectedTheirScore
+          : null;
+    return {
+      ...g,
+      ourScore: nextOurScore,
+      theirScore: nextTheirScore,
+      opponentScoreManual: !!g.opponentScoreManual || Number.isFinite(theirDetected) || Number.isFinite(detectedTheirScore),
+      result,
+    };
+  });
 }
 
 function normalizeStatForRender(game, idx = 0) {
@@ -6041,28 +6070,266 @@ function getMatchRatingDelta(match) {
   return 0;
 }
 
+function parseNumberish(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "object") {
+    return parseNumberish(
+      value.value ??
+      value.displayValue ??
+      value.metadata?.value ??
+      value.metadata?.displayValue ??
+      value.metadata?.name ??
+      value.amount ??
+      value.score ??
+      null
+    );
+  }
+  if (typeof value === "string") {
+    const cleaned = value.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+    if (!cleaned) return null;
+    const n = Number(cleaned[0]);
+    return Number.isFinite(n) ? n : null;
+  }
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function firstNumberish(...values) {
+  for (const value of values) {
+    const n = parseNumberish(value);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function findDeepNumberByKey(obj, keyRegex, maxDepth = 5, seen = new Set()) {
+  if (!obj || typeof obj !== "object" || maxDepth < 0 || seen.has(obj)) return null;
+  seen.add(obj);
+  if (Array.isArray(obj)) {
+    for (const item of obj) {
+      const found = findDeepNumberByKey(item, keyRegex, maxDepth - 1, seen);
+      if (Number.isFinite(found)) return found;
+    }
+    return null;
+  }
+  for (const [key, value] of Object.entries(obj)) {
+    if (keyRegex.test(String(key))) {
+      const direct = parseNumberish(value);
+      if (Number.isFinite(direct)) return direct;
+      if (value && typeof value === "object") {
+        const nested = firstNumberish(value.value, value.displayValue, value.amount, value.score, value.goals);
+        if (Number.isFinite(nested)) return nested;
+      }
+    }
+  }
+  for (const value of Object.values(obj)) {
+    const found = findDeepNumberByKey(value, keyRegex, maxDepth - 1, seen);
+    if (Number.isFinite(found)) return found;
+  }
+  return null;
+}
+
+function getMatchStatValue(match, field) {
+  const stats = match?.stats || {};
+  const stat = stats?.[field];
+  const base = firstNumberish(
+    stat?.value,
+    stat?.displayValue,
+    stat?.metadata?.value,
+    stat?.metadata?.displayValue,
+    match?.[field],
+    match?.metadata?.[field]
+  );
+  if (Number.isFinite(base)) return base;
+
+  if (field === "score") {
+    const score = firstNumberish(
+      stats?.score,
+      stats?.Score,
+      stats?.playerScore,
+      stats?.player_score,
+      stats?.coreScore,
+      stats?.totalScore,
+      stats?.points,
+      stats?.rating?.metadata?.score,
+      match?.score,
+      match?.playerScore,
+      match?.metadata?.score,
+      match?.metadata?.playerScore
+    );
+    if (Number.isFinite(score)) return score;
+    return findDeepNumberByKey(match, /^(score|playerScore|player_score|coreScore|totalScore|points)$/i, 5) ?? 0;
+  }
+
+  return findDeepNumberByKey(stats, new RegExp(`^${field}$`, "i"), 3) ?? 0;
+}
+
+function getMatchTeamScoreInfo(match, player = null) {
+  const metadata = match?.metadata || {};
+  const stats = match?.stats || {};
+  const ownScore = firstNumberish(
+    metadata?.ourScore,
+    metadata?.ours,
+    metadata?.teamScore,
+    metadata?.team?.score,
+    metadata?.score?.ours,
+    metadata?.score?.our,
+    metadata?.score?.team,
+    metadata?.score?.for,
+    metadata?.score?.home,
+    metadata?.goalsFor,
+    stats?.teamScore,
+    stats?.goalsFor,
+    match?.ourScore,
+    match?.teamScore
+  );
+  const theirScore = firstNumberish(
+    metadata?.theirScore,
+    metadata?.theirs,
+    metadata?.opponentScore,
+    metadata?.opponent?.score,
+    metadata?.score?.theirs,
+    metadata?.score?.their,
+    metadata?.score?.opponent,
+    metadata?.score?.against,
+    metadata?.score?.away,
+    metadata?.goalsAgainst,
+    stats?.opponentScore,
+    stats?.goalsAgainst,
+    match?.theirScore,
+    match?.opponentScore
+  );
+
+  const teamArrays = [
+    metadata?.teams,
+    metadata?.opponents,
+    metadata?.participants,
+    match?.teams,
+    match?.opponents,
+    match?.participants,
+  ].filter(Array.isArray);
+
+  let arrayOwn = null;
+  let arrayTheir = null;
+  let opponentName = metadata?.opponent?.name || metadata?.opponentName || match?.opponentName || "";
+  const handle = String(player?.name || "").toLowerCase();
+  for (const arr of teamArrays) {
+    const mapped = arr.map(item => ({ item, score:firstNumberish(item?.score, item?.goals, item?.value, item?.stats?.score, item?.stats?.goals) }));
+    const mine = mapped.find(x => {
+      const blob = JSON.stringify(x.item || {}).toLowerCase();
+      return handle && blob.includes(handle);
+    });
+    const other = mine ? mapped.find(x => x !== mine) : null;
+    if (mine && Number.isFinite(mine.score)) arrayOwn = mine.score;
+    if (other && Number.isFinite(other.score)) {
+      arrayTheir = other.score;
+      opponentName = other.item?.name || other.item?.teamName || other.item?.displayName || opponentName;
+    } else if (!mine && mapped.length >= 2 && Number.isFinite(mapped[0].score) && Number.isFinite(mapped[1].score)) {
+      arrayOwn = mapped[0].score;
+      arrayTheir = mapped[1].score;
+      opponentName = mapped[1].item?.name || mapped[1].item?.teamName || mapped[1].item?.displayName || opponentName;
+    }
+  }
+
+  return {
+    ourScore: Number.isFinite(ownScore) ? ownScore : arrayOwn,
+    theirScore: Number.isFinite(theirScore) ? theirScore : arrayTheir,
+    opponentName: opponentName || "",
+  };
+}
+
+
+function getMatchStartInfo(match) {
+  const metadata = match?.metadata || {};
+  const candidates = [
+    metadata?.dateStarted,
+    metadata?.startedAt,
+    metadata?.startTime,
+    metadata?.matchStartedAt,
+    metadata?.datePlayed,
+    metadata?.playedAt,
+    metadata?.date,
+    match?.dateStarted,
+    match?.startedAt,
+    match?.startTime,
+    match?.matchStartedAt,
+    match?.datePlayed,
+    match?.playedAt,
+  ];
+  for (const value of candidates) {
+    if (!value) continue;
+    const d = safeDateObj(value, null);
+    if (Number.isFinite(d.getTime())) return { iso: d.toISOString(), reliable: true, source: "parse_start" };
+  }
+  const collected = metadata?.dateCollected || match?.dateCollected || match?.ts || null;
+  const collectedDate = collected ? safeDateObj(collected, null) : null;
+  if (collectedDate && Number.isFinite(collectedDate.getTime())) {
+    return { iso: collectedDate.toISOString(), reliable: false, source: "date_collected" };
+  }
+  return { iso: new Date().toISOString(), reliable: false, source: "fallback_now" };
+}
+
+const PROP_BET_UNRELIABLE_START_LOCK_MS = 4 * 60 * 1000;
+function getPropBetLockTimeMsForGame(game) {
+  const hasExplicitStart = !!(game?.matchStartAt || game?.startedAt || game?.startTime || game?.dateStarted);
+  const startIso = game?.matchStartAt || game?.startedAt || game?.startTime || game?.dateStarted || game?.ts;
+  const start = safeDateObj(startIso, game?.ts || Date.now()).getTime();
+  if (!Number.isFinite(start)) return null;
+  // If Parse only gives dateCollected, treat the real lock time as a few minutes before collection.
+  // This blocks betting halfway through a match and then syncing right after it ends.
+  if (game?.matchStartReliable === false || game?.matchStartSource === "date_collected" || (!hasExplicitStart && game?.source === "parse_sessions")) {
+    return start - PROP_BET_UNRELIABLE_START_LOCK_MS;
+  }
+  return start;
+}
+
+function propBetWasPlacedBeforeGameStarted(bet, game) {
+  const placed = safeDateObj(bet?.placedAt || bet?.ts || 0, 0).getTime();
+  const lockTime = getPropBetLockTimeMsForGame(game);
+  if (!Number.isFinite(placed) || !Number.isFinite(lockTime)) return false;
+  return placed <= lockTime;
+}
+
 function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
+  const goals = getMatchStatValue(match, "goals");
+  const assists = getMatchStatValue(match, "assists");
+  const saves = getMatchStatValue(match, "saves");
+  const shots = getMatchStatValue(match, "shots");
+  const score = getMatchStatValue(match, "score");
+  const teamScore = getMatchTeamScoreInfo(match, player);
+  const matchStart = getMatchStartInfo(match);
+  const detectedOurScore = Number.isFinite(teamScore.ourScore) ? teamScore.ourScore : null;
+  const detectedTheirScore = Number.isFinite(teamScore.theirScore) ? teamScore.theirScore : null;
   return {
     id: `${sessionCode}_${player.id}_${match.id}`,
     parseMatchId: match.id,
     playerId: player.id,
+    playerName: player.name,
     mode,
-    ts: match.metadata.dateCollected,
+    ts: match.metadata?.dateCollected || matchStart.iso || new Date().toISOString(),
+    matchStartAt: matchStart.iso,
+    matchStartReliable: !!matchStart.reliable,
+    matchStartSource: matchStart.source,
     roomId: sessionCode,
     sessionCode,
-    goals: match.stats?.goals?.value || 0,
-    assists: match.stats?.assists?.value || 0,
-    saves: match.stats?.saves?.value || 0,
-    shots: match.stats?.shots?.value || 0,
-    demos: 0,
-    score: Number(match.stats?.score?.value ?? match.stats?.score?.displayValue ?? 0) || 0,
-    ourScore: match.stats?.goals?.value || 0,
-    theirScore: null,
-    opponentScoreManual: false,
+    goals: Number(goals) || 0,
+    assists: Number(assists) || 0,
+    saves: Number(saves) || 0,
+    shots: Number(shots) || 0,
+    demos: getMatchStatValue(match, "demos") || 0,
+    score: Number(score) || 0,
+    ourScore: Number.isFinite(detectedOurScore) ? detectedOurScore : (Number(goals) || 0),
+    theirScore: Number.isFinite(detectedTheirScore) ? detectedTheirScore : null,
+    parseDetectedOurScore: detectedOurScore,
+    parseDetectedTheirScore: detectedTheirScore,
+    opponent: teamScore.opponentName || "",
+    opponentScoreManual: Number.isFinite(detectedTheirScore),
     result,
     rating: match.stats?.rating?.value || null,
     ratingDelta: getMatchRatingDelta(match),
     source: "parse_sessions",
+    syncedAt: new Date().toISOString(),
+    parseScoreDebug: { scoreField: Number(score) || 0, hasOpponentScore: Number.isFinite(detectedTheirScore) },
   };
 }
 
@@ -6440,11 +6707,21 @@ useEffect(() => {
   let changed = false;
   const normalized = stats.map(g => {
     if (g?.source !== "parse_sessions") return g;
-    const nextOurScore = g.sessionCode ? (groupedScores[g.sessionCode] ?? (Number(g.goals) || 0)) : (Number(g.goals) || 0);
-    const nextTheirScore = g.opponentScoreManual ? g.theirScore : null;
+    const detectedOur = Number(g.parseDetectedOurScore);
+    const detectedTheir = Number(g.parseDetectedTheirScore);
+    const nextOurScore = Number.isFinite(detectedOur)
+      ? detectedOur
+      : g.sessionCode
+        ? (groupedScores[g.sessionCode] ?? (Number(g.goals) || 0))
+        : (Number(g.goals) || 0);
+    const nextTheirScore = g.opponentScoreManual
+      ? g.theirScore
+      : Number.isFinite(detectedTheir)
+        ? detectedTheir
+        : null;
     if (g.ourScore === nextOurScore && g.theirScore === nextTheirScore) return g;
     changed = true;
-    return { ...g, ourScore: nextOurScore, theirScore: nextTheirScore, opponentScoreManual: !!g.opponentScoreManual };
+    return { ...g, ourScore: nextOurScore, theirScore: nextTheirScore, opponentScoreManual: !!g.opponentScoreManual || Number.isFinite(detectedTheir) };
   });
   if (changed) {
     setStats(normalized);
@@ -6628,7 +6905,40 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       );
 
       if (alreadyImported) {
-        addToast?.("that match was already synced", "✅");
+        const refreshResult = pulled[0].match.metadata.result;
+        const existingSession = stats.find(g => pulled.some(x => g.parseMatchId === x.match.id && g.playerId === x.player.id))?.sessionCode || getNextAutoGameSessionCode(stats);
+        let refreshedGames = pulled.map(({ player, match }) =>
+          parseGameToStatEntry({ sessionCode: existingSession, player, match, mode: requestedMode, result: refreshResult })
+        );
+        refreshedGames = applySyncedTeamScores(refreshedGames, refreshResult);
+        let refreshed = false;
+        const updStats = stats.map(g => {
+          const fresh = refreshedGames.find(f => f.parseMatchId === g.parseMatchId && f.playerId === g.playerId);
+          if (!fresh) return g;
+          refreshed = true;
+          return {
+            ...g,
+            ...fresh,
+            id: g.id,
+            roomId: g.roomId || fresh.roomId,
+            sessionCode: g.sessionCode || fresh.sessionCode,
+            refreshedAt: new Date().toISOString(),
+          };
+        });
+        if (refreshed) {
+          setStats(updStats);
+          await storeSet("stats", updStats);
+          await settleDueBetsNow({
+            bets: await storeGet("bets").catch(() => []),
+            stats: updStats,
+            points: await storeGet("points").catch(() => points) || points,
+            setPoints,
+          }).catch(e => console.warn("post-refresh bet settle failed", e));
+          addToast?.("that synced game was refreshed with latest stats", "✅");
+          setTimeout(() => setShowSyncMatchModal(false), 350);
+        } else {
+          addToast?.("that match was already synced", "✅");
+        }
         setMatchSyncing(false);
         return;
       }
@@ -6643,6 +6953,13 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       const updStats = [...importedGames, ...stats];
       setStats(updStats);
       await storeSet("stats", updStats);
+      // APP56: settle any matching prop immediately after the next synced game is written.
+      settleDueBetsNow({
+        bets: await storeGet("bets").catch(() => []),
+        stats: updStats,
+        points: await storeGet("points").catch(() => points) || points,
+        setPoints,
+      }).catch(e => console.warn("post-sync bet settle failed", e));
       addToast?.(`${sessionCode} ${requestedMode} synced from tracker`, "✅");
       setTimeout(() => setShowSyncMatchModal(false), 350);
     } catch(e) {
@@ -7881,7 +8198,7 @@ const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(
   const pingNotifs = safePings.filter(p => p.to === currentPlayer).map(p => ({
     id: p.id, ts: p.ts,
     text: p.type==="flower"
-      ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} sent you ${p.emoji} (+${p.xp} xp)`
+      ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} sent you ${p.emoji} (+${p.xp} pts)`
       : p.type==="session"
         ? `${PLAYERS.find(pl=>pl.id===p.from)?.name} started a ${p.mode || "3v3"} session ${p.minutesUntil ? `in ${p.minutesUntil} min` : "soon"}`
         : p.type==="coinflip"
@@ -7971,7 +8288,7 @@ const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(
 {showFlowers && (
   <div style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 16, border: "1px solid rgba(255,97,193,0.2)" }}>
     <div style={{ fontSize: 12, color: "#FF61C1", fontWeight: 700, letterSpacing: 0.5, marginBottom: 4 }}>SEND PROPS 🌸</div>
-    <div style={{ fontSize: 11, color: "#4A5066", marginBottom: 12 }}>choose a teammate and send them xp from your own stash</div>
+    <div style={{ fontSize: 11, color: "#4A5066", marginBottom: 12 }}>choose a teammate and send them pts from your own stash</div>
     <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
       {PLAYERS.filter(p => p.id !== currentPlayer).map(p => (
         <button key={p.id} onClick={() => setFlowerTarget(p.id)} className="bb-pressable"
@@ -7989,7 +8306,7 @@ const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(
               style={{ flex: 1, background: selectedFlower === f.id ? "rgba(255,97,193,0.2)" : "rgba(255,255,255,0.03)", border: `1px solid ${selectedFlower === f.id ? "#FF61C1" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, padding: "10px 4px", textAlign: "center", cursor: "pointer" }}>
               <div style={{ fontSize: 22 }}>{f.emoji}</div>
               <div style={{ fontSize: 9, color: "#E8ECF4", fontWeight: 700, marginTop: 3 }}>{f.label}</div>
-              <div style={{ fontSize: 9, color: "#FF61C1", fontWeight: 700 }}>{f.xp} xp</div>
+              <div style={{ fontSize: 9, color: "#FF61C1", fontWeight: 700 }}>{f.xp} pts</div>
             </button>
           ))}
         </div>
@@ -9024,7 +9341,7 @@ function titleForPush(icon = "🔔") {
 
 function pingToPush(ping) {
   const fromName = playerNameById(ping.from);
-  if (ping.type === "flower") return { icon:"🌸", body:`${fromName} sent you ${ping.emoji || "🌸"} (+${ping.xp || 0} xp)` };
+  if (ping.type === "flower") return { icon:"🌸", body:`${fromName} sent you ${ping.emoji || "🌸"} (+${ping.xp || 0} pts)` };
   if (ping.type === "session") return { icon:"⏱️", body:`${fromName} started a ${ping.mode || "3v3"} session ${ping.minutesUntil ? `in ${ping.minutesUntil} min` : "soon"}` };
   if (ping.type === "coinflip") return { icon:"🪙", body:`${fromName} challenged you to a coin flip` };
   return { icon:"🎮", body:`${fromName} wants to run 2s` };
@@ -9281,16 +9598,51 @@ function duoMatchesGame(game, duoIds) {
   return duoIds.every(id => ids.includes(id));
 }
 
+function getBetGameKey(game) {
+  if (!game || typeof game !== "object") return "";
+  return String(
+    game.id ||
+    game.parseMatchId ||
+    game.matchId ||
+    `${game.playerId || "player"}_${normalizeGameMode(game.mode)}_${game.sessionCode || game.roomId || "session"}_${game.ts || game.date || "time"}`
+  );
+}
+
+function getBetSeenGameKeysForPlacement(stats = [], bet = null) {
+  const mode = bet ? getBetMode(bet) : null;
+  const playerId = bet?.playerId || null;
+  const duoIds = bet?.duoIds || null;
+  return sanitizeStatsForRender(stats)
+    .filter(g => {
+      if (!g) return false;
+      if (mode && normalizeGameMode(g.mode) !== mode) return false;
+      if (playerId && !bet?.combined && g.playerId !== playerId) return false;
+      if (duoIds && !duoMatchesGame(g, duoIds)) return false;
+      return true;
+    })
+    .map(getBetGameKey)
+    .filter(Boolean);
+}
+
+function betCandidateSortTime(game) {
+  return safeDateObj(game?.syncedAt || game?.importedAt || game?.createdAt || game?.ts || Date.now()).getTime();
+}
+
 function findBetTargetGame(bet, stats = []) {
   const placedAt = new Date(bet?.placedAt || bet?.ts || 0).getTime();
   const settleAt = new Date(getBetSettleAt(bet)).getTime();
   const mode = getBetMode(bet);
+  const seenKeys = new Set(Array.isArray(bet?.statKeysAtPlacement) ? bet.statKeysAtPlacement : []);
   const allGames = sanitizeStatsForRender(stats)
     .filter(g => {
-      const ts = new Date(g?.ts || 0).getTime();
-      return g && ts >= placedAt && ts <= settleAt && normalizeGameMode(g.mode) === mode;
+      if (!g || normalizeGameMode(g.mode) !== mode) return false;
+      if (!propBetWasPlacedBeforeGameStarted(bet, g)) return false;
+      const key = getBetGameKey(g);
+      if (seenKeys.size) return key && !seenKeys.has(key);
+      const ts = safeDateObj(g?.matchStartAt || g?.ts || 0).getTime();
+      return ts >= placedAt && ts <= settleAt;
     })
-    .sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
+    .sort((a, b) => betCandidateSortTime(a) - betCandidateSortTime(b));
 
   if (bet?.combined && Array.isArray(bet?.duoIds) && bet.duoIds.length >= 2) {
     const wanted = new Set(bet.duoIds);
@@ -9300,8 +9652,9 @@ function findBetTargetGame(bet, stats = []) {
       .forEach(g => {
         const ts = safeDateObj(g.ts);
         const key = g.sessionCode || g.matchId || `${dateKey(ts)}_${mode}_${Math.floor(ts.getTime() / 60000)}`;
-        if (!groups[key]) groups[key] = { key, ts:g.ts, games:[] };
+        if (!groups[key]) groups[key] = { key, ts:g.ts, syncedAt:g.syncedAt || g.ts, games:[] };
         groups[key].games.push(g);
+        if (betCandidateSortTime(g) > safeDateObj(groups[key].syncedAt || groups[key].ts).getTime()) groups[key].syncedAt = g.syncedAt || g.ts;
         if (safeDateObj(g.ts).getTime() > safeDateObj(groups[key].ts).getTime()) groups[key].ts = g.ts;
       });
 
@@ -9310,7 +9663,7 @@ function findBetTargetGame(bet, stats = []) {
         const logged = new Set(grp.games.map(g => g.playerId).filter(Boolean));
         return bet.duoIds.every(id => logged.has(id)) || grp.games.length >= 2;
       })
-      .sort((a, b) => safeDateObj(a.ts).getTime() - safeDateObj(b.ts).getTime())[0];
+      .sort((a, b) => safeDateObj(a.syncedAt || a.ts).getTime() - safeDateObj(b.syncedAt || b.ts).getTime())[0];
 
     if (!group) return null;
     const field = bet.field || "goals";
@@ -9320,6 +9673,7 @@ function findBetTargetGame(bet, stats = []) {
       id: `duo_prop_${group.key}`,
       playerName: bet.playerName || bet.duoLabel || "duo",
       ts: group.ts,
+      syncedAt: group.syncedAt || group.ts,
       mode,
       [field]: value,
     };
@@ -9355,10 +9709,17 @@ function resolveSingleBet(bet, stats = []) {
 }
 
 function settledBetPushBody(bet) {
-  const subject = bet?.isParlay ? `${bet.legs?.length || 0}-leg parlay` : `${bet.playerName || "your prop"} ${String(bet.side || "").toUpperCase()} ${bet.line ?? ""} ${bet.field || ""}`;
-  if (bet.status === "won") return `${subject} won — +${bet.payout || 0} pts`;
-  if (bet.status === "void") return `${subject} voided — ${bet.wager || 0} pts refunded`;
-  return `${subject} lost`;
+  if (bet?.isParlay) {
+    const subject = `${bet.legs?.length || 0}-leg parlay`;
+    if (bet.status === "won") return `${subject} - +${bet.payout || 0}pts`;
+    if (bet.status === "void") return `${subject} - voided +${bet.wager || 0}pts`;
+    return `${subject} - lost`;
+  }
+  const side = String(bet.side || "").toLowerCase() === "under" ? "Under" : "Over";
+  const subject = `${bet.playerName || "your prop"} ${side} ${bet.line ?? ""} ${bet.fieldLabel || bet.field || ""}`.replace(/\s+/g, " ").trim();
+  if (bet.status === "won") return `${subject} - +${bet.payout || 0}pts`;
+  if (bet.status === "void") return `${subject} - voided +${bet.wager || 0}pts`;
+  return `${subject} - lost`;
 }
 
 async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
@@ -9400,7 +9761,7 @@ async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
     return sendPushToPlayersOnce(
       `bet-settled:${settled.id}:${settled.status}`,
       [settled.bettorId],
-      settled.status === "won" ? "🎯 Prop won" : settled.status === "void" ? "↩️ Prop voided" : "🎯 Prop settled",
+      "Prop settled",
       settledBetPushBody(settled),
       { url:makeNotificationUrl("social", { subTab:"bets", id:settled.id }), type:"bet_settled", id:settled.id }
     );
@@ -10189,6 +10550,7 @@ const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusS
   const [rotation, setRotation] = useState(0);
   const [spinStartPoints, setSpinStartPoints] = useState(null);
 const [propWager, setPropWager] = useState(10);
+const PROP_WAGER_PRESETS = [10, 30, 50, 75];
 const [selectedProp, setSelectedProp] = useState(null);
 const [propSide, setPropSide] = useState(null);
 const [propPlayerFilter, setPropPlayerFilter] = useState(() => PLAYERS.find(p => p.id !== currentPlayer)?.id || PLAYERS[0]?.id || "p1");
@@ -10455,6 +10817,12 @@ const placeBet = async (chosenLine) => {
     duoIds: card.duoIds || null,
     duoLabel: card.duoLabel || "",
     combined: !!card.combined,
+    statKeysAtPlacement: getBetSeenGameKeysForPlacement(stats, {
+      playerId: card.playerId,
+      targetMode: card.mode || "3v3",
+      duoIds: card.duoIds || null,
+      combined: !!card.combined,
+    }),
   };
 
   // close the sticky wager tray immediately after tapping place bet
@@ -10728,16 +11096,19 @@ const noBettingWeek = isEventActive("no_betting");
 
           {selectedProp&&propSide&&(
             <div style={{position:"sticky",bottom:0,background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
-              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT · 1–200</div>
-              <input
-                type="number"
-                min="1"
-                max="200"
-                inputMode="numeric"
-                value={propWager}
-                onChange={e=>setPropWager(clampWager(e.target.value, propWager))}
-                style={{...s.modalInput,textAlign:"center",fontSize:18,fontFamily:"'Oswald',sans-serif",marginBottom:10}}
-              />
+              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:10}}>
+                {PROP_WAGER_PRESETS.map(amount => {
+                  const active = Number(propWager) === amount;
+                  const disabled = myPoints < amount;
+                  return (
+                    <button key={amount} onClick={()=>setPropWager(amount)} disabled={disabled} className="bb-pressable"
+                      style={{background:active?"#B8FF4D":"rgba(255,255,255,0.06)",border:`1px solid ${active?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:active?"#06070D":"#E8ECF4",cursor:disabled?"not-allowed":"pointer",opacity:disabled?0.35:1}}>
+                      {amount}
+                    </button>
+                  );
+                })}
+              </div>
               {(() => {
                 const card = props.find(p => p.id === selectedProp);
                 const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor((card?.lineOptions.length||1)/2);
@@ -10752,7 +11123,7 @@ const noBettingWeek = isEventActive("no_betting");
                     </div>
                                                                                  
                     <div style={{flex:1,fontSize:11,color:"#8B92A8",lineHeight:1.35}}>
-                      applies to {card?.targetText || `next logged ${card?.mode || "game"} game`}
+                      must be placed before match start · applies to {card?.targetText || `next logged ${card?.mode || "game"} game`}
                     </div>
 
                     <button onClick={()=>placeBet(current?.line)} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
@@ -13141,7 +13512,7 @@ const TABS=[
     id: p.id,
     ts: p.ts,
     text: p.type==="flower"
-      ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} sent you ${p.emoji || "🌸"} (+${p.xp || 0} xp)`
+      ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} sent you ${p.emoji || "🌸"} (+${p.xp || 0} pts)`
       : p.type==="session"
         ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} started a ${p.mode || "3v3"} session ${p.minutesUntil ? `in ${p.minutesUntil} min` : "soon"}`
         : p.type==="coinflip"
