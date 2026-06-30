@@ -900,7 +900,8 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
   }, [jumpGameId, session.code]);
   const rep = (session?.games || [])[0] || {};
   const won = gameIsWin(rep);
-  const duoIds = [...new Set(session.games.flatMap(g => g.duoIds || [g.playerId]).filter(Boolean))];
+  const sessionGames = Array.isArray(session?.games) ? session.games.filter(Boolean) : [];
+  const duoIds = [...new Set(sessionGames.flatMap(g => g.duoIds || [g.playerId]).filter(Boolean))];
   const duoLabel = session.mode === "2v2"
     ? duoIds.map(id => PLAYERS.find(p => p.id === id)?.name).filter(Boolean).join(" + ")
     : null;
@@ -920,7 +921,7 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
             <div style={{fontSize:10,color:"#A78BFA",fontWeight:700,letterSpacing:0.8}}>{gameLabel || "GAME"}</div>
-            <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session.mode} · {duoLabel ? `${duoLabel} · ` : ""}{fmtRelTime(session.ts)} · {session.games.length} player{session.games.length!==1?"s":""} logged</div>
+            <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{session?.mode || "game"} · {duoLabel ? `${duoLabel} · ` : ""}{fmtRelTime(session?.ts || new Date().toISOString())} · {sessionGames.length} player{sessionGames.length!==1?"s":""} logged</div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
             <div style={{textAlign:"right"}}>
@@ -934,7 +935,7 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
       {/* Dropdown */}
       {open && (
         <div style={{padding:"0 16px 14px",display:"flex",flexDirection:"column",gap:6}}>
-          {session.games.map(g => {
+          {sessionGames.map(g => {
             const p = PLAYERS.find(pl => pl.id === g.playerId);
             return (
               <button key={g.id} onClick={()=>setSelectedGame(g)} className="bb-pressable"
@@ -5704,7 +5705,7 @@ if (!sessionMap[key]) sessionMap[key] = { code: key, mode: g.mode || "3v3", game
           sessionMap[key].games.push(g);
           if (new Date(g.ts) > new Date(sessionMap[key].ts)) sessionMap[key].ts = g.ts;
         });
-        const sessions = Object.values(sessionMap).sort((a,b) => new Date(b.ts) - new Date(a.ts));
+        const sessions = Object.values(sessionMap).filter(s => s && Array.isArray(s.games) && s.games.length).sort((a,b) => new Date(b.ts || 0) - new Date(a.ts || 0));
         return (
           <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={stats} onUpdateOpponentScore={onUpdateOpponentScore} jumpDate={jumpDate} jumpGameId={jumpGameId} />
         );
@@ -5714,11 +5715,14 @@ if (!sessionMap[key]) sessionMap[key] = { code: key, mode: g.mode || "3v3", game
 }
 
 function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
-  const [open, setOpen] = useState(dk === jumpDate || sessions.some(s => s.games.some(g => String(g.id) === String(jumpGameId))));
-  const date = new Date(dk + "T00:00:00");
-  const isJumpDay = dk === jumpDate || sessions.some(s => s.games.some(g => String(g.id) === String(jumpGameId)));
+  const safeSessions = Array.isArray(sessions) ? sessions.filter(s => s && Array.isArray(s.games) && s.games.length) : [];
+  const hasJumpGame = safeSessions.some(s => (s.games || []).some(g => String(g?.id) === String(jumpGameId)));
+  const [open, setOpen] = useState(dk === jumpDate || hasJumpGame);
+  const parsedDate = new Date(`${dk || dateKey(new Date())}T00:00:00`);
+  const date = Number.isFinite(parsedDate.getTime()) ? parsedDate : new Date();
+  const isJumpDay = dk === jumpDate || hasJumpGame;
   useEffect(() => { if (isJumpDay) setOpen(true); }, [isJumpDay]);
-  const totalGames = sessions.length;
+  const totalGames = safeSessions.length;
   return (
     <div id={`teamlink-${dk}`} style={{marginBottom:10}}>
       <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
@@ -5729,8 +5733,8 @@ function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore, jumpD
         </div>
         <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
       </button>
- {open && sessions.map((sess, idx) => (
-     <SessionGroupCard key={`${sess.code}_${sess.ts}`} session={sess} allStats={Array.isArray(allStats) ? allStats : []} gameLabel={`GAME ${sessions.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} jumpGameId={jumpGameId}/>
+ {open && safeSessions.map((sess, idx) => (
+     <SessionGroupCard key={`${sess.code}_${sess.ts || idx}`} session={sess} allStats={Array.isArray(allStats) ? allStats : []} gameLabel={`GAME ${safeSessions.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} jumpGameId={jumpGameId}/>
 ))}
     </div>
   );
@@ -8603,7 +8607,60 @@ function buildManualRestoreState(existing = {}) {
     ];
   });
 
+
   return { restoredPoints, restoredPassXP, restoredPassPremium, restoredPassClaimed, restoredPassTokens, restoredPassActiveBoosts };
+}
+
+// ===================== One-time inventory/equips restore =====================
+const INVENTORY_RESTORE_PATCH_ID = "manual_restore_20260630_inventory_equips_v2";
+const MAKEUP_SHOP_ITEM_IDS = [
+  "gold_name", "teal_name", "violet_name", "blue_name",
+  "icon_goat", "icon_crown", "icon_alien", "icon_bolt", "frog",
+  "title_petty", "title_demogod", "title_lonely", "title_buffalo", "title_powershot",
+  "sb_airhorn", "sb_sheesh", "sb_nice", "sb_bruh", "sb_pop", "sb_goal", "sb_laugh", "sb_buzzer",
+  "bg_nebula", "bg_vapor", "bg_gold", "bg_void"
+];
+const PLAYER_RESTORE_EQUIPS = {
+  p1: { icon:"icon_goat", title:"title_petty" },
+  p2: { icon:"pass_premium_12", title:"title_demogod" },
+  p3: { icon:"frog", title:"title_lonely" },
+};
+function getRestoreItemType(id) {
+  const shop = SHOP_ITEMS.find(i => i.id === id);
+  if (shop) return shop.type;
+  if (String(id || "").startsWith("pass_")) return getPassRewardForOwnedId(id)?.type || null;
+  return null;
+}
+function buildInventoryRestoreState(pointsObj = {}) {
+  const restoredPoints = pointsObj && typeof pointsObj === "object" ? { ...pointsObj } : {};
+  PLAYERS.forEach(player => {
+    const pid = player.id;
+    const currentOwned = Array.isArray(restoredPoints[pid + "_owned"]) ? restoredPoints[pid + "_owned"] : [];
+    const equipPlan = PLAYER_RESTORE_EQUIPS[pid] || {};
+    const ownedAdditions = Array.from(new Set([
+      ...MAKEUP_SHOP_ITEM_IDS,
+      ...DEFAULT_SOUNDBOARD_IDS,
+      equipPlan.icon,
+      equipPlan.title,
+    ].filter(Boolean)));
+    const owned = Array.from(new Set([...currentOwned, ...ownedAdditions]));
+    const equipped = restoredPoints[pid + "_equipped"] && typeof restoredPoints[pid + "_equipped"] === "object" ? { ...restoredPoints[pid + "_equipped"] } : {};
+
+    // Only one visible icon/title should be active in presence, so clear those types first.
+    owned.forEach(id => {
+      const type = getRestoreItemType(id);
+      if (type === "icon" || type === "title") delete equipped[id];
+    });
+    if (equipPlan.icon) equipped[equipPlan.icon] = true;
+    if (equipPlan.title) equipped[equipPlan.title] = true;
+
+    // Keep the default board ready and restore a few extra sound options without forcing every sound on.
+    DEFAULT_SOUNDBOARD_IDS.forEach(id => { equipped[id] = true; });
+
+    restoredPoints[pid + "_owned"] = owned;
+    restoredPoints[pid + "_equipped"] = equipped;
+  });
+  return restoredPoints;
 }
 
 // ===================== Push Notifications =====================
@@ -11893,6 +11950,31 @@ useEffect(() => {
 }, [currentPlayer, authStage]);
 
 useEffect(() => {
+  if (!currentPlayer || authStage !== "app") return;
+  let cancelled = false;
+  (async () => {
+    try {
+      const already = await storeGet(INVENTORY_RESTORE_PATCH_ID).catch(() => null);
+      if (already?.done) return;
+      const freshPoints = await storeGet("points").catch(() => null);
+      const restoredPoints = buildInventoryRestoreState(freshPoints || points || {});
+      await Promise.all([
+        storeSet("points", restoredPoints),
+        storeSet("points_backup", restoredPoints),
+        storeSet(INVENTORY_RESTORE_PATCH_ID, { done:true, at:new Date().toISOString(), by:currentPlayer }),
+      ]);
+      if (cancelled) return;
+      setPoints(restoredPoints);
+      addToast("profile items restored", "🎒");
+    } catch (err) {
+      try { console.error("inventory restore failed", err); } catch (_) {}
+      addToast("item restore hit an error", "⚠️");
+    }
+  })();
+  return () => { cancelled = true; };
+}, [currentPlayer, authStage]);
+
+useEffect(() => {
   if (Array.isArray(stats) && stats.length) storeSet("stats_backup", stats).catch(() => {});
 }, [stats]);
 
@@ -12588,7 +12670,9 @@ return {
     if (!currentPlayer) return [];
     const today=todayAtMidnight(); const out=[];
     Object.keys(trainingData).forEach((k)=>{ const [dk,pid]=k.split("__"); if(pid!==currentPlayer)return; const date=new Date(dk+"T00:00:00"); if(date>=today)return; const comp=completions[tKey(dk,currentPlayer)]; if(!comp) out.push({key:dk,date,training:trainingData[k]}); });
-    return out.sort((a,b)=>a.date-b.date);
+    return out
+      .filter(x => x && x.date instanceof Date && Number.isFinite(x.date.getTime()))
+      .sort((a,b)=>a.date.getTime()-b.date.getTime());
   })();
 
 const touchStartY = useRef(0);
@@ -13127,3 +13211,5 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, 
   streamNote:{background:"rgba(167,139,250,0.06)",border:"1px solid rgba(167,139,250,0.15)",borderRadius:14,padding:14,marginTop:20},
 };
 // EMERGENCY_BACKUP_RESTORE_PATCH
+
+// INVENTORY_RESTORE_AND_TEAMLINK_DATE_SAFE_PATCH
