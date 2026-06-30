@@ -501,15 +501,16 @@ function GlobalStyles() {
 @keyframes floatUp { 0%{transform:translateY(0) scale(0.5); opacity:0;} 15%{opacity:1;} 100%{transform:translateY(-180px) scale(1.1); opacity:0;} }
 @keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
     * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
-    html, body { margin:0; padding:0; width:100%; height:100dvh; min-height:100dvh; overflow:hidden; background:#06070D; overscroll-behavior:none; }
-#root { width:100%; height:100dvh; min-height:100dvh; background:#06070D; overflow:hidden; }
-@supports (-webkit-touch-callout: none) { html, body, #root { min-height:100dvh; } }
+    html, body { margin:0; padding:0; width:100%; height:var(--bb-real-vh, 100dvh); min-height:var(--bb-real-vh, 100dvh); overflow:hidden; background:#06070D; overscroll-behavior:none; }
+body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:var(--bb-real-vh, 100dvh); }
+#root { width:100%; height:var(--bb-real-vh, 100dvh); min-height:var(--bb-real-vh, 100dvh); background:#06070D; overflow:hidden; }
+@supports (-webkit-touch-callout: none) { html, body, #root { min-height:var(--bb-real-vh, 100dvh); } }
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
       * { scrollbar-width:none; -ms-overflow-style:none; }
 
-      button, .bb-pressable { transition:transform .16s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, border-color .22s ease, background .22s ease, opacity .18s ease; outline:none; -webkit-tap-highlight-color:transparent; }
+      button, .bb-pressable { transition:transform .08s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, border-color .22s ease, background .22s ease, opacity .18s ease; outline:none; -webkit-tap-highlight-color:transparent; }
       button:active, .bb-pressable:active { transform:scale(0.975); }
       button:disabled { opacity:.55; cursor:not-allowed; }
       .bb-card-polish { box-shadow:0 12px 28px rgba(0,0,0,.18); }
@@ -519,8 +520,8 @@ function GlobalStyles() {
         .bb-glow-violet:hover { box-shadow:0 0 0 1px rgba(167,139,250,.4),0 8px 24px rgba(167,139,250,.12); border-color:rgba(167,139,250,.4) !important; }
         .bb-glow-pink:hover { box-shadow:0 0 0 1px rgba(255,92,138,.4),0 8px 24px rgba(255,92,138,.12); border-color:rgba(255,92,138,.4) !important; }
       }
-      .bb-tab-content { animation:fadeSlideUp .24s cubic-bezier(.2,.8,.2,1); }
-      .bb-tab-content > * { animation:softCardIn .22s cubic-bezier(.2,.8,.2,1); }
+      .bb-tab-content { animation:fadeSlideUp .16s cubic-bezier(.2,.8,.2,1); }
+      .bb-tab-content > * { animation:softCardIn .14s cubic-bezier(.2,.8,.2,1); }
       .bb-heart-pop { animation:heartPop .32s ease; }
       .bb-live-dot { animation:livePulse 1.4s ease-in-out infinite; }
       .bb-tab-content { color: var(--bb-main-text, #E8ECF4); }
@@ -533,7 +534,7 @@ function GlobalStyles() {
 // ===================== Auth screens =====================
 function NameSelectScreen({ onSelect }) {
   return (
-    <div style={{...s.loginScreen, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
+    <div style={{...s.loginScreen, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
       <div style={s.loginGlow} />
       <div style={s.loginContent}>
         <div style={s.loginEyebrow}>rivalry circuit · jul 20 – sep 21</div>
@@ -561,7 +562,7 @@ function CreatePasscodeScreen({ player, onCreated }) {
     onCreated();
   };
   return (
-   <div style={{...s.loginScreen, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}><div style={s.loginGlow} /><div style={s.loginContent}>
+   <div style={{...s.loginScreen, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}><div style={s.loginGlow} /><div style={s.loginContent}>
       <div style={{ ...s.loginPlayerDot, background:player.color, margin:"0 auto 18px", width:14, height:14 }} />
       <div style={s.loginTitle}>{player.name}</div>
       <div style={s.loginSub}>create your passcode</div>
@@ -585,8 +586,10 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
     storeGet(`auth:${player.id}`).then(a => { cachedAuth.current = a; });
   }, [player.id]);
 
-  const submit = (finalCode) => {
-    if (cachedAuth.current?.passcode === finalCode) {
+  const submit = async (finalCode) => {
+    const auth = cachedAuth.current || await storeGet(`auth:${player.id}`);
+    cachedAuth.current = auth;
+    if (auth?.passcode === finalCode) {
       if (adminMode && onAdmin) onAdmin();
       else onSuccess();
     }
@@ -594,7 +597,7 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
       setShaking(true);
       setError("Wrong passcode.");
       setCode("");
-      setTimeout(() => setShaking(false), 500);
+      setTimeout(() => setShaking(false), 360);
     }
   };
 
@@ -3395,7 +3398,7 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
   };
 
   const createSession = async () => {
-    const mins = Math.max(5, Math.min(180, Number(minutes) || 30));
+    const mins = [15,30,45,60].includes(Number(minutes)) ? Number(minutes) : 30;
     const startsAt = new Date(Date.now() + mins * 60000).toISOString();
     const session = {
       id: Date.now().toString(),
@@ -3456,10 +3459,7 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
           <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:.9}}>3V3 SESSION</div>
           <div style={{fontSize:11,color:"#6F7892",marginTop:2}}>schedule and ping the squad</div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <input value={minutes} onChange={(e)=>setMinutes(e.target.value)} inputMode="numeric" style={{width:56,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"8px 9px",color:"#E8ECF4",fontSize:12,fontWeight:800,textAlign:"center"}} />
-          <div style={{fontSize:10,color:"#6F7892",fontWeight:800}}>min</div>
-        </div>
+        <div style={{fontSize:10,color:"#6F7892",fontWeight:800}}>pick a preset</div>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         {[15,30,45,60].map(m => (
@@ -4295,6 +4295,8 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
     </div></div>
   );
 }
+const POST_IMAGE_CACHE = new Set();
+
 function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments, onExpand, onReactPost }) {
   const player=PLAYERS.find((p)=>p.id===post.playerId);
   const hearted=(post.hearts||[]).includes(currentPlayer);
@@ -4302,12 +4304,26 @@ function PostCard({ post, currentPlayer, onToggleHeart, onOpenComments, onExpand
   const [popped,setPopped]=useState(false);
   const [burst,setBurst]=useState(null);
   const pressTimer=useRef(null);
+  const [imageReady, setImageReady] = useState(() => !post.image || post.isVideo || POST_IMAGE_CACHE.has(post.image));
   useEffect(() => {
-    if (post.image && !post.isVideo) {
-      const img = new Image();
-      img.src = post.image;
+    if (!post.image || post.isVideo) {
+      setImageReady(true);
+      return;
     }
-  }, [post.image]);
+    if (POST_IMAGE_CACHE.has(post.image)) {
+      setImageReady(true);
+      return;
+    }
+    setImageReady(false);
+    const img = new Image();
+    img.onload = () => {
+      POST_IMAGE_CACHE.add(post.image);
+      setImageReady(true);
+    };
+    img.onerror = () => setImageReady(true);
+    img.decoding = "async";
+    img.src = post.image;
+  }, [post.image, post.isVideo]);
   const handleTouchStart=()=>{pressTimer.current=setTimeout(()=>setShowPicker(true),500);};
   const handleTouchEnd=()=>{clearTimeout(pressTimer.current);};
   const handleMouseDown=()=>{pressTimer.current=setTimeout(()=>setShowPicker(true),500);};
@@ -4349,9 +4365,23 @@ return (
         <span style={s.postTime}>{fmtRelTime(post.ts)}</span>
       </div>
       <div onClick={()=>onExpand(post)} style={{cursor:"pointer"}}>
-        {post.image&&(post.isVideo
-          ?<video src={post.image} style={s.postImage} controls muted playsInline loop/>
-          :<img src={post.image} alt="post" style={s.postImage}/>)}
+        {post.image && (
+          <div style={s.postImageWrap}>
+            {post.isVideo
+              ? <video src={post.image} style={s.postImage} controls muted playsInline loop preload="metadata"/>
+              : <>
+                  {!imageReady && <div style={s.postImageSkeleton}/>}
+                  <img
+                    src={post.image}
+                    alt="post"
+                    loading="eager"
+                    decoding="async"
+                    onLoad={() => { POST_IMAGE_CACHE.add(post.image); setImageReady(true); }}
+                    style={{...s.postImage, opacity:imageReady?1:0, transition:"opacity .14s ease"}}
+                  />
+                </>}
+          </div>
+        )}
         {post.caption&&<div style={s.postCaption}>{post.caption}</div>}
       </div>
       <div style={{...s.postActions,position:"relative"}}>
@@ -4697,6 +4727,7 @@ const addComment = async (postId, text) => {
       odds: copiedBet.odds,
       status: "open",
       placedAt: new Date().toISOString(),
+      settleAt: getBetSettleAt(copiedBet),
       copiedFrom: copiedBet.bettorId,
     };
     const newPts = myPoints - wager;
@@ -4740,6 +4771,7 @@ const addComment = async (postId, text) => {
       multiplier: parlayMultiplier.toFixed(2),
       status: "open",
       placedAt: new Date().toISOString(),
+      settleAt: nextTenAmIso(),
     };
     const upd = { ...points, [currentPlayer]: myPoints - parlayWager };
     setPoints(upd);
@@ -4886,7 +4918,7 @@ const addComment = async (postId, text) => {
                     </div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontSize: 10, color: "#4A5066", marginBottom: 4 }}>WAGER</div>
-                      <input type="number" value={parlayWager} onChange={e => setParlayWager(Math.max(1, Number(e.target.value)))}
+                      <input type="number" min="1" max="200" inputMode="numeric" value={parlayWager} onChange={e => setParlayWager(clampWager(e.target.value, parlayWager))}
                         style={{ ...s.modalInput, padding: "8px 10px", fontSize: 14 }} />
                     </div>
                     <div style={{ flex: 1 }}>
@@ -7187,7 +7219,7 @@ function getEquippedSoundboardIds(points, playerId) {
   const owned = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
   const equipped = points?.[playerId + "_equipped"] || {};
   const selected = owned.filter(id => equipped[id] && isSoundboardSoundId(id));
-  return (selected.length ? selected : DEFAULT_SOUNDBOARD_IDS).slice(0,6);
+  return Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...selected])).slice(0,6);
 }
 function getSoundboardAudioSrcs(soundId) {
   const sound = getSoundboardSound(soundId);
@@ -7195,11 +7227,15 @@ function getSoundboardAudioSrcs(soundId) {
   const fallbackById = {
     sb_goal: [
       baseFile,
+      "what-a-save-rocketleague.MP3",
       "what a save.mp3",
       "what-a-save.mp3",
       "what a save rocketleague.mp3",
       "what a save rocket league.mp3",
       "what-a-save-rocket-league.mp3",
+      "what-a-save-rocket-league.MP3",
+      "what a save rocket league (1).mp3",
+      "what a save rocketleague (1).mp3",
       "whatasave.mp3",
       "what_a_save.mp3",
     ],
@@ -8823,6 +8859,147 @@ function calcPayout(wager, decimalOdds) {
   return Math.round(wager * Math.min(parseFloat(decimalOdds), 5));
 }
 
+function clampWager(value, fallback = 1) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(200, Math.floor(n)));
+}
+
+function nextTenAmIso(from = new Date()) {
+  const d = new Date(from);
+  d.setDate(d.getDate() + 1);
+  d.setHours(10, 0, 0, 0);
+  return d.toISOString();
+}
+
+function getBetSettleAt(bet) {
+  return bet?.settleAt || nextTenAmIso(new Date(bet?.placedAt || bet?.ts || Date.now()));
+}
+
+function getBetResultFromGame(bet, game) {
+  if (!game) return { status:"void", note:"no logged game before settlement" };
+  const value = Number(game?.[bet.field]);
+  const line = Number(bet.line);
+  if (!Number.isFinite(value) || !Number.isFinite(line)) return { status:"void", note:"missing stat data" };
+  const won = bet.side === "over" ? value > line : value < line;
+  return {
+    status: won ? "won" : "lost",
+    note: `${game.playerName || bet.playerName || "player"} had ${value} ${bet.field}`,
+    actual: value,
+    targetGameId: game.id,
+  };
+}
+
+function findBetTargetGame(bet, stats = []) {
+  const placedAt = new Date(bet?.placedAt || bet?.ts || 0).getTime();
+  const settleAt = new Date(getBetSettleAt(bet)).getTime();
+  return (stats || [])
+    .filter(g =>
+      g &&
+      g.playerId === bet.playerId &&
+      normalizeGameMode(g.mode) === "3v3" &&
+      new Date(g.ts || 0).getTime() >= placedAt &&
+      new Date(g.ts || 0).getTime() <= settleAt
+    )
+    .sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0))[0];
+}
+
+function resolveSingleBet(bet, stats = []) {
+  if (bet?.isParlay) {
+    const legResults = (bet.legs || []).map(leg => {
+      const merged = { ...leg, placedAt: bet.placedAt, settleAt: getBetSettleAt(bet) };
+      const game = findBetTargetGame(merged, stats);
+      return { ...getBetResultFromGame(merged, game), leg };
+    });
+    if (!legResults.length || legResults.some(r => r.status === "void")) {
+      return { status:"void", note:"one or more legs had no settled stat" };
+    }
+    if (legResults.every(r => r.status === "won")) return { status:"won", note:"all parlay legs hit" };
+    return { status:"lost", note:"one or more parlay legs missed" };
+  }
+
+  if (!bet?.playerId || !bet?.field || !bet?.side) return { status:"void", note:"unsupported bet type" };
+  return getBetResultFromGame(bet, findBetTargetGame(bet, stats));
+}
+
+function settledBetPushBody(bet) {
+  const subject = bet?.isParlay ? `${bet.legs?.length || 0}-leg parlay` : `${bet.playerName || "your prop"} ${String(bet.side || "").toUpperCase()} ${bet.line ?? ""} ${bet.field || ""}`;
+  if (bet.status === "won") return `${subject} won — +${bet.payout || 0} pts`;
+  if (bet.status === "void") return `${subject} voided — ${bet.wager || 0} pts refunded`;
+  return `${subject} lost`;
+}
+
+async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
+  const list = Array.isArray(bets) ? bets : [];
+  const now = Date.now();
+  const due = list.filter(b => b?.status === "open" && new Date(getBetSettleAt(b)).getTime() <= now);
+  if (!due.length) return false;
+
+  const freshPoints = await storeGet("points").catch(() => points) || points || {};
+  const nextPoints = { ...freshPoints };
+  const dueIds = new Set(due.map(d => d.id));
+  const nextBets = list.map(b => {
+    if (!dueIds.has(b.id)) return b;
+    const result = resolveSingleBet(b, stats);
+    if (result.status === "won") nextPoints[b.bettorId] = (Number(nextPoints[b.bettorId]) || 0) + (Number(b.payout) || 0);
+    if (result.status === "void") nextPoints[b.bettorId] = (Number(nextPoints[b.bettorId]) || 0) + (Number(b.wager) || 0);
+    return {
+      ...b,
+      status: result.status,
+      settledAt: new Date().toISOString(),
+      settlementNote: result.note,
+      actual: result.actual,
+      targetGameId: result.targetGameId,
+    };
+  });
+
+  setPoints?.(nextPoints);
+  setBets?.(nextBets);
+  await storeSet("points", nextPoints);
+  await storeSet("bets", nextBets);
+
+  await Promise.allSettled(due.map(async b => {
+    const settled = nextBets.find(nb => nb.id === b.id);
+    if (!settled?.bettorId) return;
+    return sendPushToPlayersOnce(
+      `bet-settled:${settled.id}:${settled.status}`,
+      [settled.bettorId],
+      settled.status === "won" ? "🎯 Prop won" : settled.status === "void" ? "↩️ Prop voided" : "🎯 Prop settled",
+      settledBetPushBody(settled),
+      { url:makeNotificationUrl("social", { subTab:"bets", id:settled.id }), type:"bet_settled", id:settled.id }
+    );
+  }));
+
+  return true;
+}
+
+const DAILY_PROMO_PUSHES = [
+  { hour:11, title:"🎡 New spins available", body:"come test your luck in Boost." },
+  { hour:15, title:"🎯 New props available", body:"check the board before tonight's games." },
+  { hour:18, title:"🛒 Daily shop check", body:"see what's waiting in the item shop." },
+  { hour:21, title:"🎮 Squad check-in", body:"hop in and see who's on." },
+  { hour:0, title:"🌙 Late night boost", body:"new day, new spins, new props." },
+];
+
+async function maybeSendScheduledPromoPush(playerId) {
+  if (!playerId) return;
+  const now = new Date();
+  const today = dateKey(now);
+  const logKey = `promo_push_log_${playerId}_${today}`;
+  const sent = await storeGet(logKey).catch(() => ({})) || {};
+  for (const promo of DAILY_PROMO_PUSHES) {
+    const slot = new Date(now);
+    slot.setHours(promo.hour, 0, 0, 0);
+    const age = now.getTime() - slot.getTime();
+    if (age < 0 || age > 20 * 60 * 1000) continue;
+    const id = `${today}_${promo.hour}`;
+    if (sent[id]) continue;
+    await storeSet(logKey, { ...sent, [id]: true });
+    await sendPushToPlayersOnce(`promo:${playerId}:${id}`, [playerId], promo.title, promo.body, { url:makeNotificationUrl("boost", { type:"promo", id }), type:"promo", id });
+    break;
+  }
+}
+
 function StockTrendLine({ priceHistory, color, width = 260, height = 70 }) {
   if (!priceHistory || priceHistory.length < 2) {
     return (
@@ -9714,7 +9891,8 @@ const spinWheel = async () => {
   };
 
 const placeBet = async (chosenLine) => {
-  if (!selectedProp || !propSide || propWager < 1 || myPoints < propWager) return;
+  const safePropWager = clampWager(propWager, 10);
+  if (!selectedProp || !propSide || safePropWager < 1 || myPoints < safePropWager) return;
 
   const card = props.find(p => p.id === selectedProp);
   if (!card) return;
@@ -9723,7 +9901,7 @@ const placeBet = async (chosenLine) => {
   const current = card.lineOptions[lineIdx];
   const line = chosenLine ?? current.line;
   const odds = propSide === "over" ? current.overOdds : current.underOdds;
-  const payout = calcPayout(propWager, odds.decimal);
+  const payout = calcPayout(safePropWager, odds.decimal);
 
   const bet = {
     id: Date.now().toString(),
@@ -9733,11 +9911,12 @@ const placeBet = async (chosenLine) => {
     field: card.field,
     line,
     side: propSide,
-    wager: propWager,
+    wager: safePropWager,
     payout,
     odds: odds.american,
     status: "open",
     placedAt: new Date().toISOString(),
+    settleAt: nextTenAmIso(),
     targetMode: "next_3v3",
     targetText: "next logged 3v3 game"
   };
@@ -9747,7 +9926,7 @@ const placeBet = async (chosenLine) => {
   setPropSide(null);
   setPropWager(10);
 
-  const newPts = myPoints - propWager;
+  const newPts = myPoints - safePropWager;
   const upd = { ...points, [currentPlayer]: newPts };
   setPoints(upd);
   await storeSet("points", upd);
@@ -9856,7 +10035,7 @@ const noBettingWeek = isEventActive("no_betting");
                 </button>
               ))}
             </div>
-            <input type="number" value={wager} onChange={e=>setWager(Math.max(1,Number(e.target.value)))} style={{...s.modalInput,textAlign:"center",fontSize:18,fontFamily:"'Oswald',sans-serif"}}/>
+            <input type="number" min="1" max="200" inputMode="numeric" value={wager} onChange={e=>setWager(clampWager(e.target.value, wager))} style={{...s.modalInput,textAlign:"center",fontSize:18,fontFamily:"'Oswald',sans-serif"}}/>
           </div>
 
           {spinResult&&(
@@ -9952,15 +10131,16 @@ const noBettingWeek = isEventActive("no_betting");
 
           {selectedProp&&propSide&&(
             <div style={{position:"sticky",bottom:0,background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
-              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT</div>
-              <div style={{display:"flex",gap:8,marginBottom:10}}>
-                {[5,10,25,50].map(amt=>(
-                  <button key={amt} onClick={()=>setPropWager(amt)} className="bb-pressable"
-                    style={{flex:1,background:propWager===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"7px 0",fontSize:11,fontWeight:700,color:propWager===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                    {amt}
-                  </button>
-                ))}
-              </div>
+              <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT · 1–200</div>
+              <input
+                type="number"
+                min="1"
+                max="200"
+                inputMode="numeric"
+                value={propWager}
+                onChange={e=>setPropWager(clampWager(e.target.value, propWager))}
+                style={{...s.modalInput,textAlign:"center",fontSize:18,fontFamily:"'Oswald',sans-serif",marginBottom:10}}
+              />
               {(() => {
                 const card = props.find(p => p.id === selectedProp);
                 const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor((card?.lineOptions.length||1)/2);
@@ -10125,7 +10305,7 @@ const noBettingWeek = isEventActive("no_betting");
                         </div>
                         <div style={{flex:1}}>
                           <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>WAGER</div>
-                          <input type="number" value={parlayWager} onChange={e=>setParlayWager(Math.max(1,Number(e.target.value)))}
+                          <input type="number" min="1" max="200" inputMode="numeric" value={parlayWager} onChange={e=>setParlayWager(clampWager(e.target.value, parlayWager))}
                             style={{...s.modalInput,padding:"8px 10px",fontSize:14}}/>
                         </div>
                         <div style={{flex:1}}>
@@ -10135,7 +10315,7 @@ const noBettingWeek = isEventActive("no_betting");
                       </div>
                       <button onClick={async()=>{
                         if(parlayLegs.length<2||myPoints<parlayWager) return;
-                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({propKey:l.propKey,playerId:l.playerId,playerName:l.playerName,field:l.field,line:l.line,side:l.side,odds:l.odds})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString()};
+                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({propKey:l.propKey,playerId:l.playerId,playerName:l.playerName,field:l.field,line:l.line,side:l.side,odds:l.odds})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString(),settleAt:nextTenAmIso()};
                         const upd={...points,[currentPlayer]:myPoints-parlayWager};
                         setPoints(upd); await storeSet("points",upd);
                         const updBets=[...(bets||[]),parlayBet];
@@ -10503,7 +10683,7 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>
-        challenge a teammate. they get a notification and must accept. winner takes the pts.
+        
       </div>
 
       {/* Balance */}
@@ -11364,6 +11544,32 @@ function AppInner() {
   const [currentPlayer,setCurrentPlayer]=useState(null);
 const [toasts, setToasts] = useState([]);
   const [loading,setLoading]=useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const applyViewport = () => {
+      const h = Math.max(window.innerHeight || 0, window.visualViewport?.height || 0);
+      if (h) document.documentElement.style.setProperty("--bb-real-vh", `${h}px`);
+      document.documentElement.style.setProperty("--bb-safe-bottom", "env(safe-area-inset-bottom, 0px)");
+      document.body?.classList?.add("bb-pwa-shell");
+      let meta = document.querySelector('meta[name="viewport"]');
+      if (!meta) {
+        meta = document.createElement("meta");
+        meta.setAttribute("name", "viewport");
+        document.head.appendChild(meta);
+      }
+      meta.setAttribute("content", "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover");
+    };
+    applyViewport();
+    window.addEventListener("resize", applyViewport);
+    window.addEventListener("orientationchange", applyViewport);
+    window.visualViewport?.addEventListener?.("resize", applyViewport);
+    return () => {
+      window.removeEventListener("resize", applyViewport);
+      window.removeEventListener("orientationchange", applyViewport);
+      window.visualViewport?.removeEventListener?.("resize", applyViewport);
+    };
+  }, []);
   const [tab,setTab]=useState("home");
   const [schedule,setSchedule]=useState({league:buildLeagueWeeks(),playoffs:buildPlayoffRounds()});
   const [mmrProfiles,setMmrProfiles]=useState({});
@@ -11406,6 +11612,18 @@ const [statsJumpDate, setStatsJumpDate] = useState(null);
 const [stocks, setStocks] = useState({});
 const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
+  useEffect(() => {
+    if (currentPlayer !== ADMIN_ID) return;
+    if (!points || points.__maglvxx_test_wheel_spin_20260630) return;
+    const upd = {
+      ...points,
+      p1_bonusSpins: (Number(points.p1_bonusSpins) || 0) + 1,
+      __maglvxx_test_wheel_spin_20260630: true,
+    };
+    setPoints(upd);
+    storeSet("points", upd);
+  }, [currentPlayer, points]);
+
 const [chemistry, setChemistry] = useState({});   
 const [activityFeed, setActivityFeed] = useState([]);
 const [pendingActivityToasts, setPendingActivityToasts] = useState([]);  
@@ -11716,7 +11934,27 @@ useEffect(() => {
     await storeSetWithPush("activity_feed", marked);
     setActivityFeed(marked.filter(e => e.to === currentPlayer));
   })();
-}, [pendingActivityToasts]);                      
+}, [pendingActivityToasts]);
+
+useEffect(() => {
+  if (!currentPlayer) return;
+  let stopped = false;
+  const run = () => {
+    if (stopped) return;
+    settleDueBetsNow({ bets, stats, points, setBets, setPoints }).catch(e => console.warn("bet settle failed", e));
+  };
+  run();
+  const timer = setInterval(run, 60 * 1000);
+  return () => { stopped = true; clearInterval(timer); };
+}, [currentPlayer, bets, stats, points]);
+
+useEffect(() => {
+  if (!currentPlayer) return;
+  const run = () => maybeSendScheduledPromoPush(currentPlayer).catch(() => {});
+  run();
+  const timer = setInterval(run, 60 * 1000);
+  return () => clearInterval(timer);
+}, [currentPlayer]);                      
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
@@ -11872,9 +12110,17 @@ return () => {
 }, [currentPlayer]);
 
 
-  const selectName=async(pid)=>{ setSelectedPlayerId(pid); const auth=await storeGet(`auth:${pid}`); setAuthStage(auth?"enter":"create"); };
+  const selectName=async(pid)=>{
+    setSelectedPlayerId(pid);
+    setAuthStage("enter");
+    const auth=await storeGet(`auth:${pid}`);
+    if (!auth) setAuthStage("create");
+  };
 
 const loadSharedData = async (pid) => {
+  setCurrentPlayer(pid);
+  setAuthStage("app");
+  setTab("home");
   setLoading(true);
 
   const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,tsess,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
@@ -12107,7 +12353,7 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
 
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ await loadSharedData(selectedPlayerId); setAdminStandalone(true); }:undefined}/></>;
-if (loading && authStage !== "app") return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center",animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}><div style={{width:20,height:20,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.14)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/></div></>;
+if (loading && authStage !== "app") return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center",animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}><div style={{width:20,height:20,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.14)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/></div></>;
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onUseCredit={async()=>{ const current = parseCredits?.[selectedPlayerId] ?? PARSE_CREDITS_DEFAULT; if(current<=0) return false; const upd={...parseCredits,[selectedPlayerId]:current-1}; setParseCredits(upd); await storeSet("parse_credits",upd); return true; }} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const userColor = playerObj?.color || "#B8FF4D";
@@ -12180,7 +12426,7 @@ const TABS=[
   };
 
   return (
-    <div style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
+    <div style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {loading&&authStage==="app"&&<div style={{position:"fixed",top:"max(12px, env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1200,width:22,height:22,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.16)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/>}
       {(points?.[currentPlayer+"_showStars"] !== false) && <StarfieldBg/>}
@@ -12446,17 +12692,17 @@ export default function App() {
 
 // ===================== Styles =====================
 const s = {
-appShell:{display:"flex",flexDirection:"column",height:"100dvh",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:0},
-  screen:{height:"100dvh",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
+appShell:{display:"flex",flexDirection:"column",height:"var(--bb-real-vh, 100dvh)",minHeight:"var(--bb-real-vh, 100dvh)",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:0},
+  screen:{height:"var(--bb-real-vh, 100dvh)",minHeight:"var(--bb-real-vh, 100dvh)",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
 topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
   topBarRight:{display:"flex",alignItems:"center",gap:8},
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(92px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(84px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"max(10px, env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:0,zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
+tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px))",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
@@ -12588,7 +12834,9 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, 
   postCard:{background:"linear-gradient(135deg,#11131F,#0B0D17)",borderRadius:18,marginBottom:14,border:"1px solid rgba(255,255,255,0.08)",overflow:"hidden",position:"relative",boxShadow:"0 12px 28px rgba(0,0,0,0.18)"},
   postHeader:{display:"flex",alignItems:"center",gap:8,padding:"12px 14px 10px"},
   postTime:{fontSize:11,color:"#4A5066",marginLeft:"auto"},
-  postImage:{width:"100%",display:"block",maxHeight:360,objectFit:"cover",background:"#06070D"},
+  postImageWrap:{position:"relative",width:"100%",minHeight:220,background:"#06070D",overflow:"hidden"},
+  postImage:{width:"100%",display:"block",maxHeight:360,minHeight:220,objectFit:"cover",background:"#06070D"},
+  postImageSkeleton:{position:"absolute",inset:0,background:"linear-gradient(90deg,#0B0D17,#11131F,#0B0D17)",animation:"softCardIn .18s ease",zIndex:0},
   postCaption:{fontSize:13.5,color:"#E8ECF4",lineHeight:1.45,padding:"10px 14px 4px"},
   postActions:{display:"flex",gap:16,padding:"10px 14px 12px"},
   postActionBtn:{display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:0},
