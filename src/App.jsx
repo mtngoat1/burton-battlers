@@ -8,6 +8,8 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 
 // APP54_BUTTON_TWITCH_AUDIO_READY_PATCH
 // APP54_NEW_SOUNDBOARD_FILES_PATCH
+// APP55_PROPS_ALL_MODES_PUSH_PATCH
+// APP55_PROPS_WATCH_STREAM_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -6471,19 +6473,7 @@ const saveGame=async(entry)=>{
   let cur=pts[currentPlayer]||0;
   const pointsMult = isEventActive("double_points") ? 2 : 1;
   cur+=2*pointsMult;
-  const allBets=await storeGet("bets")||[];
-  const resolvedBets=allBets.map(bet=>{
-    if(bet.status!=="open") return bet;
-    if(bet.playerId!==currentPlayer) return bet;
-    if(new Date(bet.placedAt)>new Date(entry.ts)) return bet;
-    const actual=entry[bet.field]||0;
-    const won=bet.side==="over"?actual>bet.line:actual<bet.line;
-    if(won){
-      pts[bet.bettorId]=(pts[bet.bettorId]||0)+bet.payout;
-    }
-    return {...bet,status:won?"won":"lost",settledAt:new Date().toISOString(),actual};
-  });
-  await storeSet("bets",resolvedBets);
+  // Prop bets settle through settleDueBetsNow after the stat is stored, so push notifications fire properly.
 await storeSet("points",{...pts,[currentPlayer]:cur});
   const pxp=await storeGet("pass_xp")||{};
   const activeBoosts=await storeGet("pass_active_boosts")||{};
@@ -9277,18 +9267,73 @@ function getBetResultFromGame(bet, game) {
   };
 }
 
+function getBetMode(bet) {
+  const raw = String(bet?.targetMode || bet?.mode || "3v3").replace(/^next_/, "");
+  const mode = normalizeGameMode(raw);
+  return ["1v1", "2v2", "3v3"].includes(mode) ? mode : "3v3";
+}
+
+function duoMatchesGame(game, duoIds) {
+  if (!Array.isArray(duoIds) || duoIds.length < 2) return true;
+  const ids = Array.isArray(game?.duoIds) ? game.duoIds : [];
+  // Old logs may not have duoIds. Do not block those from resolving.
+  if (!ids.length) return true;
+  return duoIds.every(id => ids.includes(id));
+}
+
 function findBetTargetGame(bet, stats = []) {
   const placedAt = new Date(bet?.placedAt || bet?.ts || 0).getTime();
   const settleAt = new Date(getBetSettleAt(bet)).getTime();
-  return (stats || [])
+  const mode = getBetMode(bet);
+  const allGames = sanitizeStatsForRender(stats)
+    .filter(g => {
+      const ts = new Date(g?.ts || 0).getTime();
+      return g && ts >= placedAt && ts <= settleAt && normalizeGameMode(g.mode) === mode;
+    })
+    .sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
+
+  if (bet?.combined && Array.isArray(bet?.duoIds) && bet.duoIds.length >= 2) {
+    const wanted = new Set(bet.duoIds);
+    const groups = {};
+    allGames
+      .filter(g => wanted.has(g.playerId) && duoMatchesGame(g, bet.duoIds))
+      .forEach(g => {
+        const ts = safeDateObj(g.ts);
+        const key = g.sessionCode || g.matchId || `${dateKey(ts)}_${mode}_${Math.floor(ts.getTime() / 60000)}`;
+        if (!groups[key]) groups[key] = { key, ts:g.ts, games:[] };
+        groups[key].games.push(g);
+        if (safeDateObj(g.ts).getTime() > safeDateObj(groups[key].ts).getTime()) groups[key].ts = g.ts;
+      });
+
+    const group = Object.values(groups)
+      .filter(grp => {
+        const logged = new Set(grp.games.map(g => g.playerId).filter(Boolean));
+        return bet.duoIds.every(id => logged.has(id)) || grp.games.length >= 2;
+      })
+      .sort((a, b) => safeDateObj(a.ts).getTime() - safeDateObj(b.ts).getTime())[0];
+
+    if (!group) return null;
+    const field = bet.field || "goals";
+    const value = group.games.reduce((sum, g) => sum + (Number(g[field]) || 0), 0);
+    return {
+      ...(group.games[0] || {}),
+      id: `duo_prop_${group.key}`,
+      playerName: bet.playerName || bet.duoLabel || "duo",
+      ts: group.ts,
+      mode,
+      [field]: value,
+    };
+  }
+
+  return allGames
     .filter(g =>
-      g &&
       g.playerId === bet.playerId &&
-      normalizeGameMode(g.mode) === "3v3" &&
-      new Date(g.ts || 0).getTime() >= placedAt &&
-      new Date(g.ts || 0).getTime() <= settleAt
-    )
-    .sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0))[0];
+      duoMatchesGame(g, bet.duoIds)
+    )[0];
+}
+
+function betHasTargetGame(bet, stats = []) {
+  return !!findBetTargetGame(bet, stats);
 }
 
 function resolveSingleBet(bet, stats = []) {
@@ -9319,7 +9364,11 @@ function settledBetPushBody(bet) {
 async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
   const list = Array.isArray(bets) ? bets : [];
   const now = Date.now();
-  const due = list.filter(b => b?.status === "open" && new Date(getBetSettleAt(b)).getTime() <= now);
+  const due = list.filter(b => {
+    if (b?.status !== "open") return false;
+    const settleAt = new Date(getBetSettleAt(b)).getTime();
+    return betHasTargetGame(b, stats) || settleAt <= now;
+  });
   if (!due.length) return false;
 
   const freshPoints = await storeGet("points").catch(() => points) || points || {};
@@ -10117,7 +10166,7 @@ function WeeklyRecapTrivia({ stats, currentPlayer, points, setPoints }) {
 }          
           
           
-function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets }) {
+function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets, streamProfiles = {} }) {
 const [section, setSection] = useState("wheel");
 const [parlayLegs, setParlayLegs] = useState([]);
 const [parlayWager, setParlayWager] = useState(10);
@@ -10142,6 +10191,10 @@ const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusS
 const [propWager, setPropWager] = useState(10);
 const [selectedProp, setSelectedProp] = useState(null);
 const [propSide, setPropSide] = useState(null);
+const [propPlayerFilter, setPropPlayerFilter] = useState(() => PLAYERS.find(p => p.id !== currentPlayer)?.id || PLAYERS[0]?.id || "p1");
+const [propModeFilter, setPropModeFilter] = useState("1v1");
+const [propDuoFilter, setPropDuoFilter] = useState("");
+const [showPropStream, setShowPropStream] = useState(false);
   const [lineIndexByProp, setLineIndexByProp] = useState({}); // { [propId]: index into lineOptions }
 const [predWager, setPredWager] = useState(10);
 const [selectedPred, setSelectedPred] = useState(null);
@@ -10149,47 +10202,139 @@ const [predSide, setPredSide] = useState(null);
 
   const myPoints = points?.[currentPlayer] || 0;
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
+  useEffect(() => { if (section === "predict") setSection("props"); }, [section]);
 
-  // Build player props from stats
-const PROP_FIELD_CONFIG = {
-    goals:   { lines: [0.5, 1.5, 2.5, 3.5] },
-    assists: { lines: [0.5, 1.5, 2.5] },
-    saves:   { lines: [0.5, 1.5, 2.5, 3.5] },
-    shots:   { lines: [0.5, 1.5, 2.5, 3.5, 4.5] },
+  // Build player props from stats across 1v1 / 2v2 / 3v3.
+  const PROP_FIELD_CONFIG = {
+    goals:   { label:"goals",   lines: [0.5, 1.5, 2.5, 3.5] },
+    assists: { label:"assists", lines: [0.5, 1.5, 2.5] },
+    saves:   { label:"saves",   lines: [0.5, 1.5, 2.5, 3.5] },
+    shots:   { label:"shots",   lines: [0.5, 1.5, 2.5, 3.5, 4.5] },
+    score:   { label:"score",   lines: [199.5, 299.5, 399.5, 499.5, 599.5] },
   };
 
-  // Build one prop "card" per player+stat, with all candidate lines and per-line odds precomputed.
-  // The card itself doesn't lock a line — the user picks one via the slider in the UI.
+  const propBetPlayers = PLAYERS.filter(p => p.id !== currentPlayer);
+  const activePropPlayer = propBetPlayers.find(p => p.id === propPlayerFilter) || propBetPlayers[0] || PLAYERS[0];
+  const propDuoOptions = activePropPlayer
+    ? PLAYERS.filter(p => p.id !== activePropPlayer.id).map(p => ({
+        id: getChemistryKey(activePropPlayer.id, p.id),
+        playerIds: [activePropPlayer.id, p.id],
+        label: `${activePropPlayer.name} + ${p.name}`,
+      }))
+    : [];
+  const activePropDuo = propDuoOptions.find(d => d.id === propDuoFilter) || propDuoOptions[0] || null;
+  const activePropTwitch = String(streamProfiles?.[activePropPlayer?.id]?.twitch || "").replace(/^@/, "").trim();
+  const twitchParent = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  useEffect(() => { setShowPropStream(false); }, [activePropPlayer?.id]);
+
+  const getPropHistory = (playerId, mode, duo = null) => sanitizeStatsForRender(stats).filter(g => {
+    if (!g || g.playerId !== playerId) return false;
+    if (normalizeGameMode(g.mode) !== mode) return false;
+    if (mode === "2v2" && duo?.playerIds?.length) {
+      const ids = Array.isArray(g.duoIds) ? g.duoIds : [];
+      // Old logs may not have duoIds. Keep them visible instead of hiding all bets.
+      if (ids.length) return duo.playerIds.every(id => ids.includes(id));
+    }
+    return true;
+  });
+
+  const getCombinedDuoHistory = (duo, field) => {
+    if (!duo?.playerIds?.length) return [];
+    const ids = new Set(duo.playerIds);
+    const games = sanitizeStatsForRender(stats).filter(g => {
+      if (!g || normalizeGameMode(g.mode) !== "2v2") return false;
+      const duoIds = Array.isArray(g.duoIds) ? g.duoIds : [];
+      if (duoIds.length && !duo.playerIds.every(id => duoIds.includes(id))) return false;
+      return ids.has(g.playerId);
+    });
+    const groups = {};
+    games.forEach(g => {
+      const ts = safeDateObj(g.ts);
+      const key = g.sessionCode || g.matchId || `${dateKey(ts)}_${Math.floor(ts.getTime() / 60000)}`;
+      if (!groups[key]) groups[key] = { key, ts:g.ts, games:[] };
+      groups[key].games.push(g);
+      if (safeDateObj(g.ts).getTime() > safeDateObj(groups[key].ts).getTime()) groups[key].ts = g.ts;
+    });
+    return Object.values(groups)
+      .filter(group => {
+        const logged = new Set(group.games.map(g => g.playerId).filter(Boolean));
+        return duo.playerIds.every(id => logged.has(id)) || group.games.length >= 2;
+      })
+      .map(group => ({
+        id: `duo_${group.key}`,
+        ts: group.ts,
+        value: group.games.reduce((sum, g) => sum + (Number(g[field]) || 0), 0),
+      }));
+  };
+
+  const makeLineOptions = (historyValues, lineVals) => {
+    const count = historyValues.length || 1;
+    return lineVals.map(line => {
+      const overCount = historyValues.filter(v => Number(v) > line).length;
+      const overPct = historyValues.length > 0 ? overCount / count : 0.5;
+      const underPct = 1 - overPct;
+      const overOdds = calcOdds(Math.max(0.08, Math.min(0.92, overPct)));
+      const underOdds = calcOdds(Math.max(0.08, Math.min(0.92, underPct)));
+      return { line, overPct, underPct, overOdds, underOdds };
+    });
+  };
+
+  // Build prop cards based on the selected player/mode filters.
   const buildProps = () => {
     const cards = [];
-    PLAYERS.filter(p => p.id !== currentPlayer).forEach(player => {
-      const pg = stats.filter(g => g.playerId === player.id && g.mode === "3v3");
-      if (pg.length < 1) return;
-      Object.entries(PROP_FIELD_CONFIG).forEach(([field, { lines: lineVals }]) => {
-        const avg = pg.reduce((s, g) => s + (g[field] || 0), 0) / pg.length;
-        const lineOptions = lineVals.map(line => {
-          const overCount = pg.filter(g => (g[field] || 0) > line).length;
-          const overPct = pg.length > 0 ? overCount / pg.length : 0.5;
-          const underPct = 1 - overPct;
-          const overOdds = calcOdds(Math.max(0.08, Math.min(0.92, overPct)));
-          const underOdds = calcOdds(Math.max(0.08, Math.min(0.92, underPct)));
-          return { line, overPct, underPct, overOdds, underOdds };
-        });
-        cards.push({
-          id: `${player.id}_${field}`,
-          playerId: player.id,
-          playerName: player.name,
-          playerColor: player.color,
-          field,
-          avg: avg.toFixed(1),
-          gamesPlayed: pg.length,
-          lineOptions, // array of {line, overPct, underPct, overOdds, underOdds}
-        });
+    const player = activePropPlayer;
+    const mode = normalizeGameMode(propModeFilter || "1v1");
+    if (!player) return cards;
+
+    const history = getPropHistory(player.id, mode, mode === "2v2" ? activePropDuo : null);
+    Object.entries(PROP_FIELD_CONFIG).forEach(([field, cfg]) => {
+      const values = history.map(g => Number(g[field]) || 0);
+      const avg = values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
+      cards.push({
+        id: `${mode}_${player.id}_${field}_${mode === "2v2" && activePropDuo ? activePropDuo.id : "solo"}`,
+        playerId: player.id,
+        playerName: player.name,
+        playerColor: player.color,
+        mode,
+        duoIds: mode === "2v2" && activePropDuo ? activePropDuo.playerIds : null,
+        duoLabel: mode === "2v2" && activePropDuo ? activePropDuo.label : "",
+        field,
+        fieldLabel: cfg.label,
+        avg: avg.toFixed(field === "score" ? 0 : 1),
+        gamesPlayed: history.length,
+        targetText: mode === "2v2" && activePropDuo ? `next logged 2v2 game with ${activePropDuo.label}` : `next logged ${mode} game`,
+        lineOptions: makeLineOptions(values, cfg.lines),
       });
     });
+
+    if (mode === "2v2" && activePropDuo) {
+      ["goals", "assists", "saves", "shots", "score"].forEach(field => {
+        const cfg = PROP_FIELD_CONFIG[field];
+        const combinedHistory = getCombinedDuoHistory(activePropDuo, field);
+        const values = combinedHistory.map(x => x.value);
+        const avg = values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
+        const duoColor = player.color;
+        cards.push({
+          id: `2v2_duo_${activePropDuo.id}_${field}`,
+          playerId: player.id,
+          playerName: activePropDuo.label,
+          playerColor: duoColor,
+          mode:"2v2",
+          duoIds: activePropDuo.playerIds,
+          duoLabel: activePropDuo.label,
+          combined: true,
+          field,
+          fieldLabel: `duo ${cfg.label}`,
+          avg: avg.toFixed(field === "score" ? 0 : 1),
+          gamesPlayed: values.length,
+          targetText: `next logged 2v2 game with ${activePropDuo.label}`,
+          lineOptions: makeLineOptions(values, field === "score" ? [399.5, 599.5, 799.5, 999.5, 1199.5] : cfg.lines.map(v => v + 1)),
+        });
+      });
+    }
+
     return cards;
   };
-
   const props = buildProps();
 
 const getLegPropKey = (leg) => leg.propKey || `${leg.playerId}_${leg.field}_${leg.line}`;
@@ -10296,6 +10441,7 @@ const placeBet = async (chosenLine) => {
     playerId: card.playerId,
     playerName: card.playerName,
     field: card.field,
+    fieldLabel: card.fieldLabel || card.field,
     line,
     side: propSide,
     wager: safePropWager,
@@ -10304,8 +10450,11 @@ const placeBet = async (chosenLine) => {
     status: "open",
     placedAt: new Date().toISOString(),
     settleAt: nextTenAmIso(),
-    targetMode: "next_3v3",
-    targetText: "next logged 3v3 game"
+    targetMode: card.mode || "3v3",
+    targetText: card.targetText || `next logged ${card.mode || "3v3"} game`,
+    duoIds: card.duoIds || null,
+    duoLabel: card.duoLabel || "",
+    combined: !!card.combined,
   };
 
   // close the sticky wager tray immediately after tapping place bet
@@ -10326,9 +10475,8 @@ const placeBet = async (chosenLine) => {
     to: card.playerId,
     type: "prop",
     fromName: PLAYERS.find(p => p.id === currentPlayer)?.name || "someone",
-    text: `sent you props: ${propSide.toUpperCase()} ${line} ${card.field}`,
-    targetMode: "next_3v3",
-    targetText: "next logged 3v3 game"
+    text: `sent you ${card.mode || "3v3"} props: ${propSide.toUpperCase()} ${line} ${card.fieldLabel || card.field}`,
+    message: `${card.targetText || "next logged game"} · odds ${odds.american} · to win ${payout} pts`
   });
 
 };
@@ -10369,7 +10517,7 @@ const noBettingWeek = isEventActive("no_betting");
 
       {/* Section tabs */}
       <div style={{display:"flex",gap:8,marginBottom:18}}>
-     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"parlay",label:"parlay"},{id:"predict",label:"predict"},{id:"games",label:"games"}].map(sec=>(
+     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"parlay",label:"parlay"},{id:"games",label:"games"}].map(sec=>(
           <button key={sec.id} onClick={()=>setSection(sec.id)} className="bb-pressable"
             style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?playerColor:"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
             {sec.label}
@@ -10458,7 +10606,68 @@ const noBettingWeek = isEventActive("no_betting");
    {/* PROPS */}
       {section==="props"&&(
         <div>
-          {props.length===0&&<div style={s.emptyQueue}>not enough game data yet — props unlock after teammates log 3v3 games.</div>}
+          <div style={{background:"linear-gradient(135deg,#160D24,#0A0C16)",border:"1px solid rgba(167,139,250,0.20)",borderRadius:16,padding:14,marginBottom:14,boxShadow:"0 12px 28px rgba(0,0,0,0.18)"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:showPropStream&&activePropTwitch?12:0}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>watch while you bet</div>
+                <div style={{display:"flex",alignItems:"center",gap:7,fontSize:13,fontWeight:900,color:"#E8ECF4"}}>
+                  <span>{activePropPlayer?.name || "player"}</span>
+                  <TwitchLiveDot handle={activePropTwitch} size={8}/>
+                </div>
+                <div style={{fontSize:11,color:activePropTwitch?"#8B92A8":"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {activePropTwitch ? `twitch.tv/${activePropTwitch}` : "no twitch linked for this player"}
+                </div>
+              </div>
+              <button onClick={()=>activePropTwitch&&setShowPropStream(v=>!v)} disabled={!activePropTwitch} className="bb-pressable bb-glow-violet" style={{background:activePropTwitch?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:12,padding:"10px 13px",fontSize:12,fontWeight:900,color:activePropTwitch?"#06070D":"#4A5066",cursor:activePropTwitch?"pointer":"default",display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
+                <Tv size={14}/>{showPropStream ? "hide" : "watch"}
+              </button>
+            </div>
+            {showPropStream && activePropTwitch && (
+              <div style={{position:"relative",paddingTop:"56.25%",borderRadius:14,overflow:"hidden",background:"#05060C",border:"1px solid rgba(255,255,255,0.08)"}}>
+                <iframe
+                  src={`https://player.twitch.tv/?channel=${encodeURIComponent(activePropTwitch)}&parent=${twitchParent}&autoplay=true&muted=false`}
+                  title={`${activePropPlayer?.name || "player"} Twitch stream`}
+                  allow="autoplay; fullscreen; picture-in-picture"
+                  allowFullScreen
+                  style={{position:"absolute",inset:0,width:"100%",height:"100%",border:"none"}}
+                />
+              </div>
+            )}
+          </div>
+          <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
+            <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>player</div>
+            <div style={{display:"flex",gap:8,marginBottom:12}}>
+              {propBetPlayers.map(p => (
+                <button key={p.id} onClick={()=>{ setPropPlayerFilter(p.id); setSelectedProp(null); setPropSide(null); }} className="bb-pressable"
+                  style={{flex:1,background:activePropPlayer?.id===p.id?p.color:"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"9px 8px",fontSize:11,fontWeight:900,color:activePropPlayer?.id===p.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>mode</div>
+            <div style={{display:"flex",gap:8,marginBottom:propModeFilter==="2v2"?12:0}}>
+              {["1v1","2v2","3v3"].map(mode => (
+                <button key={mode} onClick={()=>{ setPropModeFilter(mode); setSelectedProp(null); setPropSide(null); }} className="bb-pressable"
+                  style={{flex:1,background:propModeFilter===mode?playerColor:"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:900,color:propModeFilter===mode?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  {mode}
+                </button>
+              ))}
+            </div>
+            {propModeFilter==="2v2" && activePropDuo && (
+              <>
+                <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>duo</div>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {propDuoOptions.map(duo => (
+                    <button key={duo.id} onClick={()=>{ setPropDuoFilter(duo.id); setSelectedProp(null); setPropSide(null); }} className="bb-pressable"
+                      style={{flex:"1 1 130px",background:(activePropDuo?.id===duo.id)?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"9px 8px",fontSize:11,fontWeight:900,color:(activePropDuo?.id===duo.id)?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                      {duo.label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          {props.length===0&&<div style={s.emptyQueue}>not enough game data yet — props unlock after this player logs a matching {propModeFilter} game.</div>}
           {props.map(card=>{
             const lineIdx = lineIndexByProp[card.id] ?? Math.floor(card.lineOptions.length/2);
             const current = card.lineOptions[lineIdx];
@@ -10468,7 +10677,8 @@ const noBettingWeek = isEventActive("no_betting");
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
                   <div style={{width:8,height:8,borderRadius:99,background:card.playerColor}}/>
                   <span style={{fontWeight:700,fontSize:13,color:card.playerColor}}>{card.playerName}</span>
-                  <span style={{fontSize:13,fontWeight:700,color:"#E8ECF4",marginLeft:4}}>· {card.field}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:"#E8ECF4",marginLeft:4}}>· {card.fieldLabel || card.field}</span>
+                  <span style={{fontSize:10,color:"#4A5066",fontWeight:800,textTransform:"uppercase",marginLeft:4}}>{card.mode}{card.combined?" · duo total":""}</span>
                   <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>avg: {card.avg} ({card.gamesPlayed}g)</span>
                 </div>
 
@@ -10476,7 +10686,7 @@ const noBettingWeek = isEventActive("no_betting");
                 <div style={{margin:"14px 0 12px"}}>
                   <div style={{textAlign:"center",marginBottom:8}}>
                     <span style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"#E8ECF4"}}>{current.line}</span>
-                    <span style={{fontSize:12,color:"#4A5066",marginLeft:6}}>{card.field}</span>
+                    <span style={{fontSize:12,color:"#4A5066",marginLeft:6}}>{card.fieldLabel || card.field}</span>
                   </div>
                   <input
                     type="range"
@@ -10542,7 +10752,7 @@ const noBettingWeek = isEventActive("no_betting");
                     </div>
                                                                                  
                     <div style={{flex:1,fontSize:11,color:"#8B92A8",lineHeight:1.35}}>
-                      applies to {card?.playerName}'s next logged 3v3 game
+                      applies to {card?.targetText || `next logged ${card?.mode || "game"} game`}
                     </div>
 
                     <button onClick={()=>placeBet(current?.line)} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
@@ -10702,7 +10912,7 @@ const noBettingWeek = isEventActive("no_betting");
                       </div>
                       <button onClick={async()=>{
                         if(parlayLegs.length<2||myPoints<parlayWager) return;
-                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({propKey:l.propKey,playerId:l.playerId,playerName:l.playerName,field:l.field,line:l.line,side:l.side,odds:l.odds})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString(),settleAt:nextTenAmIso()};
+                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({propKey:l.propKey,playerId:l.playerId,playerName:l.playerName,field:l.field,fieldLabel:l.fieldLabel,line:l.line,side:l.side,odds:l.odds,targetMode:l.targetMode || l.mode || "3v3",duoIds:l.duoIds || null,duoLabel:l.duoLabel || "",combined:!!l.combined})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString(),settleAt:nextTenAmIso()};
                         const upd={...points,[currentPlayer]:myPoints-parlayWager};
                         setPoints(upd); await storeSet("points",upd);
                         const updBets=[...(bets||[]),parlayBet];
@@ -10723,14 +10933,15 @@ const noBettingWeek = isEventActive("no_betting");
           {props.map(card=>{
             const lineIdx = Math.floor(card.lineOptions.length/2);
             const current = card.lineOptions[lineIdx];
-            const overLeg = {id:`${card.id}_over`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"over",odds:current.overOdds.american};
-            const underLeg = {id:`${card.id}_under`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,line:current.line,side:"under",odds:current.underOdds.american};
+            const overLeg = {id:`${card.id}_over`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"over",odds:current.overOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
+            const underLeg = {id:`${card.id}_under`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"under",odds:current.underOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
             return (
               <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(255,255,255,0.05)"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
                   <div style={{width:8,height:8,borderRadius:99,background:card.playerColor}}/>
                   <span style={{fontWeight:700,fontSize:13,color:card.playerColor}}>{card.playerName}</span>
-                  <span style={{fontSize:13,color:"#E8ECF4",marginLeft:4}}>· {card.field}</span>
+                  <span style={{fontSize:13,color:"#E8ECF4",marginLeft:4}}>· {card.fieldLabel || card.field}</span>
+                  <span style={{fontSize:10,color:"#4A5066",fontWeight:800,textTransform:"uppercase",marginLeft:4}}>{card.mode}{card.combined?" · duo total":""}</span>
                   <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>line: {current.line}</span>
                 </div>
                 <div style={{display:"flex",gap:8}}>
@@ -10901,7 +11112,7 @@ const noBettingWeek = isEventActive("no_betting");
                       <span style={{fontSize:12,color:"#8B92A8"}}>wagered {bet.wager} pts</span>
                       <span style={{fontSize:12,color:"#B8FF4D",fontWeight:700}}>win {bet.payout} pts</span>
                     </div>
-                    <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>waiting for {bet.playerName} to log a 3v3 game · cancelled bets are not refunded</div>
+                    <div style={{fontSize:10,color:"#4A5066",marginTop:4}}>waiting for {bet.targetText || `${bet.playerName} to log a ${getBetMode(bet)} game`} · cancelled bets are not refunded</div>
                   </div>
                   <button onClick={()=>cancelOpenBet(bet.id)} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:10,width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",color:"#FF5C8A",cursor:"pointer",flexShrink:0}}>
                     <X size={16}/>
@@ -13175,7 +13386,7 @@ const TABS=[
 )}    
           
 {tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
- {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>} 
+ {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} streamProfiles={streamProfiles}/>} 
 {tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
 
 {tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
