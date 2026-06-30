@@ -751,7 +751,7 @@ function TrackerSetup({ player, onComplete, onUseCredit }) {
     try {
       const res = await fetch(
        `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${player.platform}&username=${player.name}`,
-        { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+        { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
       );
       const json = await res.json();
       const segments = json?.data?.segments || [];
@@ -5932,7 +5932,7 @@ function getNextAutoGameSessionCode(stats) {
 async function fetchLatestParseMatchForPlayer(player, playlist) {
   const res = await fetch(
     `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${player.platform}&username=${player.name}`,
-    { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+    { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
   );
   const json = await res.json();
   const sessions = json?.data?.items || [];
@@ -6031,7 +6031,7 @@ const fetchLatest3v3ForPlayer = async (player, roomOpenedAt) => {
 
   const res = await fetch(
     `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${platform}&username=${player.name}`,
-    { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+    { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
   );
 
   const json = await res.json();
@@ -6604,7 +6604,7 @@ return (
           try {
             const res = await fetch(
              `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${profile.platform}&username=${profile.handle}`,
-              { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+              { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
             );
             const json = await res.json();
             const segments = json?.data?.segments || [];
@@ -12652,7 +12652,7 @@ const handleResync = async (pid) => {
     try {
       const res = await fetch(
         `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${existing.platform}&username=${existing.handle}`,
-        { headers: { "X-API-Key": "pmx_8a6e026a59120911628f4faf9ff66847" } }
+        { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
       );
       const json = await res.json();
       const segments = json?.data?.segments || [];
