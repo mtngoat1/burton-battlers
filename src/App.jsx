@@ -154,6 +154,13 @@ function fmtRelTime(iso) {
   return `${Math.floor(hrs/24)}d ago`;
 }
 function tKey(dk, pid) { return `${dk}__${pid}`; }
+function normalizeGameMode(mode) {
+  const m = String(mode || "").toLowerCase();
+  if (m.includes("1v1") || m.includes("duel")) return "1v1";
+  if (m.includes("2v2") || m.includes("double")) return "2v2";
+  if (m.includes("3v3") || m.includes("standard") || m.includes("trios")) return "3v3";
+  return String(mode || "");
+}
 
 function gameIsWin(game) {
   if (game?.result) return ["victory", "win", "won"].includes(String(game.result).toLowerCase());
@@ -877,9 +884,9 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore 
             
 function getChallengeProgress(challenge, stats, playerId) {
   const weekStart = getWeekStart();
-  const games = stats.filter(g =>
+  const games = (stats || []).filter(g =>
     g.playerId === playerId &&
-    g.mode === challenge.mode &&
+    normalizeGameMode(g.mode) === challenge.mode &&
     new Date(g.ts) >= weekStart
   );
 
@@ -1017,7 +1024,7 @@ const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
     if (completions[claimKey]) return;
     const upd = {...completions, [claimKey]: true};
     setCompletions(upd);
-    await storeSet("completions", upd);
+    await storeSetWithPush("completions", upd);
     const pxp = await storeGet("pass_xp") || {};
     const tierBonus = grantsPassTier ? PASS_TIERS_PER_CHALLENGE * 100 : 0;
     // every claim grants +1 full pass tier (100 xp), plus any extra tier bonus
@@ -2057,8 +2064,8 @@ function TrainingTab({ trainingData, completions, setCompletions, currentPlayer,
 
   useEffect(()=>{ if(jumpKey){ document.getElementById(`train-${jumpKey}`)?.scrollIntoView({behavior:"smooth",block:"center"}); onJumpHandled(); } },[jumpKey]);
 
-  const submitText=async(key,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"proof",proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSet("completions",upd); };
-  const submitNumeric=async(key,amount,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"numeric",amount,proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSet("completions",upd); };
+  const submitText=async(key,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"proof",proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSetWithPush("completions",upd); };
+  const submitNumeric=async(key,amount,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"numeric",amount,proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSetWithPush("completions",upd); };
 
   return (
     <div className="bb-tab-content" style={s.tabContent}>
@@ -2084,7 +2091,7 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
   const decide=async(key,decision)=>{
     const note=noteDraft[key]||"";
     const upd={...completions,[key]:{...completions[key],status:decision,note:decision==="rejected"?note:undefined,reviewedAt:new Date().toISOString()}};
-    setCompletions(upd); await storeSet("completions",upd);
+    setCompletions(upd); await storeSetWithPush("completions",upd);
    addToast?.(decision==="approved"?"training approved — +15 pts":`needs redo: ${note||"check the app"}`, decision==="approved"?"✅":"❌");
     if (decision==="approved") {
       const pts=await storeGet("points")||{};
@@ -3137,12 +3144,7 @@ onClick={async () => {
     </button>
   </div>
 
-      {speakingPlayer && (
-        <div style={{background:`${speakingPlayer.color}14`,border:`1px solid ${speakingPlayer.color}55`,borderRadius:13,padding:"10px 12px",marginBottom:14,display:"flex",alignItems:"center",gap:9,boxShadow:`0 0 18px ${speakingPlayer.color}22`}}>
-          <div style={{width:9,height:9,borderRadius:99,background:speakingPlayer.color,boxShadow:`0 0 10px ${speakingPlayer.color}`,animation:"livePulse 1s ease-in-out infinite"}} />
-          <div style={{fontSize:12,fontWeight:900,color:speakingPlayer.color}}>{speakingPlayer.name} is speaking</div>
-        </div>
-      )}
+
 
       {/* Participant cards */}
       <div style={{display:"flex",gap:10,marginBottom:16}}>
@@ -3318,7 +3320,7 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     const newPings = makeSessionPings(session, targets);
     const upd = [...freshPings, ...newPings].slice(-120);
     setPings(upd);
-    await storeSet("pings", upd);
+    await storeSetWithPush("pings", upd);
     addToast?.(`session ping sent to ${targets.length === 1 ? PLAYERS.find(p=>p.id===targets[0])?.name : "everyone"}`, "⏱️");
   };
 
@@ -3350,7 +3352,7 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     await storeSet("team_sessions", upd);
     const freshPings = (await storeGet("pings") || []).filter(p => !(p.type === "session" && p.sessionId === session.id && p.to === currentPlayer));
     setPings(freshPings);
-    await storeSet("pings", freshPings);
+    await storeSetWithPush("pings", freshPings);
     addToast?.("session accepted", "✅");
   };
 
@@ -3432,8 +3434,10 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const [musicVolume, setMusicVolume] = useState(42);
   const [audioReady, setAudioReady] = useState(false);
   const [localBlocked, setLocalBlocked] = useState(false);
+  const [uploadingMusicFile, setUploadingMusicFile] = useState(false);
 
   const audioRef = useRef(null);
+  const musicUploadInputRef = useRef(null);
   const audioCtxRef = useRef(null);
   const gainRef = useRef(null);
   const sourceRef = useRef(null);
@@ -3870,6 +3874,37 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     addToast?.("track added to queue", "🎧");
   };
 
+  const uploadMusicFileToQueue = async (file) => {
+    if (!file) return;
+    if (!String(file.type || "").startsWith("audio/")) {
+      addToast?.("upload an audio file", "⚠️");
+      return;
+    }
+    setUploadingMusicFile(true);
+    try {
+      const uploaded = await uploadPostImage(file);
+      const uploadedUrl = typeof uploaded === "string" ? uploaded : (uploaded?.url || uploaded?.publicUrl || uploaded?.path || "");
+      if (!uploadedUrl) throw new Error("upload failed");
+      const entry = {
+        id:`q_${Date.now()}_${currentPlayer}_upload`,
+        url:uploadedUrl,
+        title:file.name.replace(/\.(mp3|m4a|aac|wav|ogg|oga|flac|webm)$/i, ""),
+        requestedBy:currentPlayer,
+        requestedByName:player?.name || currentPlayer,
+        ts:new Date().toISOString(),
+        uploaded:true,
+      };
+      const next = { ...musicState, queue:[...queue, entry] };
+      await updateMusicState(next);
+      addToast?.("audio uploaded to queue", "🎧");
+    } catch (e) {
+      addToast?.("music upload failed", "❌");
+    } finally {
+      setUploadingMusicFile(false);
+      if (musicUploadInputRef.current) musicUploadInputRef.current.value = "";
+    }
+  };
+
   const playQueued = async (entry) => {
     if (!isDj || !entry?.url) return;
     const newDjId = entry.requestedBy || currentPlayer;
@@ -3999,6 +4034,25 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         </div>
       ) : null}
 
+      <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
+        <input
+          ref={musicUploadInputRef}
+          type="file"
+          accept="audio/*"
+          onChange={(e)=>uploadMusicFileToQueue(e.target.files?.[0])}
+          style={{display:"none"}}
+        />
+        <button
+          onClick={()=>musicUploadInputRef.current?.click()}
+          disabled={uploadingMusicFile}
+          className="bb-pressable"
+          style={{width:"100%",background:uploadingMusicFile?"rgba(255,255,255,0.05)":"rgba(255,85,0,0.12)",border:"1px solid rgba(255,85,0,0.25)",borderRadius:11,padding:"10px 0",fontSize:11,fontWeight:900,color:uploadingMusicFile?"#4A5066":"#FF5500",cursor:uploadingMusicFile?"default":"pointer"}}
+        >
+          {uploadingMusicFile ? "uploading audio…" : "upload audio to queue"}
+        </button>
+        <div style={{fontSize:9.5,color:"#4A5066",marginTop:6,lineHeight:1.35}}>teammates can upload an audio file here, then the DJ can accept it from the queue.</div>
+      </div>
+
       {queue.length ? (
         <div>
           <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:7}}>QUEUE</div>
@@ -4057,7 +4111,7 @@ useEffect(() => {
     if (!text.trim()) return;
     const msg = { id: Date.now().toString(), playerId: currentPlayer, text: text.trim(), ts: new Date().toISOString(), reactions: [] };
     const upd = [...messages, msg];
-    setMessages(upd); await storeSet("chat", upd); setText("");
+    setMessages(upd); await storeSetWithPush("chat", upd); setText("");
     addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name}: ${text.trim()}`, "💬");
   };
 
@@ -4068,7 +4122,7 @@ useEffect(() => {
       const exists = reactions.find(r => r.playerId === currentPlayer && r.emoji === emoji);
       return { ...m, reactions: exists ? reactions.filter(r => !(r.playerId === currentPlayer && r.emoji === emoji)) : [...reactions, { playerId: currentPlayer, emoji, ts: new Date().toISOString() }] };
     });
-    setMessages(upd); await storeSet("chat", upd);
+    setMessages(upd); await storeSetWithPush("chat", upd);
   };
 
 return (
@@ -4244,25 +4298,63 @@ function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
   const hearted = (post.hearts || []).includes(currentPlayer);
   const [swipeOffset, setSwipeOffset] = useState(0);
 const [imgLoaded, setImgLoaded] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const pinchStartDistance = useRef(0);
+  const pinchStartZoom = useRef(1);
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
 
+  const getTouchDistance = (touches) => {
+    if (!touches || touches.length < 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
+
   const handleTouchStart = (e) => {
+    if (e.touches?.length === 2) {
+      pinchStartDistance.current = getTouchDistance(e.touches);
+      pinchStartZoom.current = zoom;
+      return;
+    }
     swipeStartX.current = e.touches[0].clientX;
     swipeStartY.current = e.touches[0].clientY;
   };
   const handleTouchMove = (e) => {
+    if (e.touches?.length === 2) {
+      if (e.cancelable) e.preventDefault();
+      const dist = getTouchDistance(e.touches);
+      const start = pinchStartDistance.current || dist || 1;
+      const nextZoom = Math.max(1, Math.min(4, pinchStartZoom.current * (dist / start)));
+      setZoom(nextZoom);
+      setSwipeOffset(0);
+      return;
+    }
+    if (zoom > 1.02) return;
     const dx = e.touches[0].clientX - swipeStartX.current;
     const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
     if (dx > 0 && dx > dy) setSwipeOffset(dx);
   };
   const handleTouchEnd = () => {
+    if (zoom > 1.02) { setSwipeOffset(0); return; }
     if (swipeOffset > 80) {
       onClose();
       setSwipeOffset(0);
     } else {
       setSwipeOffset(0);
     }
+  };
+
+  const toggleZoom = (e) => {
+    e.stopPropagation();
+    setZoom(z => z > 1.05 ? 1 : 2.35);
+  };
+
+  const handleWheelZoom = (e) => {
+    if (!post.image || post.isVideo) return;
+    e.stopPropagation();
+    const next = Math.max(1, Math.min(4, zoom + (e.deltaY < 0 ? 0.18 : -0.18)));
+    setZoom(next);
   };
 
   return (
@@ -4287,15 +4379,20 @@ const [imgLoaded, setImgLoaded] = useState(false);
           <X size={18}/>
         </button>
       </div>
-<div onClick={(e)=>e.stopPropagation()} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", overflow:"hidden", position:"relative" }}>
+<div onClick={(e)=>e.stopPropagation()} onWheel={handleWheelZoom} style={{ flex:1, display:"flex", alignItems:"center", justifyContent:"center", overflow:zoom > 1.02 ? "auto" : "hidden", position:"relative", touchAction:zoom > 1.02 ? "pan-x pan-y" : "none" }}>
   {post.image && !imgLoaded && !post.isVideo && (
     <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(255,255,255,0.03)" }}>
       <div style={{ width:40, height:40, borderRadius:"50%", border:"3px solid rgba(255,255,255,0.08)", borderTopColor: player?.color || "#B8FF4D", animation:"spin .8s linear infinite" }}/>
     </div>
   )}
+  {post.image && !post.isVideo && (
+    <div style={{position:"absolute",bottom:12,left:"50%",transform:"translateX(-50%)",zIndex:5,background:"rgba(0,0,0,0.42)",border:"1px solid rgba(255,255,255,0.10)",borderRadius:99,padding:"6px 10px",fontSize:10,color:"#E8ECF4",pointerEvents:"none"}}>
+      pinch / double tap to zoom
+    </div>
+  )}
   {post.image && (post.isVideo
     ? <video src={post.image} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }} controls muted playsInline loop autoPlay/>
-    : <img src={post.image} alt="post" onLoad={()=>setImgLoaded(true)} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain", opacity: imgLoaded ? 1 : 0, transition:"opacity .2s ease" }}/>
+    : <img src={post.image} alt="post" onLoad={()=>setImgLoaded(true)} onDoubleClick={toggleZoom} style={{ maxWidth:zoom > 1.02 ? "none" : "100%", maxHeight:zoom > 1.02 ? "none" : "100%", width:zoom > 1.02 ? `${100 * zoom}%` : "auto", height:"auto", objectFit:"contain", opacity: imgLoaded ? 1 : 0, transition:"opacity .2s ease, width .16s ease", cursor:zoom > 1.02 ? "zoom-out" : "zoom-in" }}/>
   )}
 </div>
 {post.caption && (
@@ -4360,7 +4457,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
     seen: false
   };
   const upd = [entry, ...existing].slice(0, 80);
-  await storeSet("activity_feed", upd);
+  await storeSetWithPush("activity_feed", upd);
 };
 
   const toggleHeart = async (postId) => {
@@ -4782,7 +4879,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
               await storeSet("parse_credits",upd);
               const updReqs = (creditRequests||[]).map(r=>r.id===req.id?{...r,status:"approved",approvedAt:new Date().toISOString(),amount:amt}:r);
               setCreditRequests(updReqs);
-              await storeSet("credit_requests",updReqs);
+              await storeSetWithPush("credit_requests",updReqs);
               addToast?.(`+${amt} credits sent to ${req.playerName}`,"✅");
             }} className="bb-pressable bb-glow-lime"
               style={{flex:1,background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>
@@ -4792,7 +4889,7 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
           <button onClick={async()=>{
             const updReqs=(creditRequests||[]).map(r=>r.id===req.id?{...r,status:"denied",deniedAt:new Date().toISOString()}:r);
             setCreditRequests(updReqs);
-            await storeSet("credit_requests",updReqs);
+            await storeSetWithPush("credit_requests",updReqs);
             addToast?.(`denied ${req.playerName}'s credit request`,"❌");
           }} className="bb-pressable"
             style={{flex:1,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
@@ -6550,7 +6647,7 @@ const PREMIUM_PASS_REWARDS = {
   37: { type:"title",  value:"the operator", label:"the operator" },
   38: { type:"token",  value:"double_xp", label:"double xp token" },
   39: { type:"icon",   value:"🌠", label:"shooting star icon" },
-  40: { type:"coins",  value:100, label:"+100 pts" },
+  40: { type:"title",  value:"buffalo burton", label:"Buffalo Burton" },
   41: { type:"title",  value:"century club", label:"century club" },
   42: { type:"icon",   value:"🎪", label:"big top icon" },
   43: { type:"coins",  value:60,  label:"+60 pts" },
@@ -6908,7 +7005,7 @@ const others = safePings.filter(p => p.to !== toId);
 const myUpd = [ping, ...myExisting].slice(0, 2);
 const upd = [...myUpd, ...others];
     setPings(upd);
-    await storeSet("pings", upd);
+    await storeSetWithPush("pings", upd);
   };
 
   const myPings = safePings.filter(p => p.to === currentPlayer && Date.now() - new Date(p.ts).getTime() < 3600000);
@@ -7005,7 +7102,7 @@ const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(
             {notifs.length>0&&<button onClick={async()=>{
               const af = await storeGet("activity_feed")||[];
               const cleared = af.filter(e=>e.to!==currentPlayer);
-              await storeSet("activity_feed",cleared);
+              await storeSetWithPush("activity_feed",cleared);
               setActivityFeed([]);
             }} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:8,padding:"4px 10px",fontSize:10,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
               clear all
@@ -7022,7 +7119,7 @@ const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(
               {n.isActivity&&<button onClick={async()=>{
                 const af = await storeGet("activity_feed")||[];
                 const upd = af.filter(e=>e.id!==n.id);
-                await storeSet("activity_feed",upd);
+                await storeSetWithPush("activity_feed",upd);
                 setActivityFeed(upd.filter(e=>e.to===currentPlayer));
               }} className="bb-pressable" style={{background:"none",border:"none",color:"#4A5066",cursor:"pointer",padding:"2px 4px",flexShrink:0}}>
                 <X size={14}/>
@@ -7097,7 +7194,7 @@ await storeSet("points", updPts);
               await storeSet("flowers", updFlowers);
 const pingUpd2 = [...safePings, {id:(Date.now()+2).toString(), from:currentPlayer, to:flowerTarget, ts:new Date().toISOString(), type:"flower", emoji:flower.emoji, xp:flower.xp}];
 setPings(pingUpd2);
-await storeSet("pings", pingUpd2);
+await storeSetWithPush("pings", pingUpd2);
               addToast?.(`${flower.emoji} sent ${flower.label} to ${PLAYERS.find(p => p.id === flowerTarget)?.name} — ${flower.xp} pts`, "🌸");
               setSelectedFlower(null); setFlowerTarget(null);
             }} disabled={!canAfford} className="bb-pressable bb-glow-lime"
@@ -7776,9 +7873,10 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "room_music", "credit_requests"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "room_music", "credit_requests", "push_subscriptions"];
 // ===================== Push Notifications =====================
-const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
+const VAPID_PUBLIC_KEY = "BBdG7zPhz_GKE4gmJLC68Lp1vyAQB0TRK9XXy2ea91tiQCevbEiR1WFW-xHoLfVQjo3QEsdf5QfZP-kFk6XfEiE";
+const PUSH_SUBSCRIPTIONS_KEY = "push_subscriptions";
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -7787,33 +7885,205 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
 }
 
-async function registerPush() {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+function uint8ArrayEquals(a, b) {
+  if (!a || !b || a.byteLength !== b.byteLength) return false;
+  const aa = new Uint8Array(a);
+  const bb = new Uint8Array(b);
+  return aa.every((v, i) => v === bb[i]);
+}
+
+function getPushSupportMessage() {
+  if (typeof window === "undefined") return "push unavailable";
+  if (!('Notification' in window)) return "notifications are not supported here";
+  if (!('serviceWorker' in navigator)) return "service worker is not supported here";
+  if (!('PushManager' in window)) return "web push is not supported here";
+  if (window.location.protocol !== "https:" && window.location.hostname !== "localhost") return "notifications need HTTPS";
+  return "";
+}
+
+function getOrCreatePushDeviceId() {
   try {
-    const reg = await navigator.serviceWorker.register('/service-worker.js');
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return null;
-    const sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-    });
-    return sub;
-  } catch (e) {
-    console.error('Push registration failed', e);
-    return null;
+    const key = "bb_push_device_id";
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch (_) {
+    return `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   }
 }
 
-async function sendPush(subscription, title, body) {
-  if (!subscription) return;
+async function ensureServiceWorkerRegistered() {
+  if (!('serviceWorker' in navigator)) return null;
+  const reg = await navigator.serviceWorker.register('/service-worker.js', { scope: '/' });
+  return await navigator.serviceWorker.ready.then(() => reg);
+}
+
+async function registerPush(playerId, playerName) {
+  const unsupported = getPushSupportMessage();
+  if (unsupported) throw new Error(unsupported);
+  const reg = await ensureServiceWorkerRegistered();
+  if (!reg) throw new Error("service worker did not register");
+
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') throw new Error("notification permission was not granted");
+
+  const appKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+  let sub = await reg.pushManager.getSubscription();
+  if (sub?.options?.applicationServerKey && !uint8ArrayEquals(sub.options.applicationServerKey, appKey)) {
+    try { await sub.unsubscribe(); } catch (_) {}
+    sub = null;
+  }
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: appKey,
+    });
+  }
+
+  const json = sub.toJSON ? sub.toJSON() : sub;
+  const record = {
+    ...json,
+    endpoint: json.endpoint,
+    playerId,
+    playerName,
+    deviceId: getOrCreatePushDeviceId(),
+    updatedAt: new Date().toISOString(),
+  };
+  const all = await storeGet(PUSH_SUBSCRIPTIONS_KEY) || {};
+  const existing = Array.isArray(all[playerId]) ? all[playerId] : all[playerId] ? [all[playerId]] : [];
+  const next = {
+    ...all,
+    [playerId]: [record, ...existing.filter(s => s?.endpoint !== record.endpoint)].slice(0, 8),
+  };
+  await storeSet(PUSH_SUBSCRIPTIONS_KEY, next);
+  return record;
+}
+
+async function sendPush(subscription, title, body, data = {}) {
+  if (!subscription?.endpoint) return false;
   try {
-    await fetch('/api/send-push', {
+    const res = await fetch('/api/send-push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription, title, body }),
+      body: JSON.stringify({ subscription, title, body, data }),
     });
-} catch (e) {
+    return res.ok;
+  } catch (e) {
     console.error('Push send failed', e);
+    return false;
+  }
+}
+
+async function sendPushToPlayers(targetPlayerIds, title, body, data = {}) {
+  const ids = [...new Set((targetPlayerIds || []).filter(Boolean))];
+  if (!ids.length) return;
+  const all = await storeGet(PUSH_SUBSCRIPTIONS_KEY) || {};
+  const jobs = [];
+  ids.forEach(pid => {
+    const subs = Array.isArray(all[pid]) ? all[pid] : all[pid] ? [all[pid]] : [];
+    subs.forEach(sub => jobs.push(sendPush(sub.subscription || sub, title, body, { ...data, playerId: pid })));
+  });
+  await Promise.allSettled(jobs);
+}
+
+function playerNameById(pid) {
+  return PLAYERS.find(p => p.id === pid)?.name || "someone";
+}
+
+function titleForPush(icon = "🔔") {
+  return `${icon} Burton Battlers`;
+}
+
+function pingToPush(ping) {
+  const fromName = playerNameById(ping.from);
+  if (ping.type === "flower") return { icon:"🌸", body:`${fromName} sent you ${ping.emoji || "🌸"} (+${ping.xp || 0} xp)` };
+  if (ping.type === "session") return { icon:"⏱️", body:`${fromName} started a ${ping.mode || "3v3"} session ${ping.minutesUntil ? `in ${ping.minutesUntil} min` : "soon"}` };
+  if (ping.type === "coinflip") return { icon:"🪙", body:`${fromName} challenged you to a coin flip` };
+  return { icon:"🎮", body:`${fromName} wants to run 2s` };
+}
+
+async function dispatchPushForStoreChange(key, before, after) {
+  const listBefore = Array.isArray(before) ? before : [];
+  const listAfter = Array.isArray(after) ? after : [];
+  const oldIds = new Set(listBefore.map(x => x?.id || x?.ts || JSON.stringify(x)));
+  const newItems = listAfter.filter(x => x && !oldIds.has(x.id || x.ts || JSON.stringify(x)));
+
+  if (key === "pings") {
+    await Promise.allSettled(newItems.map(p => {
+      const msg = pingToPush(p);
+      return sendPushToPlayers([p.to], titleForPush(msg.icon), msg.body, { url:"/", type:p.type || "ping", id:p.id });
+    }));
+  }
+
+  if (key === "activity_feed") {
+    await Promise.allSettled(newItems.map(e => {
+      const icon = e.type === "like" ? "❤️" : e.type === "comment" ? "💬" : e.type === "comment_heart" ? "🩷" : "🔔";
+      const body = `${e.fromName || "someone"} ${e.text || "sent you a notification"}${e.message ? ` — "${String(e.message).slice(0, 80)}"` : ""}`;
+      return sendPushToPlayers([e.to], titleForPush(icon), body, { url:"/", type:e.type || "activity", id:e.id });
+    }));
+  }
+
+  if (key === "chat") {
+    await Promise.allSettled(newItems.map(m => {
+      const sender = playerNameById(m.playerId);
+      const targets = PLAYERS.map(p => p.id).filter(pid => pid !== m.playerId);
+      return sendPushToPlayers(targets, "💬 Team chat", `${sender}: ${String(m.text || "").slice(0, 120)}`, { url:"/", type:"chat", id:m.id });
+    }));
+  }
+
+  if (key === "completions" && after && typeof after === "object") {
+    const beforeObj = before && typeof before === "object" ? before : {};
+    const jobs = Object.entries(after).map(([completionKey, value]) => {
+      const prev = beforeObj[completionKey];
+      if (!value || prev?.status === value.status) return null;
+      const target = completionKey.split("__")[1];
+      if (!target) return null;
+      if (value.status === "approved") return sendPushToPlayers([target], "✅ Training approved", "training approved — +15 pts", { url:"/", type:"training", id:completionKey });
+      if (value.status === "rejected") return sendPushToPlayers([target], "❌ Training needs redo", value.note ? `needs redo: ${value.note}` : "your training needs another look", { url:"/", type:"training", id:completionKey });
+      return null;
+    }).filter(Boolean);
+    await Promise.allSettled(jobs);
+  }
+
+  if (key === "active_race") {
+    const oldRaceId = before?.objectiveId;
+    const newRaceId = after?.objectiveId;
+    if (newRaceId && newRaceId !== oldRaceId) {
+      const obj = typeof RACE_OBJECTIVES !== "undefined" ? RACE_OBJECTIVES.find(o => o.id === newRaceId) : null;
+      const targets = PLAYERS.map(p => p.id).filter(pid => pid !== after.startedBy);
+      await sendPushToPlayers(targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}`, { url:"/", type:"race", id:newRaceId });
+    }
+  }
+
+  if (key === "credit_requests") {
+    await Promise.allSettled(newItems.map(req => {
+      const target = req.status === "sent" || req.status === "approved" || req.status === "denied" ? req.playerId : ADMIN_ID;
+      const body = req.status === "sent" || req.status === "approved"
+        ? `parse credits updated: ${req.amount || ""}`
+        : req.status === "denied"
+          ? "your parse credit request was denied"
+          : `${req.playerName || "someone"} requested parse credits`;
+      return sendPushToPlayers([target], "🔔 Burton Battlers", body, { url:"/", type:"credits", id:req.id });
+    }));
+  }
+}
+
+async function storeSetWithPush(key, value) {
+  const before = await storeGet(key).catch(() => null);
+  await storeSet(key, value);
+  dispatchPushForStoreChange(key, before, value).catch(e => console.error("push mirror failed", e));
+}
+
+async function showLocalNotification(title, body, data = {}) {
+  if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    const reg = await ensureServiceWorkerRegistered();
+    await reg?.showNotification(title, { body, icon:"/icon-192.png", badge:"/icon-192.png", data:{ url:"/", ...data } });
+  } catch (e) {
+    console.error("local notification failed", e);
   }
 }
 // ===================== Boost Tab =====================
@@ -8601,6 +8871,7 @@ const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusS
   const [spinning, setSpinning] = useState(false);
   const [spinResult, setSpinResult] = useState(null);
   const [rotation, setRotation] = useState(0);
+  const [spinStartPoints, setSpinStartPoints] = useState(null);
 const [propWager, setPropWager] = useState(10);
 const [selectedProp, setSelectedProp] = useState(null);
 const [propSide, setPropSide] = useState(null);
@@ -8683,7 +8954,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
     seen: false
   };
 
-  await storeSet("activity_feed", [entry, ...existing].slice(0, 80));
+  await storeSetWithPush("activity_feed", [entry, ...existing].slice(0, 80));
 };             
   const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
   const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
@@ -8700,28 +8971,40 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
 
 const spinWheel = async () => {
     if (spinning || wager < 1 || myPoints < wager) return;
-    if(spinsLeft<=0) return;
+    if (spinsLeft <= 0) return;
+
+    const startingPoints = Number(myPoints) || 0;
+    setSpinStartPoints(startingPoints);
     setSpinning(true);
     setSpinResult(null);
+
     const segAngle = 360 / WHEEL_SEGMENTS.length;
     const spins = 5 + Math.floor(Math.random() * 3);
     const targetDeg = spins * 360 + Math.random() * 360;
     const newRotation = rotation + targetDeg;
     setRotation(newRotation);
+
     setTimeout(async () => {
       const normalizedAngle = ((360 - (newRotation % 360)) + 360) % 360;
       const segIdx = Math.floor(normalizedAngle / segAngle) % WHEEL_SEGMENTS.length;
       const seg = WHEEL_SEGMENTS[segIdx];
       const payout = Math.round(wager * seg.mult);
       const net = payout - wager;
-      const newPts = Math.max(0, myPoints - wager + payout);
-      const upd = { ...points, [currentPlayer]: newPts };
-      setPoints(upd);
-      await storeSet("points", upd);
-      const updCount = {...points,[currentPlayer]:newPts,[spinCountKey]:spinsUsed+1};
-      setPoints(updCount); await storeSet("points",updCount);
+
+      const freshPoints = await storeGet("points") || {};
+      const currentBalance = Number(freshPoints[currentPlayer] ?? startingPoints) || 0;
+      const newPts = Math.max(0, currentBalance - wager + payout);
+      const updatedPoints = {
+        ...freshPoints,
+        [currentPlayer]: newPts,
+        [spinCountKey]: (Number(freshPoints[spinCountKey] ?? spinsUsed) || 0) + 1,
+      };
+
+      setPoints(updatedPoints);
+      await storeSet("points", updatedPoints);
       setSpinResult({ seg, wager, payout, net });
       setSpinning(false);
+      setSpinStartPoints(null);
     }, 3000);
   };
 
@@ -8801,7 +9084,7 @@ const noBettingWeek = isEventActive("no_betting");
      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.15)",borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
           <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:"#B8FF4D"}}>{spinning && spinStartPoints != null ? spinStartPoints : myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
         <div style={{display:"flex",gap:12,marginTop:6}}>
           <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:spinsLeft>0?"#B8FF4D":"#FF5C8A",fontWeight:700}}>{spinsLeft}</span> spins left</div>
           <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:slotsLeft>0?"#A78BFA":"#FF5C8A",fontWeight:700}}>{slotsLeft}</span> slots left</div>
@@ -9447,7 +9730,7 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
     };
     const pingUpd = [...(pings||[]), pingEntry];
     setPings(pingUpd);
-    await storeSet("pings", pingUpd);
+    await storeSetWithPush("pings", pingUpd);
     addToast?.(`challenge sent to ${PLAYERS.find(p => p.id === selectedOpponent)?.name}!`, "🪙");
   };
 
@@ -9739,12 +10022,12 @@ const startRace = async (obj) => {
     const raceData = { objectiveId: obj.id, startedAt: ts, startedBy: currentPlayer };
     setActiveRace(obj.id);
     setRaceStart(ts);
-    await storeSet("active_race", raceData);
+    await storeSetWithPush("active_race", raceData);
   };
 const endRace = async () => {
     setActiveRace(null);
     setRaceStart(null);
-    await storeSet("active_race", { objectiveId: null, cancelled: true, cancelledBy: currentPlayer, cancelledAt: new Date().toISOString() });
+    await storeSetWithPush("active_race", { objectiveId: null, cancelled: true, cancelledBy: currentPlayer, cancelledAt: new Date().toISOString() });
   };
   const currentObj = RACE_OBJECTIVES.find(o => o.id === activeRace);
   const raceEndsAt = raceStart ? new Date(new Date(raceStart).getTime() + 3 * DAY_MS) : null;
@@ -9774,7 +10057,7 @@ const endRace = async () => {
     }
     setActiveRace(null);
     setRaceStart(null);
-    await storeSet("active_race", { objectiveId:null, settled:true, settledAt:new Date().toISOString(), settledBy:currentPlayer, winnerId:raceWinner?.player?.id || null, reason });
+    await storeSetWithPush("active_race", { objectiveId:null, settled:true, settledAt:new Date().toISOString(), settledBy:currentPlayer, winnerId:raceWinner?.player?.id || null, reason });
   };
 
   useEffect(() => {
@@ -10474,10 +10757,105 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
 }
 
 // ===================== Games Hub Tab =====================
+function HoopsMinuteGame({ currentPlayer, points, setPoints }) {
+  const [playing, setPlaying] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [score, setScore] = useState(0);
+  const [aim, setAim] = useState(50);
+  const [dir, setDir] = useState(1);
+  const [lastShot, setLastShot] = useState(null);
+  const highKey = `${currentPlayer}_hoopsHigh`;
+  const highScore = points?.[highKey] || 0;
+
+  useEffect(() => {
+    if (!playing) return;
+    const timer = setInterval(() => {
+      setTimeLeft(t => {
+        if (t <= 1) {
+          setPlaying(false);
+          return 0;
+        }
+        return t - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [playing]);
+
+  useEffect(() => {
+    if (!playing) return;
+    const mover = setInterval(() => {
+      setAim(a => {
+        let next = a + dir * 7;
+        if (next >= 96) { setDir(-1); next = 96; }
+        if (next <= 4) { setDir(1); next = 4; }
+        return next;
+      });
+    }, 90);
+    return () => clearInterval(mover);
+  }, [playing, dir]);
+
+  useEffect(() => {
+    if (timeLeft !== 0) return;
+    if (score <= highScore) return;
+    const upd = { ...points, [highKey]: score };
+    setPoints(upd);
+    storeSet("points", upd);
+  }, [timeLeft, score]);
+
+  const start = () => {
+    setScore(0);
+    setTimeLeft(60);
+    setAim(50);
+    setDir(1);
+    setLastShot(null);
+    setPlaying(true);
+  };
+
+  const shoot = () => {
+    if (!playing) return;
+    const distance = Math.abs(aim - 50);
+    const made = distance <= 9;
+    const close = distance <= 18;
+    const pts = made ? 3 : close ? 1 : 0;
+    setScore(s => s + pts);
+    setLastShot({ made, close, pts, ts: Date.now() });
+  };
+
+  return (
+    <div>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:23,fontWeight:700,color:"#FF8C42",marginBottom:4}}>hoops minute</div>
+      <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginBottom:16}}>tap shoot when the marker hits center. you get 60 seconds to run up the score.</div>
+      <div style={{background:"linear-gradient(135deg,#151019,#0B0D17)",border:"1px solid rgba(255,140,66,0.25)",borderRadius:18,padding:16,boxShadow:"0 12px 28px rgba(0,0,0,0.20)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>score</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:34,fontWeight:700,color:"#FF8C42"}}>{score}</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>time</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:34,fontWeight:700,color:timeLeft<=10?"#FF5C8A":"#E8ECF4"}}>{timeLeft}s</div>
+          </div>
+        </div>
+        <div style={{height:18,background:"rgba(255,255,255,0.06)",borderRadius:99,position:"relative",overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)",marginBottom:12}}>
+          <div style={{position:"absolute",left:"44%",width:"12%",top:0,bottom:0,background:"rgba(184,255,77,0.18)",borderLeft:"1px solid rgba(184,255,77,0.42)",borderRight:"1px solid rgba(184,255,77,0.42)"}} />
+          <div style={{position:"absolute",left:`calc(${aim}% - 5px)`,top:2,width:10,height:12,borderRadius:99,background:"#FF8C42",boxShadow:"0 0 12px rgba(255,140,66,.75)",transition:"left .08s linear"}} />
+        </div>
+        <button onClick={playing ? shoot : start} className="bb-pressable" style={{width:"100%",background:playing?"#FF8C42":"#B8FF4D",border:"none",borderRadius:14,padding:"15px 0",fontSize:15,fontWeight:900,color:"#06070D",cursor:"pointer",fontFamily:"'Oswald',sans-serif",letterSpacing:.5}}>
+          {playing ? "shoot" : timeLeft === 0 ? "play again" : "start 60s run"}
+        </button>
+        <div style={{fontSize:11,color:lastShot?.pts ? "#7CFFB2" : "#8B92A8",textAlign:"center",minHeight:18,marginTop:10,fontWeight:800}}>
+          {lastShot ? (lastShot.pts === 3 ? "+3 swish" : lastShot.pts === 1 ? "+1 rim bounce" : "miss") : `high score: ${highScore}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const GAME_CARDS = [
   { id:"trivia",   label:"RLCS Trivia",     desc:"5 questions · up to 3x your wager",       color:"#4D9EFF" },
   { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
-  { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
+  { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42", emoji:"🟠" },
+  { id:"hoops",    label:"Hoops Minute",     desc:"shoot for 60 seconds and chase a high score", color:"#FF8C42", emoji:"🏀" },
   { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
   { id:"rlcsbets", label:"RLCS Bets",        desc:"bet on real pro matches with live odds",    color:"#FF61C1" },
   { id:"stocks",   label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
@@ -10515,6 +10893,12 @@ function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, acti
       <BoostGrab currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>
     </div>
   );
+  if (active === "hoops") return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
+      <HoopsMinuteGame currentPlayer={currentPlayer} points={points} setPoints={setPoints}/>
+    </div>
+  );
   if (active === "recap") return (
     <div className="bb-tab-content" style={s.tabContent}>
       <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
@@ -10544,7 +10928,7 @@ function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, acti
         {GAME_CARDS.map(card => (
           <button key={card.id} onClick={()=>setActive(card.id)} className="bb-pressable"
             style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${card.color}33`,borderRadius:18,padding:"18px 14px",textAlign:"left",cursor:"pointer",display:"flex",flexDirection:"column",gap:0,minHeight:140}}>
-            <div style={{fontSize:32,marginBottom:10}}>{card.emoji}</div>
+            <div style={{fontSize:32,marginBottom:10}}>{card.emoji || "🎮"}</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:700,color:card.color,marginBottom:6,lineHeight:1.1}}>{card.label}</div>
             <div style={{fontSize:11,color:"#4A5066",lineHeight:1.4,flex:1}}>{card.desc}</div>
             <div style={{fontSize:10,color:card.color,fontWeight:700,marginTop:10}}>play →</div>
@@ -10601,6 +10985,7 @@ const [activeRace, setActiveRace] = useState(null);
 const [raceStart, setRaceStart] = useState(null);
   const [bannerDismissed,setBannerDismissed]=useState(false);
   const [pushSub, setPushSub] = useState(null);
+  const [pushStatus, setPushStatus] = useState("off");
 const [themeId, setThemeId] = useState("starfield");
 const [lastSeen, setLastSeen] = useState({social:0, chat:0, training:0});
 const [showAllGames, setShowAllGames] = useState(false);
@@ -10626,15 +11011,19 @@ const [roomMusicEnabled, setRoomMusicEnabled] = useState(false);
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
 const lastActiveRef = useRef(Date.now());
-const AUTO_LOCK_MS = 10 * 60 * 1000;
+const AUTO_LOCK_MS = 6 * 60 * 60 * 1000; // stay logged in during long voice/music sessions
 const toastDismissedAll = useRef(false);
 const lastVoicePresenceRef = useRef(null);
+const voiceJoinCooldownRef = useRef({});
 const sessionPingSeenRef = useRef(new Set());
 const sessionPingInitializedRef = useRef(false);
 const addToast = useCallback((text, icon = "🔔") => {
   if (toastDismissedAll.current) return;
   const id = Date.now().toString();
   setToasts(prev => [...prev, { id, text, icon }]);
+  if (typeof document !== "undefined" && document.hidden) {
+    showLocalNotification(titleForPush(icon), String(text || ""), { type:"toast" });
+  }
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
 }, []);              
 const closeChatPanel = useCallback(() => {
@@ -10645,6 +11034,62 @@ const closeChatPanel = useCallback(() => {
 }, [lastSeen, messages.length, currentPlayer]);
 const chatSwipe = useSwipeRightToClose(closeChatPanel);
 const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    let manifest = document.querySelector('link[rel="manifest"]');
+    if (!manifest) {
+      manifest = document.createElement("link");
+      manifest.rel = "manifest";
+      manifest.href = "/manifest.json";
+      document.head.appendChild(manifest);
+    }
+    if (!document.querySelector('meta[name="theme-color"]')) {
+      const meta = document.createElement("meta");
+      meta.name = "theme-color";
+      meta.content = "#06070D";
+      document.head.appendChild(meta);
+    }
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!currentPlayer || typeof window === "undefined") return;
+    let cancelled = false;
+    (async () => {
+      const unsupported = getPushSupportMessage();
+      if (unsupported) { if (!cancelled) setPushStatus("unsupported"); return; }
+      if (Notification.permission === "denied") { if (!cancelled) setPushStatus("denied"); return; }
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (!cancelled) {
+          setPushSub(sub?.toJSON ? sub.toJSON() : sub);
+          setPushStatus(sub && Notification.permission === "granted" ? "on" : "off");
+        }
+      } catch (_) {
+        if (!cancelled) setPushStatus("off");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentPlayer]);
+
+  const enablePhoneNotifications = useCallback(async () => {
+    if (!currentPlayer) return;
+    setPushStatus("saving");
+    try {
+      const player = PLAYERS.find(p => p.id === currentPlayer);
+      const record = await registerPush(currentPlayer, player?.name || currentPlayer);
+      setPushSub(record);
+      setPushStatus("on");
+      addToast("phone notifications enabled", "🔔");
+    } catch (e) {
+      setPushStatus(e?.message === "notification permission was not granted" ? "denied" : "unsupported");
+      addToast(e?.message || "phone notifications failed", "❌");
+    }
+  }, [currentPlayer, addToast]);
 
 useEffect(() => {
   if (!currentPlayer) return;
@@ -10657,13 +11102,20 @@ useEffect(() => {
     if (!alive) return;
 
     const previous = lastVoicePresenceRef.current;
-    if (previous) {
+    const now = Date.now();
+    const selfInVoice = !!cleaned[currentPlayer];
+    if (selfInVoice) setVoiceJoinBanner(null);
+
+    if (previous && !selfInVoice) {
       Object.entries(cleaned).forEach(([pid, v]) => {
         if (pid === currentPlayer) return;
         if (previous[pid]) return;
+        const lastShown = voiceJoinCooldownRef.current?.[pid] || 0;
+        if (now - lastShown < 5 * 60 * 1000) return;
+        voiceJoinCooldownRef.current = { ...voiceJoinCooldownRef.current, [pid]: now };
         const player = PLAYERS.find(p => p.id === pid);
         setVoiceJoinBanner({
-          id: `${pid}_${v.ts || Date.now()}`,
+          id: `${pid}_${v.ts || now}`,
           playerId: pid,
           name: player?.name || v.name || "someone",
           color: player?.color || "#B8FF4D",
@@ -10742,7 +11194,7 @@ useEffect(() => {
   (async () => {
     const af = await storeGet("activity_feed") || [];
     const marked = af.map(e => e.to === currentPlayer ? { ...e, seen: true } : e);
-    await storeSet("activity_feed", marked);
+    await storeSetWithPush("activity_feed", marked);
     setActivityFeed(marked.filter(e => e.to === currentPlayer));
   })();
 }, [pendingActivityToasts]);                      
@@ -10787,6 +11239,10 @@ if (key === "team_room") setTeamRoom(value?.closed ? null : value);
 if (key === "team_sessions") setTeamSessions(Array.isArray(value) ? value : []);
 if (key === "parse_credits") setParseCredits(value);
 if (key === "credit_requests") setCreditRequests(Array.isArray(value) ? value : []);
+if (key === "push_subscriptions" && currentPlayer) {
+  const saved = Array.isArray(value?.[currentPlayer]) ? value[currentPlayer] : value?.[currentPlayer] ? [value[currentPlayer]] : [];
+  if (saved.length && pushStatus !== "on") setPushStatus("on");
+}
 if (key === "active_race") {
   if (value?.objectiveId) {
     setActiveRace(value.objectiveId);
@@ -10847,6 +11303,18 @@ return () => {
     if (document.hidden) return;
     const timeSinceActive = Date.now() - lastActiveRef.current;
    if (timeSinceActive > AUTO_LOCK_MS) {
+  let stillInVoice = false;
+  try {
+    const vp = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
+    stillInVoice = !!vp[currentPlayer] || !!window.__bbDailyCallObject;
+  } catch (_) {
+    stillInVoice = !!window.__bbDailyCallObject;
+  }
+  if (stillInVoice) {
+    lastActiveRef.current = Date.now();
+    return;
+  }
+
   const fresh = await storeGet("presence") || {};
   const upd = { ...fresh, [currentPlayer + "_mode"]: null };
   delete upd[currentPlayer];
@@ -10989,13 +11457,13 @@ if (allCatchup.length > 0) {
   const markedAll = (Array.isArray(af) ? af : []).map(e =>
     allIds.has(e.id) ? { ...e, seen: true } : e
   );
-  await storeSet("activity_feed", markedAll);
+  await storeSetWithPush("activity_feed", markedAll);
 }
 
     if (unseenNew.length > 0) {
       const seenIds = new Set(unseenNew.map(e => e.id));
       const markedSeen = af.map(e => seenIds.has(e.id) ? { ...e, seen: true } : e);
-      await storeSet("activity_feed", markedSeen);
+      await storeSetWithPush("activity_feed", markedSeen);
     }
   }
 
@@ -11193,7 +11661,7 @@ const TABS=[
     await storeSet("team_sessions", updSessions);
     const freshPings = (await storeGet("pings") || []).filter(p => !(p.type === "session" && p.sessionId === sessionPingBanner.sessionId && p.to === currentPlayer));
     setPings(freshPings);
-    await storeSet("pings", freshPings);
+    await storeSetWithPush("pings", freshPings);
     setSessionPingBanner(null);
     setTab("room");
     addToast?.("session accepted", "✅");
@@ -11228,10 +11696,10 @@ const TABS=[
         <div style={{fontSize:13,fontWeight:900,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{voiceJoinBanner.name} joined voice room</div>
         <div style={{fontSize:10.5,color:"#8B92A8",marginTop:2}}>tap join now to enter the room</div>
       </div>
-      <button onClick={()=>{ setTab("room"); setAutoJoinVoiceNonce(Date.now()); setVoiceJoinBanner(null); }} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:11,padding:"9px 11px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer",flexShrink:0}}>
+      <button onClick={()=>{ if (voiceJoinBanner?.playerId) voiceJoinCooldownRef.current = { ...voiceJoinCooldownRef.current, [voiceJoinBanner.playerId]: Date.now() }; setTab("room"); setAutoJoinVoiceNonce(Date.now()); setVoiceJoinBanner(null); }} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:11,padding:"9px 11px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer",flexShrink:0}}>
         join now
       </button>
-      <button onClick={()=>setVoiceJoinBanner(null)} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,width:30,height:30,color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+      <button onClick={()=>{ if (voiceJoinBanner?.playerId) voiceJoinCooldownRef.current = { ...voiceJoinCooldownRef.current, [voiceJoinBanner.playerId]: Date.now() }; setVoiceJoinBanner(null); }} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,width:30,height:30,color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
         <X size={15}/>
       </button>
     </div>
@@ -11321,7 +11789,10 @@ const TABS=[
                 <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:1}}>NOTIFICATIONS</div>
                 <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{topNotifs.length ? `${topNotifs.length} recent update${topNotifs.length!==1?"s":""}` : "nothing new yet"}</div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                <button onClick={enablePhoneNotifications} disabled={pushStatus === "saving" || pushStatus === "unsupported" || pushStatus === "denied"} className="bb-pressable" style={{background:pushStatus==="on"?"rgba(124,255,178,0.10)":"rgba(184,255,77,0.10)",border:`1px solid ${pushStatus==="on"?"rgba(124,255,178,0.30)":"rgba(184,255,77,0.25)"}`,borderRadius:10,padding:"7px 10px",fontSize:10,fontWeight:900,color:pushStatus==="on"?"#7CFFB2":"#B8FF4D",cursor:(pushStatus === "saving" || pushStatus === "unsupported" || pushStatus === "denied")?"not-allowed":"pointer"}}>
+                  {pushStatus === "on" ? "phone alerts on" : pushStatus === "saving" ? "enabling…" : pushStatus === "denied" ? "alerts blocked" : pushStatus === "unsupported" ? "not supported" : "enable phone alerts"}
+                </button>
                 {topNotifs.length > 0 && (
                   <button onClick={async()=>{
                     const ids = topNotifsRaw.map(n => n.id);
@@ -11331,11 +11802,11 @@ const TABS=[
 
                     const freshPings = (await storeGet("pings") || []).filter(p => p.to !== currentPlayer);
                     setPings(freshPings);
-                    await storeSet("pings", freshPings);
+                    await storeSetWithPush("pings", freshPings);
 
                     const freshActivity = (await storeGet("activity_feed") || []).filter(e => e.to !== currentPlayer);
                     setActivityFeed(freshActivity);
-                    await storeSet("activity_feed", freshActivity);
+                    await storeSetWithPush("activity_feed", freshActivity);
                   }} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:10,padding:"7px 10px",fontSize:10,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>
                     clear all
                   </button>
