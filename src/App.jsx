@@ -483,6 +483,7 @@ function GlobalStyles() {
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600&family=Inter:wght@400;600;700&display=swap');
       @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes wheelTickerFlicker { 0%,100%{ transform:translateY(-50%) rotate(0deg); } 25%{ transform:translateY(-50%) rotate(-9deg); } 50%{ transform:translateY(-50%) rotate(6deg); } 75%{ transform:translateY(-50%) rotate(-4deg); } }
       @keyframes coinFlipReal { 0%{ transform:translate3d(0,0,0) rotateX(0deg) rotateZ(-4deg); } 18%{ transform:translate3d(0,-16px,0) rotateX(360deg) rotateZ(4deg); } 40%{ transform:translate3d(0,-27px,0) rotateX(720deg) rotateZ(-3deg); } 62%{ transform:translate3d(0,-20px,0) rotateX(1080deg) rotateZ(3deg); } 82%{ transform:translate3d(0,-8px,0) rotateX(1440deg) rotateZ(-2deg); } 100%{ transform:translate3d(0,0,0) rotateX(1800deg) rotateZ(0deg); } }
       @keyframes coinShine { 0%,100%{ opacity:.16; transform:translateX(-45%) rotate(18deg); } 50%{ opacity:.34; transform:translateX(45%) rotate(18deg); } }
       @keyframes fadeSlideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
@@ -820,11 +821,11 @@ function getWeekStart() {
 }
             
 function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore, jumpGameId = null }) {
-  const [open, setOpen] = useState(!!jumpGameId && (session.games || []).some(g => g.id === jumpGameId));
+  const [open, setOpen] = useState(!!jumpGameId && (session.games || []).some(g => String(g.id) === String(jumpGameId)));
   const [selectedGame, setSelectedGame] = useState(null);
   useEffect(() => {
     if (!jumpGameId) return;
-    const target = (session.games || []).find(g => g.id === jumpGameId);
+    const target = (session.games || []).find(g => String(g.id) === String(jumpGameId));
     if (!target) return;
     setOpen(true);
     const timer = setTimeout(() => setSelectedGame(target), 240);
@@ -932,6 +933,17 @@ function getChallengeProgress(challenge, stats, playerId) {
   return { current: 0, target: challenge.target, done: false, display: 0 };
 }
 
+function getChallengeRewardMeta(idxInMode) {
+  const slot = idxInMode % 3;
+  return {
+    wheel: slot === 0,
+    slot: slot === 1,
+    rank: slot === 2,
+    label: slot === 0 ? "🎡 +wheel" : slot === 1 ? "🎰 +slot" : "⬆️ +rank",
+    claimLabel: slot === 0 ? "+ 🎡 wheel spin" : slot === 1 ? "+ 🎰 slot spin" : "+ ⬆️ rank",
+  };
+}
+
 function ChallengeCompactRow({ challenge, mode, idxInMode, stats, currentPlayer, rival, completions, onClaim }) {
   const rivalGames = stats.filter(g => g.playerId === rival.id && g.mode === "3v3");
   const rivalAvg = mode === "3v3" && challenge.field && rivalGames.length
@@ -943,8 +955,7 @@ function ChallengeCompactRow({ challenge, mode, idxInMode, stats, currentPlayer,
   const progress = getChallengeProgress({...challenge, target: adjustedTarget}, stats, currentPlayer);
   const claimKey = `challenge_${currentPlayer}_${Math.floor(Date.now()/WEEK_MS)}_${mode}_${idxInMode}`;
   const claimed = !!completions[claimKey];
-  const grantsBonusSpin = idxInMode === 0 || idxInMode === 3;
-const grantsPassTier = idxInMode === 0 || idxInMode === 2; // 1st and 3rd challenge per mode grant a pass tier
+  const rewardMeta = getChallengeRewardMeta(idxInMode);
   const color = challenge.color;
   const progressPct = Math.min(1, progress.current / adjustedTarget);
   const descText = mode === "3v3" && rivalAvg
@@ -956,7 +967,7 @@ const grantsPassTier = idxInMode === 0 || idxInMode === 2; // 1st and 3rd challe
     <div style={{background:"#161927",borderRadius:11,padding:"10px 12px",marginBottom:6,border:`1px solid ${color}1a`}}>
       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
         <div style={{fontSize:9,color,fontWeight:700,letterSpacing:0.5}}>{modeLabel}</div>
-        {grantsBonusSpin && <div style={{fontSize:8,color:"#FFD166",fontWeight:700}}>🎡</div>}
+        <div style={{fontSize:8,color:"#FFD166",fontWeight:700}}>{rewardMeta.label}</div>
         <div style={{fontSize:10.5,color:"#8B92A8",marginLeft:"auto"}}>{progress.display} / {challenge.type==="winrate"?"60%":adjustedTarget}</div>
       </div>
       <div style={{fontSize:11.5,color:"#E8ECF4",lineHeight:1.35,marginBottom:6}}>{descText}</div>
@@ -967,7 +978,7 @@ const grantsPassTier = idxInMode === 0 || idxInMode === 2; // 1st and 3rd challe
         {claimed ? (
           <span style={{fontSize:10,color:"#7CFFB2",fontWeight:700,flexShrink:0}}>✓ claimed</span>
         ) : progress.done ? (
-          <button onClick={()=>onClaim(claimKey, grantsBonusSpin, idxInMode===0||idxInMode===2)} className="bb-pressable bb-glow-lime"
+          <button onClick={()=>onClaim(claimKey, rewardMeta.wheel, rewardMeta.rank, rewardMeta.slot)} className="bb-pressable bb-glow-lime"
             style={{flexShrink:0,background:color,border:"none",borderRadius:7,padding:"4px 9px",fontSize:9.5,fontWeight:700,color:"#06070D",cursor:"pointer"}}>
             claim
           </button>
@@ -1037,24 +1048,21 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
 const XP_PER_CHALLENGE = 17;
   const PASS_TIERS_PER_CHALLENGE = 1; // tiers awarded for first two challenges
 
-const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
+const claimXP = async (claimKey, grantsWheelSpin, grantsPassTier, grantsSlotSpin = false) => {
     if (completions[claimKey]) return;
     const upd = {...completions, [claimKey]: true};
     setCompletions(upd);
     await storeSetWithPush("completions", upd);
     const pxp = await storeGet("pass_xp") || {};
-    const tierBonus = grantsPassTier ? PASS_TIERS_PER_CHALLENGE * 100 : 0;
-    // every claim grants +1 full pass tier (100 xp), plus any extra tier bonus
-    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+XP_PER_CHALLENGE+tierBonus+XP_PER_TIER};
+    const tierBonus = grantsPassTier ? PASS_TIERS_PER_CHALLENGE * XP_PER_TIER : 0;
+    const updXP = {...pxp, [currentPlayer]: (pxp[currentPlayer]||0)+XP_PER_CHALLENGE+tierBonus};
     setPassXP(updXP);
     await storeSet("pass_xp", updXP);
-    // every claim grants +1 wheel spin and +1 slot spin, plus an extra one on bonus-spin challenges
     const bonusSpins = await storeGet("points") || {};
-    const extraSpin = grantsBonusSpin ? 1 : 0;
     const updBonus = {
       ...bonusSpins,
-      [currentPlayer+"_bonusSpins"]: (bonusSpins[currentPlayer+"_bonusSpins"]||0) + 1 + extraSpin,
-      [currentPlayer+"_bonusSlots"]: (bonusSpins[currentPlayer+"_bonusSlots"]||0) + 1 + extraSpin,
+      [currentPlayer+"_bonusSpins"]: (bonusSpins[currentPlayer+"_bonusSpins"]||0) + (grantsWheelSpin ? 1 : 0),
+      [currentPlayer+"_bonusSlots"]: (bonusSpins[currentPlayer+"_bonusSlots"]||0) + (grantsSlotSpin ? 1 : 0),
     };
     await storeSet("points", updBonus);
   };
@@ -1093,7 +1101,7 @@ const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
         const progress = getChallengeProgress({...challenge, target: adjustedTarget}, stats, currentPlayer);
         const claimKey = `challenge_${currentPlayer}_${weekNum}_${mode}_${idxInMode}`;
         const claimed = !!completions[claimKey];
-        const grantsBonusSpin = idxInMode === 0 || idxInMode === 3;
+        const rewardMeta = getChallengeRewardMeta(idxInMode);
         const modeLabel = `${{ "3v3":"3V3","2v2":"2V2","1v1":"1V1" }[mode]}`;
         const color = challenge.color;
         const progressPct = Math.min(1, progress.current / adjustedTarget);
@@ -1106,7 +1114,7 @@ const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <div style={{fontSize:10,color,fontWeight:700,letterSpacing:0.8}}>{modeLabel} CHALLENGE</div>
               <div style={{width:6,height:6,borderRadius:99,background:color}}/>
-              {grantsBonusSpin && <div style={{fontSize:9,color:"#FFD166",fontWeight:700,marginLeft:"auto"}}>🎡 +spin</div>}
+              <div style={{fontSize:9,color:"#FFD166",fontWeight:700,marginLeft:"auto"}}>{rewardMeta.label}</div>
             </div>
             <div style={{fontSize:13.5,color:"#E8ECF4",lineHeight:1.5,marginBottom:12}}>{descText}</div>
             <div style={{marginBottom:12}}>
@@ -1119,9 +1127,9 @@ const claimXP = async (claimKey, grantsBonusSpin, grantsPassTier) => {
               </div>
             </div>
 {progress.done && !claimed && (
-              <button onClick={()=>claimXP(claimKey, grantsBonusSpin, idxInMode===0||idxInMode===2)} className="bb-pressable bb-glow-lime"
+              <button onClick={()=>claimXP(claimKey, rewardMeta.wheel, rewardMeta.rank, rewardMeta.slot)} className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:color,border:"none",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#06070D",cursor:"pointer",marginBottom:8}}>
-                🏆 claim +{XP_PER_CHALLENGE} xp + ⬆️ tier + 🎡 spin{grantsBonusSpin?" x2":""}
+                🏆 claim +{XP_PER_CHALLENGE} xp {rewardMeta.claimLabel}
               </button>
             )}
             {claimed && <div style={{fontSize:12,color:"#7CFFB2",fontWeight:700,marginBottom:8}}>✓ +{XP_PER_CHALLENGE} xp claimed this week</div>}
@@ -1592,7 +1600,10 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
     animation:"chatPanelIn .24s cubic-bezier(.2,.8,.2,1)",
     ...comparisonSwipe.swipeStyle,
   }}>
-     <FullScreenHeader title="team comparison · 3v3" subtitle="team stats" onClose={onClose} accent="#A78BFA" />
+     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 14px)",borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.92)",backdropFilter:"blur(14px)",flexShrink:0}}>
+       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:700,textTransform:"lowercase",color:"#E8ECF4",letterSpacing:.2}}>team comparison · 3v3</div>
+       <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:.7,textTransform:"uppercase"}}>swipe →</div>
+     </div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {PLAYERS.map(p => {
           const pg = modeGames.filter(g => g.playerId === p.id);
@@ -1726,10 +1737,19 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const itemType = (id) => SHOP_ITEMS.find(i => i.id === id)?.type || (id.startsWith("pass_") ? getPassRewardForOwnedId(id)?.type : null);
   const toggleEquip = async (id) => {
     const type = itemType(id);
-    if (!type || !["color","icon","title","background","text_color"].includes(type)) return;
+    if (!type || !["color","icon","title","background","text_color","sound"].includes(type)) return;
     const newEquipped = { ...equipped };
-    owned.forEach(ownedId => { if (itemType(ownedId) === type) delete newEquipped[ownedId]; });
-    if (!equipped[id]) newEquipped[id] = true;
+    if (type === "sound") {
+      if (newEquipped[id]) delete newEquipped[id];
+      else {
+        const equippedSounds = Object.keys(newEquipped).filter(isSoundboardSoundId);
+        if (equippedSounds.length >= 6) delete newEquipped[equippedSounds[0]];
+        newEquipped[id] = true;
+      }
+    } else {
+      owned.forEach(ownedId => { if (itemType(ownedId) === type) delete newEquipped[ownedId]; });
+      if (!equipped[id]) newEquipped[id] = true;
+    }
     const upd = { ...points, [currentPlayer + "_equipped"]: newEquipped };
     setPoints(upd);
     await storeSet("points", upd);
@@ -1775,12 +1795,28 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
           <button key={t.id} onClick={()=>setSourceTab(t.id)} className="bb-pressable" style={{flex:1,background:sourceTab===t.id?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"9px 0",fontSize:11,fontWeight:900,color:sourceTab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{t.label}</button>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,marginBottom:12}}>
-        {[{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"}].map(t=>(
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:7,marginBottom:12}}>
+        {[{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"}].map(t=>(
           <button key={t.id} onClick={()=>setKindTab(t.id)} className="bb-pressable" style={{background:kindTab===t.id?"rgba(184,255,77,0.16)":"rgba(255,255,255,0.045)",border:`1px solid ${kindTab===t.id?"rgba(184,255,77,0.35)":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:kindTab===t.id?"#B8FF4D":"#8B92A8",cursor:"pointer"}}>{t.label}</button>
         ))}
       </div>
       {renderOwned(`${sourceTab === "pass" ? "OWNED FROM PASS" : "OWNED FROM SHOP"} · ${kindTab.replace("_"," ")}`, (sourceTab === "pass" ? passOwned : shopOwned).filter(id => itemType(id) === kindTab))}
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(77,158,255,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
+        <div style={{fontSize:10,color:player?.color||"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:10}}>SOUNDBOARD SELECTIONS</div>
+        <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>pick up to 6 sounds for your voice room board. default sounds are always available.</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...shopOwned.filter(isSoundboardSoundId)])).map(id => {
+            const snd = getSoundboardSound(id);
+            const active = getEquippedSoundboardIds(points, currentPlayer).includes(id);
+            return (
+              <button key={id} onClick={()=>toggleEquip(id)} className="bb-pressable" style={{background:active?`${player?.color||"#4D9EFF"}18`:"rgba(255,255,255,0.035)",border:`1px solid ${active?(player?.color||"#4D9EFF")+"55":"rgba(255,255,255,0.07)"}`,borderRadius:12,padding:"10px 8px",minHeight:56,textAlign:"center",cursor:"pointer"}}>
+                <div style={{fontSize:11,fontWeight:900,color:active?(player?.color||"#4D9EFF"):"#E8ECF4",lineHeight:1.15,wordBreak:"break-word"}}>{snd.label}</div>
+                <div style={{fontSize:9,color:"#4A5066",marginTop:4}}>{active ? "on board" : "tap to add"}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       {textKitId && (
         <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
           <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,marginBottom:10}}>CUSTOM TEXT KIT</div>
@@ -1806,6 +1842,21 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, points, setPoints, onRe
   const [showTeamComparison, setShowTeamComparison] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
 const [homeSubTab, setHomeSubTab] = useState("overview");    
+  const homeSwipeRef = useRef({ x:0, y:0 });
+  const handleHomeSwipeStart = (e) => {
+    const t = e.touches?.[0];
+    if (!t) return;
+    homeSwipeRef.current = { x:t.clientX, y:t.clientY };
+  };
+  const handleHomeSwipeEnd = (e) => {
+    const t = e.changedTouches?.[0];
+    if (!t) return;
+    const dx = t.clientX - homeSwipeRef.current.x;
+    const dy = Math.abs(t.clientY - homeSwipeRef.current.y);
+    if (Math.abs(dx) > 75 && Math.abs(dx) > dy * 1.35) {
+      setHomeSubTab(dx < 0 ? "profile" : "overview");
+    }
+  };
   useEffect(() => {
   setShowTeamComparison(false);
   setExpandedStat(null);
@@ -1823,18 +1874,18 @@ const [homeSubTab, setHomeSubTab] = useState("overview");
 const weeklyEvent = getWeeklyEvent();
 
 return (
-  <div className="bb-tab-content" style={s.tabContent}>
+  <div className="bb-tab-content" onTouchStart={handleHomeSwipeStart} onTouchEnd={handleHomeSwipeEnd} style={{...s.tabContent,touchAction:"pan-y"}}>
     {expandedStat && <ExpandedStatModal stat={expandedStat} record={record} schedule={schedule} onClose={() => setExpandedStat(null)} />}
     {showTeamComparison && <TeamComparisonModal stats={stats} currentPlayer={currentPlayer} onClose={()=>setShowTeamComparison(false)}/>}
 
     {/* Sub-tab switcher */}
     <div style={{display:"flex",gap:8,marginBottom:16}}>
       <button onClick={()=>setHomeSubTab("overview")} className="bb-pressable"
-        style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:homeSubTab==="overview"?"#B8FF4D":"rgba(255,255,255,0.05)",color:homeSubTab==="overview"?"#06070D":"#8B92A8"}}>
+        style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:homeSubTab==="overview"?(PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D"):"rgba(255,255,255,0.05)",color:homeSubTab==="overview"?"#06070D":"#8B92A8"}}>
         overview
       </button>
       <button onClick={()=>setHomeSubTab("profile")} className="bb-pressable"
-        style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:homeSubTab==="profile"?"#B8FF4D":"rgba(255,255,255,0.05)",color:homeSubTab==="profile"?"#06070D":"#8B92A8"}}>
+        style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:homeSubTab==="profile"?(PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D"):"rgba(255,255,255,0.05)",color:homeSubTab==="profile"?"#06070D":"#8B92A8"}}>
         profile
       </button>
     </div>
@@ -2243,8 +2294,6 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
             <div style={s.sectionLabel}>team streams</div>
             <button onClick={()=>setEditingTwitch(true)} className="bb-pressable" style={s.newPostBtn}><Edit3 size={13}/> my twitch</button>
           </div>
-          <div style={s.sectionSubLabel}>when a teammate goes live on twitch, tap to watch right here</div>
-
           {editingTwitch && (
             <div style={s.twitchEditCard}>
               <div style={s.modalLabel}>your twitch username</div>
@@ -3018,7 +3067,7 @@ setLoading(false);
         setParticipants(latest);
         setMuted(co.localAudio ? !co.localAudio() : muted);
       } catch (_) {}
-    }, 900);
+    }, 3200);
     return () => clearInterval(timer);
   }, [joined, callObject, muted]);
 
@@ -3255,7 +3304,6 @@ onClick={async () => {
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:10}}>
           <div>
             <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>VOICE SOUNDBOARD</div>
-            <div style={{fontSize:10,color:"#4A5066",marginTop:2}}>customize sounds from the shop + garage</div>
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
@@ -3266,8 +3314,7 @@ onClick={async () => {
                 playSoundboardSound(soundId);
                 const event = { id:`${Date.now()}_${currentPlayer}_${soundId}`, by:currentPlayer, soundId, ts:new Date().toISOString() };
                 await storeSet("soundboard_events", event);
-              }} className="bb-pressable" style={{background:"rgba(255,255,255,0.055)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"10px 6px",fontSize:10,fontWeight:900,color:"#E8ECF4",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                <span style={{fontSize:18}}>{snd.emoji}</span>
+              }} className="bb-pressable" style={{background:"rgba(255,255,255,0.055)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"10px 6px",fontSize:10,fontWeight:900,color:"#E8ECF4",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",minHeight:46,textAlign:"center",lineHeight:1.05,wordBreak:"break-word",overflowWrap:"anywhere"}}>
                 <span>{snd.label}</span>
               </button>
             );
@@ -3428,9 +3475,14 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
           </button>
         ))}
       </div>
-      <button onClick={createSession} className="bb-pressable bb-glow-violet" style={{width:"100%",background:"#A78BFA",border:"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:14}}>
+      <button onClick={createSession} className="bb-pressable bb-glow-violet" style={{width:"100%",background:"#A78BFA",border:"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:10}}>
         ping squad for 3v3
       </button>
+      {openSessions.some(s => new Date(s.startsAt).getTime() <= Date.now()) && (
+        <button onClick={clearStartedSessions} className="bb-pressable" style={{width:"100%",background:"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.26)",borderRadius:12,padding:"10px 0",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer",marginBottom:14}}>
+          clear all started 3v3 pings
+        </button>
+      )}
 
       {openSessions.length === 0 ? (
         <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:12,fontSize:12,color:"#6F7892",textAlign:"center"}}>no planned session yet</div>
@@ -5415,9 +5467,9 @@ if (!sessionMap[key]) sessionMap[key] = { code: g.roomId || g.sessionCode, mode:
 }
 
 function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
-  const [open, setOpen] = useState(dk === jumpDate || sessions.some(s => s.games.some(g => g.id === jumpGameId)));
+  const [open, setOpen] = useState(dk === jumpDate || sessions.some(s => s.games.some(g => String(g.id) === String(jumpGameId))));
   const date = new Date(dk + "T00:00:00");
-  const isJumpDay = dk === jumpDate || sessions.some(s => s.games.some(g => g.id === jumpGameId));
+  const isJumpDay = dk === jumpDate || sessions.some(s => s.games.some(g => String(g.id) === String(jumpGameId)));
   useEffect(() => { if (isJumpDay) setOpen(true); }, [isJumpDay]);
   const totalGames = sessions.length;
   return (
@@ -6063,7 +6115,7 @@ useEffect(() => {
     }, 180);
     setTimeout(() => {
       onJumpHandled();
-    }, 900);
+    }, 3200);
   }
 }, [jumpDate]);
 
@@ -6383,7 +6435,7 @@ return (
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"stats"},{id:"teamlink",label:"team link"},{id:"chem",label:"chem"},{id:"mmr",label:"mmr"}].map(sub=>(
   <button key={sub.id} onClick={()=>setStatsSubTab(sub.id)} className="bb-pressable"
-    style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:statsSubTab===sub.id?"#B8FF4D":"rgba(255,255,255,0.05)",color:statsSubTab===sub.id?"#06070D":"#8B92A8"}}>
+    style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:statsSubTab===sub.id?playerColor:"rgba(255,255,255,0.05)",color:statsSubTab===sub.id?"#06070D":"#8B92A8"}}>
     {sub.label}
   </button>
 ))}
@@ -6553,8 +6605,8 @@ function getDailyShopItems() {
     h = ((h * 1664525 + 1013904223) + i * 7919 + salt) & 0xffffffff;
     return { item, sort: Math.abs(h) };
   }).sort((a, b) => a.sort - b.sort).map(x => x.item);
-  const backgrounds = seeded(SHOP_ITEMS.filter(i => i.type === "background"), 9001).slice(0, 4);
-  const others = seeded(SHOP_ITEMS.filter(i => i.type !== "background"), 1337).slice(0, 10);
+  const backgrounds = seeded(SHOP_ITEMS.filter(i => i.type === "background"), 9001).slice(0, 8);
+  const others = seeded(SHOP_ITEMS.filter(i => i.type !== "background"), 1337).slice(0, 14);
   return [...others, ...backgrounds];
 }
 
@@ -6607,14 +6659,14 @@ const SHOP_ITEMS = [
 
 
   // soundboard sounds
-  { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:120, type:"sound", value:"sb_airhorn",},
-  { id:"sb_sheesh",  label:"cold as ice",  desc:"clean shot reaction", cost:120, type:"sound", value:"sb_sheesh", },
-  { id:"sb_nice",    label:"go bills",desc:"burton's classic catchphrase", cost:500, type:"sound", value:"sb_nice", },
-  { id:"sb_bruh",    label:"jordan never did that move",    desc:"pick n roll", cost:200, type:"sound", value:"sb_bruh", },
-  { id:"sb_goal",    label:"what a save",desc:"announcer", cost:150, type:"sound", value:"sb_goal", },
-  { id:"sb_laugh",   label:"demonic laugh",   desc:"the curse", cost:110, type:"sound", value:"sb_laugh", },
-  { id:"sb_buzzer",  label:"fart",  desc:"tiny toot", cost:150, type:"sound", value:"sb_buzzer", },
-  { id:"sb_pop",     label:"bottle",     desc:"fresh brewski", cost:70, type:"sound", value:"sb_pop",},
+  { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:120, type:"sound", value:"sb_airhorn", file:"horn.mp3", emoji:"📣" },
+  { id:"sb_sheesh",  label:"cold as ice", desc:"clean shot reaction", cost:120, type:"sound", value:"sb_sheesh", file:"cold as ice.mp3", emoji:"🥶" },
+  { id:"sb_nice",    label:"go bills", desc:"burton's classic catchphrase", cost:500, type:"sound", value:"sb_nice", file:"go bills.mp3", emoji:"✅" },
+  { id:"sb_bruh",    label:"jordan never did that move", desc:"pick n roll", cost:200, type:"sound", value:"sb_bruh", file:"jordan never did that move.mp3", emoji:"🏀" },
+  { id:"sb_goal",    label:"what a save", desc:"announcer", cost:150, type:"sound", value:"sb_goal", file:"what-a-save-rocketleague.mp3", emoji:"🚨" },
+  { id:"sb_laugh",   label:"demonic laugh", desc:"the curse", cost:110, type:"sound", value:"sb_laugh", file:"demonic laugh.mp3", emoji:"😈" },
+  { id:"sb_buzzer",  label:"fart", desc:"tiny toot", cost:150, type:"sound", value:"sb_buzzer", file:"fart.mp3", emoji:"💨" },
+  { id:"sb_pop",     label:"bottle", desc:"fresh brewski", cost:70, type:"sound", value:"sb_pop", file:"bottle.mp3", emoji:"🍾" },
 
   // daily background rotation
   { id:"bg_carbon",    label:"Carbon Fiber", emoji:"⬛", desc:"dark carbon weave texture",       cost:80,   type:"background", value:"carbon" },
@@ -6628,9 +6680,64 @@ const SHOP_ITEMS = [
   { id:"bg_turf",      label:"Grass Turf",   emoji:"🌱", desc:"field grass texture",             cost:150,  type:"background", value:"turf" },
   { id:"bg_moss",      label:"Moss Stone",   emoji:"🪨", desc:"dark moss textured background",   cost:150,  type:"background", value:"moss" },
   { id:"bg_goalnet",   label:"Goal Net",     emoji:"🥅", desc:"stadium netting overlay",         cost:150,  type:"background", value:"goalnet" },
+
+  { id:"bg_nebula",    label:"Neon Nebula",    emoji:"🪐", desc:"purple space gas clouds",          cost:220, type:"background", value:"nebula" },
+  { id:"bg_crt",       label:"CRT Static",     emoji:"📺", desc:"old tv scanline glow",            cost:180, type:"background", value:"crt" },
+  { id:"bg_vapor",     label:"Vapor Grid",     emoji:"🌅", desc:"retro sunset grid",               cost:200, type:"background", value:"vapor" },
+  { id:"bg_lava",      label:"Lava Lamp",      emoji:"🌋", desc:"slow molten blobs",               cost:240, type:"background", value:"lava" },
+  { id:"bg_ocean",     label:"Deep Ocean",     emoji:"🌊", desc:"dark blue underwater light",       cost:190, type:"background", value:"ocean" },
+  { id:"bg_thunder",   label:"Thunderstorm",   emoji:"⛈️", desc:"storm clouds and electric glow",   cost:230, type:"background", value:"thunder" },
+  { id:"bg_snow",      label:"Snowstorm",      emoji:"❄️", desc:"icy white blue drift",            cost:210, type:"background", value:"snow" },
+  { id:"bg_holo",      label:"Hologram",       emoji:"🧊", desc:"clear holographic panels",         cost:260, type:"background", value:"holo" },
+  { id:"bg_gold",      label:"Gold Rush",      emoji:"🏆", desc:"black and gold spotlight",         cost:300, type:"background", value:"gold" },
+  { id:"bg_void",      label:"The Void",       emoji:"⚫", desc:"near black eclipse glow",          cost:220, type:"background", value:"void" },
+  { id:"bg_sunset",    label:"Pink Sunset",    emoji:"🌇", desc:"warm orange pink fade",           cost:190, type:"background", value:"sunset" },
+  { id:"bg_slime",     label:"Slime Lab",      emoji:"🧪", desc:"toxic green bubbles",             cost:210, type:"background", value:"slime" },
+  { id:"bg_ice",       label:"Ice Wall",       emoji:"🧊", desc:"frosted blue crystal",            cost:210, type:"background", value:"ice" },
+  { id:"bg_city",      label:"Neon City",      emoji:"🌃", desc:"night city window lights",        cost:260, type:"background", value:"city" },
+  { id:"bg_comet",     label:"Comet Trail",    emoji:"☄️", desc:"streaking stars and motion",      cost:240, type:"background", value:"comet" },
   { id:"bg_custom",    label:"Ultimate BG",  emoji:"🖼️", desc:"upload your own image",           cost:5000, type:"background", value:"custom" },
 
 ];
+
+const BACKGROUND_ITEM_IDS = SHOP_ITEMS.filter(i => i.type === "background").map(i => i.id);
+function getBackgroundPreview(value) {
+  const map = {
+    carbon:"repeating-linear-gradient(45deg,#1a1a1a 0px,#1a1a1a 2px,#2a2a2a 2px,#2a2a2a 4px)",
+    spring:"linear-gradient(135deg,#ffd6e7,#c3f0ca,#a8d8ea)", aurora:"linear-gradient(135deg,#0d0221,#00ff87,#60efff)",
+    midnight:"linear-gradient(135deg,#0a0a2e,#1a1a5e,#2d2d8f)", whiteout:"linear-gradient(135deg,#FFFFFF,#F7F7F2,#FF61C1)",
+    pinkboost:"linear-gradient(135deg,#FF61C1,#A78BFA,#4D9EFF)", matrix:"repeating-linear-gradient(90deg,#020806 0 5px,#B8FF4D 5px 6px,#020806 6px 12px)",
+    morse:"repeating-linear-gradient(90deg,#B8FF4D 0 8px,#020806 8px 14px,#B8FF4D 14px 17px,#020806 17px 28px)",
+    turf:"repeating-linear-gradient(115deg,#15360F 0 3px,#1F4B17 3px 6px,#10280C 6px 9px)", moss:"radial-gradient(circle,#315D25,#081307)",
+    goalnet:"linear-gradient(90deg,rgba(255,255,255,.55) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.55) 1px,transparent 1px),#101625",
+    nebula:"radial-gradient(circle at 25% 30%,#FF61C1,transparent 28%),radial-gradient(circle at 70% 55%,#4D9EFF,transparent 28%),linear-gradient(135deg,#12051D,#030511)",
+    crt:"repeating-linear-gradient(0deg,rgba(255,255,255,.18) 0 1px,transparent 1px 4px),linear-gradient(135deg,#101020,#05060A)",
+    vapor:"linear-gradient(180deg,#35134D 0%,#FF61C1 45%,#11131F 46%),repeating-linear-gradient(90deg,transparent 0 10px,rgba(255,255,255,.25) 10px 11px)",
+    lava:"radial-gradient(circle at 30% 20%,#FF5C8A,transparent 26%),radial-gradient(circle at 70% 70%,#FFD166,transparent 26%),linear-gradient(135deg,#260507,#080308)",
+    ocean:"radial-gradient(circle at 50% 0%,#4D9EFF,transparent 35%),linear-gradient(135deg,#01162A,#020612)",
+    thunder:"linear-gradient(135deg,#0A0C16,#242846),linear-gradient(45deg,transparent 40%,#FFD166 41%,transparent 43%)",
+    snow:"radial-gradient(circle,#FFFFFF 0 2px,transparent 3px),linear-gradient(135deg,#DFF6FF,#6CB4FF,#101B35)",
+    holo:"linear-gradient(135deg,rgba(255,255,255,.8),rgba(77,158,255,.45),rgba(255,97,193,.45))",
+    gold:"radial-gradient(circle at 50% 15%,#FFD166,transparent 34%),linear-gradient(135deg,#1A1205,#050402)",
+    void:"radial-gradient(circle at 50% 50%,#1D2440 0 18%,#020204 45%,#000 100%)",
+    sunset:"linear-gradient(135deg,#FF8C32,#FF61C1,#24124A)", slime:"radial-gradient(circle at 20% 25%,#B8FF4D,transparent 20%),radial-gradient(circle at 80% 70%,#6DFF8A,transparent 24%),linear-gradient(135deg,#031307,#061D0B)",
+    ice:"linear-gradient(135deg,#E6FCFF,#75D7FF,#0A1A2B)", city:"repeating-linear-gradient(90deg,#06070D 0 12px,#FFD166 12px 14px,#06070D 14px 22px,#4D9EFF 22px 24px),linear-gradient(135deg,#02040A,#101B35)",
+    comet:"radial-gradient(circle at 75% 25%,#FFFFFF 0 3px,transparent 4px),linear-gradient(115deg,transparent 0 35%,#4D9EFF 36%,transparent 50%),linear-gradient(135deg,#030511,#101433)",
+    custom:"linear-gradient(135deg,#A78BFA,#FFD166)",
+  };
+  return map[value] || map.custom;
+}
+function getBackgroundVisualStyle(bgId, customUrl, theme) {
+  const item = SHOP_ITEMS.find(i => i.id === bgId);
+  if (item?.value === "custom" && customUrl) return { backgroundImage:`url(${customUrl})`, backgroundSize:"cover", backgroundPosition:"center" };
+  if (!item) return { background:theme.bg };
+  const bg = getBackgroundPreview(item.value);
+  const base = { backgroundImage:bg };
+  if (item.value === "goalnet") base.backgroundSize = "34px 34px,34px 34px,cover";
+  if (item.value === "whiteout" || item.value === "snow" || item.value === "holo" || item.value === "ice") base.color = "#11131F";
+  return base;
+}
+
 const DAILY_SPINS_MAX = 3;
 const DAILY_SLOTS_MAX = 3;
 const PASS_PREMIUM_COST = 150;
@@ -6888,16 +6995,16 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
 
 // ===================== Voice Soundboard =====================
 const SOUNDBOARD_SOUNDS = [
-  { id:"sb_airhorn", label:"Airhorn", desc:"quick hype blast", cost:120, type:"sound", emoji:"📣" },
-  { id:"sb_sheesh", label:"Sheesh", desc:"clean shot reaction", cost:120, type:"sound", emoji:"🥶" },
-  { id:"sb_nice", label:"Nice One", desc:"short positive chirp", cost:90, type:"sound", emoji:"✅" },
-  { id:"sb_bruh", label:"Bruh", desc:"low miss sting", cost:90, type:"sound", emoji:"😐" },
-  { id:"sb_goal", label:"Goal Horn", desc:"mini arena horn", cost:150, type:"sound", emoji:"🚨" },
-  { id:"sb_laugh", label:"Laugh", desc:"tiny laugh blip", cost:110, type:"sound", emoji:"🤣" },
-  { id:"sb_buzzer", label:"Buzzer", desc:"wrong answer buzz", cost:100, type:"sound", emoji:"🚫" },
-  { id:"sb_pop", label:"Pop", desc:"soft click pop", cost:70, type:"sound", emoji:"🫧" },
+  { id:"sb_airhorn", label:"horn", desc:"quick blast", cost:120, type:"sound", value:"sb_airhorn", file:"horn.mp3", emoji:"📣" },
+  { id:"sb_sheesh", label:"cold as ice", desc:"clean shot reaction", cost:120, type:"sound", value:"sb_sheesh", file:"cold as ice.mp3", emoji:"🥶" },
+  { id:"sb_nice", label:"go bills", desc:"burton's classic catchphrase", cost:500, type:"sound", value:"sb_nice", file:"go bills.mp3", emoji:"✅" },
+  { id:"sb_bruh", label:"jordan never did that move", desc:"pick n roll", cost:200, type:"sound", value:"sb_bruh", file:"jordan never did that move.mp3", emoji:"🏀" },
+  { id:"sb_goal", label:"what a save", desc:"announcer", cost:150, type:"sound", value:"sb_goal", file:"what-a-save-rocketleague.mp3", emoji:"🚨" },
+  { id:"sb_laugh", label:"demonic laugh", desc:"the curse", cost:110, type:"sound", value:"sb_laugh", file:"demonic laugh.mp3", emoji:"😈" },
+  { id:"sb_buzzer", label:"fart", desc:"tiny toot", cost:150, type:"sound", value:"sb_buzzer", file:"fart.mp3", emoji:"💨" },
+  { id:"sb_pop", label:"bottle", desc:"fresh brewski", cost:70, type:"sound", value:"sb_pop", file:"bottle.mp3", emoji:"🍾" },
 ];
-const DEFAULT_SOUNDBOARD_IDS = ["sb_airhorn","sb_sheesh","sb_nice","sb_bruh","sb_goal","sb_laugh"];
+const DEFAULT_SOUNDBOARD_IDS = ["sb_laugh","sb_buzzer","sb_goal"];
 function getSoundboardSound(id) {
   return SOUNDBOARD_SOUNDS.find(s => s.id === id) || SOUNDBOARD_SOUNDS[0];
 }
@@ -6910,57 +7017,28 @@ function getEquippedSoundboardIds(points, playerId) {
   const selected = owned.filter(id => equipped[id] && isSoundboardSoundId(id));
   return (selected.length ? selected : DEFAULT_SOUNDBOARD_IDS).slice(0,6);
 }
+function getSoundboardAudioSrc(soundId) {
+  const sound = getSoundboardSound(soundId);
+  const file = sound?.file || `${soundId}.mp3`;
+  const safeFile = String(file || "")
+    .replace(/^\/+/, "")
+    .split("/")
+    .map(part => encodeURIComponent(part))
+    .join("/");
+  return `/soundboard/${safeFile}`;
+}
+
 function playSoundboardSound(soundId) {
   if (typeof window === "undefined") return;
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
-    const sound = getSoundboardSound(soundId);
-    const now = ctx.currentTime;
-    const master = ctx.createGain();
-    master.gain.setValueAtTime(0.001, now);
-    master.gain.linearRampToValueAtTime(0.16, now + 0.015);
-    master.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
-    master.connect(ctx.destination);
-
-    const hit = (t, freq, dur, type="sine", vol=1, slideTo=null) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = type;
-      o.frequency.setValueAtTime(freq, now + t);
-      if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, now + t + dur);
-      g.gain.setValueAtTime(0.001, now + t);
-      g.gain.linearRampToValueAtTime(0.75 * vol, now + t + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.001, now + t + dur);
-      o.connect(g); g.connect(master);
-      o.start(now + t); o.stop(now + t + dur + 0.04);
-    };
-    const noise = (t, dur, vol=0.4) => {
-      const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
-      const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-      const src = ctx.createBufferSource();
-      const g = ctx.createGain();
-      g.gain.setValueAtTime(vol, now + t);
-      g.gain.exponentialRampToValueAtTime(0.001, now + t + dur);
-      src.buffer = buffer;
-      src.connect(g); g.connect(master);
-      src.start(now + t); src.stop(now + t + dur);
-    };
-
-    const id = sound.id;
-    if (id === "sb_airhorn") { hit(0, 520, .22, "sawtooth", 1, 390); hit(.13, 650, .18, "sawtooth", .85, 500); noise(.02, .12, .12); }
-    else if (id === "sb_sheesh") { hit(0, 780, .13, "triangle", .65, 1040); hit(.10, 980, .18, "sine", .75, 1240); }
-    else if (id === "sb_nice") { hit(0, 660, .08, "sine", .6); hit(.08, 880, .10, "sine", .72); hit(.18, 1320, .08, "sine", .5); }
-    else if (id === "sb_bruh") { hit(0, 220, .18, "sawtooth", .75, 145); hit(.16, 130, .26, "triangle", .65, 95); }
-    else if (id === "sb_goal") { hit(0, 392, .16, "square", .85); hit(.16, 392, .16, "square", .85); hit(.32, 523, .28, "square", 1); noise(.02, .22, .08); }
-    else if (id === "sb_laugh") { hit(0, 420, .06, "triangle", .6); hit(.08, 540, .06, "triangle", .72); hit(.16, 460, .07, "triangle", .65); hit(.24, 600, .08, "triangle", .6); }
-    else if (id === "sb_buzzer") { hit(0, 115, .42, "sawtooth", 1, 88); noise(0, .18, .08); }
-    else if (id === "sb_pop") { hit(0, 1100, .055, "sine", .7, 580); noise(0, .035, .1); }
-    setTimeout(() => ctx.close?.(), 1100);
-  } catch (_) {}
+    const audio = new Audio(getSoundboardAudioSrc(soundId));
+    audio.volume = 0.95;
+    audio.currentTime = 0;
+    const p = audio.play();
+    if (p?.catch) p.catch((e) => console.warn("soundboard audio blocked or missing", soundId, e));
+  } catch (e) {
+    console.warn("soundboard audio failed", soundId, e);
+  }
 }
 
 function MusicShare({ currentPlayer, addToast }) {
@@ -7548,7 +7626,7 @@ await storeSetWithPush("pings", pingUpd2);
 
             <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>SOUNDBOARD SOUNDS</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {SHOP_ITEMS.filter(i=>i.type==="sound").map(item=>{
+              {SHOP_ITEMS.filter(i=>i.type==="sound" && !DEFAULT_SOUNDBOARD_IDS.includes(i.id)).map(item=>{
                 const isOwned=owned.includes(item.id);
                 const isEquipped=equipped[item.id];
                 const canAfford=myPoints>=item.cost;
@@ -7579,20 +7657,7 @@ await storeSetWithPush("pings", pingUpd2);
                 const isCustom = item.value === "custom";
                 return (
                   <div key={item.id} style={{background:isEquipped?"rgba(167,139,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px 14px",border:`1px solid ${isEquipped?"rgba(167,139,250,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
-                    <div style={{width:36,height:36,borderRadius:8,flexShrink:0,background:
-                      item.value==="carbon"?"repeating-linear-gradient(45deg,#1a1a1a 0px,#1a1a1a 2px,#2a2a2a 2px,#2a2a2a 4px)":
-                      item.value==="spring"?"linear-gradient(135deg,#ffd6e7,#c3f0ca,#a8d8ea)":
-                      item.value==="aurora"?"linear-gradient(135deg,#0d0221,#00ff87,#60efff)":
-                      item.value==="midnight"?"linear-gradient(135deg,#0a0a2e,#1a1a5e,#2d2d8f)":
-                      item.value==="whiteout"?"linear-gradient(135deg,#FFFFFF,#F7F7F2,#FF61C1)":
-                      item.value==="pinkboost"?"linear-gradient(135deg,#FF61C1,#A78BFA,#4D9EFF)":
-                      item.value==="matrix"?"repeating-linear-gradient(90deg,#020806 0 5px,#B8FF4D 5px 6px,#020806 6px 12px)":
-                      item.value==="morse"?"repeating-linear-gradient(90deg,#B8FF4D 0 8px,#020806 8px 14px,#B8FF4D 14px 17px,#020806 17px 28px)":
-                      item.value==="turf"?"repeating-linear-gradient(115deg,#15360F 0 3px,#1F4B17 3px 6px,#10280C 6px 9px)":
-                      item.value==="moss"?"radial-gradient(circle,#315D25,#081307)":
-                      item.value==="goalnet"?"linear-gradient(90deg,rgba(255,255,255,.55) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.55) 1px,transparent 1px),#101625":
-                      "linear-gradient(135deg,#A78BFA,#FFD166)"
-                    }}/>
+                    <div style={{width:36,height:36,borderRadius:8,flexShrink:0,background:getBackgroundPreview(item.value)}}/>
                     <div style={{flex:1}}>
                       <div style={{fontSize:13,fontWeight:700,color:isOwned?"#A78BFA":"#E8ECF4"}}>{item.label}</div>
                       <div style={{fontSize:10,color:"#4A5066",marginTop:1}}>{item.desc}{item.cost===5000?" · 5000 pts":""}</div>
@@ -8763,7 +8828,7 @@ function RLCSTrivia({ currentPlayer, points, setPoints }) {
         setQIndex(i => i + 1);
         setSelected(null);
       }
-    }, 900);
+    }, 3200);
   };
 
   const reset = () => { setStarted(false); setDone(false); setSelected(null); setQIndex(0); setCorrect(0); setWrong(0); };
@@ -9082,7 +9147,7 @@ function WeeklyRecapTrivia({ stats, currentPlayer, points, setPoints }) {
       } else {
         setQIndex(i => i+1); setSelected(null);
       }
-    }, 900);
+    }, 3200);
   };
 
   const reset = () => { setStarted(false); setDone(false); setSelected(null); setQIndex(0); setCorrect(0); };
@@ -9429,8 +9494,7 @@ const noBettingWeek = isEventActive("no_betting");
 
           {/* Wheel visual */}
           <div style={{position:"relative",width:286,height:286,margin:"0 auto 24px",filter:"drop-shadow(0 18px 34px rgba(0,0,0,0.38))"}}>
-            <div style={{position:"absolute",top:"50%",right:-5,transform:"translateY(-50%)",zIndex:14,width:0,height:0,borderTop:"16px solid transparent",borderBottom:"16px solid transparent",borderRight:"28px solid #B8FF4D",filter:"drop-shadow(0 0 10px rgba(184,255,77,0.5))"}}/>
-            <div style={{position:"absolute",top:"50%",right:-31,transform:"translateY(-50%)",zIndex:15,fontSize:9,fontWeight:900,color:"#06070D",background:"#B8FF4D",borderRadius:99,padding:"3px 6px",letterSpacing:.6}}>LANDS</div>
+            <div style={{position:"absolute",top:"50%",right:-10,transform:"translateY(-50%)",zIndex:15,width:34,height:28,background:"#FF2D2D",clipPath:"polygon(0 50%,100% 8%,100% 92%)",borderRadius:4,filter:"drop-shadow(0 0 10px rgba(255,45,45,0.55))",animation:spinning?"wheelTickerFlicker .12s linear infinite":"none"}}/>
             <div style={{position:"absolute",inset:0,borderRadius:"50%",background:"radial-gradient(circle at 35% 28%,rgba(255,255,255,0.16),transparent 30%),linear-gradient(135deg,#222739,#090B14)",border:"10px solid rgba(184,255,77,0.32)",boxShadow:"inset 0 0 0 7px rgba(6,7,13,0.72), inset 0 0 30px rgba(0,0,0,0.5)"}}/>
             <div style={{position:"absolute",top:13,left:13,width:"calc(100% - 26px)",height:"calc(100% - 26px)",borderRadius:"50%",overflow:"hidden",border:"6px solid rgba(6,7,13,0.8)",transition:spinning?"transform 3s cubic-bezier(0.17,0.67,0.12,0.99)":"none",transform:`rotate(${rotation}deg)`,boxShadow:"inset 0 0 0 4px rgba(255,255,255,0.07)"}}>
               <svg viewBox="0 0 200 200" style={{width:"100%",height:"100%",display:"block"}}>
@@ -9447,7 +9511,7 @@ const noBettingWeek = isEventActive("no_betting");
                   const ty = 100 + 66 * Math.sin(midAngle);
                   return (
                     <g key={i}>
-                      <path d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`} fill={seg.color} opacity="0.92" stroke="rgba(6,7,13,0.72)" strokeWidth="2"/>
+                      <path d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`} fill={seg.color} opacity="0.96" stroke="#06070D" strokeWidth="3.2"/>
                       <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize="7" fill="#06070D" fontWeight="900" transform={`rotate(${(i+0.5)*segAngle}, ${tx}, ${ty})`}>{seg.mult}x</text>
                     </g>
                   );
@@ -9455,12 +9519,6 @@ const noBettingWeek = isEventActive("no_betting");
                 <circle cx="100" cy="100" r="31" fill="#06070D" stroke="rgba(184,255,77,0.45)" strokeWidth="5"/>
                 <circle cx="100" cy="100" r="13" fill="#B8FF4D" opacity="0.92"/>
               </svg>
-              {WHEEL_SEGMENTS.map((seg, i) => {
-                const angle = i * segAngle;
-                return (
-                  <div key={`tick-${i}`} style={{position:"absolute",top:"50%",left:"50%",width:"48%",height:3,transformOrigin:"left center",transform:`rotate(${angle}deg)`,background:"rgba(6,7,13,0.72)",opacity:0.8}}/>
-                );
-              })}
             </div>
           </div>
 
@@ -10860,9 +10918,6 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
   const [showLive, setShowLive] = useState(false);
   return (
     <div>
-      <div style={{fontSize:11,color:"#4A5066",marginBottom:14,lineHeight:1.5}}>
-        live Rocket League hub only — betting cards are removed for now.
-      </div>
       <div style={{background:"linear-gradient(135deg,#180B22,#0B0E18)",border:"2px solid rgba(255,97,193,0.25)",borderRadius:20,padding:14,marginBottom:14,boxShadow:"0 14px 34px rgba(255,97,193,0.08)"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:showLive?12:0}}>
           <div>
@@ -10886,9 +10941,6 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
             />
           </div>
         )}
-      </div>
-      <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:13,fontSize:12,color:"#8B92A8",lineHeight:1.45}}>
-        placeholder betting options are disabled. this tab is now just a live watch hub.
       </div>
     </div>
   );
@@ -11631,13 +11683,14 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   };
   if (authStage==="select") return <><GlobalStyles/><NameSelectScreen onSelect={selectName}/></>;
   const selectedPlayer=PLAYERS.find((p)=>p.id===selectedPlayerId);
-  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.10)",borderRadius:12,padding:"9px 12px",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/></div></div></>;
+  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"none",border:"none",padding:"9px 0",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/></div></div></>;
 
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ await loadSharedData(selectedPlayerId); setAdminStandalone(true); }:undefined}/></>;
 if (loading && authStage !== "app") return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center",animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}><div style={{width:20,height:20,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.14)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/></div></>;
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onUseCredit={async()=>{ const current = parseCredits?.[selectedPlayerId] ?? PARSE_CREDITS_DEFAULT; if(current<=0) return false; const upd={...parseCredits,[selectedPlayerId]:current-1}; setParseCredits(upd); await storeSet("parse_credits",upd); return true; }} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
+  const userColor = playerObj?.color || "#B8FF4D";
   const isAdmin=currentPlayer===ADMIN_ID;
 const TABS=[
     {id:"home",     icon:Home,       label:"home"},
@@ -11684,23 +11737,11 @@ const TABS=[
     .slice(0, 40);
   const eq = points?.[currentPlayer+"_equipped"] || {};
   const own = points?.[currentPlayer+"_owned"] || [];
-  const bgId = own.find(id => eq[id] && ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].includes(id));
+  const bgId = own.find(id => eq[id] && BACKGROUND_ITEM_IDS.includes(id));
   const customUrl = points?.[currentPlayer+"_customBg"];
   const hasTextKitEquipped = own.some(id => eq[id] && id.startsWith("pass_premium_") && getPassRewardForOwnedId(id)?.type === "text_color");
   const textColors = hasTextKitEquipped ? (points?.[currentPlayer+"_textColors"] || {}) : {};
-  const bgStyle = bgId==="bg_carbon" ? {backgroundImage:"repeating-linear-gradient(45deg,#0e0e0e 0px,#0e0e0e 3px,#1a1a1a 3px,#1a1a1a 6px)"}
-    : bgId==="bg_spring"   ? {backgroundImage:"linear-gradient(135deg,#1a0a1a,#0a1a12,#0a1220)"}
-    : bgId==="bg_aurora"   ? {backgroundImage:"linear-gradient(135deg,#040d14,#012a1a,#040818)"}
-    : bgId==="bg_midnight" ? {backgroundImage:"linear-gradient(135deg,#04050f,#080830,#04050f)"}
-    : bgId==="bg_matrix" ? {backgroundImage:"repeating-linear-gradient(90deg,rgba(184,255,77,.08) 0 2px,transparent 2px 12px),radial-gradient(circle at 30% 20%,rgba(184,255,77,.18),transparent 30%),linear-gradient(135deg,#020806,#06120B)"}
-    : bgId==="bg_whiteout" ? {backgroundImage:"linear-gradient(135deg,#FAFAF5,#FFFFFF,#F0F0EA)", color:"#11131F"}
-    : bgId==="bg_pinkboost" ? {backgroundImage:"linear-gradient(135deg,#220817,#4A123E,#10113A)"}
-    : bgId==="bg_morse" ? {backgroundImage:"repeating-linear-gradient(90deg,rgba(184,255,77,.14) 0 8px,transparent 8px 14px,rgba(184,255,77,.08) 14px 17px,transparent 17px 28px),linear-gradient(135deg,#020806,#03120B)"}
-    : bgId==="bg_turf" ? {backgroundImage:"repeating-linear-gradient(115deg,#15360F 0 3px,#1F4B17 3px 6px,#10280C 6px 9px)"}
-    : bgId==="bg_moss" ? {backgroundImage:"radial-gradient(circle at 20% 20%,#315D25 0 10%,transparent 11%),radial-gradient(circle at 80% 30%,#1C3A18 0 12%,transparent 13%),linear-gradient(135deg,#081307,#183115)"}
-    : bgId==="bg_goalnet" ? {backgroundImage:"linear-gradient(90deg,rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(135deg,#05070D,#101625)",backgroundSize:"34px 34px,34px 34px,cover"}
-    : bgId==="bg_custom" && customUrl ? {backgroundImage:`url(${customUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
-    : {background:theme.bg};
+  const bgStyle = getBackgroundVisualStyle(bgId, customUrl, theme);
 
   const acceptSessionFromBanner = async () => {
     if (!sessionPingBanner?.sessionId) return;
@@ -11957,12 +11998,12 @@ const TABS=[
     setTimeout(() => scrollToTop(), 0);
     if (t.id==="social") { const upd={...lastSeen,social:posts.length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
     if (t.id==="training") { const upd={...lastSeen,training:Object.keys(completions).filter(k=>k.endsWith(`__${currentPlayer}`)&&completions[k].status==="pending").length}; setLastSeen(upd); storeSet(`lastSeen:${currentPlayer}`,upd); }
-  }} className="bb-pressable" style={s.tabBtn}>
+  }} className="bb-pressable" style={{...s.tabBtn,border:tab===t.id?`1px solid ${t.id==="admin"||t.id==="verify"?"#FF5C8A":userColor}55`:"1px solid transparent",boxShadow:tab===t.id?`0 0 12px ${(t.id==="admin"||t.id==="verify"?"#FF5C8A":userColor)}22`:"none"}}>
             <div style={{position:"relative",display:"inline-flex"}}>
-             <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066"}/>
+             <t.icon size={18} color={tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":userColor):"#4A5066"}/>
               {badges[t.id]>0&&<div style={{position:"absolute",top:-4,right:-6,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
             </div>
-            <span style={{color:tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":"#B8FF4D"):"#4A5066",fontSize:9,fontWeight:600}}>{t.label}</span>
+            <span style={{color:tab===t.id?(t.id==="admin"||t.id==="verify"?"#FF5C8A":userColor):"#4A5066",fontSize:9,fontWeight:600}}>{t.label}</span>
           </button>
         ))}
       </div>}
