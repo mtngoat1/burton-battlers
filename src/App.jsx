@@ -1872,6 +1872,7 @@ const [homeSubTab, setHomeSubTab] = useState("overview");
   const previewDays = Array.from({length:5},(_,i)=>{ const date=new Date(today.getTime()+i*DAY_MS); const key=dateKey(date); return {key,date,training:trainingData[tKey(key,currentPlayer)]||null}; });
 
 const weeklyEvent = getWeeklyEvent();
+const homeUserColor = PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
 
 return (
   <div className="bb-tab-content" onTouchStart={handleHomeSwipeStart} onTouchEnd={handleHomeSwipeEnd} style={{...s.tabContent,touchAction:"pan-y"}}>
@@ -1903,7 +1904,7 @@ return (
       </div>
 
       <div onClick={onOpenBracket} className="bb-pressable" style={{...s.heroCard,cursor:"pointer"}}>
-        <div style={s.heroEyebrow}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
+        <div style={{...s.heroEyebrow,color:homeUserColor}}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
         {nextMatch ? (
           <>
             <div style={s.heroMatchup}>
@@ -1912,7 +1913,7 @@ return (
               <div style={s.heroTeam}><div style={{...s.heroTeamName,color:nextMatch.opponent?"#E8ECF4":"#4A5066"}}>{nextMatch.opponent||"tbd"}</div></div>
             </div>
             <div style={s.heroMeta}>{nextMatch.label} · {daysUntil===0?"this week":`in ${daysUntil}d`} · {nextMatch.dateRange}</div>
-            <div style={{fontSize:10,color:"#B8FF4D",fontWeight:700,letterSpacing:.6,marginTop:8}}>tap to open full bracket</div>
+            <div style={{fontSize:10,color:homeUserColor,fontWeight:700,letterSpacing:.6,marginTop:8}}>tap to open full bracket</div>
           </>
         ) : <div style={s.heroMatchup}><div style={s.heroTeamName}>gg. see you next circuit.</div></div>}
       </div>
@@ -4519,7 +4520,7 @@ function PostCommentsModal({ post, onAddComment, onHeartComment, currentPlayer, 
     </div></div>
   );
 }
-function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats }) {
+function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats, deepLink, onDeepLinkHandled }) {
   const userColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
   const [composing, setComposing] = useState(false);
   const [commentingOn, setCommentingOn] = useState(null);
@@ -4529,6 +4530,52 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
   const [parlayLegs, setParlayLegs] = useState([]);
   const [parlayWager, setParlayWager] = useState(10);
   const [showParlay, setShowParlay] = useState(false);
+  const [openBetDays, setOpenBetDays] = useState({});
+  const socialSwipeRef = useRef({ x:0, y:0 });
+  const socialSwipeHandlers = {
+    onTouchStart: (e) => {
+      const t = e.touches?.[0];
+      if (!t) return;
+      socialSwipeRef.current = { x:t.clientX, y:t.clientY };
+    },
+    onTouchMove: (e) => {
+      const t = e.touches?.[0];
+      if (!t) return;
+      const dx = t.clientX - socialSwipeRef.current.x;
+      const dy = t.clientY - socialSwipeRef.current.y;
+      if (Math.abs(dx) > 16 && Math.abs(dx) > Math.abs(dy) * 1.25 && e.cancelable) e.preventDefault();
+    },
+    onTouchEnd: (e) => {
+      const t = e.changedTouches?.[0];
+      if (!t) return;
+      const dx = t.clientX - socialSwipeRef.current.x;
+      const dy = t.clientY - socialSwipeRef.current.y;
+      if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.35) {
+        setSubTab(dx < 0 ? "bets" : "feed");
+      }
+    },
+  };
+
+  useEffect(() => {
+    if (!deepLink) return;
+    if (deepLink.subTab === "bets") {
+      setSubTab("bets");
+      onDeepLinkHandled?.();
+      return;
+    }
+    setSubTab("feed");
+    const targetPostId = deepLink.postId || deepLink.id;
+    const targetPost = (posts || []).find(p => String(p.id) === String(targetPostId));
+    if (targetPost) {
+      if (deepLink.openComments || deepLink.commentId || deepLink.type === "comment" || deepLink.type === "comment_heart") setCommentingOn(targetPost);
+      else setExpandedPost(targetPost);
+      onDeepLinkHandled?.();
+    } else if (targetPostId) {
+      setTimeout(() => onDeepLinkHandled?.(), 1600);
+    } else {
+      onDeepLinkHandled?.();
+    }
+  }, [deepLink, posts]);
 
   const addPost = async (data) => {
     let img = null;
@@ -4541,7 +4588,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
     addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name} posted something`, "📸");
   };
 
-const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "" }) => {
+const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "", postId = "", commentId = "" }) => {
   const existing = await storeGet("activity_feed") || [];
   const entry = {
     id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -4551,6 +4598,8 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
     text,
     message,
     gameId,
+    postId,
+    commentId,
     ts: new Date().toISOString(),
     seen: false
   };
@@ -4566,7 +4615,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
     setPosts(upd);
     await storeSet("posts", upd);
     if (isLiking && post && post.playerId !== currentPlayer) {
-      await pushActivity({ to: post.playerId, type: "like", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your post` });
+      await pushActivity({ to: post.playerId, type: "like", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your post`, postId });
     }
   };
 
@@ -4576,7 +4625,7 @@ const reactToPost = async (postId, emoji) => {
     setPosts(upd);
     await storeSet("posts", upd);
     if (post && post.playerId !== currentPlayer) {
-      await pushActivity({ to: post.playerId, type: "post_react", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `reacted ${emoji} to your post` });
+      await pushActivity({ to: post.playerId, type: "post_react", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `reacted ${emoji} to your post`, postId });
     }
   };
 
@@ -4589,7 +4638,7 @@ const addComment = async (postId, text) => {
     setCommentingOn(prev => prev ? upd.find(p => p.id === prev.id) : prev);
     const post = posts.find(p => p.id === postId);
     if (post && post.playerId !== currentPlayer) {
-      await pushActivity({ to: post.playerId, type: "comment", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `left a comment on your post` });
+      await pushActivity({ to: post.playerId, type: "comment", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `left a comment on your post`, message:text, postId, commentId:comment.id });
     }
   };
 
@@ -4610,7 +4659,7 @@ const addComment = async (postId, text) => {
     const post = posts.find(p => p.id === postId);
     const comment = post?.comments?.find(c => c.id === commentId);
     if (comment && comment.playerId !== currentPlayer) {
-      await pushActivity({ to: comment.playerId, type: "comment_heart", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your comment` });
+      await pushActivity({ to: comment.playerId, type: "comment_heart", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your comment`, postId, commentId });
     }
   };
   // All bets from teammates (not current player). Clear is local to this account so it does not erase anyone else's history.
@@ -4705,7 +4754,7 @@ const addComment = async (postId, text) => {
   };
 
   return (
-    <div className="bb-tab-content" style={s.tabContent}>
+    <div className="bb-tab-content" {...socialSwipeHandlers} style={{...s.tabContent,touchAction:"pan-y"}}>
    {composing && <SocialComposer currentPlayer={currentPlayer} onPost={addPost} onClose={() => setComposing(false)} />}
    {commentingOn && <PostCommentsModal post={commentingOn} onAddComment={addComment} onHeartComment={heartComment} currentPlayer={currentPlayer} onClose={() => setCommentingOn(null)} />}
       {expandedPost && <PostFullscreenModal post={posts.find(p=>p.id===expandedPost.id)||expandedPost} currentPlayer={currentPlayer} onToggleHeart={toggleHeart} onClose={() => setExpandedPost(null)} />}
@@ -4775,10 +4824,15 @@ const addComment = async (postId, text) => {
         acc[key].push(b);
         return acc;
       }, {});
-      return Object.entries(grouped).slice(0,8).map(([dk, list]) => (
+      return Object.entries(grouped).slice(0,8).map(([dk, list], idx) => {
+        const dayOpen = openBetDays[dk] ?? idx === 0;
+        return (
         <div key={dk} style={{background:"#11131F",borderRadius:16,padding:12,marginBottom:10,border:"1px solid rgba(255,209,102,0.18)"}}>
-          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>{fmtDay(new Date(dk+"T00:00:00"))}</div>
-          {list.map(b => {
+          <button onClick={() => setOpenBetDays(prev => ({ ...prev, [dk]: !(prev[dk] ?? idx === 0) }))} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:dayOpen?8:0}}>
+            <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>{fmtDay(new Date(dk+"T00:00:00"))} · {list.length} bet{list.length!==1?"s":""}</div>
+            <ChevronRight size={14} color="#FFD166" style={{transform:dayOpen?"rotate(90deg)":"none",transition:"transform .18s ease"}}/>
+          </button>
+          {dayOpen && list.map(b => {
             const won = b.status === "won";
             const lost = b.status === "lost";
             return (
@@ -4792,7 +4846,7 @@ const addComment = async (postId, text) => {
             );
           })}
         </div>
-      ));
+      );});
     })()}
   </div>
 
@@ -5514,16 +5568,21 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
 }
 
 function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
- const roomGames = stats.filter(g => g.roomId || g.sessionCode);
+ const safeStats = Array.isArray(stats) ? stats : [];
+ const safeGameDateKey = (game) => {
+   const d = new Date(game?.ts || Date.now());
+   return Number.isFinite(d.getTime()) ? d.toISOString().slice(0,10) : dateKey(new Date());
+ };
+ const roomGames = safeStats.filter(g => g && (g.roomId || g.sessionCode));
   const dayMap = {};
   roomGames.forEach(g => {
-    const dk = dateKey(new Date(g.ts));
+    const dk = safeGameDateKey(g);
     if (!dayMap[dk]) dayMap[dk] = [];
     dayMap[dk].push(g);
   });
   const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
-const recentGames = roomGames
-  .sort((a,b) => new Date(b.ts) - new Date(a.ts))
+const recentGames = [...roomGames]
+  .sort((a,b) => new Date(b.ts || 0) - new Date(a.ts || 0))
   .slice(0,5);                
 
   if (days.length === 0) {
@@ -5535,8 +5594,8 @@ const recentGames = roomGames
       {days.map(([dk, dayGames]) => {
         const sessionMap = {};
         dayGames.forEach(g => {
- const key = g.roomId || g.sessionCode;
-if (!sessionMap[key]) sessionMap[key] = { code: g.roomId || g.sessionCode, mode: g.mode, games: [], ts: g.ts };
+ const key = g.roomId || g.sessionCode || `${g.mode || "game"}_${g.ts || Math.random()}`;
+if (!sessionMap[key]) sessionMap[key] = { code: key, mode: g.mode || "3v3", games: [], ts: g.ts || new Date().toISOString() };
           sessionMap[key].games.push(g);
           if (new Date(g.ts) > new Date(sessionMap[key].ts)) sessionMap[key].ts = g.ts;
         });
@@ -8170,10 +8229,10 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
         <div style={{ marginBottom: isPremium ? 10 : 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8B92A8", marginBottom: 4 }}>
             <span>free · tier {freeProgress.tier}/{FREE_TIER_COUNT}</span>
-            <span style={{ color: "#B8FF4D" }}>{freeProgress.xpIntoTier}/{freeProgress.xpForNext} xp</span>
+            <span style={{ color: playerColor }}>{freeProgress.xpIntoTier}/{freeProgress.xpForNext} xp</span>
           </div>
           <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 99, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${(freeProgress.xpIntoTier / freeProgress.xpForNext) * 100}%`, background: "#B8FF4D", borderRadius: 99 }} />
+            <div style={{ height: "100%", width: `${(freeProgress.xpIntoTier / freeProgress.xpForNext) * 100}%`, background: playerColor, borderRadius: 99 }} />
           </div>
         </div>
 
@@ -8194,7 +8253,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
       {/* Track selector */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <button onClick={() => switchTrack("free")} className="bb-pressable"
-          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: track === "free" ? "#B8FF4D" : "rgba(255,255,255,0.05)", color: track === "free" ? "#06070D" : "#8B92A8" }}>
+          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: track === "free" ? playerColor : "rgba(255,255,255,0.05)", color: track === "free" ? "#06070D" : "#8B92A8" }}>
           free track
         </button>
         <button onClick={() => switchTrack("premium")} className="bb-pressable"
@@ -8216,10 +8275,10 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
           let rewardEmoji = reward.type === "coins" ? "🪙" : reward.type === "token" ? "🎟" : (reward.type === "color" || reward.type === "text_color") ? "🎨" : reward.type === "icon" ? reward.value : reward.type === "title" ? "📝" : reward.type === "car" ? "🏎️" : "🎁";
 
           return (
-            <div key={tier} style={{ background: claimed ? "rgba(184,255,77,0.05)" : unlocked ? "#11131F" : "rgba(255,255,255,0.02)", borderRadius: 13, padding: "12px 14px", border: `1px solid ${claimed ? "rgba(184,255,77,0.2)" : isNext ? "rgba(167,139,250,0.3)" : unlocked ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"}`, display: "flex", alignItems: "center", gap: 12 }}>
+            <div key={tier} style={{ background: claimed ? `${playerColor}0D` : unlocked ? "#11131F" : "rgba(255,255,255,0.02)", borderRadius: 13, padding: "12px 14px", border: `1px solid ${claimed ? `${playerColor}33` : isNext ? "rgba(167,139,250,0.3)" : unlocked ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"}`, display: "flex", alignItems: "center", gap: 12 }}>
               {/* Tier number */}
               <div style={{ width: 38, textAlign: "center", flexShrink: 0 }}>
-                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, color: unlocked ? (track === "free" ? "#B8FF4D" : "#A78BFA") : "#4A5066" }}>{tier}</div>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 15, fontWeight: 700, color: unlocked ? (track === "free" ? playerColor : "#A78BFA") : "#4A5066" }}>{tier}</div>
                 <div style={{ fontSize: 9, color: "#4A5066", fontWeight: 700 }}>TIER</div>
               </div>
 
@@ -8238,7 +8297,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
                   <div style={{ fontSize: 11, color: "#7CFFB2", fontWeight: 700 }}>✓ claimed</div>
                 ) : unlocked ? (
                   <button onClick={() => claimReward(tier, reward)} className="bb-pressable bb-glow-lime"
-                    style={{ background: track === "free" ? "#B8FF4D" : "#A78BFA", border: "none", borderRadius: 9, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, color: "#06070D", cursor: "pointer" }}>
+                    style={{ background: track === "free" ? playerColor : "#A78BFA", border: "none", borderRadius: 9, padding: "7px 14px", fontSize: 11.5, fontWeight: 700, color: "#06070D", cursor: "pointer" }}>
                     claim
                   </button>
                 ) : (
@@ -8381,6 +8440,41 @@ const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "commen
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BBdG7zPhz_GKE4gmJLC68Lp1vyAQB0TRK9XXy2ea91tiQCevbEiR1WFW-xHoLfVQjo3QEsdf5QfZP-kFk6XfEiE";
 const PUSH_SUBSCRIPTIONS_KEY = "push_subscriptions";
+
+function makeNotificationUrl(action, params = {}) {
+  try {
+    const qs = new URLSearchParams({ bb_action: String(action || "home") });
+    Object.entries(params || {}).forEach(([k, v]) => {
+      if (v === undefined || v === null || v === "") return;
+      qs.set(k, String(v));
+    });
+    return `/?${qs.toString()}`;
+  } catch (_) {
+    return "/";
+  }
+}
+
+function readNotificationDeepLink() {
+  if (typeof window === "undefined") return null;
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    const hashParams = new URLSearchParams(String(window.location.hash || "").replace(/^#\??/, ""));
+    const action = params.get("bb_action") || hashParams.get("bb_action");
+    if (!action) return null;
+    const read = (key) => params.get(key) || hashParams.get(key) || "";
+    return {
+      action,
+      type: read("type"),
+      id: read("id"),
+      postId: read("postId"),
+      commentId: read("commentId"),
+      subTab: read("subTab"),
+      openComments: read("openComments") === "1",
+    };
+  } catch (_) {
+    return null;
+  }
+}
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - base64String.length % 4) % 4);
@@ -8561,7 +8655,7 @@ async function notifyPingPush(ping) {
     [ping.to],
     titleForPush(msg.icon),
     msg.body,
-    { url:"/", type:ping.type || "ping", id:ping.id }
+    { url:makeNotificationUrl("ping", { type:ping.type || "ping", id:ping.id }), type:ping.type || "ping", id:ping.id }
   );
 }
 
@@ -8573,7 +8667,7 @@ async function notifyActivityPush(entry) {
     [entry.to],
     titleForPush(msg.icon),
     msg.body,
-    { url:"/", type:entry.type || "activity", id:entry.id }
+    { url:makeNotificationUrl((entry.postId || entry.type === "comment" || entry.type === "comment_heart" || entry.type === "like" || entry.type === "post_react") ? "post" : "activity", { type:entry.type || "activity", id:entry.id, postId:entry.postId, commentId:entry.commentId, openComments:(entry.type === "comment" || entry.type === "comment_heart") ? 1 : "" }), type:entry.type || "activity", id:entry.id, postId:entry.postId, commentId:entry.commentId }
   );
 }
 
@@ -8587,7 +8681,7 @@ async function notifyNewPostPush(post) {
     targets,
     "📸 New squad post",
     `${poster} posted something${caption}`,
-    { url:"/", type:"post", id:post.id }
+    { url:makeNotificationUrl("post", { postId:post.id }), type:"post", id:post.id, postId:post.id }
   );
 }
 
@@ -8607,7 +8701,7 @@ async function notifyVoiceJoinPush(playerId) {
     targets,
     "🎙️ Voice room",
     `${playerNameById(playerId)} joined voice room`,
-    { url:"/", type:"voice_join", id:`voice_${playerId}_${now}` }
+    { url:makeNotificationUrl("voice", { id:`voice_${playerId}_${now}` }), type:"voice_join", id:`voice_${playerId}_${now}` }
   );
 }
 
@@ -8638,7 +8732,7 @@ async function dispatchPushForStoreChange(key, before, after) {
         targets,
         "💬 Team chat",
         `${sender}: ${String(m.text || "").slice(0, 120)}`,
-        { url:"/", type:"chat", id:m.id }
+        { url:makeNotificationUrl("chat", { id:m.id }), type:"chat", id:m.id }
       );
     }));
   }
@@ -8650,8 +8744,8 @@ async function dispatchPushForStoreChange(key, before, after) {
       if (!value || prev?.status === value.status) return null;
       const target = completionKey.split("__")[1];
       if (!target) return null;
-      if (value.status === "approved") return sendPushToPlayersOnce(`training:${completionKey}:approved`, [target], "✅ Training approved", "training approved — +15 pts", { url:"/", type:"training", id:completionKey });
-      if (value.status === "rejected") return sendPushToPlayersOnce(`training:${completionKey}:rejected`, [target], "❌ Training needs redo", value.note ? `needs redo: ${value.note}` : "your training needs another look", { url:"/", type:"training", id:completionKey });
+      if (value.status === "approved") return sendPushToPlayersOnce(`training:${completionKey}:approved`, [target], "✅ Training approved", "training approved — +15 pts", { url:makeNotificationUrl("training", { id:completionKey }), type:"training", id:completionKey });
+      if (value.status === "rejected") return sendPushToPlayersOnce(`training:${completionKey}:rejected`, [target], "❌ Training needs redo", value.note ? `needs redo: ${value.note}` : "your training needs another look", { url:makeNotificationUrl("training", { id:completionKey }), type:"training", id:completionKey });
       return null;
     }).filter(Boolean);
     await Promise.allSettled(jobs);
@@ -8663,7 +8757,7 @@ async function dispatchPushForStoreChange(key, before, after) {
     if (newRaceId && newRaceId !== oldRaceId) {
       const obj = typeof RACE_OBJECTIVES !== "undefined" ? RACE_OBJECTIVES.find(o => o.id === newRaceId) : null;
       const targets = PLAYERS.map(p => p.id).filter(pid => pid !== after.startedBy);
-      await sendPushToPlayersOnce(`race:${newRaceId}`, targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}`, { url:"/", type:"race", id:newRaceId });
+      await sendPushToPlayersOnce(`race:${newRaceId}`, targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}`, { url:makeNotificationUrl("boost", { type:"race", id:newRaceId }), type:"race", id:newRaceId });
     }
   }
 
@@ -8675,7 +8769,7 @@ async function dispatchPushForStoreChange(key, before, after) {
         : req.status === "denied"
           ? "your parse credit request was denied"
           : `${req.playerName || "someone"} requested parse credits`;
-      return sendPushToPlayersOnce(`credits:${req.id || req.ts || JSON.stringify(req)}:${req.status || "new"}`, [target], "🔔 Burton Battlers", body, { url:"/", type:"credits", id:req.id });
+      return sendPushToPlayersOnce(`credits:${req.id || req.ts || JSON.stringify(req)}:${req.status || "new"}`, [target], "🔔 Burton Battlers", body, { url:makeNotificationUrl("admin", { type:"credits", id:req.id }), type:"credits", id:req.id });
     }));
   }
 }
@@ -9548,7 +9642,7 @@ const toggleParlayLeg = (leg) => {
 };
 const isParlayLegSelected = (legId) => parlayLegs.some(l => l.id === legId);
 
-const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "" }) => {
+const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "", postId = "", commentId = "" }) => {
   const existing = await storeGet("activity_feed") || [];
 
   const entry = {
@@ -9559,6 +9653,8 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
     text,
     message,
     gameId,
+    postId,
+    commentId,
     ts: new Date().toISOString(),
     seen: false
   };
@@ -11319,6 +11415,8 @@ const [flipChallenges, setFlipChallenges] = useState([]);
 const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
 const [teamSessions, setTeamSessions] = useState([]); // planned 3v3 sessions / RSVPs
 const [chatOpen, setChatOpen] = useState(false);
+const [socialDeepLink, setSocialDeepLink] = useState(null);
+const [pendingNotificationLink, setPendingNotificationLink] = useState(null);
 const [showTopNotifs, setShowTopNotifs] = useState(false);
 const [showTrainingFull, setShowTrainingFull] = useState(false);
 const [adminStandalone, setAdminStandalone] = useState(false);
@@ -11386,6 +11484,92 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
       navigator.serviceWorker.register('/service-worker.js', { scope: '/' }).catch(() => {});
     }
   }, []);
+
+
+
+  useEffect(() => {
+    const link = readNotificationDeepLink();
+    if (!link) return;
+    setPendingNotificationLink(link);
+    try { localStorage.setItem("bb_pending_notification_link", JSON.stringify(link)); } catch (_) {}
+    try {
+      const cleanUrl = `${window.location.pathname || "/"}${window.location.hash && !String(window.location.hash).includes("bb_action") ? window.location.hash : ""}`;
+      window.history.replaceState(null, "", cleanUrl || "/");
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    if (!currentPlayer || typeof window === "undefined") return;
+    if (pendingNotificationLink) return;
+    try {
+      const raw = localStorage.getItem("bb_pending_notification_link");
+      if (raw) setPendingNotificationLink(JSON.parse(raw));
+    } catch (_) {}
+  }, [currentPlayer, pendingNotificationLink]);
+
+  useEffect(() => {
+    if (!currentPlayer || !pendingNotificationLink) return;
+    const link = pendingNotificationLink;
+    const done = () => {
+      setPendingNotificationLink(null);
+      try { localStorage.removeItem("bb_pending_notification_link"); } catch (_) {}
+    };
+    if (link.action === "voice") {
+      setChatOpen(false);
+      setTab("room");
+      setAutoJoinVoiceNonce(Date.now());
+      done();
+      return;
+    }
+    if (link.action === "chat") {
+      setTab("home");
+      setChatOpen(true);
+      done();
+      return;
+    }
+    if (link.action === "ping") {
+      setChatOpen(false);
+      setTab("squad");
+      setShowTopNotifs(true);
+      done();
+      return;
+    }
+    if (link.action === "post" || link.action === "activity") {
+      setChatOpen(false);
+      setSocialDeepLink({ postId: link.postId || link.id, commentId: link.commentId, type: link.type, openComments: link.openComments || link.type === "comment" || link.type === "comment_heart" });
+      setTab("social");
+      done();
+      return;
+    }
+    if (link.action === "social") {
+      setChatOpen(false);
+      setSocialDeepLink({ subTab: link.subTab || "feed" });
+      setTab("social");
+      done();
+      return;
+    }
+    if (link.action === "training") {
+      setChatOpen(false);
+      const dk = String(link.id || "").split("__")[0];
+      if (dk) setJumpKey(dk);
+      setShowTrainingFull(true);
+      done();
+      return;
+    }
+    if (link.action === "boost") {
+      setChatOpen(false);
+      setTab("boost");
+      done();
+      return;
+    }
+    if (link.action === "admin" && currentPlayer === ADMIN_ID) {
+      setChatOpen(false);
+      setAdminStandalone(true);
+      done();
+      return;
+    }
+    done();
+  }, [currentPlayer, pendingNotificationLink]);
 
   useEffect(() => {
     if (!currentPlayer || typeof window === "undefined") return;
@@ -12162,7 +12346,7 @@ const TABS=[
 <AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>
 {tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-      {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
+      {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
           
 {tab==="room"&&(
