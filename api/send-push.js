@@ -1,9 +1,10 @@
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   try {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
     if (req.method === "OPTIONS") {
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-      res.setHeader("Access-Control-Allow-Headers", "Content-Type");
       return res.status(204).end();
     }
 
@@ -21,7 +22,8 @@ module.exports = async function handler(req, res) {
 
     let webpush;
     try {
-      webpush = require("web-push");
+      const mod = await import("web-push");
+      webpush = mod.default || mod;
     } catch (e) {
       return res.status(500).json({
         error: "web-push package is not installed on Vercel",
@@ -29,7 +31,11 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const body =
+      typeof req.body === "string"
+        ? JSON.parse(req.body || "{}")
+        : req.body || {};
+
     const { subscription, title, message, data } = body;
 
     if (!subscription || !subscription.endpoint) {
@@ -61,4 +67,4 @@ module.exports = async function handler(req, res) {
       detail: error.message,
     });
   }
-};
+}
