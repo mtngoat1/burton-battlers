@@ -186,70 +186,6 @@ function applySyncedTeamScores(importedGames, result) {
   }));
 }
 
-function isMeaningfulPointsSnapshot(pts) {
-  if (!pts || typeof pts !== "object" || Array.isArray(pts)) return false;
-  const keys = Object.keys(pts).filter(k => !String(k).startsWith("__"));
-  if (!keys.length) return false;
-  const hasPlayerScore = PLAYERS.some(p => Object.prototype.hasOwnProperty.call(pts, p.id));
-  const hasInventory = PLAYERS.some(p => Array.isArray(pts[p.id + "_owned"]) && pts[p.id + "_owned"].length > 0);
-  const hasEquipped = PLAYERS.some(p => pts[p.id + "_equipped"] && typeof pts[p.id + "_equipped"] === "object");
-  return hasPlayerScore || hasInventory || hasEquipped || keys.length > 4;
-}
-
-function looksLikeWipedPointsSnapshot(pts) {
-  if (!pts || typeof pts !== "object" || Array.isArray(pts)) return false;
-  const keys = Object.keys(pts).filter(k => !String(k).startsWith("__"));
-  if (!keys.length) return false;
-  const hasPlayerScore = PLAYERS.some(p => Object.prototype.hasOwnProperty.call(pts, p.id));
-  const hasInventory = PLAYERS.some(p => Array.isArray(pts[p.id + "_owned"]) && pts[p.id + "_owned"].length > 0);
-  const onlyBonusKeys = keys.every(k => /_(bonusSpins|bonusSlots)$/.test(k) || k.includes("test_wheel_spin"));
-  return !hasPlayerScore && !hasInventory && keys.length <= 3 && onlyBonusKeys;
-}
-
-function backupHasMorePointData(backup, current) {
-  if (!isMeaningfulPointsSnapshot(backup)) return false;
-  if (!current || typeof current !== "object") return true;
-  const backupKeys = Object.keys(backup).filter(k => !String(k).startsWith("__")).length;
-  const currentKeys = Object.keys(current).filter(k => !String(k).startsWith("__")).length;
-  const backupHasScores = PLAYERS.some(p => Object.prototype.hasOwnProperty.call(backup, p.id));
-  const currentHasScores = PLAYERS.some(p => Object.prototype.hasOwnProperty.call(current, p.id));
-  return backupKeys > currentKeys || (backupHasScores && !currentHasScores);
-}
-
-function isMeaningfulGenericSnapshot(v) {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
-  const keys = Object.keys(v).filter(k => !String(k).startsWith("__"));
-  if (!keys.length) return false;
-  return keys.some(k => {
-    const val = v[k];
-    if (Array.isArray(val)) return val.length > 0;
-    if (val && typeof val === "object") return Object.keys(val).length > 0;
-    return val !== null && val !== undefined && val !== false && val !== 0 && val !== "";
-  });
-}
-
-function backupHasMoreGenericData(backup, current) {
-  if (!isMeaningfulGenericSnapshot(backup)) return false;
-  if (!current || typeof current !== "object" || Array.isArray(current)) return true;
-  const backupKeys = Object.keys(backup).filter(k => !String(k).startsWith("__"));
-  const currentKeys = Object.keys(current).filter(k => !String(k).startsWith("__"));
-  if (currentKeys.length === 0) return true;
-  if (backupKeys.length > currentKeys.length) return true;
-  const backupWeight = backupKeys.reduce((sum, k) => {
-    const val = backup[k];
-    if (Array.isArray(val)) return sum + val.length + 1;
-    if (val && typeof val === "object") return sum + Object.keys(val).length + 1;
-    return sum + (val ? 1 : 0);
-  }, 0);
-  const currentWeight = currentKeys.reduce((sum, k) => {
-    const val = current[k];
-    if (Array.isArray(val)) return sum + val.length + 1;
-    if (val && typeof val === "object") return sum + Object.keys(val).length + 1;
-    return sum + (val ? 1 : 0);
-  }, 0);
-  return backupWeight > currentWeight;
-}
-
 // ===================== MMR helpers =====================
 const RL_PLAYLISTS = ["Ranked Duel 1v1","Ranked Doubles 2v2","Ranked Standard 3v3"];
 function deterministicMMR(seed, idx) {
@@ -1783,12 +1719,6 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const player = PLAYERS.find(p => p.id === currentPlayer);
   const [sourceTab, setSourceTab] = useState("pass");
   const [kindTab, setKindTab] = useState("title");
-  const profileKindTabs = sourceTab === "pass"
-    ? [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"}]
-    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"}];
-  useEffect(() => {
-    if (sourceTab === "pass" && kindTab === "sound") setKindTab("title");
-  }, [sourceTab, kindTab]);
   const passOwned = owned.filter(id => id.startsWith("pass_"));
   const shopOwned = owned.filter(id => SHOP_ITEMS.find(i => i.id === id));
   const itemLabel = (id) => {
@@ -1868,31 +1798,28 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
           <button key={t.id} onClick={()=>setSourceTab(t.id)} className="bb-pressable" style={{flex:1,background:sourceTab===t.id?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"9px 0",fontSize:11,fontWeight:900,color:sourceTab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{t.label}</button>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${profileKindTabs.length},1fr)`,gap:7,marginBottom:12}}>
-        {profileKindTabs.map(t=>(
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:7,marginBottom:12}}>
+        {[{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"}].map(t=>(
           <button key={t.id} onClick={()=>setKindTab(t.id)} className="bb-pressable" style={{background:kindTab===t.id?"rgba(184,255,77,0.16)":"rgba(255,255,255,0.045)",border:`1px solid ${kindTab===t.id?"rgba(184,255,77,0.35)":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:kindTab===t.id?"#B8FF4D":"#8B92A8",cursor:"pointer"}}>{t.label}</button>
         ))}
       </div>
-      {sourceTab === "shop" && kindTab === "sound" ? (
-        <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(77,158,255,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
-          <div style={{fontSize:10,color:player?.color||"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:10}}>SOUNDBOARD SELECTIONS</div>
-          <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>pick up to 6 sounds for your voice room board. default sounds are always available.</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...shopOwned.filter(isSoundboardSoundId)])).map(id => {
-              const snd = getSoundboardSound(id);
-              const active = getEquippedSoundboardIds(points, currentPlayer).includes(id);
-              return (
-                <button key={id} onClick={()=>toggleEquip(id)} className="bb-pressable" style={{background:active?`${player?.color||"#4D9EFF"}18`:"rgba(255,255,255,0.035)",border:`1px solid ${active?(player?.color||"#4D9EFF")+"55":"rgba(255,255,255,0.07)"}`,borderRadius:12,padding:"10px 8px",minHeight:56,textAlign:"center",cursor:"pointer"}}>
-                  <div style={{fontSize:11,fontWeight:900,color:active?(player?.color||"#4D9EFF"):"#E8ECF4",lineHeight:1.15,wordBreak:"break-word"}}>{snd.label}</div>
-                  <div style={{fontSize:9,color:"#4A5066",marginTop:4}}>{active ? "on board" : "tap to add"}</div>
-                </button>
-              );
-            })}
-          </div>
+      {renderOwned(`${sourceTab === "pass" ? "OWNED FROM PASS" : "OWNED FROM SHOP"} · ${kindTab.replace("_"," ")}`, (sourceTab === "pass" ? passOwned : shopOwned).filter(id => itemType(id) === kindTab))}
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(77,158,255,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
+        <div style={{fontSize:10,color:player?.color||"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:10}}>SOUNDBOARD SELECTIONS</div>
+        <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>pick up to 6 sounds for your voice room board. default sounds are always available.</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          {Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...shopOwned.filter(isSoundboardSoundId)])).map(id => {
+            const snd = getSoundboardSound(id);
+            const active = getEquippedSoundboardIds(points, currentPlayer).includes(id);
+            return (
+              <button key={id} onClick={()=>toggleEquip(id)} className="bb-pressable" style={{background:active?`${player?.color||"#4D9EFF"}18`:"rgba(255,255,255,0.035)",border:`1px solid ${active?(player?.color||"#4D9EFF")+"55":"rgba(255,255,255,0.07)"}`,borderRadius:12,padding:"10px 8px",minHeight:56,textAlign:"center",cursor:"pointer"}}>
+                <div style={{fontSize:11,fontWeight:900,color:active?(player?.color||"#4D9EFF"):"#E8ECF4",lineHeight:1.15,wordBreak:"break-word"}}>{snd.label}</div>
+                <div style={{fontSize:9,color:"#4A5066",marginTop:4}}>{active ? "on board" : "tap to add"}</div>
+              </button>
+            );
+          })}
         </div>
-      ) : (
-        renderOwned(`${sourceTab === "pass" ? "OWNED FROM PASS" : "OWNED FROM SHOP"} · ${kindTab.replace("_"," ")}`, (sourceTab === "pass" ? passOwned : shopOwned).filter(id => itemType(id) === kindTab))
-      )}
+      </div>
       {textKitId && (
         <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
           <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,marginBottom:10}}>CUSTOM TEXT KIT</div>
@@ -7336,7 +7263,7 @@ function playSoundboardSound(soundId) {
     if (!src) return;
     try {
       const audio = new Audio(src);
-      audio.volume = 0.3;
+      audio.volume = 0.6;
       audio.currentTime = 0;
       audio.addEventListener("error", () => {
         index += 1;
@@ -11686,46 +11613,16 @@ const [stocks, setStocks] = useState({});
 const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
   useEffect(() => {
-    if (!isMeaningfulPointsSnapshot(points) || looksLikeWipedPointsSnapshot(points)) return;
-    storeSet("points_backup", points).catch(() => {});
-  }, [points]);
-
-  useEffect(() => {
-    if (!isMeaningfulGenericSnapshot(passXP)) return;
-    storeSet("pass_xp_backup", passXP).catch(() => {});
-  }, [passXP]);
-
-  useEffect(() => {
-    if (!isMeaningfulGenericSnapshot(passPremium)) return;
-    storeSet("pass_premium_backup", passPremium).catch(() => {});
-  }, [passPremium]);
-
-  useEffect(() => {
-    if (!isMeaningfulGenericSnapshot(passClaimed)) return;
-    storeSet("pass_claimed_backup", passClaimed).catch(() => {});
-  }, [passClaimed]);
-
-  useEffect(() => {
-    if (!isMeaningfulGenericSnapshot(passTokens)) return;
-    storeSet("pass_tokens_backup", passTokens).catch(() => {});
-  }, [passTokens]);
-
-  useEffect(() => {
-    if (!isMeaningfulGenericSnapshot(passActiveBoosts)) return;
-    storeSet("pass_active_boosts_backup", passActiveBoosts).catch(() => {});
-  }, [passActiveBoosts]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    (posts || []).forEach(post => {
-      if (!post?.image || post?.isVideo || POST_IMAGE_CACHE.has(post.image)) return;
-      const img = new Image();
-      img.onload = () => POST_IMAGE_CACHE.add(post.image);
-      img.onerror = () => POST_IMAGE_CACHE.add(post.image);
-      img.decoding = "async";
-      img.src = post.image;
-    });
-  }, [posts]);
+    if (currentPlayer !== ADMIN_ID) return;
+    if (!points || points.__maglvxx_test_wheel_spin_20260630) return;
+    const upd = {
+      ...points,
+      p1_bonusSpins: (Number(points.p1_bonusSpins) || 0) + 1,
+      __maglvxx_test_wheel_spin_20260630: true,
+    };
+    setPoints(upd);
+    storeSet("points", upd);
+  }, [currentPlayer, points]);
 
 const [chemistry, setChemistry] = useState({});   
 const [activityFeed, setActivityFeed] = useState([]);
@@ -11756,10 +11653,8 @@ const lastVoicePresenceRef = useRef(null);
 const voiceJoinCooldownRef = useRef({});
 const sessionPingSeenRef = useRef(new Set());
 const sessionPingInitializedRef = useRef(false);
-const appIsVisible = () => (typeof document === "undefined" || !document.hidden);
 const addToast = useCallback((text, icon = "🔔") => {
   if (toastDismissedAll.current) return;
-  if (!appIsVisible()) return;
   const cleanText = String(text || "").trim();
   const key = `${icon}:${cleanText}`;
   const now = Date.now();
@@ -11770,6 +11665,9 @@ const addToast = useCallback((text, icon = "🔔") => {
     const withoutDupes = prev.filter(t => `${t.icon}:${String(t.text || "").trim()}` !== key);
     return [...withoutDupes, { id, text: cleanText, icon }].slice(-3);
   });
+  if (typeof document !== "undefined" && document.hidden) {
+    showLocalNotification(titleForPush(icon), cleanText, { type:"toast" });
+  }
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
 }, []);
 
@@ -11942,7 +11840,7 @@ useEffect(() => {
     const selfInVoice = !!cleaned[currentPlayer];
     if (selfInVoice) setVoiceJoinBanner(null);
 
-    if (previous && !selfInVoice && appIsVisible()) {
+    if (previous && !selfInVoice && pushStatusRef.current !== "on") {
       Object.entries(cleaned).forEach(([pid, v]) => {
         if (pid === currentPlayer) return;
         if (previous[pid]) return;
@@ -11996,7 +11894,7 @@ useEffect(() => {
   const fresh = mySessionPings.find(p => !sessionPingSeenRef.current.has(p.id));
   currentIds.forEach(id => sessionPingSeenRef.current.add(id));
   if (!fresh) return;
-  if (!appIsVisible()) return;
+  if (pushStatusRef.current === "on") return;
 
   const fromPlayer = PLAYERS.find(p => p.id === fresh.from);
   setSessionPingBanner({
@@ -12025,7 +11923,10 @@ useEffect(() => {
 
 useEffect(() => {
   if (pendingActivityToasts.length === 0) return;
-  // catch-up notifications stay in the notification hub only
+  if (pushStatusRef.current !== "on") {
+    setCatchupQueue(pendingActivityToasts);
+    setCatchupStopped(false);
+  }
   setPendingActivityToasts([]);
   (async () => {
     const af = await storeGet("activity_feed") || [];
@@ -12076,7 +11977,7 @@ document.addEventListener("mousemove", updateActive, { passive: true });
       if (key === "chat") {
   setMessages(prev => {
     const newMsgs = value.filter(m => m.playerId !== currentPlayer && !prev.find(p => p.id === m.id));
-    if (appIsVisible()) {
+    if (pushStatusRef.current !== "on") {
       newMsgs.forEach(m => {
         const sender = PLAYERS.find(pl => pl.id === m.playerId);
         addToast(`${sender?.name}: ${m.text}`, "💬");
@@ -12141,7 +12042,7 @@ if (key === "activity_feed") {
   const myFeed = (Array.isArray(value)?value:[]).filter(e=>e.to===currentPlayer);
   const prev = activityFeed || [];
   const newEntries = myFeed.filter(e=>!prev.find(p=>p.id===e.id)&&!e.seen);
-  if (appIsVisible()) {
+  if (pushStatusRef.current !== "on") {
     newEntries.forEach((e,i)=>{
       setTimeout(()=>addToast(`${e.fromName} ${e.text}`,e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"),i*800);
     });
@@ -12265,36 +12166,13 @@ storeGet("credit_requests"),
   if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
 setTeamRoom(tr && !tr.closed ? tr : null);
   if (tsess) setTeamSessions(Array.isArray(tsess) ? tsess : []);
-  {
-    const pointsCurrent = pts && typeof pts === "object" ? pts : {};
-    const pointsBackup = await storeGet("points_backup").catch(() => null);
-    if (backupHasMorePointData(pointsBackup, pointsCurrent)) {
-      await storeSet("points", pointsBackup);
-      setPoints(pointsBackup);
-      addToast("points restored from backup", "↩");
-    } else if (pts) {
-      setPoints(pointsCurrent);
-    }
-  }
+  if (pts) setPoints(pts);
   if (bts) setBets(Array.isArray(bts) ? bts : []);
-
-  const restoreSnapshotIfBetter = async (key, currentValue, setter, label) => {
-    const current = currentValue && typeof currentValue === "object" ? currentValue : {};
-    const backup = await storeGet(`${key}_backup`).catch(() => null);
-    if (backupHasMoreGenericData(backup, current)) {
-      await storeSet(key, backup);
-      setter(backup);
-      addToast(`${label} restored from backup`, "↩");
-      return;
-    }
-    if (currentValue) setter(current);
-  };
-
-  await restoreSnapshotIfBetter("pass_xp", pxp, setPassXP, "pass xp");
-  await restoreSnapshotIfBetter("pass_premium", ppm, setPassPremium, "premium pass");
-  await restoreSnapshotIfBetter("pass_claimed", pcl, setPassClaimed, "pass claims");
-  await restoreSnapshotIfBetter("pass_tokens", ptk, setPassTokens, "pass rewards");
-  await restoreSnapshotIfBetter("pass_active_boosts", pab, setPassActiveBoosts, "pass boosts");
+  if (pxp) setPassXP(pxp);
+  if (ppm) setPassPremium(ppm);
+  if (pcl) setPassClaimed(pcl);
+  if (ptk) setPassTokens(ptk);
+  if (pab) setPassActiveBoosts(pab);
   if (tlogs) setTimeLogs(Array.isArray(tlogs) ? tlogs : []);
   if (stks) setStocks(stks);
   if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
@@ -12343,7 +12221,7 @@ const unseenNew = myFeed.filter(e =>
       .sort((a, b) => new Date(a.ts) - new Date(b.ts));
 
 if (allCatchup.length > 0) {
-  // login catch-up stays in the notification hub only; no dropdown spam when opening from a phone alert
+  if (pushStatusRef.current !== "on") setPendingActivityToasts(allCatchup);
   // immediately mark all as seen so they don't repeat
   const allIds = new Set(allCatchup.map(e => e.id).filter(Boolean));
   const markedAll = (Array.isArray(af) ? af : []).map(e =>
@@ -12495,7 +12373,7 @@ const TABS=[
     chat: Math.max(0, messages.length - lastSeen.chat),
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
-  const hidePushMirroredInAppNotifs = false;
+  const hidePushMirroredInAppNotifs = pushStatus === "on";
   const topActivityNotifs = hidePushMirroredInAppNotifs ? [] : (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
     id: e.id,
     ts: e.ts,
@@ -12714,7 +12592,7 @@ const TABS=[
 <AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>
 {tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-      <div style={{display:tab==="social"?"block":"none",height:"100%",minHeight:"100%"}} aria-hidden={tab!=="social"}><SocialTab key="social-mounted" posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)}/></div>
+      {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
           
 {tab==="room"&&(
@@ -12824,7 +12702,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(84px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
   tabContent:{padding:"16px 16px 24px"},
-tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px) - 10px)",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_DROP_FINAL: drops buttons into bottom safe-area gap */},
+tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px))",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)"},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
   reminderBanner:{display:"flex",alignItems:"center",gap:6,padding:"10px 14px",background:"rgba(255,92,138,0.08)",borderBottom:"1px solid rgba(255,92,138,0.2)",animation:"dropDown .3s cubic-bezier(.2,.8,.2,1)",flexShrink:0},
   reminderBtn:{flex:1,display:"flex",alignItems:"center",gap:10,background:"none",border:"none",padding:0,cursor:"pointer",textAlign:"left"},
@@ -12993,4 +12871,3 @@ chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, 
   offlineChip:{fontSize:11,color:"#4A5066",fontWeight:700,background:"rgba(255,255,255,0.04)",padding:"4px 10px",borderRadius:99},
   streamNote:{background:"rgba(167,139,250,0.06)",border:"1px solid rgba(167,139,250,0.15)",borderRadius:14,padding:14,marginTop:20},
 };
-// EMERGENCY_BACKUP_RESTORE_PATCH
