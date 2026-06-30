@@ -3428,6 +3428,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const [requestLink, setRequestLink] = useState("");
   const [joinedMusic, setJoinedMusic] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
+  const [localMusicPaused, setLocalMusicPaused] = useState(false);
   const [musicVolume, setMusicVolume] = useState(42);
   const [playerReady, setPlayerReady] = useState(false);
   const musicVolumeRef = useRef(42);
@@ -3609,13 +3610,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   }, [hasTrack, musicState?.url]);
 
   useEffect(() => {
-    if (!hasTrack || (!joinedMusic && !musicState.playing)) return;
+    if (!hasTrack || !joinedMusic || localMusicPaused) return;
     let cancelled = false;
     const applyState = async () => {
-      if (!joinedMusic) {
-        setJoinedMusic(true);
-        setAudioUnlocked(true);
-      }
       const signature = `${musicState.url}|${musicState.playing}|${musicState.updatedAt}|${Math.floor((musicState.positionMs||0)/250)}`;
       if (lastAppliedRef.current === signature || applyingRef.current) return;
       applyingRef.current = true;
@@ -3627,9 +3624,6 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         widget.seekTo?.(target);
         if (musicState.playing) {
           widget.play?.();
-          [260, 700, 1300].forEach(delay => setTimeout(() => {
-            try { widget.play?.(); } catch (_) {}
-          }, delay));
         } else {
           widget.pause?.();
         }
@@ -3640,9 +3634,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         applyingRef.current = false;
       }
     };
-    const t = setTimeout(applyState, 250);
+    const t = setTimeout(applyState, 180);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [joinedMusic, hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs]);
+  }, [joinedMusic, localMusicPaused, hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs]);
 
   useEffect(() => {
     musicVolumeRef.current = Math.max(0, Math.min(100, Number(musicVolume) || 0));
@@ -3655,13 +3649,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     return () => { cancelled = true; timers.forEach(clearTimeout); };
   }, [musicVolume, hasTrack, musicState?.url, joinedMusic]);
 
-  useEffect(() => {
-    if (!hasTrack || !musicState.playing) return;
-    const t = setTimeout(() => {
-      try { joinMusic({ silent:true }); } catch (_) {}
-    }, isDj ? 120 : 320);
-    return () => clearTimeout(t);
-  }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, isDj]);
+  // Do not auto-start room music just because the DJ pressed play.
+  // Mobile browsers need a local tap, and auto-retrying play caused the fading/restart bug.
+  useEffect(() => {}, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, isDj]);
 
   useEffect(() => {
     if (!joinedMusic || !hasTrack || !musicState.playing || isDj) return;
@@ -3692,6 +3682,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     }
     setJoinedMusic(true);
     setAudioUnlocked(true);
+    setLocalMusicPaused(false);
     try {
       const widget = await getWidget();
       if (!widget) return false;
@@ -3700,9 +3691,6 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       widget.seekTo?.(target);
       if (activeState.playing) {
         widget.play?.();
-        [260, 700, 1300].forEach(delay => setTimeout(() => {
-          try { widget.play?.(); } catch (_) {}
-        }, delay));
       } else {
         widget.pause?.();
       }
@@ -3720,6 +3708,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       const widget = widgetRef.current || await getWidget();
       widget?.pause?.();
     } catch (_) {}
+    setLocalMusicPaused(true);
     setJoinedMusic(false);
     setAudioUnlocked(false);
     lastAppliedRef.current = "";
@@ -3759,13 +3748,8 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     };
   }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicVolume, joinedMusic]);
 
-  useEffect(() => {
-    if (!hasTrack || joinedMusic) return;
-    const t = setTimeout(() => {
-      try { joinMusic({ silent:true }); } catch (_) {}
-    }, 450);
-    return () => clearTimeout(t);
-  }, [hasTrack, musicState?.url]);
+  // Track load only prepares the embedded player. It will not auto-play until this device taps play here.
+  useEffect(() => {}, [hasTrack, musicState?.url]);
 
   const loadTrack = async (urlOverride = null) => {
     const rawUrl = cleanUrl(urlOverride || trackLink);
@@ -3807,6 +3791,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     if (nextPlaying) {
       setJoinedMusic(true);
       setAudioUnlocked(true);
+      setLocalMusicPaused(false);
     }
     let widget = null;
     try {
@@ -3827,9 +3812,6 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       if (nextPlaying) {
         widget.seekTo?.(pos);
         widget.play?.();
-        [260, 700, 1300].forEach(delay => setTimeout(() => {
-          try { widget.play?.(); } catch (_) {}
-        }, delay));
       } else {
         widget.pause?.();
       }
@@ -3883,20 +3865,19 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     };
     setJoinedMusic(true);
     setAudioUnlocked(true);
+    setLocalMusicPaused(false);
     await updateMusicState(next);
     try {
       const widget = await getWidget();
       widget?.setVolume?.(Number(musicVolume) || 0);
       widget?.seekTo?.(0);
       widget?.play?.();
-      [260, 700, 1300].forEach(delay => setTimeout(() => {
-        try { widget?.play?.(); } catch (_) {}
-      }, delay));
     } catch (_) {}
     addToast?.(`${next.djName} is DJ now`, "🎧");
   };
 
   const playHere = async () => {
+    setLocalMusicPaused(false);
     if (!hasTrack) {
       addToast?.("load a SoundCloud track first", "🎧");
       return;
@@ -3910,6 +3891,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       const widget = widgetRef.current || await getWidget();
       widget?.pause?.();
     } catch (_) {}
+    setLocalMusicPaused(true);
     setJoinedMusic(false);
     lastAppliedRef.current = "";
     addToast?.("music paused on this device", "🎧");
@@ -3938,33 +3920,21 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
             <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
             <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
-            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · everyone can tap play here if their phone blocks autoplay</div>
+            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "room is playing" : "room paused"} · hidden in-app player</div>
           </div>
-          <div aria-hidden="true" style={{position:"fixed",left:0,bottom:0,width:1,height:1,overflow:"hidden",opacity:0.01,pointerEvents:"none",transform:"scale(0.01)",transformOrigin:"bottom left"}}>
+          <div aria-hidden="true" style={{position:"absolute",left:-9999,top:-9999,width:1,height:1,overflow:"hidden",opacity:0,pointerEvents:"none"}}>
             <iframe
               ref={iframeRef}
-              title="SoundCloud room music hidden player"
+              title="SoundCloud hidden room music player"
               width="1"
               height="1"
               scrolling="no"
               frameBorder="no"
               allow="autoplay; encrypted-media"
               src={embedSrc}
-              tabIndex={-1}
               onLoad={()=>setTimeout(()=>applyMusicVolume(musicVolumeRef.current), 220)}
-              style={{border:"none",width:1,height:1,opacity:0.01,pointerEvents:"none"}}
+              style={{border:"none",width:1,height:1,display:"block"}}
             />
-          </div>
-          <div style={{background:joinedMusic?"rgba(184,255,77,0.08)":"rgba(255,85,0,0.08)",border:`1px solid ${joinedMusic?"rgba(184,255,77,0.22)":"rgba(255,85,0,0.18)"}`,borderRadius:12,padding:"10px 12px",fontSize:11,color:joinedMusic?"#B8FF4D":"#FF5500",fontWeight:900,textAlign:"center",marginBottom:10}}>
-            {joinedMusic ? "🎧 music linked to voice room" : "🎧 music room is on — ready to link"}
-          </div>
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            <button onClick={playHere} className="bb-pressable" style={{flex:1,background:"rgba(184,255,77,0.13)",border:"1px solid rgba(184,255,77,0.35)",borderRadius:11,padding:"10px 0",fontSize:11,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>
-              play here
-            </button>
-            <button onClick={pauseHere} className="bb-pressable" style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"10px 0",fontSize:11,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>
-              pause here
-            </button>
           </div>
         </>
       ) : (
@@ -3985,6 +3955,8 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           value={musicVolume}
           onInput={(e)=>handleMusicVolumeChange(e.currentTarget.value)}
           onChange={(e)=>handleMusicVolumeChange(e.currentTarget.value)}
+          onMouseUp={(e)=>applyMusicVolume(e.currentTarget.value)}
+          onTouchEnd={(e)=>applyMusicVolume(e.currentTarget.value)}
           style={{width:"100%",accentColor:"#FF5500"}}
         />
       </div>
