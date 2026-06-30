@@ -2363,6 +2363,8 @@ const [voiceVolumes, setVoiceVolumes] = useState(() => Object.fromEntries(PLAYER
 const voiceVolumesRef = useRef(voiceVolumes);
 const playerAudioRefs = useRef({});
 const playerTrackIdsRef = useRef({});
+const playerGainRefs = useRef({});
+const playerAudioNodeRefs = useRef({});
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
   const writeVoicePresenceNow = async ({ updateLocal = true } = {}) => {
@@ -2500,13 +2502,32 @@ const playerTrackIdsRef = useRef({});
     return audio;
   };
 
-  const applyPlayerVoiceVolume = (pid, value) => {
-    const audio = playerAudioRefs.current[pid] || (typeof window !== "undefined" ? window.__bbVoicePlayerAudio?.[pid] : null);
-    if (!audio) return;
-    audio.volume = Math.max(0, Math.min(1, Number(value ?? 100) / 100));
+  const disconnectPlayerVoiceNodes = (pid) => {
+    const nodes = playerAudioNodeRefs.current?.[pid];
+    if (!nodes) return;
+    try { nodes.source?.disconnect?.(); } catch (_) {}
+    try { nodes.gain?.disconnect?.(); } catch (_) {}
+    try { nodes.dest?.disconnect?.(); } catch (_) {}
+    delete playerAudioNodeRefs.current[pid];
+    delete playerGainRefs.current[pid];
   };
 
-  const addRemoteVoiceTrack = (track, participant) => {
+  const applyPlayerVoiceVolume = (pid, value) => {
+    const vol = Math.max(0, Math.min(1, Number(value ?? 100) / 100));
+    const gain = playerGainRefs.current?.[pid];
+    if (gain?.gain) {
+      try { gain.gain.value = vol; } catch (_) {}
+    }
+
+    const audio = playerAudioRefs.current[pid] || (typeof window !== "undefined" ? window.__bbVoicePlayerAudio?.[pid] : null);
+    if (!audio) return;
+    audio.muted = false;
+    // Desktop browsers honor <audio>.volume. iOS ignores it, so when a GainNode exists,
+    // keep the element at full output and let the per-player GainNode do the real volume work.
+    try { audio.volume = gain ? 1 : vol; } catch (_) {}
+  };
+
+  const addRemoteVoiceTrack = async (track, participant) => {
     if (!track || track.kind !== "audio" || participant?.local) return;
     const pid = getVoicePlayerIdFromParticipant(participant);
     if (!pid) return;
@@ -2514,9 +2535,30 @@ const playerTrackIdsRef = useRef({});
     const audio = getPersistentPlayerAudio(pid);
     if (!audio || typeof MediaStream === "undefined") return;
 
-    if (playerTrackIdsRef.current[pid] !== track.id || !audio.srcObject) {
-      audio.srcObject = new MediaStream([track]);
-      playerTrackIdsRef.current[pid] = track.id;
+    const trackKey = track.id || `${pid}_${track.label || "voice"}`;
+    const needsReconnect = playerTrackIdsRef.current[pid] !== trackKey || !audio.srcObject || !playerGainRefs.current[pid];
+
+    if (needsReconnect) {
+      disconnectPlayerVoiceNodes(pid);
+      try {
+        const ctx = await getAudioContext();
+        if (ctx?.createMediaStreamSource && ctx?.createGain && ctx?.createMediaStreamDestination) {
+          const inputStream = new MediaStream([track]);
+          const source = ctx.createMediaStreamSource(inputStream);
+          const gain = ctx.createGain();
+          const dest = ctx.createMediaStreamDestination();
+          source.connect(gain);
+          gain.connect(dest);
+          playerAudioNodeRefs.current[pid] = { source, gain, dest, inputStream };
+          playerGainRefs.current[pid] = gain;
+          audio.srcObject = dest.stream;
+        } else {
+          audio.srcObject = new MediaStream([track]);
+        }
+      } catch (_) {
+        audio.srcObject = new MediaStream([track]);
+      }
+      playerTrackIdsRef.current[pid] = trackKey;
     }
 
     audio.muted = false;
@@ -2527,6 +2569,7 @@ const playerTrackIdsRef = useRef({});
   const removeRemoteVoiceTrack = (participant) => {
     const pid = getVoicePlayerIdFromParticipant(participant);
     if (!pid) return;
+    disconnectPlayerVoiceNodes(pid);
     const audio = playerAudioRefs.current[pid] || (typeof window !== "undefined" ? window.__bbVoicePlayerAudio?.[pid] : null);
     if (audio) {
       try { audio.pause?.(); } catch (_) {}
@@ -2634,7 +2677,9 @@ useEffect(() => {
   };
 
   loadVoicePresence();
-  const unsub = subscribeKVMulti([VOICE_PRESENCE_KEY], ({ value }) => applyVoicePresence(value || {}));
+  // Do not open a second realtime subscription for voice_presence here.
+  // Supabase/Daily can throw if this same channel is already subscribed, so we poll instead.
+  const unsub = null;
   const timer = setInterval(loadVoicePresence, 1000);
 
   return () => {
@@ -2862,11 +2907,14 @@ setLoading(false);
       remoteStreamRef.current?.getTracks?.().forEach(t => { try { t.stop?.(); } catch (_) {} });
       remoteStreamRef.current = null;
       if (typeof window !== "undefined") delete window.__bbVoiceRemoteStream;
+      Object.keys(playerAudioNodeRefs.current || {}).forEach(disconnectPlayerVoiceNodes);
       Object.values(playerAudioRefs.current || {}).forEach(audio => {
         try { audio.pause?.(); } catch (_) {}
         try { audio.srcObject = null; } catch (_) {}
       });
       playerTrackIdsRef.current = {};
+      playerGainRefs.current = {};
+      playerAudioNodeRefs.current = {};
     } catch (_) {}
   };
 
@@ -3561,9 +3609,13 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   }, [hasTrack, musicState?.url]);
 
   useEffect(() => {
-    if (!joinedMusic || !hasTrack) return;
+    if (!hasTrack || (!joinedMusic && !musicState.playing)) return;
     let cancelled = false;
     const applyState = async () => {
+      if (!joinedMusic) {
+        setJoinedMusic(true);
+        setAudioUnlocked(true);
+      }
       const signature = `${musicState.url}|${musicState.playing}|${musicState.updatedAt}|${Math.floor((musicState.positionMs||0)/250)}`;
       if (lastAppliedRef.current === signature || applyingRef.current) return;
       applyingRef.current = true;
@@ -3575,7 +3627,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         widget.seekTo?.(target);
         if (musicState.playing) {
           widget.play?.();
-          setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
+          [260, 700, 1300].forEach(delay => setTimeout(() => {
+            try { widget.play?.(); } catch (_) {}
+          }, delay));
         } else {
           widget.pause?.();
         }
@@ -3600,6 +3654,14 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
     }, delay));
     return () => { cancelled = true; timers.forEach(clearTimeout); };
   }, [musicVolume, hasTrack, musicState?.url, joinedMusic]);
+
+  useEffect(() => {
+    if (!hasTrack || !musicState.playing) return;
+    const t = setTimeout(() => {
+      try { joinMusic({ silent:true }); } catch (_) {}
+    }, isDj ? 120 : 320);
+    return () => clearTimeout(t);
+  }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, isDj]);
 
   useEffect(() => {
     if (!joinedMusic || !hasTrack || !musicState.playing || isDj) return;
@@ -3638,6 +3700,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       widget.seekTo?.(target);
       if (activeState.playing) {
         widget.play?.();
+        [260, 700, 1300].forEach(delay => setTimeout(() => {
+          try { widget.play?.(); } catch (_) {}
+        }, delay));
       } else {
         widget.pause?.();
       }
@@ -3762,7 +3827,9 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       if (nextPlaying) {
         widget.seekTo?.(pos);
         widget.play?.();
-        setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
+        [260, 700, 1300].forEach(delay => setTimeout(() => {
+          try { widget.play?.(); } catch (_) {}
+        }, delay));
       } else {
         widget.pause?.();
       }
@@ -3822,9 +3889,30 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
       widget?.setVolume?.(Number(musicVolume) || 0);
       widget?.seekTo?.(0);
       widget?.play?.();
-      setTimeout(() => { try { widget?.play?.(); } catch (_) {} }, 350);
+      [260, 700, 1300].forEach(delay => setTimeout(() => {
+        try { widget?.play?.(); } catch (_) {}
+      }, delay));
     } catch (_) {}
     addToast?.(`${next.djName} is DJ now`, "🎧");
+  };
+
+  const playHere = async () => {
+    if (!hasTrack) {
+      addToast?.("load a SoundCloud track first", "🎧");
+      return;
+    }
+    const ok = await joinMusic({ silent:true });
+    if (ok) addToast?.("music playing on this device", "🎧");
+  };
+
+  const pauseHere = async () => {
+    try {
+      const widget = widgetRef.current || await getWidget();
+      widget?.pause?.();
+    } catch (_) {}
+    setJoinedMusic(false);
+    lastAppliedRef.current = "";
+    addToast?.("music paused on this device", "🎧");
   };
 
   const removeQueued = async (entryId) => {
@@ -3850,7 +3938,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,marginBottom:10}}>
             <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.7,marginBottom:4}}>NOW PLAYING</div>
             <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{musicState.title || displayTrack(musicState.url)}</div>
-            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · linked when music room is on</div>
+            <div style={{fontSize:10.5,color:musicState.playing?"#7CFFB2":"#8B92A8",marginTop:4}}>{musicState.playing ? "live from the DJ" : "paused"} · everyone can tap play here if their phone blocks autoplay</div>
           </div>
           <div aria-hidden="true" style={{position:"fixed",left:0,bottom:0,width:1,height:1,overflow:"hidden",opacity:0.01,pointerEvents:"none",transform:"scale(0.01)",transformOrigin:"bottom left"}}>
             <iframe
@@ -3869,6 +3957,14 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
           </div>
           <div style={{background:joinedMusic?"rgba(184,255,77,0.08)":"rgba(255,85,0,0.08)",border:`1px solid ${joinedMusic?"rgba(184,255,77,0.22)":"rgba(255,85,0,0.18)"}`,borderRadius:12,padding:"10px 12px",fontSize:11,color:joinedMusic?"#B8FF4D":"#FF5500",fontWeight:900,textAlign:"center",marginBottom:10}}>
             {joinedMusic ? "🎧 music linked to voice room" : "🎧 music room is on — ready to link"}
+          </div>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            <button onClick={playHere} className="bb-pressable" style={{flex:1,background:"rgba(184,255,77,0.13)",border:"1px solid rgba(184,255,77,0.35)",borderRadius:11,padding:"10px 0",fontSize:11,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>
+              play here
+            </button>
+            <button onClick={pauseHere} className="bb-pressable" style={{flex:1,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"10px 0",fontSize:11,fontWeight:900,color:"#E8ECF4",cursor:"pointer"}}>
+              pause here
+            </button>
           </div>
         </>
       ) : (
@@ -6819,7 +6915,9 @@ useEffect(() => {
     applyVoicePresence(await storeGet(VOICE_PRESENCE_KEY) || {});
   };
   loadVoicePresence();
-  const unsub = subscribeKVMulti([VOICE_PRESENCE_KEY], ({ value }) => applyVoicePresence(value || {}));
+  // Do not open a second realtime subscription for voice_presence here.
+  // Supabase/Daily can throw if this same channel is already subscribed, so we poll instead.
+  const unsub = null;
   const timer = setInterval(loadVoicePresence, 1000);
   return () => { alive = false; clearInterval(timer); unsub?.(); };
 }, []);
@@ -7699,7 +7797,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "voice_presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "room_music", "credit_requests"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "room_music", "credit_requests"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
