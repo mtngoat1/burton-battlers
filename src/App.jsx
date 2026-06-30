@@ -22,6 +22,19 @@ const DAY_MS  = 24 * 60 * 60 * 1000;
 const STOCK_BASE_PRICE = 100;
 const PARSE_CREDITS_DEFAULT = 50;
 const PARSE_RESERVE_DEFAULT = 50;
+const VOICE_PRESENCE_KEY = "voice_presence";
+const VOICE_PRESENCE_TTL_MS = 8500;
+const VOICE_PRESENCE_HEARTBEAT_MS = 2500;
+
+function cleanVoicePresenceMap(vp) {
+  const cutoff = Date.now() - VOICE_PRESENCE_TTL_MS;
+  return Object.fromEntries(
+    Object.entries(vp || {}).filter(([_, v]) => {
+      const ts = new Date(v?.ts || 0).getTime();
+      return Number.isFinite(ts) && ts > cutoff;
+    })
+  );
+}
 
 const WEEKLY_EVENTS = [
   { id:"double_xp", emoji:"🔥", title:"Double Pass XP Week", desc:"all pass xp from training approvals and logged games is doubled this week.", color:"#B8FF4D" },
@@ -2349,11 +2362,134 @@ const audioContextRef = useRef(null);
 const [voiceVolume, setVoiceVolume] = useState(100);
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
+  const writeVoicePresenceNow = async ({ updateLocal = true } = {}) => {
+    if (!currentPlayer) return {};
+    try {
+      const fresh = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
+      const updatedPresence = {
+        ...fresh,
+        [currentPlayer]: {
+          playerId: currentPlayer,
+          name: playerObj?.name || currentPlayer,
+          ts: new Date().toISOString(),
+        },
+      };
+      await storeSet(VOICE_PRESENCE_KEY, updatedPresence);
+      if (updateLocal) setVoicePresence(updatedPresence);
+      return updatedPresence;
+    } catch (_) {
+      return {};
+    }
+  };
+
+  const removeVoicePresenceNow = async ({ updateLocal = true } = {}) => {
+    if (!currentPlayer) return {};
+    if (updateLocal) {
+      setVoicePresence(prev => {
+        const next = { ...cleanVoicePresenceMap(prev) };
+        delete next[currentPlayer];
+        return next;
+      });
+    }
+    try {
+      const fresh = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
+      delete fresh[currentPlayer];
+      await storeSet(VOICE_PRESENCE_KEY, fresh);
+      return fresh;
+    } catch (_) {
+      return {};
+    }
+  };
+
+  const clearGlobalVoicePresenceHeartbeat = () => {
+    if (typeof window === "undefined") return;
+    if (window.__bbVoicePresenceTimer) clearInterval(window.__bbVoicePresenceTimer);
+    if (window.__bbVoicePresencePageHide) window.removeEventListener("pagehide", window.__bbVoicePresencePageHide);
+    if (window.__bbVoicePresenceBeforeUnload) window.removeEventListener("beforeunload", window.__bbVoicePresenceBeforeUnload);
+    delete window.__bbVoicePresenceTimer;
+    delete window.__bbVoicePresencePageHide;
+    delete window.__bbVoicePresenceBeforeUnload;
+    delete window.__bbVoicePresencePid;
+  };
+
+  const startGlobalVoicePresenceHeartbeat = () => {
+    if (typeof window === "undefined" || !currentPlayer) return;
+    clearGlobalVoicePresenceHeartbeat();
+    window.__bbVoicePresencePid = currentPlayer;
+
+    const beat = () => {
+      writeVoicePresenceNow({ updateLocal:false });
+    };
+    beat();
+    window.__bbVoicePresenceTimer = setInterval(beat, VOICE_PRESENCE_HEARTBEAT_MS);
+
+    const markLeftOnClose = () => {
+      const pid = window.__bbVoicePresencePid || currentPlayer;
+      if (window.__bbVoicePresenceTimer) clearInterval(window.__bbVoicePresenceTimer);
+      try { window.dispatchEvent(new CustomEvent("bb-voice-left", { detail:{ playerId: pid } })); } catch (_) {}
+      // Best-effort async cleanup for app close. If the browser kills it, the short TTL removes stale status quickly.
+      removeVoicePresenceNow({ updateLocal:false });
+    };
+    window.__bbVoicePresencePageHide = markLeftOnClose;
+    window.__bbVoicePresenceBeforeUnload = markLeftOnClose;
+    window.addEventListener("pagehide", markLeftOnClose);
+    window.addEventListener("beforeunload", markLeftOnClose);
+  };
+
+  const getPersistentRemoteAudio = () => {
+    if (typeof window === "undefined" || typeof document === "undefined") return remoteAudioRef.current;
+    let audio = window.__bbVoiceRemoteAudio;
+    if (!audio) {
+      audio = document.createElement("audio");
+      audio.autoplay = true;
+      audio.playsInline = true;
+      audio.muted = false;
+      audio.style.display = "none";
+      document.body.appendChild(audio);
+      window.__bbVoiceRemoteAudio = audio;
+    }
+    remoteAudioRef.current = audio;
+    return audio;
+  };
+
   const getRemoteStream = () => {
+    if (typeof window !== "undefined" && window.__bbVoiceRemoteStream) {
+      remoteStreamRef.current = window.__bbVoiceRemoteStream;
+      return remoteStreamRef.current;
+    }
     if (!remoteStreamRef.current && typeof MediaStream !== "undefined") {
       remoteStreamRef.current = new MediaStream();
+      if (typeof window !== "undefined") window.__bbVoiceRemoteStream = remoteStreamRef.current;
     }
     return remoteStreamRef.current;
+  };
+
+  const playPersistentVoiceAudio = () => {
+    const audio = getPersistentRemoteAudio();
+    const stream = getRemoteStream();
+    if (!audio || !stream) return;
+    audio.srcObject = stream;
+    audio.muted = false;
+    audio.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
+    audio.play?.().catch(() => {});
+  };
+
+  const addRemoteVoiceTrack = (track) => {
+    if (!track || track.kind !== "audio") return;
+    const stream = getRemoteStream();
+    if (!stream) return;
+    if (!stream.getTracks().some(t => t.id === track.id)) {
+      stream.addTrack(track);
+    }
+    playPersistentVoiceAudio();
+  };
+
+  const syncRemoteAudioFromParticipants = (allParticipants = participants) => {
+    Object.values(allParticipants || {}).forEach(dp => {
+      if (dp?.local) return;
+      const track = dp?.tracks?.audio?.persistentTrack || dp?.tracks?.audio?.track;
+      if (track) addRemoteVoiceTrack(track);
+    });
   };
 
   const getParticipantIds = (dp) => [dp?.session_id, dp?.id, dp?.user_id, dp?.peerId].filter(Boolean);
@@ -2457,7 +2593,9 @@ const [voiceVolume, setVoiceVolume] = useState(100);
     try {
       setCallObject(existing);
       setJoined(true);
-      setParticipants(existing.participants?.() || {});
+      const latest = existing.participants?.() || {};
+      setParticipants(latest);
+      syncRemoteAudioFromParticipants(latest);
       setMuted(existing.localAudio ? !existing.localAudio() : false);
       setError(null);
     } catch (err) {
@@ -2470,53 +2608,32 @@ const [voiceVolume, setVoiceVolume] = useState(100);
 useEffect(() => {
   let alive = true;
 
+  const applyVoicePresence = (vp) => {
+    if (!alive) return;
+    setVoicePresence(cleanVoicePresenceMap(vp));
+  };
+
   const loadVoicePresence = async () => {
-  const vp = await storeGet("voice_presence") || {};
-    const cutoff = Date.now() - 45 * 1000;
-
-    const cleaned = Object.fromEntries(
-      Object.entries(vp).filter(([_, v]) => new Date(v.ts).getTime() > cutoff)
-    );
-
-    if (alive) setVoicePresence(cleaned);
+    applyVoicePresence(await storeGet(VOICE_PRESENCE_KEY) || {});
   };
 
   loadVoicePresence();
-  const timer = setInterval(loadVoicePresence, 5000);
+  const unsub = subscribeKVMulti([VOICE_PRESENCE_KEY], ({ value }) => applyVoicePresence(value || {}));
+  const timer = setInterval(loadVoicePresence, 1000);
 
   return () => {
     alive = false;
     clearInterval(timer);
+    unsub?.();
   };
-}, []);              
-              
-              
+}, []);
+
   useEffect(() => {
-  if (!joined || !currentPlayer) return;
+    if (!joined || !currentPlayer) return;
+    startGlobalVoicePresenceHeartbeat();
+    writeVoicePresenceNow();
+  }, [joined, currentPlayer]);
 
-  const writePresence = async () => {
-    const vp = await storeGet("voice_presence") || {};
-    const updatedPresence = {
-      ...vp,
-      [currentPlayer]: {
-        playerId: currentPlayer,
-        name: playerObj?.name || currentPlayer,
-        ts: new Date().toISOString()
-      }
-    };
-
-    await storeSet("voice_presence", updatedPresence);
-    setVoicePresence(updatedPresence);
-  };
-
-  writePresence();
-  const timer = setInterval(writePresence, 15000);
-
-  return () => clearInterval(timer);
-}, [joined, currentPlayer]);            
-              
-              
-              
   const joinRoom = async () => {
     if (!window.DailyIframe) {
       setError("voice SDK still loading — try again in a second");
@@ -2529,11 +2646,16 @@ useEffect(() => {
         const state = existing.meetingState?.();
         const canReuse = !state || state === "joined-meeting" || state === "joining-meeting";
         if (canReuse) {
+          const latest = existing.participants?.() || {};
           setCallObject(existing);
-          setParticipants(existing.participants?.() || {});
+          setParticipants(latest);
+          syncRemoteAudioFromParticipants(latest);
           setJoined(true);
           setMuted(existing.localAudio ? !existing.localAudio() : false);
           setError(null);
+          startGlobalVoicePresenceHeartbeat();
+          await writeVoicePresenceNow();
+          try { window.dispatchEvent(new CustomEvent("bb-voice-joined", { detail:{ playerId: currentPlayer } })); } catch (_) {}
           return;
         }
         try { existing.destroy?.(); } catch (_) {}
@@ -2592,18 +2714,7 @@ window.__bbDailyCallObject = co;
   startSpeakingAnalyzer(e.participant, e.track);
   if (e.participant?.local) return;
 
-  const remoteStream = getRemoteStream();
-  if (!remoteStream) return;
-  if (!remoteStream.getTracks().some(t => t.id === e.track.id)) {
-    remoteStream.addTrack(e.track);
-  }
-
-  if (remoteAudioRef.current) {
-    remoteAudioRef.current.srcObject = remoteStream;
-    remoteAudioRef.current.muted = false;
-    remoteAudioRef.current.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
-    remoteAudioRef.current.play().catch(console.error);
-  }
+  addRemoteVoiceTrack(e.track);
 });
     co.on("track-stopped", (e) => {
   if (e.track?.kind === "audio") stopParticipantAnalyzers(e.participant);
@@ -2658,37 +2769,35 @@ co.on("active-speaker-change", (e) => {
 await co.setLocalAudio(true);   
     
 window.__bbDailyCallObject = co;
-setParticipants(co.participants());
+const latestParticipants = co.participants();
+setParticipants(latestParticipants);
+syncRemoteAudioFromParticipants(latestParticipants);
     
       setCallObject(co);
     setMuted(false);
     setJoined(true);
 
-const vp = await storeGet("voice_presence") || {};
-const updatedPresence = {
-  ...vp,
-  [currentPlayer]: {
-    playerId: currentPlayer,
-    name: playerObj?.name || currentPlayer,
-    ts: new Date().toISOString()
-  }
-};
-
-await storeSet("voice_presence", updatedPresence);
-setVoicePresence(updatedPresence);
+startGlobalVoicePresenceHeartbeat();
+await writeVoicePresenceNow();
 
 setLoading(false);
+      try { window.dispatchEvent(new CustomEvent("bb-voice-joined", { detail:{ playerId: currentPlayer } })); } catch (_) {}
       addToast?.(`${playerObj?.name} joined voice`, "🎙️");
 } catch (e) {
   console.error(e);
   const msg = String(e?.message || e || "").toLowerCase();
   if (msg.includes("duplicate") && msg.includes("daily") && window.__bbDailyCallObject) {
     const existing = window.__bbDailyCallObject;
+    const latest = existing.participants?.() || {};
     setCallObject(existing);
-    setParticipants(existing.participants?.() || {});
+    setParticipants(latest);
+    syncRemoteAudioFromParticipants(latest);
     setJoined(true);
     setMuted(existing.localAudio ? !existing.localAudio() : false);
     setError(null);
+    startGlobalVoicePresenceHeartbeat();
+    await writeVoicePresenceNow();
+    try { window.dispatchEvent(new CustomEvent("bb-voice-joined", { detail:{ playerId: currentPlayer } })); } catch (_) {}
   } else {
     setError(e.message);
   }
@@ -2702,31 +2811,38 @@ setLoading(false);
   }, [autoJoinNonce]);
 
   const leaveRoom = async () => {
-    if (callObject) {
-      await callObject.leave();
-      callObject.destroy();
-      if (window.__bbDailyCallObject === callObject) delete window.__bbDailyCallObject;
+    // Make the UI/presence change immediately for everyone before Daily finishes leaving.
+    setJoined(false);
+    setParticipants({});
+    setSpeakingMap({});
+    speakingUntilRef.current = {};
+    setMuted(false);
+    setLoading(false);
+    setError(null);
+    clearGlobalVoicePresenceHeartbeat();
+    await removeVoicePresenceNow();
+    try { window.dispatchEvent(new CustomEvent("bb-voice-left", { detail:{ playerId: currentPlayer } })); } catch (_) {}
+
+    const co = callObject || window.__bbDailyCallObject;
+    if (co) {
+      try { await co.leave?.(); } catch (_) {}
+      try { co.destroy?.(); } catch (_) {}
+      if (window.__bbDailyCallObject === co) delete window.__bbDailyCallObject;
       setCallObject(null);
     }
     try {
       Object.keys(speakingAnalyzersRef.current).forEach(stopSpeakingAnalyzer);
       if (audioContextRef.current?.state !== "closed") audioContextRef.current?.close?.();
       audioContextRef.current = null;
-      remoteStreamRef.current?.getTracks?.().forEach(t => t.stop());
+      const audio = getPersistentRemoteAudio();
+      if (audio) {
+        try { audio.pause?.(); } catch (_) {}
+        audio.srcObject = null;
+      }
+      remoteStreamRef.current?.getTracks?.().forEach(t => { try { t.stop?.(); } catch (_) {} });
       remoteStreamRef.current = null;
+      if (typeof window !== "undefined") delete window.__bbVoiceRemoteStream;
     } catch (_) {}
-const vp = await storeGet("voice_presence") || {};
-delete vp[currentPlayer];
-await storeSet("voice_presence", vp);
-setVoicePresence(vp);
-
-setJoined(false);
-setParticipants({});
-setSpeakingMap({});
-speakingUntilRef.current = {};
-setMuted(false);
-setLoading(false);
-setError(null);
   };
 
   const toggleMute = async () => {
@@ -2760,6 +2876,7 @@ setError(null);
       if (!co) return;
       try {
         const latest = co.participants?.() || {};
+        syncRemoteAudioFromParticipants(latest);
         const now = Date.now();
         Object.values(latest).forEach(dp => {
           const persistentTrack = dp?.tracks?.audio?.persistentTrack || dp?.tracks?.audio?.track;
@@ -2795,8 +2912,9 @@ setError(null);
   const speakingPlayer = speakingParticipant ? getPlayerForName(speakingParticipant.user_name) : null;
 
   useEffect(() => {
-    if (!remoteAudioRef.current) return;
-    remoteAudioRef.current.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
+    const audio = getPersistentRemoteAudio();
+    if (!audio) return;
+    audio.volume = Math.max(0, Math.min(1, Number(voiceVolume || 100) / 100));
   }, [voiceVolume]);
 
   if (!joined) {
@@ -2879,12 +2997,7 @@ onClick={async () => {
       marginBottom:10,
       boxShadow:"0 0 24px rgba(184,255,77,0.08)",
     }}>
-<audio
-  ref={remoteAudioRef}
-  autoPlay
-  playsInline
-  style={{ display: "none" }}
-/>
+{/* voice audio is kept in a persistent hidden element so it keeps playing across tabs */}
 
 {/* Header */}
 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
@@ -3187,6 +3300,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   const widgetRef = useRef(null);
   const lastAppliedRef = useRef("");
   const applyingRef = useRef(false);
+  const driftCorrectionRef = useRef(0);
 
   const player = PLAYERS.find(p => p.id === currentPlayer);
   const isDj = !musicState?.dj || musicState.dj === currentPlayer;
@@ -3355,31 +3469,33 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   }, [musicVolume, joinedMusic]);
 
   useEffect(() => {
-    if (!joinedMusic || !hasTrack || !musicState.playing) return;
+    if (!joinedMusic || !hasTrack || !musicState.playing || isDj) return;
     const timer = setInterval(async () => {
       try {
         const widget = await getWidget();
         if (!widget) return;
         widget.getPosition?.((pos) => {
           const expected = getLivePositionMs(musicState);
-          if (Math.abs(Number(pos || 0) - expected) > 3500) {
+          const drift = Math.abs(Number(pos || 0) - expected);
+          if (drift > 9500 && Date.now() - driftCorrectionRef.current > 22000) {
+            driftCorrectionRef.current = Date.now();
             widget.seekTo?.(expected);
           }
         });
       } catch (_) {}
-    }, 4500);
+    }, 12000);
     return () => clearInterval(timer);
-  }, [joinedMusic, hasTrack, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicState?.url]);
+  }, [joinedMusic, hasTrack, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicState?.url, isDj]);
 
-  const joinMusic = async () => {
+  const joinMusic = async ({ silent = false } = {}) => {
     if (!hasTrack) {
-      addToast?.("load a SoundCloud track first", "🎧");
-      return;
+      if (!silent) addToast?.("load a SoundCloud track first", "🎧");
+      return false;
     }
     setJoinedMusic(true);
     try {
       const widget = await getWidget();
-      if (!widget) return;
+      if (!widget) return false;
       const target = getLivePositionMs(musicState);
 
       // Mobile Safari/Chrome will not let a remote DJ click start audio on this phone.
@@ -3388,10 +3504,10 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
         widget.setVolume?.(Number(musicVolume) || 0);
         widget.seekTo?.(target);
         widget.play?.();
-        setTimeout(() => { try { widget.seekTo?.(target); } catch (_) {} }, 90);
+        setTimeout(() => { try { widget.seekTo?.(getLivePositionMs(musicState)); } catch (_) {} }, 90);
         setTimeout(() => { try { widget.play?.(); } catch (_) {} }, 350);
         setAudioUnlocked(true);
-        addToast?.(joinedMusic ? "reconnected room music" : "joined room music", "🎧");
+        if (!silent) addToast?.(joinedMusic ? "reconnected room music" : "joined room music", "🎧");
       } else {
         widget.setVolume?.(0);
         widget.seekTo?.(target);
@@ -3404,12 +3520,41 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
             widget.setVolume?.(Number(musicVolume) || 0);
           } catch (_) {}
         }, 180);
-        addToast?.("room music unlocked — DJ can play now", "🎧");
+        if (!silent) addToast?.("room music unlocked — DJ can play now", "🎧");
       }
+      return true;
     } catch (_) {
-      addToast?.("tap join music again after the player loads", "🎧");
+      if (!silent) addToast?.("tap join music again after the player loads", "🎧");
+      return false;
     }
   };
+
+  const leaveMusic = async ({ silent = false } = {}) => {
+    try {
+      const widget = widgetRef.current || await getWidget();
+      widget?.pause?.();
+    } catch (_) {}
+    setJoinedMusic(false);
+    setAudioUnlocked(false);
+    lastAppliedRef.current = "";
+    if (!silent) addToast?.("left room music", "🎧");
+  };
+
+  useEffect(() => {
+    const handleVoiceJoined = () => {
+      if (!hasTrack) return;
+      setTimeout(() => { joinMusic({ silent:true }); }, 250);
+    };
+    const handleVoiceLeft = () => {
+      leaveMusic({ silent:true });
+    };
+    window.addEventListener("bb-voice-joined", handleVoiceJoined);
+    window.addEventListener("bb-voice-left", handleVoiceLeft);
+    return () => {
+      window.removeEventListener("bb-voice-joined", handleVoiceJoined);
+      window.removeEventListener("bb-voice-left", handleVoiceLeft);
+    };
+  }, [hasTrack, musicState?.url, musicState?.playing, musicState?.updatedAt, musicState?.positionMs, musicVolume, joinedMusic]);
 
   const loadTrack = async (urlOverride = null) => {
     const rawUrl = cleanUrl(urlOverride || trackLink);
@@ -3575,7 +3720,7 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
               style={{border:"none",width:1,height:1,opacity:0.01,pointerEvents:"none"}}
             />
           </div>
-          <button onClick={joinMusic} className="bb-pressable bb-glow-lime" style={{width:"100%",background:joinedMusic?"rgba(184,255,77,0.12)":"#B8FF4D",border:joinedMusic?"1px solid rgba(184,255,77,0.32)":"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:joinedMusic?"#B8FF4D":"#06070D",cursor:"pointer",marginBottom:10}}>
+          <button onClick={()=>joinMusic()} className="bb-pressable bb-glow-lime" style={{width:"100%",background:joinedMusic?"rgba(184,255,77,0.12)":"#B8FF4D",border:joinedMusic?"1px solid rgba(184,255,77,0.32)":"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:joinedMusic?"#B8FF4D":"#06070D",cursor:"pointer",marginBottom:10}}>
             {joinedMusic ? (audioUnlocked ? "🔊 reconnect audio" : "🔊 unlock audio") : "🎧 join music"}
           </button>
         </>
@@ -6435,17 +6580,16 @@ useEffect(() => {
 
 useEffect(() => {
   let alive = true;
+  const applyVoicePresence = (vp) => {
+    if (alive) setVoicePresence(cleanVoicePresenceMap(vp));
+  };
   const loadVoicePresence = async () => {
-    const vp = await storeGet("voice_presence") || {};
-    const cutoff = Date.now() - 45 * 1000;
-    const cleaned = Object.fromEntries(
-      Object.entries(vp).filter(([_, v]) => new Date(v.ts).getTime() > cutoff)
-    );
-    if (alive) setVoicePresence(cleaned);
+    applyVoicePresence(await storeGet(VOICE_PRESENCE_KEY) || {});
   };
   loadVoicePresence();
-  const timer = setInterval(loadVoicePresence, 5000);
-  return () => { alive = false; clearInterval(timer); };
+  const unsub = subscribeKVMulti([VOICE_PRESENCE_KEY], ({ value }) => applyVoicePresence(value || {}));
+  const timer = setInterval(loadVoicePresence, 1000);
+  return () => { alive = false; clearInterval(timer); unsub?.(); };
 }, []);
 
 const [flowerTarget, setFlowerTarget] = useState(null);
@@ -7331,7 +7475,7 @@ function StarfieldBg() {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "room_music", "credit_requests"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "voice_presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "music_links", "room_music", "credit_requests"];
 // ===================== Push Notifications =====================
 const VAPID_PUBLIC_KEY = "BEzMZEUUsvCmR-Pu1xQPyxntGBn2rpqy8GfgY_WBZBmyUTP4b3vfCEesyBSfpJ9UJe7-OnmSrKdoDOb8O0IkINE";
 
@@ -10175,6 +10319,7 @@ const [teamSessions, setTeamSessions] = useState([]); // planned 3v3 sessions / 
 const [chatOpen, setChatOpen] = useState(false);
 const [showTopNotifs, setShowTopNotifs] = useState(false);
 const [voiceJoinBanner, setVoiceJoinBanner] = useState(null);
+const [sessionPingBanner, setSessionPingBanner] = useState(null);
 const [autoJoinVoiceNonce, setAutoJoinVoiceNonce] = useState(null);
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
@@ -10182,6 +10327,8 @@ const lastActiveRef = useRef(Date.now());
 const AUTO_LOCK_MS = 10 * 60 * 1000;
 const toastDismissedAll = useRef(false);
 const lastVoicePresenceRef = useRef(null);
+const sessionPingSeenRef = useRef(new Set());
+const sessionPingInitializedRef = useRef(false);
 const addToast = useCallback((text, icon = "🔔") => {
   if (toastDismissedAll.current) return;
   const id = Date.now().toString();
@@ -10202,11 +10349,8 @@ useEffect(() => {
   let alive = true;
 
   const pollVoicePresence = async () => {
-    const vp = await storeGet("voice_presence") || {};
-    const cutoff = Date.now() - 45 * 1000;
-    const cleaned = Object.fromEntries(
-      Object.entries(vp).filter(([_, v]) => new Date(v.ts).getTime() > cutoff)
-    );
+    const vp = await storeGet(VOICE_PRESENCE_KEY) || {};
+    const cleaned = cleanVoicePresenceMap(vp);
 
     if (!alive) return;
 
@@ -10233,6 +10377,42 @@ useEffect(() => {
   const timer = setInterval(pollVoicePresence, 1000);
   return () => { alive = false; clearInterval(timer); };
 }, [currentPlayer]);
+
+useEffect(() => {
+  sessionPingSeenRef.current = new Set();
+  sessionPingInitializedRef.current = false;
+  setSessionPingBanner(null);
+}, [currentPlayer]);
+
+useEffect(() => {
+  if (!currentPlayer) return;
+  const mySessionPings = (pings || [])
+    .filter(p => p.to === currentPlayer && p.type === "session")
+    .sort((a,b) => new Date(b.ts) - new Date(a.ts));
+  const currentIds = new Set(mySessionPings.map(p => p.id));
+
+  if (!sessionPingInitializedRef.current) {
+    currentIds.forEach(id => sessionPingSeenRef.current.add(id));
+    sessionPingInitializedRef.current = true;
+    return;
+  }
+
+  const fresh = mySessionPings.find(p => !sessionPingSeenRef.current.has(p.id));
+  currentIds.forEach(id => sessionPingSeenRef.current.add(id));
+  if (!fresh) return;
+
+  const fromPlayer = PLAYERS.find(p => p.id === fresh.from);
+  setSessionPingBanner({
+    id: fresh.id,
+    sessionId: fresh.sessionId,
+    from: fresh.from,
+    fromName: fromPlayer?.name || "someone",
+    color: fromPlayer?.color || "#A78BFA",
+    mode: fresh.mode || "3v3",
+    minutesUntil: fresh.minutesUntil,
+    ts: fresh.ts || new Date().toISOString(),
+  });
+}, [pings, currentPlayer]);
 
 useEffect(() => {
   if (catchupStopped || catchupQueue.length === 0) return;
@@ -10364,6 +10544,19 @@ return () => {
   delete upd[currentPlayer];
   await storeSet("presence", upd);
   setPresence(upd);
+
+  try { window.__bbVoicePresencePageHide?.(); } catch (_) {}
+  try {
+    const voiceFresh = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
+    delete voiceFresh[currentPlayer];
+    await storeSet(VOICE_PRESENCE_KEY, voiceFresh);
+  } catch (_) {}
+  try {
+    const co = window.__bbDailyCallObject;
+    await co?.leave?.();
+    co?.destroy?.();
+    delete window.__bbDailyCallObject;
+  } catch (_) {}
 
   setMyMode(null);
   setCurrentPlayer(null);
@@ -10682,6 +10875,22 @@ const TABS=[
     : bgId==="bg_custom" && customUrl ? {backgroundImage:`url(${customUrl})`,backgroundSize:"cover",backgroundPosition:"center"}
     : {background:theme.bg};
 
+  const acceptSessionFromBanner = async () => {
+    if (!sessionPingBanner?.sessionId) return;
+    const updSessions = (teamSessions || []).map(s => s.id === sessionPingBanner.sessionId
+      ? { ...s, responses: { ...(s.responses || {}), [currentPlayer]: "accepted" } }
+      : s
+    );
+    setTeamSessions(updSessions);
+    await storeSet("team_sessions", updSessions);
+    const freshPings = (await storeGet("pings") || []).filter(p => !(p.type === "session" && p.sessionId === sessionPingBanner.sessionId && p.to === currentPlayer));
+    setPings(freshPings);
+    await storeSet("pings", freshPings);
+    setSessionPingBanner(null);
+    setTab("room");
+    addToast?.("session accepted", "✅");
+  };
+
   return (
     <div style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || "#B8FF4D", animation:"fadeSlideUp .5s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
@@ -10720,6 +10929,24 @@ const TABS=[
     </div>
   </div>
 )}
+{sessionPingBanner && (
+  <div style={{position:"fixed",top:voiceJoinBanner ? "calc(env(safe-area-inset-top) + 122px)" : "max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1001,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto",animation:"dropDown .22s cubic-bezier(.2,.8,.2,1)"}}>
+    <div style={{background:"linear-gradient(135deg,#141225,#0B0D17)",border:`1px solid ${sessionPingBanner.color}55`,borderRadius:18,padding:"13px 14px",boxShadow:"0 16px 44px rgba(0,0,0,0.42)",display:"flex",alignItems:"center",gap:12}}>
+      <div style={{width:34,height:34,borderRadius:12,background:`${sessionPingBanner.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>⏱️</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:13,fontWeight:900,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sessionPingBanner.fromName} pinged a {sessionPingBanner.mode || "3v3"} session</div>
+        <div style={{fontSize:10.5,color:"#8B92A8",marginTop:2}}>{sessionPingBanner.minutesUntil ? `starts in ${sessionPingBanner.minutesUntil} min` : "starting soon"} · still saved in notifications</div>
+      </div>
+      <button onClick={acceptSessionFromBanner} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:11,padding:"9px 11px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer",flexShrink:0}}>
+        accept
+      </button>
+      <button onClick={()=>{ setTab("room"); setSessionPingBanner(null); }} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,padding:"8px 9px",color:"#E8ECF4",fontSize:11,fontWeight:900,cursor:"pointer",flexShrink:0}}>room</button>
+      <button onClick={()=>setSessionPingBanner(null)} className="bb-pressable" style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,width:30,height:30,color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+        <X size={15}/>
+      </button>
+    </div>
+  </div>
+)}
       {resyncOverlay&&<SyncOverlay onDone={finishResync} label="syncing rocket league data"/>}
       {commentDay&&<CommentsModal dayKey={commentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setCommentDay(null)}/>}
  <div style={s.topBar}>
@@ -10749,6 +10976,20 @@ const TABS=[
 
     await storeSet("presence", upd);
     setPresence(upd);
+
+    try { window.__bbVoicePresencePageHide?.(); } catch (_) {}
+    try {
+      const voiceFresh = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
+      delete voiceFresh[currentPlayer];
+      await storeSet(VOICE_PRESENCE_KEY, voiceFresh);
+    } catch (_) {}
+    try {
+      const co = window.__bbDailyCallObject;
+      await co?.leave?.();
+      co?.destroy?.();
+      delete window.__bbDailyCallObject;
+    } catch (_) {}
+
     setMyMode(null);
 
     setCurrentPlayer(null);
