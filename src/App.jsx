@@ -2723,6 +2723,7 @@ useEffect(() => {
           setError(null);
           startGlobalVoicePresenceHeartbeat();
           await writeVoicePresenceNow();
+          notifyVoiceJoinPush(currentPlayer).catch(e => console.error("voice push failed", e));
           try { window.dispatchEvent(new CustomEvent("bb-voice-joined", { detail:{ playerId: currentPlayer } })); } catch (_) {}
           return;
         }
@@ -2851,6 +2852,7 @@ syncRemoteAudioFromParticipants(latestParticipants);
 
 startGlobalVoicePresenceHeartbeat();
 await writeVoicePresenceNow();
+notifyVoiceJoinPush(currentPlayer).catch(e => console.error("voice push failed", e));
 
 setLoading(false);
       try { window.dispatchEvent(new CustomEvent("bb-voice-joined", { detail:{ playerId: currentPlayer } })); } catch (_) {}
@@ -3321,6 +3323,7 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     const upd = [...freshPings, ...newPings].slice(-120);
     setPings(upd);
     await storeSetWithPush("pings", upd);
+    await Promise.allSettled(newPings.map(p => notifyPingPush(p)));
     addToast?.(`session ping sent to ${targets.length === 1 ? PLAYERS.find(p=>p.id===targets[0])?.name : "everyone"}`, "⏱️");
   };
 
@@ -4440,6 +4443,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
     const upd = [post, ...posts];
     setPosts(upd);
     await storeSet("posts", upd);
+    await notifyNewPostPush(post);
     addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name} posted something`, "📸");
   };
 
@@ -4458,6 +4462,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
   };
   const upd = [entry, ...existing].slice(0, 80);
   await storeSetWithPush("activity_feed", upd);
+  await notifyActivityPush(entry);
 };
 
   const toggleHeart = async (postId) => {
@@ -7006,6 +7011,7 @@ const myUpd = [ping, ...myExisting].slice(0, 2);
 const upd = [...myUpd, ...others];
     setPings(upd);
     await storeSetWithPush("pings", upd);
+    await notifyPingPush(ping);
   };
 
   const myPings = safePings.filter(p => p.to === currentPlayer && Date.now() - new Date(p.ts).getTime() < 3600000);
@@ -7194,7 +7200,7 @@ await storeSet("points", updPts);
               await storeSet("flowers", updFlowers);
 const pingUpd2 = [...safePings, {id:(Date.now()+2).toString(), from:currentPlayer, to:flowerTarget, ts:new Date().toISOString(), type:"flower", emoji:flower.emoji, xp:flower.xp}];
 setPings(pingUpd2);
-await storeSetWithPush("pings", pingUpd2);
+await storeSetWithPush("pings", pingUpd2); await notifyPingPush(pingUpd2[pingUpd2.length - 1]);
               addToast?.(`${flower.emoji} sent ${flower.label} to ${PLAYERS.find(p => p.id === flowerTarget)?.name} — ${flower.xp} pts`, "🌸");
               setSelectedFlower(null); setFlowerTarget(null);
             }} disabled={!canAfford} className="bb-pressable bb-glow-lime"
@@ -8005,6 +8011,94 @@ function pingToPush(ping) {
   return { icon:"🎮", body:`${fromName} wants to run 2s` };
 }
 
+function activityToPush(entry) {
+  const icon =
+    entry?.type === "like" ? "❤️" :
+    entry?.type === "comment" ? "💬" :
+    entry?.type === "comment_heart" ? "🩷" :
+    entry?.type === "post_react" ? "✨" :
+    entry?.type === "post" ? "📸" :
+    entry?.type === "prop" ? "🎯" :
+    "🔔";
+  const fromName = entry?.fromName || "someone";
+  const actionText = entry?.text || "sent you a notification";
+  const message = entry?.message ? ` — "${String(entry.message).slice(0, 90)}"` : "";
+  return { icon, body: `${fromName} ${actionText}${message}` };
+}
+
+async function sendPushToPlayersOnce(dedupeId, targetPlayerIds, title, body, data = {}) {
+  const id = String(dedupeId || `${title}:${body}:${Date.now()}`);
+  try {
+    const key = "push_sent_log";
+    const now = Date.now();
+    const log = await storeGet(key).catch(() => ({})) || {};
+    if (log[id] && now - Number(log[id]) < 24 * 60 * 60 * 1000) return;
+    const entries = Object.entries(log)
+      .filter(([_, ts]) => now - Number(ts) < 24 * 60 * 60 * 1000)
+      .slice(-250);
+    await storeSet(key, { ...Object.fromEntries(entries), [id]: now });
+  } catch (_) {}
+  return sendPushToPlayers(targetPlayerIds, title, body, data);
+}
+
+async function notifyPingPush(ping) {
+  if (!ping?.to || ping.to === ping.from) return;
+  const msg = pingToPush(ping);
+  return sendPushToPlayersOnce(
+    `ping:${ping.id || ping.ts || JSON.stringify(ping)}`,
+    [ping.to],
+    titleForPush(msg.icon),
+    msg.body,
+    { url:"/", type:ping.type || "ping", id:ping.id }
+  );
+}
+
+async function notifyActivityPush(entry) {
+  if (!entry?.to) return;
+  const msg = activityToPush(entry);
+  return sendPushToPlayersOnce(
+    `activity:${entry.id || entry.ts || JSON.stringify(entry)}`,
+    [entry.to],
+    titleForPush(msg.icon),
+    msg.body,
+    { url:"/", type:entry.type || "activity", id:entry.id }
+  );
+}
+
+async function notifyNewPostPush(post) {
+  if (!post?.id || !post?.playerId) return;
+  const poster = playerNameById(post.playerId);
+  const caption = post.caption ? ` — "${String(post.caption).slice(0, 90)}"` : "";
+  const targets = PLAYERS.map(p => p.id).filter(pid => pid !== post.playerId);
+  return sendPushToPlayersOnce(
+    `post:${post.id}`,
+    targets,
+    "📸 New squad post",
+    `${poster} posted something${caption}`,
+    { url:"/", type:"post", id:post.id }
+  );
+}
+
+async function notifyVoiceJoinPush(playerId) {
+  if (!playerId) return;
+  const now = Date.now();
+  try {
+    const key = "voice_join_push_cooldowns";
+    const cooldowns = await storeGet(key).catch(() => ({})) || {};
+    const last = Number(cooldowns[playerId] || 0);
+    if (now - last < 5 * 60 * 1000) return;
+    await storeSet(key, { ...cooldowns, [playerId]: now });
+  } catch (_) {}
+  const targets = PLAYERS.map(p => p.id).filter(pid => pid !== playerId);
+  return sendPushToPlayersOnce(
+    `voice:${playerId}:${Math.floor(now / (5 * 60 * 1000))}`,
+    targets,
+    "🎙️ Voice room",
+    `${playerNameById(playerId)} joined voice room`,
+    { url:"/", type:"voice_join", id:`voice_${playerId}_${now}` }
+  );
+}
+
 async function dispatchPushForStoreChange(key, before, after) {
   const listBefore = Array.isArray(before) ? before : [];
   const listAfter = Array.isArray(after) ? after : [];
@@ -8012,18 +8106,15 @@ async function dispatchPushForStoreChange(key, before, after) {
   const newItems = listAfter.filter(x => x && !oldIds.has(x.id || x.ts || JSON.stringify(x)));
 
   if (key === "pings") {
-    await Promise.allSettled(newItems.map(p => {
-      const msg = pingToPush(p);
-      return sendPushToPlayers([p.to], titleForPush(msg.icon), msg.body, { url:"/", type:p.type || "ping", id:p.id });
-    }));
+    await Promise.allSettled(newItems.map(p => notifyPingPush(p)));
   }
 
   if (key === "activity_feed") {
-    await Promise.allSettled(newItems.map(e => {
-      const icon = e.type === "like" ? "❤️" : e.type === "comment" ? "💬" : e.type === "comment_heart" ? "🩷" : "🔔";
-      const body = `${e.fromName || "someone"} ${e.text || "sent you a notification"}${e.message ? ` — "${String(e.message).slice(0, 80)}"` : ""}`;
-      return sendPushToPlayers([e.to], titleForPush(icon), body, { url:"/", type:e.type || "activity", id:e.id });
-    }));
+    await Promise.allSettled(newItems.map(e => notifyActivityPush(e)));
+  }
+
+  if (key === "posts") {
+    await Promise.allSettled(newItems.map(p => notifyNewPostPush(p)));
   }
 
   if (key === "chat") {
@@ -8955,6 +9046,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
   };
 
   await storeSetWithPush("activity_feed", [entry, ...existing].slice(0, 80));
+  await notifyActivityPush(entry);
 };             
   const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
   const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
@@ -9731,6 +9823,7 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
     const pingUpd = [...(pings||[]), pingEntry];
     setPings(pingUpd);
     await storeSetWithPush("pings", pingUpd);
+    await notifyPingPush(pingEntry);
     addToast?.(`challenge sent to ${PLAYERS.find(p => p.id === selectedOpponent)?.name}!`, "🪙");
   };
 
@@ -10761,11 +10854,18 @@ function HoopsMinuteGame({ currentPlayer, points, setPoints }) {
   const [playing, setPlaying] = useState(false);
   const [timeLeft, setTimeLeft] = useState(60);
   const [score, setScore] = useState(0);
-  const [aim, setAim] = useState(50);
-  const [dir, setDir] = useState(1);
   const [lastShot, setLastShot] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [dragStart, setDragStart] = useState(null);
+  const [dragNow, setDragNow] = useState(null);
+  const [ball, setBall] = useState({ x:0, y:0, scale:1 });
+  const [ballFlying, setBallFlying] = useState(false);
   const highKey = `${currentPlayer}_hoopsHigh`;
   const highScore = points?.[highKey] || 0;
+  const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#FF8C42";
+  const highRows = PLAYERS
+    .map(p => ({ ...p, high: Number(points?.[`${p.id}_hoopsHigh`]) || 0 }))
+    .sort((a,b) => b.high - a.high);
 
   useEffect(() => {
     if (!playing) return;
@@ -10782,51 +10882,92 @@ function HoopsMinuteGame({ currentPlayer, points, setPoints }) {
   }, [playing]);
 
   useEffect(() => {
-    if (!playing) return;
-    const mover = setInterval(() => {
-      setAim(a => {
-        let next = a + dir * 7;
-        if (next >= 96) { setDir(-1); next = 96; }
-        if (next <= 4) { setDir(1); next = 4; }
-        return next;
-      });
-    }, 90);
-    return () => clearInterval(mover);
-  }, [playing, dir]);
-
-  useEffect(() => {
     if (timeLeft !== 0) return;
     if (score <= highScore) return;
     const upd = { ...points, [highKey]: score };
     setPoints(upd);
     storeSet("points", upd);
-  }, [timeLeft, score]);
+  }, [timeLeft, score, highScore, highKey, points, setPoints]);
 
   const start = () => {
     setScore(0);
     setTimeLeft(60);
-    setAim(50);
-    setDir(1);
     setLastShot(null);
+    setDragStart(null);
+    setDragNow(null);
+    setBall({ x:0, y:0, scale:1 });
+    setBallFlying(false);
     setPlaying(true);
   };
 
-  const shoot = () => {
-    if (!playing) return;
-    const distance = Math.abs(aim - 50);
-    const made = distance <= 9;
-    const close = distance <= 18;
-    const pts = made ? 3 : close ? 1 : 0;
-    setScore(s => s + pts);
-    setLastShot({ made, close, pts, ts: Date.now() });
+  const getPoint = (e) => ({ x:e.clientX || 0, y:e.clientY || 0 });
+
+  const beginShot = (e) => {
+    if (!playing || ballFlying) return;
+    e.preventDefault?.();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const p = getPoint(e);
+    setDragging(true);
+    setDragStart(p);
+    setDragNow(p);
   };
+
+  const dragShot = (e) => {
+    if (!dragging || !dragStart || ballFlying) return;
+    e.preventDefault?.();
+    setDragNow(getPoint(e));
+  };
+
+  const finishShot = (e) => {
+    if (!dragging || !dragStart || ballFlying) return;
+    e.preventDefault?.();
+    const end = getPoint(e);
+    setDragging(false);
+    setDragNow(null);
+    const dx = end.x - dragStart.x;
+    const dy = end.y - dragStart.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 22 || dy > -18) {
+      setLastShot({ pts:0, label:"swipe up on the ball", ts:Date.now() });
+      setDragStart(null);
+      return;
+    }
+
+    const power = distance;
+    const horizErr = Math.abs(dx);
+    const powerErr = Math.abs(power - 155);
+    const upward = dy < -55;
+    const swish = upward && horizErr <= 34 && powerErr <= 45;
+    const board = !swish && upward && horizErr <= 78 && powerErr <= 85;
+    const pts = swish ? 3 : board ? 1 : 0;
+    const label = swish ? "+3 swish" : board ? "+1 backboard" : "miss";
+
+    setScore(s => s + pts);
+    setLastShot({ pts, label, ts:Date.now() });
+    setBallFlying(true);
+
+    const flightX = swish ? 0 : board ? (dx >= 0 ? 46 : -46) : Math.max(-135, Math.min(135, dx * 1.35));
+    const flightY = swish ? -262 : board ? -246 : -215;
+    setBall({ x:flightX, y:flightY, scale: pts ? .72 : .82 });
+
+    setTimeout(() => {
+      setBall({ x:0, y:0, scale:1 });
+      setBallFlying(false);
+      setDragStart(null);
+    }, 560);
+  };
+
+  const dragDx = dragging && dragStart && dragNow ? dragNow.x - dragStart.x : 0;
+  const dragDy = dragging && dragStart && dragNow ? dragNow.y - dragStart.y : 0;
+  const aimText = dragging ? `release · ${Math.round(Math.hypot(dragDx, dragDy))}` : playing ? "swipe the ball upward" : "tap start to play";
 
   return (
     <div>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:23,fontWeight:700,color:"#FF8C42",marginBottom:4}}>hoops minute</div>
-      <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginBottom:16}}>tap shoot when the marker hits center. you get 60 seconds to run up the score.</div>
-      <div style={{background:"linear-gradient(135deg,#151019,#0B0D17)",border:"1px solid rgba(255,140,66,0.25)",borderRadius:18,padding:16,boxShadow:"0 12px 28px rgba(0,0,0,0.20)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+      <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginBottom:16}}>swipe the ball toward the hoop for 60 seconds. clean swishes are 3 pts, backboard makes are 1 pt.</div>
+
+      <div style={{background:"linear-gradient(180deg,#151019,#090B12)",border:"1px solid rgba(255,140,66,0.25)",borderRadius:22,padding:14,boxShadow:"0 16px 34px rgba(0,0,0,0.28)",overflow:"hidden"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
           <div>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>score</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:34,fontWeight:700,color:"#FF8C42"}}>{score}</div>
@@ -10836,16 +10977,44 @@ function HoopsMinuteGame({ currentPlayer, points, setPoints }) {
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:34,fontWeight:700,color:timeLeft<=10?"#FF5C8A":"#E8ECF4"}}>{timeLeft}s</div>
           </div>
         </div>
-        <div style={{height:18,background:"rgba(255,255,255,0.06)",borderRadius:99,position:"relative",overflow:"hidden",border:"1px solid rgba(255,255,255,0.08)",marginBottom:12}}>
-          <div style={{position:"absolute",left:"44%",width:"12%",top:0,bottom:0,background:"rgba(184,255,77,0.18)",borderLeft:"1px solid rgba(184,255,77,0.42)",borderRight:"1px solid rgba(184,255,77,0.42)"}} />
-          <div style={{position:"absolute",left:`calc(${aim}% - 5px)`,top:2,width:10,height:12,borderRadius:99,background:"#FF8C42",boxShadow:"0 0 12px rgba(255,140,66,.75)",transition:"left .08s linear"}} />
+
+        <div style={{position:"relative",height:360,borderRadius:18,overflow:"hidden",background:"radial-gradient(circle at 50% 18%, rgba(255,140,66,.18), transparent 28%), linear-gradient(180deg,#101421,#070910)",border:"1px solid rgba(255,255,255,0.07)",touchAction:"none",marginBottom:12}}>
+          <div style={{position:"absolute",left:"50%",top:36,transform:"translateX(-50%)",width:150,height:78,borderRadius:18,border:"2px solid rgba(255,255,255,0.16)",background:"linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.02))",boxShadow:"0 12px 34px rgba(0,0,0,.28)"}} />
+          <div style={{position:"absolute",left:"50%",top:108,transform:"translateX(-50%)",width:104,height:16,borderRadius:"50%",border:"4px solid #FF8C42",boxShadow:"0 0 20px rgba(255,140,66,.45)",background:"rgba(255,140,66,.04)"}} />
+          <div style={{position:"absolute",left:"50%",top:124,transform:"translateX(-50%)",width:86,height:42,borderLeft:"2px solid rgba(255,255,255,0.14)",borderRight:"2px solid rgba(255,255,255,0.14)",borderBottom:"2px solid rgba(255,255,255,0.10)",borderRadius:"0 0 26px 26px",opacity:.85}} />
+
+          <div style={{position:"absolute",left:0,right:0,bottom:0,height:102,background:"linear-gradient(180deg,transparent,rgba(255,140,66,0.09))",borderTop:"1px solid rgba(255,255,255,0.05)"}} />
+          {dragging && (
+            <div style={{position:"absolute",left:"50%",bottom:62,width:3,height:Math.max(26, Math.min(150, -dragDy)),background:Math.abs(dragDx)<45?"#B8FF4D":"#FF8C42",transform:`translateX(${dragDx/4}px) rotate(${Math.max(-28, Math.min(28, dragDx/5))}deg)`,transformOrigin:"bottom",borderRadius:99,boxShadow:"0 0 14px rgba(184,255,77,.38)",opacity:.82}} />
+          )}
+          <div
+            onPointerDown={beginShot}
+            onPointerMove={dragShot}
+            onPointerUp={finishShot}
+            onPointerCancel={finishShot}
+            className="bb-pressable"
+            style={{position:"absolute",left:"50%",bottom:44,width:58,height:58,borderRadius:"50%",background:"radial-gradient(circle at 32% 26%, #FFD59A 0 9%, #FF8C42 18%, #D8681F 64%, #8E3B12 100%)",border:"2px solid rgba(255,255,255,.18)",boxShadow:"0 14px 26px rgba(0,0,0,.34), 0 0 22px rgba(255,140,66,.25)",cursor:playing&&!ballFlying?"grab":"default",touchAction:"none",transform:`translate(-50%,0) translate3d(${ball.x}px,${ball.y}px,0) scale(${ball.scale})`,transition:ballFlying?"transform .48s cubic-bezier(.12,.76,.22,1), opacity .48s ease":"transform .18s ease",opacity:playing||timeLeft===0?1:.72,zIndex:4,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28}}
+          >🏀</div>
+          <div style={{position:"absolute",left:12,right:12,bottom:10,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10}}>
+            <div style={{fontSize:11,color:"#8B92A8",fontWeight:800}}>{aimText}</div>
+            <div style={{fontSize:11,color:lastShot?.pts?"#7CFFB2":"#8B92A8",fontWeight:900,minWidth:92,textAlign:"right"}}>{lastShot ? lastShot.label : `best ${highScore}`}</div>
+          </div>
         </div>
-        <button onClick={playing ? shoot : start} className="bb-pressable" style={{width:"100%",background:playing?"#FF8C42":"#B8FF4D",border:"none",borderRadius:14,padding:"15px 0",fontSize:15,fontWeight:900,color:"#06070D",cursor:"pointer",fontFamily:"'Oswald',sans-serif",letterSpacing:.5}}>
-          {playing ? "shoot" : timeLeft === 0 ? "play again" : "start 60s run"}
+
+        <button onClick={start} className="bb-pressable" style={{width:"100%",background:playing?"rgba(255,255,255,0.06)":"#B8FF4D",border:`1px solid ${playing?"rgba(255,255,255,0.08)":"rgba(184,255,77,.4)"}`,borderRadius:14,padding:"13px 0",fontSize:15,fontWeight:900,color:playing?"#8B92A8":"#06070D",cursor:"pointer",fontFamily:"'Oswald',sans-serif",letterSpacing:.5}}>
+          {playing ? "restart run" : timeLeft === 0 ? "play again" : "start 60s run"}
         </button>
-        <div style={{fontSize:11,color:lastShot?.pts ? "#7CFFB2" : "#8B92A8",textAlign:"center",minHeight:18,marginTop:10,fontWeight:800}}>
-          {lastShot ? (lastShot.pts === 3 ? "+3 swish" : lastShot.pts === 1 ? "+1 rim bounce" : "miss") : `high score: ${highScore}`}
-        </div>
+      </div>
+
+      <div style={{marginTop:14,background:"linear-gradient(135deg,#101421,#080A12)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:18,padding:14}}>
+        <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.9,textTransform:"uppercase",marginBottom:10}}>hoops leaderboard</div>
+        {highRows.map((p, idx) => (
+          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 0",borderTop:idx?"1px solid rgba(255,255,255,0.05)":"none"}}>
+            <div style={{width:24,height:24,borderRadius:9,background:`${p.color}18`,color:p.color,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900}}>{idx+1}</div>
+            <div style={{flex:1,minWidth:0,fontSize:12.5,fontWeight:900,color:p.id===currentPlayer?playerColor:"#E8ECF4"}}>{p.name}</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:p.high?"#FF8C42":"#4A5066"}}>{p.high}</div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -10855,7 +11024,7 @@ const GAME_CARDS = [
   { id:"trivia",   label:"RLCS Trivia",     desc:"5 questions · up to 3x your wager",       color:"#4D9EFF" },
   { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
   { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42", emoji:"🟠" },
-  { id:"hoops",    label:"Hoops Minute",     desc:"shoot for 60 seconds and chase a high score", color:"#FF8C42", emoji:"🏀" },
+  { id:"hoops",    label:"Hoops Minute",     desc:"swipe shots for 60 seconds · swish = 3", color:"#FF8C42", emoji:"🏀" },
   { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
   { id:"rlcsbets", label:"RLCS Bets",        desc:"bet on real pro matches with live odds",    color:"#FF61C1" },
   { id:"stocks",   label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
@@ -11835,8 +12004,8 @@ const TABS=[
       {tab==="social"&&<SocialTab key={tab} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats}/>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
           
-<div style={{display:tab==="room"?"flex":"none",flexDirection:"column",alignItems:"center",height:"100%",padding:"20px",overflowY:"auto"}}>
-    <div style={{width:"100%",maxWidth:480}}>
+<div style={{display:tab==="room"?"flex":"none",flexDirection:"column",alignItems:"center",minHeight:"100%",padding:"20px 20px max(120px, env(safe-area-inset-bottom))",overflow:"visible"}}>
+    <div style={{width:"100%",maxWidth:480,overflow:"visible"}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
       <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce} musicRoomEnabled={roomMusicEnabled} onMusicRoomToggle={setRoomMusicEnabled}/>
       <TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/>
