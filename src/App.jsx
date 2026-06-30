@@ -18,6 +18,7 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 // APP62_WIZARD_SOUNDBOARD_EQUIP_FIX
 // APP58_PROP_BET_PRE_MATCH_LOCK_PTS_NOTIFICATION_PATCH
 // APP63_PARSE_SCORE_SHOP_PROPS_NOTIFICATION_PATCH
+// APP64_FORCE_PARSE_SCORE_ODDS_VARIETY_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -194,7 +195,7 @@ function normalizeGameMode(mode) {
 
 function gameIsWin(game) {
   if (game?.result) return ["victory", "win", "won"].includes(String(game.result).toLowerCase());
-  const our = Number(game?.ourScore);
+  const our = getDisplayedOurScore(game);
   const their = Number(game?.theirScore);
   return Number.isFinite(our) && Number.isFinite(their) && our > their;
 }
@@ -202,10 +203,11 @@ function getDisplayedOurScore(game) {
   const rawOur = Number(game?.ourScore);
   const goals = Number(game?.goals);
   const detectedOur = Number(game?.parseDetectedOurScore);
-  // Parse sometimes returns the player's goals but not the final team score.
-  // If the stored score is blank/0 while the player clearly scored, show/use goals as our score.
-  if ((!Number.isFinite(rawOur) || rawOur === 0) && Number.isFinite(goals) && goals > 0 && !Number.isFinite(detectedOur)) return goals;
+  // Parse sometimes returns player goals but not a final team score.
+  // If stored/detected team score is blank or 0 while the player clearly scored, show goals as our score.
+  if (Number.isFinite(goals) && goals > 0 && (!Number.isFinite(rawOur) || rawOur === 0) && (!Number.isFinite(detectedOur) || detectedOur === 0)) return goals;
   if (Number.isFinite(rawOur)) return rawOur;
+  if (Number.isFinite(detectedOur)) return detectedOur;
   return Number.isFinite(goals) ? goals : 0;
 }
 function formatGameScore(game) {
@@ -6239,39 +6241,205 @@ function findDeepNumberByKey(obj, keyRegex, maxDepth = 5, seen = new Set()) {
   return null;
 }
 
-function getMatchStatValue(match, field) {
-  const stats = match?.stats || {};
-  const stat = stats?.[field];
-  const base = firstNumberish(
-    stat?.value,
-    stat?.displayValue,
-    stat?.metadata?.value,
-    stat?.metadata?.displayValue,
-    match?.[field],
-    match?.metadata?.[field]
-  );
-  if (Number.isFinite(base)) return base;
+function normalizeStatAliasName(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
 
-  if (field === "score") {
-    const score = firstNumberish(
-      stats?.score,
-      stats?.Score,
-      stats?.playerScore,
-      stats?.player_score,
-      stats?.coreScore,
-      stats?.totalScore,
-      stats?.points,
-      stats?.rating?.metadata?.score,
-      match?.score,
-      match?.playerScore,
-      match?.metadata?.score,
-      match?.metadata?.playerScore
+const PARSE_STAT_ALIASES = {
+  goals: ["goals", "goal", "goalscore", "goals_scored"],
+  assists: ["assists", "assist"],
+  saves: ["saves", "save"],
+  shots: ["shots", "shot"],
+  demos: ["demos", "demo", "demolitions", "demolition"],
+  score: [
+    "score",
+    "playerscore",
+    "player_score",
+    "core_score",
+    "corescore",
+    "totalscore",
+    "total_score",
+    "points",
+    "matchscore",
+    "stat_score",
+    "statScore",
+    "rocketleague_score",
+    "rlscore",
+  ],
+};
+
+function getStatLabels(key, value) {
+  const labels = [key];
+  if (value && typeof value === "object") {
+    labels.push(
+      value.key,
+      value.name,
+      value.label,
+      value.slug,
+      value.displayName,
+      value.displayValueName,
+      value.type,
+      value.stat,
+      value.statName,
+      value.metadata?.key,
+      value.metadata?.name,
+      value.metadata?.label,
+      value.metadata?.displayName,
+      value.metadata?.statName,
+      value.metadata?.slug,
     );
-    if (Number.isFinite(score)) return score;
-    return findDeepNumberByKey(match, /^(score|playerScore|player_score|coreScore|totalScore|points)$/i, 5) ?? 0;
+    if (value.stat && typeof value.stat === "object") {
+      labels.push(value.stat.key, value.stat.name, value.stat.label, value.stat.displayName, value.stat.slug);
+    }
+  }
+  return labels.filter(v => v !== null && v !== undefined && v !== "").map(normalizeStatAliasName);
+}
+
+function parseStatNumberish(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "object") {
+    const direct = firstNumberish(
+      value.value,
+      value.displayValue,
+      value.amount,
+      value.score,
+      value.points,
+      value.total,
+      value.count,
+      value.statValue,
+      value.current,
+      value.metadata?.value,
+      value.metadata?.displayValue,
+      value.metadata?.amount,
+      value.metadata?.score,
+      value.metadata?.points,
+      value.metadata?.total,
+      value.metadata?.count,
+      value.stats?.value,
+      value.stats?.score,
+      value.stats?.points,
+    );
+    if (Number.isFinite(direct)) return direct;
+  }
+  return parseNumberish(value);
+}
+
+function statAliasSet(field) {
+  return new Set((PARSE_STAT_ALIASES[field] || [field]).map(normalizeStatAliasName));
+}
+
+function getStatValueByAliases(container, field, maxDepth = 4, seen = new Set()) {
+  if (!container || maxDepth < 0 || seen.has(container)) return null;
+  if (typeof container !== "object") return null;
+  seen.add(container);
+  const aliases = statAliasSet(field);
+
+  if (Array.isArray(container)) {
+    for (const item of container) {
+      const labels = getStatLabels("", item);
+      if (labels.some(l => aliases.has(l))) {
+        const n = parseStatNumberish(item);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    for (const item of container) {
+      const n = getStatValueByAliases(item, field, maxDepth - 1, seen);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
   }
 
-  return findDeepNumberByKey(stats, new RegExp(`^${field}$`, "i"), 3) ?? 0;
+  for (const [key, value] of Object.entries(container)) {
+    const labels = getStatLabels(key, value);
+    if (labels.some(l => aliases.has(l))) {
+      const n = parseStatNumberish(value);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+
+  // Some Tracker/Parse responses use friendly names like "Core Score" or "Player Score" as nested labels.
+  for (const [key, value] of Object.entries(container)) {
+    if (!value || typeof value !== "object") continue;
+    const labels = getStatLabels(key, value);
+    if (labels.some(l => aliases.has(l) || (field === "score" && /^(core|player|total|match)?score$/.test(l)))) {
+      const n = parseStatNumberish(value);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+
+  for (const value of Object.values(container)) {
+    const n = getStatValueByAliases(value, field, maxDepth - 1, seen);
+    if (Number.isFinite(n)) return n;
+  }
+  return null;
+}
+
+function getMatchStatValue(match, field) {
+  const stats = match?.stats || {};
+
+  // First: strict stat-object extraction. This handles both object maps and arrays like
+  // [{name:"Score", value:632}], [{metadata:{name:"Core Score"}, displayValue:"632"}], etc.
+  const fromStats = getStatValueByAliases(stats, field, 5);
+  if (Number.isFinite(fromStats)) return fromStats;
+
+  // Second: common player stat containers outside match.stats.
+  const fromPlayerContainers = getStatValueByAliases(
+    [
+      match?.playerStats,
+      match?.player?.stats,
+      match?.metadata?.playerStats,
+      match?.metadata?.stats,
+      match?.segments,
+      match?.data?.stats,
+    ].filter(Boolean),
+    field,
+    5
+  );
+  if (Number.isFinite(fromPlayerContainers)) return fromPlayerContainers;
+
+  const direct = firstNumberish(
+    match?.[field],
+    match?.metadata?.[field],
+    match?.data?.[field]
+  );
+  if (Number.isFinite(direct)) return direct;
+
+  if (field === "score") {
+    // Avoid using generic metadata.score first because that can be the team scoreboard object.
+    const explicitScore = firstNumberish(
+      match?.playerScore,
+      match?.player_score,
+      match?.coreScore,
+      match?.core_score,
+      match?.totalScore,
+      match?.total_score,
+      match?.points,
+      match?.metadata?.playerScore,
+      match?.metadata?.player_score,
+      match?.metadata?.coreScore,
+      match?.metadata?.core_score,
+      match?.metadata?.totalScore,
+      match?.metadata?.total_score,
+      match?.metadata?.points,
+      match?.data?.playerScore,
+      match?.data?.coreScore,
+      match?.data?.totalScore,
+      match?.data?.points,
+    );
+    if (Number.isFinite(explicitScore)) return explicitScore;
+
+    const deepScore = findDeepNumberByKey(
+      { stats: match?.stats, playerStats: match?.playerStats, player: match?.player, data: match?.data },
+      /^(score|playerScore|player_score|coreScore|core_score|totalScore|total_score|points)$/i,
+      7
+    );
+    return Number.isFinite(deepScore) ? deepScore : 0;
+  }
+
+  const deep = findDeepNumberByKey(stats, new RegExp(`^${field}$`, "i"), 5);
+  return Number.isFinite(deep) ? deep : 0;
 }
 
 function getMatchTeamScoreInfo(match, player = null) {
@@ -6442,8 +6610,9 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     shots: Number(shots) || 0,
     demos,
     score: Number(score) || 0,
+    playerScore: Number(score) || 0,
     scoreSource: Number(parsedScore) > 0 ? "parse" : "estimated_from_stats",
-    ourScore: Number.isFinite(detectedOurScore) ? detectedOurScore : (Number(goals) || 0),
+    ourScore: Number.isFinite(detectedOurScore) && !(Number(detectedOurScore) === 0 && Number(goals) > 0) ? detectedOurScore : (Number(goals) || 0),
     theirScore: Number.isFinite(detectedTheirScore) ? detectedTheirScore : null,
     parseDetectedOurScore: detectedOurScore,
     parseDetectedTheirScore: detectedTheirScore,
@@ -6839,9 +7008,10 @@ useEffect(() => {
     const fallbackGoals = Number(g.goals) || 0;
     const groupedOur = g.sessionCode ? (groupedScores[groupKey] ?? fallbackGoals) : fallbackGoals;
     const currentOur = Number(g.ourScore);
-    const nextOurScore = Number.isFinite(detectedOur)
+    const bestGoalFallback = Math.max(Number.isFinite(currentOur) ? currentOur : 0, groupedOur, fallbackGoals);
+    const nextOurScore = Number.isFinite(detectedOur) && !(detectedOur === 0 && bestGoalFallback > 0)
       ? detectedOur
-      : Math.max(Number.isFinite(currentOur) ? currentOur : 0, groupedOur, fallbackGoals);
+      : bestGoalFallback;
     const nextTheirScore = g.opponentScoreManual
       ? g.theirScore
       : Number.isFinite(detectedTheir)
@@ -10773,11 +10943,11 @@ const [predSide, setPredSide] = useState(null);
 
   // Build player props from stats across 1v1 / 2v2 / 3v3.
   const PROP_FIELD_CONFIG = {
-    goals:   { label:"goals",   lines: [0.5, 1.5, 2.5, 3.5] },
-    assists: { label:"assists", lines: [0.5, 1.5, 2.5] },
-    saves:   { label:"saves",   lines: [0.5, 1.5, 2.5, 3.5] },
-    shots:   { label:"shots",   lines: [0.5, 1.5, 2.5, 3.5, 4.5] },
-    score:   { label:"score",   lines: [199.5, 299.5, 399.5, 499.5, 599.5] },
+    goals:   { label:"goals",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
+    assists: { label:"assists", lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
+    saves:   { label:"saves",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
+    shots:   { label:"shots",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
+    score:   { label:"score",   lines: [99.5, 199.5, 299.5, 399.5, 499.5, 599.5, 799.5, 999.5] },
   };
 
   const propBetPlayers = PLAYERS.filter(p => p.id !== currentPlayer);
@@ -10911,7 +11081,7 @@ const [predSide, setPredSide] = useState(null);
           avg: avg.toFixed(field === "score" ? 0 : 1),
           gamesPlayed: values.length,
           targetText: `next logged 2v2 game with ${activePropDuo.label}`,
-          lineOptions: makeLineOptions(values, field === "score" ? [399.5, 599.5, 799.5, 999.5, 1199.5] : cfg.lines.map(v => v + 1)),
+          lineOptions: makeLineOptions(values, field === "score" ? [199.5, 399.5, 599.5, 799.5, 999.5, 1199.5, 1399.5, 1599.5] : cfg.lines.map(v => v + 1)),
         });
       });
     }
