@@ -12,6 +12,10 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 // APP55_PROPS_WATCH_STREAM_PATCH
 // APP56_PROPS_PRESET_WAGER_NEXT_SYNC_SETTLE_PATCH
 // APP57_SCORE_PARSE_OPPONENT_NOTIFICATION_PATCH
+// APP59_VOICE_PRESENCE_ACCURACY_PATCH
+// APP60_LATE_PROP_SETTLES_LOST_PUSH_PATCH
+// APP61_PROPS_MULTIVIEW_SCORE_BOTTOM_FILL_PATCH
+// APP62_WIZARD_SOUNDBOARD_EQUIP_FIX
 // APP58_PROP_BET_PRE_MATCH_LOCK_PTS_NOTIFICATION_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
@@ -30,17 +34,28 @@ const STOCK_BASE_PRICE = 100;
 const PARSE_CREDITS_DEFAULT = 50;
 const PARSE_RESERVE_DEFAULT = 50;
 const VOICE_PRESENCE_KEY = "voice_presence";
-const VOICE_PRESENCE_TTL_MS = 8500;
-const VOICE_PRESENCE_HEARTBEAT_MS = 2500;
+const VOICE_PRESENCE_TTL_MS = 4500;
+const VOICE_PRESENCE_HEARTBEAT_MS = 1000;
 
 function cleanVoicePresenceMap(vp) {
-  const cutoff = Date.now() - VOICE_PRESENCE_TTL_MS;
+  const now = Date.now();
+  const cutoff = now - VOICE_PRESENCE_TTL_MS;
   return Object.fromEntries(
     Object.entries(vp || {}).filter(([_, v]) => {
+      if (!v || typeof v !== "object" || v.active === false) return false;
       const ts = new Date(v?.ts || 0).getTime();
-      return Number.isFinite(ts) && ts > cutoff;
+      const expiresAt = Number(v?.expiresAt || 0);
+      const freshByTimestamp = Number.isFinite(ts) && ts > cutoff;
+      const freshByExpiry = Number.isFinite(expiresAt) && expiresAt > now;
+      return freshByTimestamp || freshByExpiry;
     })
   );
+}
+function voicePresenceMapsDiffer(a, b) {
+  const ak = Object.keys(a || {}).sort();
+  const bk = Object.keys(b || {}).sort();
+  if (ak.length !== bk.length) return true;
+  return ak.some((k, i) => k !== bk[i]);
 }
 
 const WEEKLY_EVENTS = [
@@ -182,9 +197,18 @@ function gameIsWin(game) {
   const their = Number(game?.theirScore);
   return Number.isFinite(our) && Number.isFinite(their) && our > their;
 }
+function getDisplayedOurScore(game) {
+  const rawOur = Number(game?.ourScore);
+  const goals = Number(game?.goals);
+  const detectedOur = Number(game?.parseDetectedOurScore);
+  // Parse sometimes returns the player's goals but not the final team score.
+  // If the stored score is blank/0 while the player clearly scored, show/use goals as our score.
+  if ((!Number.isFinite(rawOur) || rawOur === 0) && Number.isFinite(goals) && goals > 0 && !Number.isFinite(detectedOur)) return goals;
+  if (Number.isFinite(rawOur)) return rawOur;
+  return Number.isFinite(goals) ? goals : 0;
+}
 function formatGameScore(game) {
-  const ourRaw = game?.ourScore ?? game?.goals ?? 0;
-  const our = Number.isFinite(Number(ourRaw)) ? Number(ourRaw) : 0;
+  const our = getDisplayedOurScore(game);
   const theirRaw = game?.theirScore;
   const theirKnown = theirRaw !== null && theirRaw !== undefined && theirRaw !== "" && Number.isFinite(Number(theirRaw));
   return `${our} – ${theirKnown ? Number(theirRaw) : "?"}`;
@@ -566,7 +590,9 @@ function HomeCommandCenter({ currentPlayer, points, nextMatch, daysUntil, previe
   const latestGame = playerGames[0];
   const myPoints = points?.[currentPlayer] || 0;
   const trainingStatus = todayCompletion?.status === "approved" ? "approved" : todayCompletion?.status === "pending" ? "pending" : todayItem?.training ? "open" : "not set";
-  const resultColor = latestGame ? (latestGame.ourScore > latestGame.theirScore ? "#7CFFB2" : "#FF5C8A") : "#4A5066";
+  const latestOurScore = latestGame ? getDisplayedOurScore(latestGame) : 0;
+  const latestTheirKnown = latestGame?.theirScore !== null && latestGame?.theirScore !== undefined && latestGame?.theirScore !== "";
+  const resultColor = latestGame ? (latestOurScore > Number(latestGame.theirScore) ? "#7CFFB2" : "#FF5C8A") : "#4A5066";
   const miniCard = (label, value, sub, accent, onClick) => (
     <button onClick={onClick} className="bb-pressable" style={{background:"rgba(255,255,255,0.045)",border:`1px solid ${accent}26`,borderRadius:16,padding:"13px 12px",textAlign:"left",cursor:onClick?"pointer":"default",minHeight:88}}>
       <div style={{fontSize:9.5,color:accent,fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:7}}>{label}</div>
@@ -586,7 +612,7 @@ function HomeCommandCenter({ currentPlayer, points, nextMatch, daysUntil, previe
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
         {miniCard("training", todayItem?.training?.title || "not assigned", trainingStatus, "#A78BFA", onGotoTraining)}
-        {miniCard("latest game", latestGame ? `${latestGame.ourScore}-${latestGame.theirScore}` : "no games", latestGame ? `${latestGame.mode} · ${fmtRelTime(latestGame.ts)}` : "sync after your next match", resultColor, latestGame ? onGotoStats : onGotoStats)}
+        {miniCard("latest game", latestGame ? `${latestOurScore}-${latestTheirKnown ? latestGame.theirScore : "?"}` : "no games", latestGame ? `${latestGame.mode} · ${fmtRelTime(latestGame.ts)}` : "sync after your next match", resultColor, latestGame ? onGotoStats : onGotoStats)}
         {miniCard("next match", nextMatch ? (nextMatch.opponent || "TBD") : "season done", nextMatch ? `${nextMatch.label} · ${daysUntil===0?"this week":`in ${daysUntil}d`}` : "no upcoming match", "#B8FF4D", onOpenBracket)}
         {miniCard("balance", `${myPoints} pts`, "shop · bets · rewards", "#FFD166", null)}
       </div>
@@ -1473,7 +1499,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
               <button onClick={() => setSelectedGame(null)} style={{ background: "none", border: "none", color: "#4A5066", cursor: "pointer", fontSize: 18 }}>✕</button>
             </div>
             <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 42, fontWeight: 700, textAlign: "center", marginBottom: 6, color: "#E8ECF4" }}>
-  {selectedGame.games[0]?.ourScore} – {selectedGame.games[0]?.theirScore}
+  {formatGameScore(selectedGame.games[0])}
 </div>
             <div style={{ textAlign: "center", fontSize: 11, color: "#7CFFB2", fontWeight: 700, marginBottom: 20 }}>WIN · {heatMultiplier(selectedGame.gameNum)}x xp</div>
             {PLAYERS.map(p => {
@@ -1535,7 +1561,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <span style={{ fontSize: 14 }}>{"🔥".repeat(Math.min(gameNum, 5))}</span>
-                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: "#E8ECF4" }}>{rep.ourScore}–{rep.theirScore}</div>
+                <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: "#E8ECF4" }}>{formatGameScore(rep)}</div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{ fontSize: 10, color: "#FFD166", fontWeight: 700 }}>{heatMultiplier(gameNum)}x xp</div>
@@ -1912,7 +1938,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
     if (type === "sound") {
       if (newEquipped[id]) delete newEquipped[id];
       else {
-        const equippedSounds = Object.keys(newEquipped).filter(isSoundboardSoundId);
+        const equippedSounds = Object.keys(newEquipped).filter(soundId => isSoundboardSoundId(soundId) && !DEFAULT_SOUNDBOARD_IDS.includes(soundId));
         if (equippedSounds.length >= 6) delete newEquipped[equippedSounds[0]];
         newEquipped[id] = true;
       }
@@ -1973,7 +1999,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
       {sourceTab === "shop" && kindTab === "sound" ? (
         <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(77,158,255,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
           <div style={{fontSize:10,color:player?.color||"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:10}}>SOUNDBOARD SELECTIONS</div>
-          <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>pick up to 6 sounds for your voice room board. default sounds are always available.</div>
+          <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>pick up to 6 custom sounds for your voice room board. default sounds are always available and do not use a slot.</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             {Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...shopOwned.filter(isSoundboardSoundId)])).map(id => {
               const snd = getSoundboardSound(id);
@@ -2651,18 +2677,31 @@ const playerAudioRefs = useRef({});
 const playerTrackIdsRef = useRef({});
 const playerGainRefs = useRef({});
 const playerAudioNodeRefs = useRef({});
+const voicePresenceActiveRef = useRef(false);
+const voicePresenceSessionIdRef = useRef(null);
   const playerObj = PLAYERS.find(p => p.id === currentPlayer);
 
+  const ensureVoicePresenceSessionId = () => {
+    if (!voicePresenceSessionIdRef.current) {
+      voicePresenceSessionIdRef.current = `voice_${currentPlayer}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    }
+    return voicePresenceSessionIdRef.current;
+  };
+
   const writeVoicePresenceNow = async ({ updateLocal = true } = {}) => {
-    if (!currentPlayer) return {};
+    if (!currentPlayer || !voicePresenceActiveRef.current) return {};
     try {
+      const now = Date.now();
       const fresh = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
       const updatedPresence = {
         ...fresh,
         [currentPlayer]: {
           playerId: currentPlayer,
           name: playerObj?.name || currentPlayer,
-          ts: new Date().toISOString(),
+          active: true,
+          sessionId: ensureVoicePresenceSessionId(),
+          ts: new Date(now).toISOString(),
+          expiresAt: now + VOICE_PRESENCE_TTL_MS,
         },
       };
       await storeSet(VOICE_PRESENCE_KEY, updatedPresence);
@@ -2673,18 +2712,18 @@ const playerAudioNodeRefs = useRef({});
     }
   };
 
-  const removeVoicePresenceNow = async ({ updateLocal = true } = {}) => {
-    if (!currentPlayer) return {};
+  const removeSpecificVoicePresenceNow = async (pid, { updateLocal = true } = {}) => {
+    if (!pid) return {};
     if (updateLocal) {
       setVoicePresence(prev => {
         const next = { ...cleanVoicePresenceMap(prev) };
-        delete next[currentPlayer];
+        delete next[pid];
         return next;
       });
     }
     try {
       const fresh = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
-      delete fresh[currentPlayer];
+      delete fresh[pid];
       await storeSet(VOICE_PRESENCE_KEY, fresh);
       return fresh;
     } catch (_) {
@@ -2692,23 +2731,69 @@ const playerAudioNodeRefs = useRef({});
     }
   };
 
+  const removeVoicePresenceNow = async ({ updateLocal = true, retry = true } = {}) => {
+    if (!currentPlayer) return {};
+    voicePresenceActiveRef.current = false;
+    const removed = await removeSpecificVoicePresenceNow(currentPlayer, { updateLocal });
+    if (retry && typeof window !== "undefined") {
+      [350, 1200, 2600].forEach(delay => {
+        window.setTimeout(() => removeSpecificVoicePresenceNow(currentPlayer, { updateLocal:false }), delay);
+      });
+    }
+    return removed;
+  };
+
+  const pruneVoicePresenceToDailyParticipants = async (latestParticipants = {}) => {
+    try {
+      const connectedIds = new Set(
+        Object.values(latestParticipants || {})
+          .map(dp => getVoicePlayerIdFromParticipant(dp))
+          .filter(Boolean)
+      );
+      if (!connectedIds.size) return;
+      const fresh = cleanVoicePresenceMap(await storeGet(VOICE_PRESENCE_KEY) || {});
+      let changed = false;
+      Object.keys(fresh).forEach(pid => {
+        if (!connectedIds.has(pid)) {
+          delete fresh[pid];
+          changed = true;
+        }
+      });
+      if (changed) {
+        await storeSet(VOICE_PRESENCE_KEY, fresh);
+        setVoicePresence(fresh);
+      }
+    } catch (_) {}
+  };
+
   const clearGlobalVoicePresenceHeartbeat = () => {
     if (typeof window === "undefined") return;
     if (window.__bbVoicePresenceTimer) clearInterval(window.__bbVoicePresenceTimer);
+    if (window.__bbVoicePresenceHiddenTimer) clearTimeout(window.__bbVoicePresenceHiddenTimer);
     if (window.__bbVoicePresencePageHide) window.removeEventListener("pagehide", window.__bbVoicePresencePageHide);
     if (window.__bbVoicePresenceBeforeUnload) window.removeEventListener("beforeunload", window.__bbVoicePresenceBeforeUnload);
+    if (window.__bbVoicePresenceUnload) window.removeEventListener("unload", window.__bbVoicePresenceUnload);
+    if (window.__bbVoicePresenceFreeze) window.removeEventListener("freeze", window.__bbVoicePresenceFreeze);
+    if (window.__bbVoicePresenceVisibility) document.removeEventListener("visibilitychange", window.__bbVoicePresenceVisibility);
     delete window.__bbVoicePresenceTimer;
+    delete window.__bbVoicePresenceHiddenTimer;
     delete window.__bbVoicePresencePageHide;
     delete window.__bbVoicePresenceBeforeUnload;
+    delete window.__bbVoicePresenceUnload;
+    delete window.__bbVoicePresenceFreeze;
+    delete window.__bbVoicePresenceVisibility;
     delete window.__bbVoicePresencePid;
   };
 
   const startGlobalVoicePresenceHeartbeat = () => {
     if (typeof window === "undefined" || !currentPlayer) return;
     clearGlobalVoicePresenceHeartbeat();
+    voicePresenceActiveRef.current = true;
+    ensureVoicePresenceSessionId();
     window.__bbVoicePresencePid = currentPlayer;
 
     const beat = () => {
+      if (!voicePresenceActiveRef.current) return;
       writeVoicePresenceNow({ updateLocal:false });
     };
     beat();
@@ -2716,15 +2801,30 @@ const playerAudioNodeRefs = useRef({});
 
     const markLeftOnClose = () => {
       const pid = window.__bbVoicePresencePid || currentPlayer;
+      voicePresenceActiveRef.current = false;
       if (window.__bbVoicePresenceTimer) clearInterval(window.__bbVoicePresenceTimer);
       try { window.dispatchEvent(new CustomEvent("bb-voice-left", { detail:{ playerId: pid } })); } catch (_) {}
       // Best-effort async cleanup for app close. If the browser kills it, the short TTL removes stale status quickly.
       removeVoicePresenceNow({ updateLocal:false });
     };
+    const markLeftIfHidden = () => {
+      if (document.visibilityState !== "hidden") {
+        if (window.__bbVoicePresenceHiddenTimer) clearTimeout(window.__bbVoicePresenceHiddenTimer);
+        return;
+      }
+      if (window.__bbVoicePresenceHiddenTimer) clearTimeout(window.__bbVoicePresenceHiddenTimer);
+      window.__bbVoicePresenceHiddenTimer = window.setTimeout(markLeftOnClose, 1800);
+    };
     window.__bbVoicePresencePageHide = markLeftOnClose;
     window.__bbVoicePresenceBeforeUnload = markLeftOnClose;
+    window.__bbVoicePresenceUnload = markLeftOnClose;
+    window.__bbVoicePresenceFreeze = markLeftOnClose;
+    window.__bbVoicePresenceVisibility = markLeftIfHidden;
     window.addEventListener("pagehide", markLeftOnClose);
     window.addEventListener("beforeunload", markLeftOnClose);
+    window.addEventListener("unload", markLeftOnClose);
+    window.addEventListener("freeze", markLeftOnClose);
+    document.addEventListener("visibilitychange", markLeftIfHidden);
   };
 
   const getPersistentRemoteAudio = () => {
@@ -2959,7 +3059,12 @@ useEffect(() => {
   };
 
   const loadVoicePresence = async () => {
-    applyVoicePresence(await storeGet(VOICE_PRESENCE_KEY) || {});
+    const raw = await storeGet(VOICE_PRESENCE_KEY) || {};
+    const cleaned = cleanVoicePresenceMap(raw);
+    applyVoicePresence(cleaned);
+    if (voicePresenceMapsDiffer(raw, cleaned)) {
+      try { await storeSet(VOICE_PRESENCE_KEY, cleaned); } catch (_) {}
+    }
   };
 
   loadVoicePresence();
@@ -3075,6 +3180,8 @@ window.__bbDailyCallObject = co;
       co.on("participant-left", (e) => {
         stopParticipantAnalyzers(e.participant);
         removeRemoteVoiceTrack(e.participant);
+        const leftPid = getVoicePlayerIdFromParticipant(e.participant);
+        if (leftPid) removeSpecificVoicePresenceNow(leftPid, { updateLocal:true });
         setParticipants(prev => {
           const next = { ...prev };
           delete next[e.participant.session_id];
@@ -3174,6 +3281,7 @@ setLoading(false);
     setError(null);
     clearGlobalVoicePresenceHeartbeat();
     await removeVoicePresenceNow();
+    voicePresenceSessionIdRef.current = null;
     try { window.dispatchEvent(new CustomEvent("bb-voice-left", { detail:{ playerId: currentPlayer } })); } catch (_) {}
 
     const co = callObject || window.__bbDailyCallObject;
@@ -3254,6 +3362,7 @@ setLoading(false);
         speakingUntilRef.current = Object.fromEntries(Object.entries(speakingUntilRef.current).filter(([_, exp]) => exp > now));
         setSpeakingMap(activeSpeaking);
         setParticipants(latest);
+        pruneVoicePresenceToDailyParticipants(latest);
         setMuted(co.localAudio ? !co.localAudio() : muted);
       } catch (_) {}
     }, 3200);
@@ -6701,19 +6810,22 @@ useEffect(() => {
   stats.forEach(g => {
     if (g?.source !== "parse_sessions") return;
     if (!g.sessionCode) return;
-    if (!groupedScores[g.sessionCode]) groupedScores[g.sessionCode] = 0;
-    groupedScores[g.sessionCode] += Number(g.goals) || 0;
+    const key = `${g.mode || "game"}__${g.sessionCode}`;
+    if (!groupedScores[key]) groupedScores[key] = 0;
+    groupedScores[key] += Number(g.goals) || 0;
   });
   let changed = false;
   const normalized = stats.map(g => {
     if (g?.source !== "parse_sessions") return g;
     const detectedOur = Number(g.parseDetectedOurScore);
     const detectedTheir = Number(g.parseDetectedTheirScore);
+    const groupKey = `${g.mode || "game"}__${g.sessionCode}`;
+    const fallbackGoals = Number(g.goals) || 0;
+    const groupedOur = g.sessionCode ? (groupedScores[groupKey] ?? fallbackGoals) : fallbackGoals;
+    const currentOur = Number(g.ourScore);
     const nextOurScore = Number.isFinite(detectedOur)
       ? detectedOur
-      : g.sessionCode
-        ? (groupedScores[g.sessionCode] ?? (Number(g.goals) || 0))
-        : (Number(g.goals) || 0);
+      : Math.max(Number.isFinite(currentOur) ? currentOur : 0, groupedOur, fallbackGoals);
     const nextTheirScore = g.opponentScoreManual
       ? g.theirScore
       : Number.isFinite(detectedTheir)
@@ -6727,7 +6839,7 @@ useEffect(() => {
     setStats(normalized);
     storeSet("stats", normalized);
   }
-}, [stats?.length]);
+}, [stats]);
 useEffect(() => {
   if (jumpDate) {
     const targetDate = (jumpDate && typeof jumpDate === "object") ? jumpDate.date : jumpDate; // JUMPDATE_NULL_SAFE_PATCH
@@ -7765,13 +7877,26 @@ function isSoundboardSoundId(id) {
 function getEquippedSoundboardIds(points, playerId) {
   const owned = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
   const equipped = points?.[playerId + "_equipped"] || {};
-  const selected = owned.filter(id => equipped[id] && isSoundboardSoundId(id));
-  return Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...selected])).slice(0,6);
+  // Defaults stay on the board automatically and do not use up custom sound slots.
+  const selected = owned.filter(id => equipped[id] && isSoundboardSoundId(id) && !DEFAULT_SOUNDBOARD_IDS.includes(id));
+  return Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...selected.slice(0, 6)]));
 }
 function getSoundboardAudioSrcs(soundId) {
   const sound = getSoundboardSound(soundId);
   const baseFile = sound?.file || `${soundId}.mp3`;
   const fallbackById = {
+    sb_wizard: [
+      baseFile,
+      "your a wizard.mp3",
+      "your a wizard mp3",
+      "youre a wizard.mp3",
+      "you're a wizard.mp3",
+      "you are a wizard.mp3",
+      "your-a-wizard.mp3",
+      "youre-a-wizard.mp3",
+      "your_a_wizard.mp3",
+      "wizard.mp3",
+    ],
     sb_fart_echo: [
       baseFile,
       "fart echo mp3",
@@ -8107,7 +8232,12 @@ useEffect(() => {
     if (alive) setVoicePresence(cleanVoicePresenceMap(vp));
   };
   const loadVoicePresence = async () => {
-    applyVoicePresence(await storeGet(VOICE_PRESENCE_KEY) || {});
+    const raw = await storeGet(VOICE_PRESENCE_KEY) || {};
+    const cleaned = cleanVoicePresenceMap(raw);
+    applyVoicePresence(cleaned);
+    if (voicePresenceMapsDiffer(raw, cleaned)) {
+      try { await storeSet(VOICE_PRESENCE_KEY, cleaned); } catch (_) {}
+    }
   };
   loadVoicePresence();
   // Do not open a second realtime subscription for voice_presence here.
@@ -8160,7 +8290,7 @@ const toggleEquip = async (itemId) => {
     const currentlyOn = !!newEquipped[itemId];
     if (currentlyOn) delete newEquipped[itemId];
     else {
-      const equippedSounds = SHOP_ITEMS.filter(i => i.type === "sound" && newEquipped[i.id]).map(i => i.id);
+      const equippedSounds = SHOP_ITEMS.filter(i => i.type === "sound" && newEquipped[i.id] && !DEFAULT_SOUNDBOARD_IDS.includes(i.id)).map(i => i.id);
       if (equippedSounds.length >= 6) delete newEquipped[equippedSounds[0]];
       newEquipped[itemId] = true;
     }
@@ -9628,18 +9758,20 @@ function betCandidateSortTime(game) {
   return safeDateObj(game?.syncedAt || game?.importedAt || game?.createdAt || game?.ts || Date.now()).getTime();
 }
 
-function findBetTargetGame(bet, stats = []) {
+function findBetTargetGame(bet, stats = [], options = {}) {
   const placedAt = new Date(bet?.placedAt || bet?.ts || 0).getTime();
   const settleAt = new Date(getBetSettleAt(bet)).getTime();
   const mode = getBetMode(bet);
+  const enforcePreMatchLock = options.enforcePreMatchLock !== false;
   const seenKeys = new Set(Array.isArray(bet?.statKeysAtPlacement) ? bet.statKeysAtPlacement : []);
   const allGames = sanitizeStatsForRender(stats)
     .filter(g => {
       if (!g || normalizeGameMode(g.mode) !== mode) return false;
-      if (!propBetWasPlacedBeforeGameStarted(bet, g)) return false;
+      if (enforcePreMatchLock && !propBetWasPlacedBeforeGameStarted(bet, g)) return false;
       const key = getBetGameKey(g);
       if (seenKeys.size) return key && !seenKeys.has(key);
       const ts = safeDateObj(g?.matchStartAt || g?.ts || 0).getTime();
+      if (!enforcePreMatchLock) return betCandidateSortTime(g) >= placedAt && ts <= settleAt;
       return ts >= placedAt && ts <= settleAt;
     })
     .sort((a, b) => betCandidateSortTime(a) - betCandidateSortTime(b));
@@ -9686,6 +9818,27 @@ function findBetTargetGame(bet, stats = []) {
     )[0];
 }
 
+function findBetLateLockedGame(bet, stats = []) {
+  const game = findBetTargetGame(bet, stats, { enforcePreMatchLock: false });
+  if (!game) return null;
+  return propBetWasPlacedBeforeGameStarted(bet, game) ? null : game;
+}
+
+function betHasLateLockedGame(bet, stats = []) {
+  return !!findBetLateLockedGame(bet, stats);
+}
+
+function betLateLockedResult(bet, game) {
+  const value = Number(game?.[bet?.field]);
+  return {
+    status:"lost",
+    note:"bet placed after the match started",
+    actual:Number.isFinite(value) ? value : undefined,
+    targetGameId:game?.id,
+    lateLocked:true,
+  };
+}
+
 function betHasTargetGame(bet, stats = []) {
   return !!findBetTargetGame(bet, stats);
 }
@@ -9694,17 +9847,22 @@ function resolveSingleBet(bet, stats = []) {
   if (bet?.isParlay) {
     const legResults = (bet.legs || []).map(leg => {
       const merged = { ...leg, placedAt: bet.placedAt, settleAt: getBetSettleAt(bet) };
+      const lateGame = findBetLateLockedGame(merged, stats);
+      if (lateGame) return { ...betLateLockedResult(merged, lateGame), leg };
       const game = findBetTargetGame(merged, stats);
       return { ...getBetResultFromGame(merged, game), leg };
     });
     if (!legResults.length || legResults.some(r => r.status === "void")) {
       return { status:"void", note:"one or more legs had no settled stat" };
     }
+    if (legResults.some(r => r.lateLocked)) return { status:"lost", note:"one or more legs were placed after match start", lateLocked:true };
     if (legResults.every(r => r.status === "won")) return { status:"won", note:"all parlay legs hit" };
     return { status:"lost", note:"one or more parlay legs missed" };
   }
 
   if (!bet?.playerId || !bet?.field || !bet?.side) return { status:"void", note:"unsupported bet type" };
+  const lateGame = findBetLateLockedGame(bet, stats);
+  if (lateGame) return betLateLockedResult(bet, lateGame);
   return getBetResultFromGame(bet, findBetTargetGame(bet, stats));
 }
 
@@ -9719,7 +9877,7 @@ function settledBetPushBody(bet) {
   const subject = `${bet.playerName || "your prop"} ${side} ${bet.line ?? ""} ${bet.fieldLabel || bet.field || ""}`.replace(/\s+/g, " ").trim();
   if (bet.status === "won") return `${subject} - +${bet.payout || 0}pts`;
   if (bet.status === "void") return `${subject} - voided +${bet.wager || 0}pts`;
-  return `${subject} - lost`;
+  return `${subject} - lost${bet.lateLocked ? " (late bet)" : ""}`;
 }
 
 async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
@@ -9728,7 +9886,7 @@ async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
   const due = list.filter(b => {
     if (b?.status !== "open") return false;
     const settleAt = new Date(getBetSettleAt(b)).getTime();
-    return betHasTargetGame(b, stats) || settleAt <= now;
+    return betHasTargetGame(b, stats) || betHasLateLockedGame(b, stats) || settleAt <= now;
   });
   if (!due.length) return false;
 
@@ -9747,6 +9905,7 @@ async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
       settlementNote: result.note,
       actual: result.actual,
       targetGameId: result.targetGameId,
+      lateLocked: !!result.lateLocked,
     };
   });
 
@@ -10557,6 +10716,8 @@ const [propPlayerFilter, setPropPlayerFilter] = useState(() => PLAYERS.find(p =>
 const [propModeFilter, setPropModeFilter] = useState("1v1");
 const [propDuoFilter, setPropDuoFilter] = useState("");
 const [showPropStream, setShowPropStream] = useState(false);
+const [propStreamMode, setPropStreamMode] = useState("single");
+const [propOneVOneCoStreamPlayerId, setPropOneVOneCoStreamPlayerId] = useState(() => PLAYERS.find(p => p.id !== currentPlayer)?.id || "p1");
   const [lineIndexByProp, setLineIndexByProp] = useState({}); // { [propId]: index into lineOptions }
 const [predWager, setPredWager] = useState(10);
 const [selectedPred, setSelectedPred] = useState(null);
@@ -10585,9 +10746,25 @@ const [predSide, setPredSide] = useState(null);
       }))
     : [];
   const activePropDuo = propDuoOptions.find(d => d.id === propDuoFilter) || propDuoOptions[0] || null;
-  const activePropTwitch = String(streamProfiles?.[activePropPlayer?.id]?.twitch || "").replace(/^@/, "").trim();
+  const getPropTwitchHandle = (playerId) => String(streamProfiles?.[playerId]?.twitch || "").replace(/^@/, "").trim();
+  const activePropTwitch = getPropTwitchHandle(activePropPlayer?.id);
   const twitchParent = typeof window !== "undefined" ? window.location.hostname : "localhost";
-  useEffect(() => { setShowPropStream(false); }, [activePropPlayer?.id]);
+  const oneVOneStreamOptions = PLAYERS.filter(p => p.id !== activePropPlayer?.id);
+  const oneVOneCoStreamPlayer = oneVOneStreamOptions.find(p => p.id === propOneVOneCoStreamPlayerId) || oneVOneStreamOptions[0] || null;
+  const activePropStreamPlayers = (() => {
+    if (propModeFilter === "2v2" && activePropDuo?.playerIds?.length) {
+      return activePropDuo.playerIds.map(id => PLAYERS.find(p => p.id === id)).filter(Boolean);
+    }
+    if (propModeFilter === "1v1" && propStreamMode === "multi") {
+      return [activePropPlayer, oneVOneCoStreamPlayer].filter(Boolean).filter((p, idx, arr) => arr.findIndex(x => x.id === p.id) === idx);
+    }
+    return [activePropPlayer].filter(Boolean);
+  })();
+  const activePropStreamHandles = activePropStreamPlayers
+    .map(p => ({ player: p, handle: getPropTwitchHandle(p.id) }))
+    .filter(x => x.handle);
+  const canWatchPropStream = activePropStreamHandles.length > 0;
+  useEffect(() => { setShowPropStream(false); }, [activePropPlayer?.id, propModeFilter, activePropDuo?.id, propStreamMode, propOneVOneCoStreamPlayerId]);
 
   const getPropHistory = (playerId, mode, duo = null) => sanitizeStatsForRender(stats).filter(g => {
     if (!g || g.playerId !== playerId) return false;
@@ -10975,30 +11152,58 @@ const noBettingWeek = isEventActive("no_betting");
       {section==="props"&&(
         <div>
           <div style={{background:"linear-gradient(135deg,#160D24,#0A0C16)",border:"1px solid rgba(167,139,250,0.20)",borderRadius:16,padding:14,marginBottom:14,boxShadow:"0 12px 28px rgba(0,0,0,0.18)"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:showPropStream&&activePropTwitch?12:0}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:showPropStream&&canWatchPropStream?12:0}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>watch while you bet</div>
-                <div style={{display:"flex",alignItems:"center",gap:7,fontSize:13,fontWeight:900,color:"#E8ECF4"}}>
-                  <span>{activePropPlayer?.name || "player"}</span>
-                  <TwitchLiveDot handle={activePropTwitch} size={8}/>
+                <div style={{display:"flex",alignItems:"center",gap:7,fontSize:13,fontWeight:900,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  <span>{propModeFilter === "2v2" ? (activePropDuo?.label || "duo") : propModeFilter === "1v1" && propStreamMode === "multi" ? `${activePropPlayer?.name || "player"} + ${oneVOneCoStreamPlayer?.name || "pov"}` : (activePropPlayer?.name || "player")}</span>
+                  {activePropStreamHandles.slice(0,2).map(x => <TwitchLiveDot key={x.player.id} handle={x.handle} size={8}/>)}
                 </div>
-                <div style={{fontSize:11,color:activePropTwitch?"#8B92A8":"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                  {activePropTwitch ? `twitch.tv/${activePropTwitch}` : "no twitch linked for this player"}
+                <div style={{fontSize:11,color:canWatchPropStream?"#8B92A8":"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                  {canWatchPropStream ? `${activePropStreamHandles.length} POV${activePropStreamHandles.length!==1?"s":""} linked` : "no twitch linked for this view"}
                 </div>
               </div>
-              <button onClick={()=>activePropTwitch&&setShowPropStream(v=>!v)} disabled={!activePropTwitch} className="bb-pressable bb-glow-violet" style={{background:activePropTwitch?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:12,padding:"10px 13px",fontSize:12,fontWeight:900,color:activePropTwitch?"#06070D":"#4A5066",cursor:activePropTwitch?"pointer":"default",display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
-                <Tv size={14}/>{showPropStream ? "hide" : "watch"}
+              <button onClick={()=>canWatchPropStream&&setShowPropStream(v=>!v)} disabled={!canWatchPropStream} className="bb-pressable bb-glow-violet" style={{background:canWatchPropStream?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:12,padding:"10px 13px",fontSize:12,fontWeight:900,color:canWatchPropStream?"#06070D":"#4A5066",cursor:canWatchPropStream?"pointer":"default",display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
+                <Tv size={14}/>{showPropStream ? "hide" : (activePropStreamHandles.length > 1 ? "multiview" : "watch")}
               </button>
             </div>
-            {showPropStream && activePropTwitch && (
-              <div style={{position:"relative",paddingTop:"56.25%",borderRadius:14,overflow:"hidden",background:"#05060C",border:"1px solid rgba(255,255,255,0.08)"}}>
-                <iframe
-                  src={`https://player.twitch.tv/?channel=${encodeURIComponent(activePropTwitch)}&parent=${twitchParent}&autoplay=true&muted=false`}
-                  title={`${activePropPlayer?.name || "player"} Twitch stream`}
-                  allow="autoplay; fullscreen; picture-in-picture"
-                  allowFullScreen
-                  style={{position:"absolute",inset:0,width:"100%",height:"100%",border:"none"}}
-                />
+            {propModeFilter === "1v1" && (
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:showPropStream&&canWatchPropStream?12:0}}>
+                {["single","multi"].map(view => (
+                  <button key={view} onClick={()=>setPropStreamMode(view)} className="bb-pressable" style={{background:propStreamMode===view?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"8px 8px",fontSize:10.5,fontWeight:900,color:propStreamMode===view?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                    {view === "single" ? "single POV" : "1v1 multiview"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {propModeFilter === "1v1" && propStreamMode === "multi" && oneVOneStreamOptions.length > 0 && (
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:showPropStream&&canWatchPropStream?12:0}}>
+                {oneVOneStreamOptions.map(p => (
+                  <button key={p.id} onClick={()=>setPropOneVOneCoStreamPlayerId(p.id)} className="bb-pressable" style={{flex:"1 1 110px",background:oneVOneCoStreamPlayer?.id===p.id?p.color:"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"8px 8px",fontSize:10.5,fontWeight:900,color:oneVOneCoStreamPlayer?.id===p.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                    second POV · {p.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {showPropStream && canWatchPropStream && (
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {activePropStreamHandles.map(({player, handle}, idx) => (
+                  <div key={`${player.id}-${handle}`} style={{borderRadius:14,overflow:"hidden",background:"#05060C",border:`1px solid ${player.color}44`}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",background:"rgba(255,255,255,0.04)"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:7,fontSize:11,fontWeight:900,color:player.color}}><TwitchLiveDot handle={handle} size={7}/>{player.name} POV</div>
+                      <div style={{fontSize:10,color:"#4A5066"}}>twitch.tv/{handle}</div>
+                    </div>
+                    <div style={{position:"relative",paddingTop:"56.25%"}}>
+                      <iframe
+                        src={`https://player.twitch.tv/?channel=${encodeURIComponent(handle)}&parent=${twitchParent}&autoplay=${idx===0?"true":"false"}&muted=${idx===0?"false":"true"}`}
+                        title={`${player.name} Twitch stream`}
+                        allow="autoplay; fullscreen; picture-in-picture"
+                        allowFullScreen
+                        style={{position:"absolute",inset:0,width:"100%",height:"100%",border:"none"}}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -11095,7 +11300,7 @@ const noBettingWeek = isEventActive("no_betting");
           })}
 
           {selectedProp&&propSide&&(
-            <div style={{position:"sticky",bottom:0,background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
+            <div style={{position:"sticky",bottom:"env(safe-area-inset-bottom, 0px)",background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
               <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:10}}>
                 {PROP_WAGER_PRESETS.map(amount => {
@@ -12290,7 +12495,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
     <button key={p1game.id} onClick={() => setChemSelectedGame({ game: p1game, allPlayerGames: myAllGames })} className="bb-pressable"
       style={{width:"100%",background:"#11131F",borderRadius:13,padding:"13px 14px",marginBottom:8,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",textAlign:"left"}}>
       <div>
-        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{p1game.ourScore}–{p1game.theirScore}</div>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#E8ECF4"}}>{formatGameScore(p1game)}</div>
         <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>{fmtRelTime(p1game.ts)}{p1game.sessionCode ? ` · ${p1game.sessionCode}` : ""}</div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -13747,7 +13952,7 @@ const TABS=[
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
           
 {tab==="room"&&(
-<div style={{display:"flex",flexDirection:"column",alignItems:"center",minHeight:"100%",padding:"20px 20px max(120px, env(safe-area-inset-bottom))",overflow:"visible"}}>
+<div style={{display:"flex",flexDirection:"column",alignItems:"center",minHeight:"100%",padding:"20px 20px max(36px, env(safe-area-inset-bottom))",overflow:"visible"}}>
     <div style={{width:"100%",maxWidth:480,overflow:"visible"}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
       <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce} soundboardEvent={soundboardEvent}/>
@@ -13843,16 +14048,16 @@ export default function App() {
 
 // ===================== Styles =====================
 const s = {
-appShell:{display:"flex",flexDirection:"column",height:"var(--bb-real-vh, 100dvh)",minHeight:"var(--bb-real-vh, 100dvh)",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:0},
-  screen:{height:"var(--bb-real-vh, 100dvh)",minHeight:"var(--bb-real-vh, 100dvh)",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"},
+appShell:{display:"flex",flexDirection:"column",height:"var(--bb-real-vh, 100dvh)",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:0,backgroundSize:"cover",backgroundPosition:"center",backgroundRepeat:"no-repeat"},
+  screen:{height:"var(--bb-real-vh, 100dvh)",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto",backgroundSize:"cover",backgroundPosition:"center",backgroundRepeat:"no-repeat"},
 topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
   topBarRight:{display:"flex",alignItems:"center",gap:8},
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"calc(22px + env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none"},
-  tabContent:{padding:"16px 16px 24px"},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"max(28px, env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none",background:"transparent"},
+  tabContent:{padding:"16px 16px max(34px, env(safe-area-inset-bottom, 0px))",minHeight:"calc(var(--bb-real-vh, 100dvh) - 118px)"},
 pageButtonNav:{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"10px 14px",paddingBottom:8,background:"rgba(6,7,13,0.72)",borderBottom:"1px solid rgba(255,255,255,0.06)",scrollbarWidth:"none",msOverflowStyle:"none",position:"relative",zIndex:5,flexShrink:0},
 pageButtonNavItem:{flexShrink:0,minWidth:72,borderRadius:16,padding:"10px 10px",display:"flex",alignItems:"center",justifyContent:"center",gap:7,cursor:"pointer",backdropFilter:"blur(10px)"},
 tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px) - 10px)",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_DROP_FINAL: drops buttons into bottom safe-area gap */},
