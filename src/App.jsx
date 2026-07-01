@@ -184,6 +184,11 @@ function fmtRelTime(iso) {
   if (hrs < 24) return `${hrs}h ago`;
   return `${Math.floor(hrs/24)}d ago`;
 }
+function bbHaptic(pattern = 14) {
+  try {
+    if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") navigator.vibrate(pattern);
+  } catch (_) {}
+}
 function tKey(dk, pid) { return `${dk}__${pid}`; }
 function normalizeGameMode(mode) {
   const m = String(mode || "").toLowerCase();
@@ -673,6 +678,7 @@ function GlobalStyles() {
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600&family=Inter:wght@400;600;700&display=swap');
       @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes wheelTickerFlicker { 0%,100%{ transform:translateY(-50%) rotate(0deg); } 25%{ transform:translateY(-50%) rotate(-9deg); } 50%{ transform:translateY(-50%) rotate(6deg); } 75%{ transform:translateY(-50%) rotate(-4deg); } }
+      @keyframes wheelOuterLights { 0%{ transform:rotate(0deg) scale(1); filter:blur(.2px) drop-shadow(0 0 10px rgba(184,255,77,.38)); } 50%{ transform:rotate(180deg) scale(1.018); filter:blur(.2px) drop-shadow(0 0 20px rgba(255,209,102,.52)); } 100%{ transform:rotate(360deg) scale(1); filter:blur(.2px) drop-shadow(0 0 10px rgba(184,255,77,.38)); } }
       @keyframes coinFlipReal { 0%{ transform:translate3d(0,0,0) rotateX(0deg) rotateZ(-4deg); } 18%{ transform:translate3d(0,-16px,0) rotateX(360deg) rotateZ(4deg); } 40%{ transform:translate3d(0,-27px,0) rotateX(720deg) rotateZ(-3deg); } 62%{ transform:translate3d(0,-20px,0) rotateX(1080deg) rotateZ(3deg); } 82%{ transform:translate3d(0,-8px,0) rotateX(1440deg) rotateZ(-2deg); } 100%{ transform:translate3d(0,0,0) rotateX(1800deg) rotateZ(0deg); } }
       @keyframes coinShine { 0%,100%{ opacity:.16; transform:translateX(-45%) rotate(18deg); } 50%{ opacity:.34; transform:translateX(45%) rotate(18deg); } }
       @keyframes fadeSlideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
@@ -1018,14 +1024,11 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
   const safeGames = Array.isArray(session?.games) ? session.games.filter(Boolean).map(normalizeStatForRender).filter(Boolean) : [];
   const safeSession = { ...(session || {}), games: safeGames, mode: session?.mode || safeGames[0]?.mode || "3v3", ts: session?.ts || safeGames[0]?.ts || new Date().toISOString() };
   const [open, setOpen] = useState(!!jumpGameId && safeGames.some(g => String(g.id) === String(jumpGameId)));
-  const [selectedGame, setSelectedGame] = useState(null);
   useEffect(() => {
     if (!jumpGameId) return;
     const target = safeGames.find(g => String(g.id) === String(jumpGameId));
     if (!target) return;
     setOpen(true);
-    const timer = setTimeout(() => setSelectedGame(target), 240);
-    return () => clearTimeout(timer);
   }, [jumpGameId, session.code]);
   const rep = (session?.games || [])[0] || {};
   const won = gameIsWin(rep);
@@ -1037,14 +1040,6 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
 
   return (
     <div style={{background:"#11131F",borderRadius:14,marginBottom:10,border:`1px solid ${won?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`}}>
-      {selectedGame && (
-        <GameDetailModal
-          game={selectedGame}
-          allPlayerGames={sanitizeStatsForRender(allStats).filter(g=>g.playerId===selectedGame.playerId&&g.mode===selectedGame.mode).sort((a,b)=>safeDateObj(a.ts).getTime()-safeDateObj(b.ts).getTime())}
-          onClose={()=>setSelectedGame(null)}
-          onUpdateOpponentScore={onUpdateOpponentScore}
-        />
-      )}
       {/* Clickable header */}
       <button onClick={()=>setOpen(v=>!v)} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:"14px 16px",cursor:"pointer",textAlign:"left"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -1067,8 +1062,8 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
           {sessionGames.map(g => {
             const p = PLAYERS.find(pl => pl.id === g.playerId);
             return (
-              <button key={g.id} onClick={()=>setSelectedGame(g)} className="bb-pressable"
-                style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:10,border:"1px solid rgba(255,255,255,0.04)",cursor:"pointer",textAlign:"left",width:"100%"}}>
+              <div key={g.id}
+                style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:10,border:"1px solid rgba(255,255,255,0.04)",cursor:"default",textAlign:"left",width:"100%"}}>
                 <div style={{width:7,height:7,borderRadius:99,background:p?.color,flexShrink:0}}/>
                 <span style={{fontSize:12,fontWeight:700,color:p?.color,minWidth:64}}>{p?.name}</span>
 
@@ -1087,8 +1082,7 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
                     </div>
                   ))}
                 </div>
-                <div style={{fontSize:9,color:"#4A5066",flexShrink:0}}>→</div>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -1469,7 +1463,7 @@ function heatMultiplier(wins) {
 
 function HeatStreakCard({ stats, currentPlayer }) {
   const [selectedGame, setSelectedGame] = useState(null);
-
+  
   const todayDk = dateKey(todayAtMidnight());
   const streaks = getNightStreaks(stats);
   const todayStreak = streaks[0];
@@ -1913,7 +1907,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const [kindTab, setKindTab] = useState("title");
   const profileKindTabs = sourceTab === "pass"
     ? [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"}]
-    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"border",label:"borders"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"},{id:"background",label:"backgrounds"}];
+    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"border",label:"borders"},{id:"sound",label:"sounds"},{id:"background",label:"backgrounds"}];
   useEffect(() => {
     if (!profileKindTabs.some(t => t.id === kindTab)) setKindTab(profileKindTabs[0]?.id || "title");
   }, [sourceTab, kindTab]);
@@ -1939,6 +1933,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   };
   const itemType = (id) => SHOP_ITEMS.find(i => i.id === id)?.type || (id.startsWith("pass_") ? getPassRewardForOwnedId(id)?.type : null);
   const toggleEquip = async (id) => {
+    bbHaptic(12);
     const type = itemType(id);
     if (!type || !["color","icon","title","background","border","text_color","sound"].includes(type)) return;
     const newEquipped = { ...equipped };
@@ -2192,7 +2187,7 @@ return (
             </div>
           );
         })}
-        <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>tap for full breakdown →</div>
+        
       </button>
       <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
     </>}
@@ -5790,27 +5785,15 @@ const FIELDS = ["goals","assists","saves","shots"];
 
 function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats, currentPlayer, onUpdateOpponentScore }) {
   const [open, setOpen] = useState(dk === jumpDate || false);
-  const [selectedGame, setSelectedGame] = useState(null);
   const date = new Date(dk + "T00:00:00");
   const wins = games.filter(g => gameIsWin(g)).length;
   const isJump = dk === jumpDate;
   useEffect(() => { if (isJump) setOpen(true); }, [isJump]);
 
-  const myAllGames = (allStats||[])
-    .filter(g => g.playerId === currentPlayer && g.mode === games[0]?.mode)
-    .sort((a,b) => new Date(a.ts)-new Date(b.ts));
 
   return (
     <div id={`gamelog-${dk}`} style={{marginBottom:10}}>
-      {selectedGame && (
-        <GameDetailModal
-          game={selectedGame}
-          allPlayerGames={myAllGames}
-          onClose={() => setSelectedGame(null)}
-          onUpdateOpponentScore={onUpdateOpponentScore}
-        />
-      )}
-      <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
+            <button onClick={() => setOpen(v=>!v)} className="bb-pressable"
         style={{width:"100%",background:"#11131F",borderRadius:13,padding:"12px 14px",border:`1px solid ${isJump?"rgba(167,139,250,0.4)":"rgba(255,255,255,0.06)"}`,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",marginBottom:open?6:0}}>
         <div style={{textAlign:"left"}}>
           <div style={{fontSize:12,fontWeight:700,color:playerColor}}>{fmtDay(date)}</div>
@@ -5824,8 +5807,8 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
       {open && games.map(g => {
         const won = gameIsWin(g);
         return (
-          <button key={g.id} onClick={() => setSelectedGame(g)} className="bb-pressable"
-            style={{width:"100%",background:"rgba(255,255,255,0.02)",borderRadius:11,padding:"11px 13px",marginBottom:6,border:`1px solid ${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"}`,textAlign:"left",cursor:"pointer"}}>
+          <div key={g.id}
+            style={{width:"100%",background:"rgba(255,255,255,0.02)",borderRadius:11,padding:"11px 13px",marginBottom:6,border:`1px solid ${won?"rgba(124,255,178,0.12)":"rgba(255,92,138,0.08)"}`,textAlign:"left",cursor:"default"}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:700}}>{formatGameScore(g)}</div>
               <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -5841,8 +5824,8 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
                 </div>
               ))}
             </div>
-            <div style={{fontSize:9,color:"#4A5066",marginTop:6}}>tap for full breakdown →</div>
-          </button>
+            
+          </div>
         );
       })}
     </div>
@@ -7749,10 +7732,10 @@ function getBackgroundPreview(value) {
 }
 function getBackgroundVisualStyle(bgId, customUrl, theme) {
   const item = SHOP_ITEMS.find(i => i.id === bgId);
-  if (item?.value === "custom" && customUrl) return { backgroundImage:`url(${customUrl})`, backgroundSize:"cover", backgroundPosition:"center" };
-  if (!item) return { background:theme.bg };
+  if (item?.value === "custom" && customUrl) return { background:theme.bg, backgroundImage:`url(${customUrl})`, backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" };
+  if (!item) return { background:theme.bg, backgroundImage:"none", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat", color:theme.text };
   const bg = getBackgroundPreview(item.value);
-  const base = { backgroundImage:bg };
+  const base = { background:theme.bg, backgroundImage:bg, backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat", color:theme.text };
   if (item.value === "goalnet") base.backgroundSize = "34px 34px,34px 34px,cover";
   if (item.value === "whiteout" || item.value === "snow" || item.value === "holo" || item.value === "ice") base.color = "#11131F";
   return base;
@@ -8470,6 +8453,7 @@ const upd = [...myUpd, ...others];
   const equipped = safePoints?.[currentPlayer + "_equipped"] && typeof safePoints[currentPlayer + "_equipped"] === "object" ? safePoints[currentPlayer + "_equipped"] : {};
 
   const buyItem = async (item) => {
+    bbHaptic(12);
     if (myPoints < item.cost) return;
     if (owned.includes(item.id)) return;
     const upd = { ...safePoints, [currentPlayer]: myPoints - item.cost, [currentPlayer + "_owned"]: [...owned, item.id] };
@@ -8478,6 +8462,7 @@ const upd = [...myUpd, ...others];
   };
 
 const toggleEquip = async (itemId) => {
+  bbHaptic(10);
   const item = SHOP_ITEMS.find(i => i.id === itemId);
   const newEquipped = { ...equipped };
   if (item?.type === "background") {
@@ -10788,7 +10773,7 @@ function WeeklyRecapTrivia({ stats, currentPlayer, points, setPoints }) {
 function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets, streamProfiles = {} }) {
 const [section, setSection] = useState("wheel");
 const [parlayLegs, setParlayLegs] = useState([]);
-const [parlayWager, setParlayWager] = useState(10);
+const [parlayWager, setParlayWager] = useState(50);
 const [showParlay, setShowParlay] = useState(false);
 const [slotSpinning, setSlotSpinning] = useState(false);
 const [slotReels, setSlotReels] = useState(["🚀","🚀","🚀"]);
@@ -10824,6 +10809,7 @@ const [predSide, setPredSide] = useState(null);
 
   const myPoints = points?.[currentPlayer] || 0;
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
+  const PROPS_PARLAY_WAGER_PRESETS = [50, 100, 250, 500];
   useEffect(() => { if (section === "predict" || section === "parlay") setSection("props"); }, [section]);
 
   // Build player props from stats across 1v1 / 2v2 / 3v3.
@@ -10977,6 +10963,7 @@ const [predSide, setPredSide] = useState(null);
 
 const getLegPropKey = (leg) => leg.propKey || `${leg.playerId}_${leg.field}_${leg.line}`;
 const toggleParlayLeg = (leg) => {
+  bbHaptic(10);
   setParlayLegs(prev => {
     const sameLegSelected = prev.some(l => l.id === leg.id);
     if (sameLegSelected) return prev.filter(l => l.id !== leg.id);
@@ -10998,6 +10985,7 @@ const getParlayLegDecimalOdds = (odds) => {
 const propsParlayMultiplier = parlayLegs.reduce((m, leg) => m * Math.min(getParlayLegDecimalOdds(leg.odds), 3), 1);
 const propsParlayPayout = Math.round(Number(parlayWager || 0) * propsParlayMultiplier);
 const placeOwnPropsParlay = async () => {
+  bbHaptic([14, 35, 18]);
   const cleanWager = Number(parlayWager) || 0;
   if (parlayLegs.length < 2 || myPoints < cleanWager || cleanWager <= 0) return;
   const parlayBet = {
@@ -11030,7 +11018,7 @@ const placeOwnPropsParlay = async () => {
   const updBets = [...(bets || []), parlayBet];
   setBets(updBets); await storeSet("bets", updBets);
   setParlayLegs([]);
-  setParlayWager(10);
+  setParlayWager(50);
   setShowParlay(false);
 };
 const renderPropsParlayBuilder = () => (
@@ -11054,17 +11042,23 @@ const renderPropsParlayBuilder = () => (
             <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>MULTIPLIER</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#FFD166"}}>{propsParlayMultiplier.toFixed(2)}x</div>
           </div>
-          <div style={{flex:1}}>
+          <div style={{flex:1.35}}>
             <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>WAGER</div>
-            <input type="number" min="1" max="200" inputMode="numeric" value={parlayWager} onChange={e=>setParlayWager(clampWager(e.target.value, parlayWager))} style={{...s.modalInput,padding:"8px 10px",fontSize:14}}/>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:5}}>
+              {PROPS_PARLAY_WAGER_PRESETS.map(amt => (
+                <button key={amt} onClick={()=>{ bbHaptic(10); setParlayWager(amt); }} className="bb-pressable" style={{background:Number(parlayWager)===amt?"#FFD166":"rgba(255,255,255,0.05)",border:`1px solid ${Number(parlayWager)===amt?"#FFD166":"rgba(255,255,255,0.07)"}`,borderRadius:8,padding:"7px 0",fontSize:10.5,fontWeight:900,color:Number(parlayWager)===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  {amt}
+                </button>
+              ))}
+            </div>
           </div>
           <div style={{flex:1}}>
             <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>TO WIN</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#7CFFB2"}}>{propsParlayPayout}</div>
           </div>
         </div>
-        <button onClick={placeOwnPropsParlay} disabled={parlayLegs.length<2||myPoints<Number(parlayWager)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<Number(parlayWager)?0.4:1}}>
-          place {parlayLegs.length}-leg parlay — {parlayWager} pts to win {propsParlayPayout}
+        <button onClick={placeOwnPropsParlay} disabled={parlayLegs.length<2||myPoints<Number(parlayWager)} className="bb-pressable bb-glow-lime bb-force-dark" style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<Number(parlayWager)?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",minHeight:48}}>
+          submit
         </button>
       </>
     )}
@@ -11105,6 +11099,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
 
 const spinWheel = async () => {
     if (spinning || wager < 1 || myPoints < wager) return;
+    bbHaptic([18, 30, 18]);
     if (spinsLeft <= 0) return;
 
     const startingPoints = Number(myPoints) || 0;
@@ -11137,12 +11132,14 @@ const spinWheel = async () => {
       setPoints(updatedPoints);
       await storeSet("points", updatedPoints);
       setSpinResult({ seg, wager, payout, net });
+      bbHaptic(net >= 0 ? [20, 45, 25] : 28);
       setSpinning(false);
       setSpinStartPoints(null);
     }, 3000);
   };
 
 const placeBet = async (chosenLine) => {
+  bbHaptic(14);
   const safePropWager = clampWager(propWager, 25);
   if (!selectedProp || !propSide || safePropWager < 1 || myPoints < safePropWager) return;
 
@@ -11237,7 +11234,7 @@ const noBettingWeek = isEventActive("no_betting");
         </div>
         <div style={{fontSize:11,color:"#4A5066",textAlign:"right"}}>
           <div style={{color:"#FFD166",fontWeight:700,fontSize:13}}>{myOpenBets.length} open bets</div>
-          <div style={{marginTop:2}}>{mySettledBets.length} settled</div>
+          
         </div>
       </div>
 
@@ -11257,9 +11254,10 @@ const noBettingWeek = isEventActive("no_betting");
 
           {/* Wheel visual */}
           <div style={{position:"relative",width:286,height:286,margin:"0 auto 24px",filter:"drop-shadow(0 18px 34px rgba(0,0,0,0.38))"}}>
+            <div style={{position:"absolute",inset:-9,borderRadius:"50%",background:`conic-gradient(from 0deg, ${playerColor}, #FFD166, #4D9EFF, #FF61C1, ${playerColor})`,opacity:spinning?0.95:0.28,animation:spinning?"wheelOuterLights .55s linear infinite":"none",zIndex:0}}/>
             <div style={{position:"absolute",top:"50%",right:-10,transform:"translateY(-50%)",zIndex:15,width:34,height:28,background:"#FF2D2D",clipPath:"polygon(0 50%,100% 8%,100% 92%)",borderRadius:4,filter:"drop-shadow(0 0 10px rgba(255,45,45,0.55))",animation:spinning?"wheelTickerFlicker .12s linear infinite":"none"}}/>
-            <div style={{position:"absolute",inset:0,borderRadius:"50%",background:"radial-gradient(circle at 35% 28%,rgba(255,255,255,0.16),transparent 30%),linear-gradient(135deg,#222739,#090B14)",border:"10px solid rgba(184,255,77,0.32)",boxShadow:"inset 0 0 0 7px rgba(6,7,13,0.72), inset 0 0 30px rgba(0,0,0,0.5)"}}/>
-            <div style={{position:"absolute",top:13,left:13,width:"calc(100% - 26px)",height:"calc(100% - 26px)",borderRadius:"50%",overflow:"hidden",border:"6px solid rgba(6,7,13,0.8)",transition:spinning?"transform 3s cubic-bezier(0.17,0.67,0.12,0.99)":"none",transform:`rotate(${rotation}deg)`,boxShadow:"inset 0 0 0 4px rgba(255,255,255,0.07)"}}>
+            <div style={{position:"absolute",inset:0,borderRadius:"50%",background:"radial-gradient(circle at 35% 28%,rgba(255,255,255,0.16),transparent 30%),linear-gradient(135deg,#222739,#090B14)",border:"10px solid rgba(184,255,77,0.32)",boxShadow:"inset 0 0 0 7px rgba(6,7,13,0.72), inset 0 0 30px rgba(0,0,0,0.5)",zIndex:1}}/>
+            <div style={{position:"absolute",top:13,left:13,width:"calc(100% - 26px)",height:"calc(100% - 26px)",borderRadius:"50%",overflow:"hidden",border:"6px solid rgba(6,7,13,0.8)",transition:spinning?"transform 3s cubic-bezier(0.17,0.67,0.12,0.99)":"none",transform:`rotate(${rotation}deg)`,boxShadow:"inset 0 0 0 4px rgba(255,255,255,0.07)",zIndex:2}}>
               <svg viewBox="0 0 200 200" style={{width:"100%",height:"100%",display:"block"}}>
                 <circle cx="100" cy="100" r="100" fill="#0B0D17"/>
                 {WHEEL_SEGMENTS.map((seg, i) => {
@@ -11340,9 +11338,9 @@ const noBettingWeek = isEventActive("no_betting");
                   <span>{propModeFilter === "2v2" ? (activePropDuo?.label || "duo") : propModeFilter === "1v1" && propStreamMode === "multi" ? `${activePropPlayer?.name || "player"} + ${oneVOneCoStreamPlayer?.name || "pov"}` : (activePropPlayer?.name || "player")}</span>
                   {activePropStreamHandles.slice(0,2).map(x => <TwitchLiveDot key={x.player.id} handle={x.handle} size={8}/>)}
                 </div>
-                <div style={{fontSize:11,color:canWatchPropStream?"#8B92A8":"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                  {canWatchPropStream ? `${activePropStreamHandles.length} POV${activePropStreamHandles.length!==1?"s":""} linked` : "no twitch linked for this view"}
-                </div>
+                {!canWatchPropStream && (
+                  <div style={{fontSize:11,color:"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>no twitch linked for this view</div>
+                )}
               </div>
               <button onClick={()=>canWatchPropStream&&setShowPropStream(v=>!v)} disabled={!canWatchPropStream} className="bb-pressable bb-glow-violet" style={{background:canWatchPropStream?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:12,padding:"10px 13px",fontSize:12,fontWeight:900,color:canWatchPropStream?"#06070D":"#4A5066",cursor:canWatchPropStream?"pointer":"default",display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
                 <Tv size={14}/>{showPropStream ? "hide" : (activePropStreamHandles.length > 1 ? "multiview" : "watch")}
@@ -11557,6 +11555,7 @@ const noBettingWeek = isEventActive("no_betting");
         };
         const spinSlots = async () => {
           if(slotSpinning||myPoints<slotWager||slotsLeft<=0) return;
+          bbHaptic([12, 24, 12]);
           setSlotSpinning(true); setSlotResult(null);
           const results = [pickSym(),pickSym(),pickSym()];
           let tick = 0;
@@ -11584,6 +11583,7 @@ const noBettingWeek = isEventActive("no_betting");
               const updCount2 = {...upd,[slotCountKey]:slotsUsed+1};
               setPoints(updCount2); storeSet("points",updCount2);
               setSlotResult({results,mult,payout,net,allSame,twosame});
+              bbHaptic(net >= 0 ? [16, 35, 18] : 24);
               setSlotSpinning(false);
             }
           },100);
@@ -13022,6 +13022,60 @@ const addToast = useCallback((text, icon = "🔔") => {
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
 }, []);
 
+  useEffect(() => {
+    if (authStage !== "app" || !currentPlayer || !points || Object.keys(points).length === 0) return;
+    const grantKey = `${currentPlayer}_wheel_visual_test_spins_v1`;
+    if (points[grantKey]) return;
+    const bonusKey = `${currentPlayer}_bonusSpins`;
+    const upd = { ...points, [bonusKey]: (Number(points[bonusKey]) || 0) + 2, [grantKey]: true };
+    setPoints(upd);
+    storeSet("points", upd).catch(() => {});
+    addToast?.("+2 test wheel spins", "🎡");
+  }, [authStage, currentPlayer, points, addToast]);
+
+  useEffect(() => {
+    if (authStage !== "app" || !currentPlayer) return;
+    let alreadyScheduled = false;
+    try {
+      const key = `bb_test_squad_checkin_${currentPlayer}_${dateKey(new Date())}`;
+      alreadyScheduled = sessionStorage.getItem(key) === "1";
+      if (!alreadyScheduled) sessionStorage.setItem(key, "1");
+    } catch (_) {}
+    if (alreadyScheduled) return;
+    const timeoutId = setTimeout(async () => {
+      const now = new Date().toISOString();
+      const player = PLAYERS.find(p => p.id === currentPlayer);
+      const testPing = {
+        id: `test_squad_checkin_${currentPlayer}_${Date.now()}`,
+        from: currentPlayer,
+        to: currentPlayer,
+        type: "session",
+        mode: "squad check-in",
+        sessionId: `test_squad_checkin_${currentPlayer}`,
+        startsAt: now,
+        minutesUntil: 0,
+        ts: now,
+        test: true,
+      };
+      try {
+        const fresh = await storeGet("pings") || [];
+        const upd = [testPing, ...fresh.filter(p => p.id !== testPing.id)].slice(0, 80);
+        setPings(upd);
+        await storeSet("pings", upd);
+      } catch (_) {}
+      setSessionPingBanner({
+        fromName: player?.name || "squad",
+        color: player?.color || "#B8FF4D",
+        mode: "squad check-in",
+        sessionId: testPing.sessionId,
+        minutesUntil: 0,
+      });
+      addToast?.("test squad check-in notification", "⏱️");
+      showLocalNotification("⏱️ Squad check-in", "test notification — squad check-in works", { url:makeNotificationUrl("ping", { type:"test_checkin" }), type:"test_checkin", id:testPing.id });
+    }, 30 * 60 * 1000);
+    return () => clearTimeout(timeoutId);
+  }, [authStage, currentPlayer, addToast]);
+
 
 useEffect(() => {
   if (!currentPlayer || authStage !== "app") return;
@@ -13921,7 +13975,7 @@ const TABS=[
   };
 
   return (
-    <div style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
+    <div key={`${currentPlayer}-${bgId || "default"}-${customUrl || ""}`} style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {false&&loading&&authStage==="app"&&<div style={{position:"fixed",top:"max(12px, env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1200,width:22,height:22,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.16)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/>}
       {(points?.[currentPlayer+"_showStars"] !== false) && <StarfieldBg/>}
@@ -14050,7 +14104,7 @@ const TABS=[
               }} className="bb-pressable" style={{...s.pageButtonNavItem,background:active?`${accent}18`:"rgba(255,255,255,0.045)",border:`1px solid ${active?accent+"66":"rgba(255,255,255,0.07)"}`,boxShadow:active?`0 0 14px ${accent}22`:"none"}}>
                 <div style={{position:"relative",display:"inline-flex"}}>
                   <t.icon size={16} color={active?accent:"#8B92A8"}/>
-                  {badges[t.id]>0&&<div style={{position:"absolute",top:-6,right:-7,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
+                  {t.id !== "social" && badges[t.id]>0&&<div style={{position:"absolute",top:-6,right:-7,background:"#FF5C8A",borderRadius:99,minWidth:14,height:14,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:800,color:"#fff",padding:"0 3px"}}>{badges[t.id]}</div>}
                 </div>
                 <span style={{color:active?accent:"#8B92A8",fontSize:10,fontWeight:900,textTransform:"lowercase"}}>{t.label}</span>
               </button>
