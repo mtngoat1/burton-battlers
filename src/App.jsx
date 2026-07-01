@@ -1075,7 +1075,7 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
   {g.ratingDelta != null ? `${g.ratingDelta > 0 ? "+" : ""}${g.ratingDelta} MMR` : "—"}
 </div>
                 <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
-                  {["goals","assists","saves","shots","score","demos"].map(f => (
+                  {getStatFieldsForMode(g.mode || session?.mode).map(f => (
                     <div key={f} style={{textAlign:"center"}}>
                       <div style={{fontSize:8,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
                       <div style={{fontSize:12,fontWeight:700,color:p?.color||"#E8ECF4"}}>{g[f]||0}</div>
@@ -1351,18 +1351,13 @@ function getCoachNote(stats, playerId) {
   const avgSaves = avg("saves");
   const avgDemos = avg("demos");
   const avgShots = avg("shots");
-  const avgScore = avg("score");
 
   let note = null;
 
   if (wins >= 3 && losses === 0) {
     note = { text: "you were locked in last night — keep that same energy, don't change anything.", emoji: "🔥" };
   } else if (losses > wins) {
-    if (avgScore > 400) {
-      note = { text: "your numbers were good last night but the W's weren't there — focus on team plays today.", emoji: "🤝" };
-    } else {
-      note = { text: "rough night last night — reset and focus on one thing today, don't try to do everything at once.", emoji: "🧘" };
-    }
+    note = { text: "rough night last night — reset and focus on one thing today, don't try to do everything at once.", emoji: "🧘" };
   } else if (avgAssists > avgGoals && avgAssists > 1.5) {
     note = { text: "you set up a lot last night — try being more selfish today, take the shots yourself.", emoji: "🎯" };
   } else if (avgGoals > 2) {
@@ -1383,8 +1378,7 @@ function getCoachNote(stats, playerId) {
     note.text.includes("defending") || note.text.includes("last back") ? "saves" :
     note.text.includes("aggressively") || note.text.includes("positioning") ? "demos" :
     note.text.includes("on fire") || note.text.includes("goals") ? "goals" :
-    note.text.includes("numbers were good") ? "score" :
-    "score";
+    "shots";
   const targetGame = [...lastNightGames].sort((a, b) => {
     if (targetField === "shots" && avgShots < 1) return (Number(a.shots)||0) - (Number(b.shots)||0);
     return (Number(b[targetField]) || 0) - (Number(a[targetField]) || 0);
@@ -1511,11 +1505,11 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
                     {!pg && <span style={{ fontSize: 11, color: "#4A5066", fontStyle: "italic" }}>didn't log</span>}
                   </div>
                   {pg && (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
-                      {[["goals", pg.goals], ["assists", pg.assists], ["saves", pg.saves], ["shots", pg.shots], ["demos", pg.demos]].map(([label, val]) => (
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${getStatFieldsForMode(pg.mode).length},1fr)`, gap: 6 }}>
+                      {getStatFieldsForMode(pg.mode).map(label => [label, pg[label]]).map(([label, val]) => (
                         <div key={label} style={{ textAlign: "center", background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: "6px 2px" }}>
                           <div style={{ fontSize: 9, color: "#4A5066", fontWeight: 700, marginBottom: 3, textTransform: "uppercase" }}>{label}</div>
-                          <div style={{ fontSize: 15, fontWeight: 700, color: p.color }}>{val}</div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: p.color }}>{val || 0}</div>
                         </div>
                       ))}
                     </div>
@@ -1780,7 +1774,7 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
   const modeGames = stats.filter(g => g.mode === "3v3");
   const avg = (arr, field) => arr.length ? (arr.reduce((s,g) => s+(g[field]||0),0)/arr.length).toFixed(1) : "—";
   const winRate = (arr) => arr.length ? Math.round((arr.filter(g=>g.ourScore>g.theirScore).length/arr.length)*100)+"%" : "—";
-  const ALL_FIELDS = ["goals","assists","saves","shots","score","demos"];
+  const ALL_FIELDS = ["goals","assists","saves","shots"];
 
   return (
    <div
@@ -5431,7 +5425,7 @@ function AdminFutureSetup({ addToast }) {
   );
 }
 
-function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP, parseCredits, setParseCredits, creditRequests, setCreditRequests }) {
+function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP, parseCredits, setParseCredits, creditRequests, setCreditRequests, navPosition = "top", setNavPosition }) {
   const [assigning,setAssigning]=useState(null); const [settingMmrFor,setSettingMmrFor]=useState(null); const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
   const today=todayAtMidnight();
   const totalDays=Math.ceil((PLAYOFF_END-TRAINING_START)/DAY_MS);
@@ -5446,6 +5440,17 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
     <div className="bb-tab-content" style={s.tabContent}>
       {assigning&&<AdminAssignTraining dateKeyStr={assigning.dateKeyStr} player={PLAYERS.find((p)=>p.id===assigning.playerId)} existing={trainingData[tKey(assigning.dateKeyStr,assigning.playerId)]} onSave={(data)=>saveTraining(assigning.dateKeyStr,assigning.playerId,data)} onClose={()=>setAssigning(null)}/>}
   <VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP}/>
+
+  <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:16,padding:14,marginBottom:16}}>
+    <div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>nav position test</div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+      {["top","bottom"].map(pos => (
+        <button key={pos} onClick={async()=>{ setNavPosition?.(pos); await storeSet("nav_position", pos); addToast?.(`nav moved to ${pos}`, pos === "top" ? "⬆️" : "⬇️"); }} className="bb-pressable" style={{background:navPosition===pos?"#FF5C8A":"rgba(255,255,255,0.05)",border:`1px solid ${navPosition===pos?"#FF5C8A":"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:900,color:navPosition===pos?"#06070D":"#8B92A8",cursor:"pointer"}}>
+          {pos}
+        </button>
+      ))}
+    </div>
+  </div>
 
 {/* Credit Requests */}
 {(creditRequests||[]).filter(r=>r.status==="pending").length > 0 && (
@@ -5517,7 +5522,9 @@ addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️
 // ===================== Stats Tab =====================
 const STAT_MODES = ["2v2","1v1"];
 const LOGGABLE_MODES = ["2v2","1v1"];
-const STAT_FIELDS = ["goals","assists","saves","shots","score"];
+const BASE_STAT_FIELDS = ["goals","assists","saves","shots"];
+const getStatFieldsForMode = (mode) => normalizeGameMode(mode) === "1v1" ? [...BASE_STAT_FIELDS, "demos"] : BASE_STAT_FIELDS;
+const STAT_FIELDS = BASE_STAT_FIELDS;
 
 function StatsTrendLine({ games, field, color }) {
   if (games.length < 2) return null;
@@ -5554,7 +5561,6 @@ useEffect(() => {
   const [assists, setAssists] = useState("");
   const [saves, setSaves] = useState("");
   const [shots, setShots] = useState("");
-  const [score, setScore] = useState("");
   const [demos, setDemos] = useState("");
   const [teammateId, setTeammateId] = useState(PLAYERS.find(p => p.id !== currentPlayer)?.id || "");
 
@@ -5572,8 +5578,7 @@ useEffect(() => {
       assists: Number(assists) || 0,
       saves: Number(saves) || 0,
       shots: Number(shots) || 0,
-      score: Number(score) || 0,
-      demos: Number(demos) || 0,
+      demos: mode === "1v1" ? (Number(demos) || 0) : 0,
       ts: new Date().toISOString(),
       duoIds: mode === "2v2" ? [currentPlayer, teammateId].filter(Boolean) : [currentPlayer],
 roomId: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : null,
@@ -5591,7 +5596,7 @@ sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : manualSes
           <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
         </div>
 
-        <div style={s.modalLabel}>score</div>
+        <div style={s.modalLabel}>final score</div>
         <div style={s.modalScoreRow}>
           <div style={{flex:1}}><div style={s.modalLabel}>us</div><input type="number" value={ourScore} onChange={e=>setOurScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
           <div style={{flex:1}}><div style={s.modalLabel}>them</div><input type="number" value={theirScore} onChange={e=>setTheirScore(e.target.value)} placeholder="0" style={s.modalInput}/></div>
@@ -5612,7 +5617,7 @@ sessionCode: (roomId && (mode === "3v3" || mode === "2v2")) ? roomId : manualSes
 
         <div style={s.modalLabel}>your stats</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          {[["goals",goals,setGoals],["assists",assists,setAssists],["saves",saves,setSaves],["shots",shots,setShots],["score",score,setScore],["demos",demos,setDemos]].map(([label,val,setter])=>(
+          {[["goals",goals,setGoals],["assists",assists,setAssists],["saves",saves,setSaves],["shots",shots,setShots],...(mode === "1v1" ? [["demos",demos,setDemos]] : [])].map(([label,val,setter])=>(
             <div key={label}>
               <div style={s.modalLabel}>{label}</div>
               <input type="number" value={val} onChange={e=>setter(e.target.value)} placeholder="0" style={s.modalInput}/>
@@ -5695,7 +5700,7 @@ const FIELDS = ["goals","assists","saves","shots"];
         {scoreIsSynced && (
           <div style={{background:"#11131F",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:"13px 14px",marginBottom:18}}>
             <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>opponent score</div>
-            <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginBottom:10}}>Your score is pulled from combined goals. Add the opponent score here; win/loss still comes from Tracker.</div>
+            <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginBottom:10}}>Add the opponent final score here; win/loss still comes from Tracker.</div>
             <div style={{display:"flex",gap:8}}>
               <input type="number" value={localTheirScore} onChange={e=>setLocalTheirScore(e.target.value)} placeholder="them" style={{...s.modalInput,flex:1,marginBottom:0}} />
               <button onClick={saveOpponentScore} disabled={localTheirScore===""} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:11,padding:"0 13px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:localTheirScore==="" ? .5 : 1}}>save</button>
@@ -5868,7 +5873,7 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
     return Object.entries(dayMap)
       .sort((a,b) => b[0].localeCompare(a[0]))
       .map(([dk, dayGames]) => (
-        <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={null} STAT_FIELDS={STAT_FIELDS} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={onUpdateOpponentScore}/>
+        <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={null} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={onUpdateOpponentScore}/>
       ));
   };
 
@@ -6233,7 +6238,6 @@ const PARSE_STAT_ALIASES = {
   saves: ["saves", "save"],
   shots: ["shots", "shot"],
   demos: ["demos", "demolitions", "demolition"],
-  score: ["score", "player score", "playerscore", "player_score", "core score", "corescore", "core points", "corepoints", "total score", "totalscore", "score points", "scorepoints", "points", "player points", "stat score", "stat points", "match score"],
 };
 function normalizeParseStatName(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -6461,26 +6465,12 @@ function propBetWasPlacedBeforeGameStarted(bet, game) {
   return placed <= lockTime;
 }
 
-function estimateRocketLeagueScoreFromStats({ goals = 0, assists = 0, saves = 0, shots = 0, demos = 0 } = {}) {
-  // Parse/Tracker sometimes omits the player score stat even when it returns the box-score stats.
-  // This fallback keeps score props usable. It is an estimate from visible RL scoring values, not hidden events like clears/centers.
-  const g = Number(goals) || 0;
-  const a = Number(assists) || 0;
-  const s = Number(saves) || 0;
-  const sh = Number(shots) || 0;
-  const d = Number(demos) || 0;
-  return Math.max(0, Math.round(g * 100 + a * 50 + s * 50 + sh * 10 + d * 0));
-}
-
 function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
   const goals = getMatchStatValue(match, "goals");
   const assists = getMatchStatValue(match, "assists");
   const saves = getMatchStatValue(match, "saves");
   const shots = getMatchStatValue(match, "shots");
-  const demos = getMatchStatValue(match, "demos") || 0;
-  const parsedScore = getMatchStatValue(match, "score");
-  const estimatedScore = estimateRocketLeagueScoreFromStats({ goals, assists, saves, shots, demos });
-  const score = Number(parsedScore) > 0 ? Number(parsedScore) : 0;
+  const demos = normalizeGameMode(mode) === "1v1" ? (getMatchStatValue(match, "demos") || 0) : 0;
   const teamScore = getMatchTeamScoreInfo(match, player);
   const matchStart = getMatchStartInfo(match);
   const detectedOurScore = Number.isFinite(teamScore.ourScore) ? teamScore.ourScore : null;
@@ -6502,9 +6492,6 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     saves: Number(saves) || 0,
     shots: Number(shots) || 0,
     demos,
-    playerScore: Number(score) || 0,
-    score: Number(score) || 0,
-    scoreSource: Number(parsedScore) > 0 ? "parse" : "missing_from_parse",
     ourScore: Number.isFinite(detectedOurScore) && (detectedOurScore > 0 || (Number(goals) || 0) <= 0) ? detectedOurScore : (Number(goals) || 0),
     theirScore: Number.isFinite(detectedTheirScore) ? detectedTheirScore : null,
     parseDetectedOurScore: detectedOurScore,
@@ -6516,7 +6503,6 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     ratingDelta: getMatchRatingDelta(match),
     source: "parse_sessions",
     syncedAt: new Date().toISOString(),
-    parseScoreDebug: { parsedScore: Number(parsedScore) || 0, estimatedScorePreviewOnly: estimatedScore, savedScore: Number(score) || 0, scoreAliases: collectParseStatValuesByAlias(match, "score"), hasOpponentScore: Number.isFinite(detectedTheirScore) },
   };
 }
 
@@ -6788,8 +6774,8 @@ const [swipeOffset, setSwipeOffset] = useState(0);
                   {!game && <span style={{fontSize:11,color:"#4A5066",fontStyle:"italic",marginLeft:"auto"}}>hasn't logged yet</span>}
                 </div>
                 {game && (
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
-                    {["goals","assists","saves","shots","score","demos"].map(f => (
+                  <div style={{display:"grid",gridTemplateColumns:`repeat(${getStatFieldsForMode(game.mode || teamRoom?.mode).length},1fr)`,gap:6}}>
+                    {getStatFieldsForMode(game.mode || teamRoom?.mode).map(f => (
                       <div key={f} style={{textAlign:"center",background:"rgba(255,255,255,0.03)",borderRadius:8,padding:"6px 2px"}}>
                         <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
                         <div style={{fontSize:14,fontWeight:700,color:player.color}}>{game[f]||0}</div>
@@ -7360,7 +7346,7 @@ return (
       ) : (
         <>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-            {STAT_FIELDS.map(f=>(
+            {getStatFieldsForMode(mode).map(f=>(
               <div key={f} style={{background:"#11131F",borderRadius:18,padding:"16px",border:"2px solid rgba(255,255,255,0.08)"}}>
                 <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:6,textTransform:"uppercase"}}>{f}</div>
                 <div style={{fontSize:22,fontWeight:700,fontFamily:"'Oswald',sans-serif",color:playerColor,marginBottom:6}}>{avg(recentMyGames,f)}</div>
@@ -7423,7 +7409,7 @@ return (
         const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
         const visibleDays = showAllGames ? days : days.slice(0,3);
         return visibleDays.map(([dk, dayGames]) => (
-          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={STAT_FIELDS} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={updateOpponentScore}/>
+          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={updateOpponentScore}/>
         ));
       })()}
 {Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
@@ -10818,7 +10804,7 @@ const [predSide, setPredSide] = useState(null);
     assists: { label:"assists", lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5] },
     saves:   { label:"saves",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
     shots:   { label:"shots",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
-    score:   { label:"score",   lines: [199.5, 299.5, 399.5, 499.5, 599.5, 699.5, 799.5, 999.5] },
+    demos:   { label:"demos",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5] },
   };
 
   const propBetPlayers = PLAYERS.filter(p => p.id !== currentPlayer);
@@ -10912,6 +10898,7 @@ const [predSide, setPredSide] = useState(null);
 
     const history = getPropHistory(player.id, mode, mode === "2v2" ? activePropDuo : null);
     Object.entries(PROP_FIELD_CONFIG).forEach(([field, cfg]) => {
+      if (field === "demos" && mode !== "1v1") return;
       const values = history.map(g => Number(g[field]) || 0);
       const avg = values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
       cards.push({
@@ -10924,7 +10911,7 @@ const [predSide, setPredSide] = useState(null);
         duoLabel: mode === "2v2" && activePropDuo ? activePropDuo.label : "",
         field,
         fieldLabel: cfg.label,
-        avg: avg.toFixed(field === "score" ? 0 : 1),
+        avg: avg.toFixed(1),
         gamesPlayed: history.length,
         targetText: mode === "2v2" && activePropDuo ? `next logged 2v2 game with ${activePropDuo.label}` : `next logged ${mode} game`,
         lineOptions: makeLineOptions(values, cfg.lines),
@@ -10932,7 +10919,7 @@ const [predSide, setPredSide] = useState(null);
     });
 
     if (mode === "2v2" && activePropDuo) {
-      ["goals", "assists", "saves", "shots", "score"].forEach(field => {
+      ["goals", "assists", "saves", "shots"].forEach(field => {
         const cfg = PROP_FIELD_CONFIG[field];
         const combinedHistory = getCombinedDuoHistory(activePropDuo, field);
         const values = combinedHistory.map(x => x.value);
@@ -10949,10 +10936,10 @@ const [predSide, setPredSide] = useState(null);
           combined: true,
           field,
           fieldLabel: `duo ${cfg.label}`,
-          avg: avg.toFixed(field === "score" ? 0 : 1),
+          avg: avg.toFixed(1),
           gamesPlayed: values.length,
           targetText: `next logged 2v2 game with ${activePropDuo.label}`,
-          lineOptions: makeLineOptions(values, field === "score" ? [399.5, 599.5, 799.5, 999.5, 1199.5, 1399.5, 1599.5, 1999.5] : cfg.lines.map(v => v + 1)),
+          lineOptions: makeLineOptions(values, cfg.lines.map(v => v + 1)),
         });
       });
     }
@@ -12893,6 +12880,15 @@ const [toasts, setToasts] = useState([]);
     };
   }, []);
   const [tab,setTab]=useState("home");
+  const [navPosition, setNavPosition] = useState("top");
+  useEffect(() => {
+    let alive = true;
+    storeGet("nav_position").then(pos => {
+      if (!alive) return;
+      if (pos === "bottom" || pos === "top") setNavPosition(pos);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const [schedule,setSchedule]=useState({league:buildLeagueWeeks(),playoffs:buildPlayoffRounds()});
   const [mmrProfiles,setMmrProfiles]=useState({});
   const [trainingData,setTrainingData]=useState({});
@@ -13898,7 +13894,7 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   };
   if (authStage==="select") return <><GlobalStyles/><NameSelectScreen onSelect={selectName}/></>;
   const selectedPlayer=PLAYERS.find((p)=>p.id===selectedPlayerId);
-  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"none",border:"none",padding:"9px 0",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AppSectionBoundary resetKey={`admin-standalone-${adminStandalone}`} label="admin" accent="#FF5C8A" onGoHome={()=>setAdminStandalone(false)}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/></AppSectionBoundary></div></div></>;
+  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"none",border:"none",padding:"9px 0",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AppSectionBoundary resetKey={`admin-standalone-${adminStandalone}`} label="admin" accent="#FF5C8A" onGoHome={()=>setAdminStandalone(false)}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition}/></AppSectionBoundary></div></div></>;
 
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ await loadSharedData(selectedPlayerId); setAdminStandalone(true); }:undefined}/></>;
@@ -13922,6 +13918,7 @@ const TABS=[
     chat: lastSeen.chat > 0 ? Math.max(0, messages.length - lastSeen.chat) : 0,
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
+  const navAtBottom = navPosition === "bottom";
   const hidePushMirroredInAppNotifs = false;
   const topActivityNotifs = hidePushMirroredInAppNotifs ? [] : (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
     id: e.id,
@@ -14090,7 +14087,7 @@ const TABS=[
 </div>
 </div>
       {!chatOpen && (
-        <div style={s.pageButtonNav}>
+        <div style={navAtBottom ? s.pageButtonNavBottom : s.pageButtonNav}>
           {TABS.map((t)=>{
             const active = tab === t.id;
             const accent = t.id === "admin" || t.id === "verify" ? "#FF5C8A" : userColor;
@@ -14160,7 +14157,7 @@ const TABS=[
         </div>
       )}
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setJumpKey(key); setShowTrainingFull(true); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
-      <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+      <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1, paddingBottom: navAtBottom ? "calc(96px + env(safe-area-inset-bottom, 0px))" : 0}} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
 <AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>
 {tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
@@ -14186,7 +14183,7 @@ const TABS=[
 {tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
 {tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
- {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests}/>}
+ {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition}/>}
 </AppSectionBoundary>
       </div>
 
@@ -14275,6 +14272,7 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:0,WebkitOverflowScrolling:"touch",overscrollBehaviorY:"contain",minHeight:0,height:"100%",scrollbarWidth:"none",msOverflowStyle:"none",background:"transparent"},
   tabContent:{padding:"16px 16px max(18px, env(safe-area-inset-bottom, 0px))",minHeight:"calc(var(--bb-real-vh, 100dvh) - 92px)"},
 pageButtonNav:{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"10px 14px",paddingBottom:8,background:"transparent",borderBottom:"1px solid transparent",scrollbarWidth:"none",msOverflowStyle:"none",position:"relative",zIndex:5,flexShrink:0},
+pageButtonNavBottom:{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"10px 14px",paddingBottom:"calc(12px + env(safe-area-inset-bottom, 0px))",background:"rgba(10,12,22,0.94)",borderTop:"1px solid rgba(255,255,255,0.08)",scrollbarWidth:"none",msOverflowStyle:"none",position:"fixed",left:0,right:0,bottom:0,zIndex:650,flexShrink:0,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",backdropFilter:"blur(14px)"},
 pageButtonNavItem:{flexShrink:0,minWidth:72,borderRadius:16,padding:"10px 10px",display:"flex",alignItems:"center",justifyContent:"center",gap:7,cursor:"pointer",backdropFilter:"blur(10px)"},
 tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px) - 10px)",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_DROP_FINAL: drops buttons into bottom safe-area gap */},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
