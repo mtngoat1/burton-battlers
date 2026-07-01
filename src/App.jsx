@@ -4943,6 +4943,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
   const [showParlay, setShowParlay] = useState(false);
   const [showAllTeammateBets, setShowAllTeammateBets] = useState(false);
   const [openBetDays, setOpenBetDays] = useState({});
+  const [openParlayRows, setOpenParlayRows] = useState({});
   const socialSwipeRef = useRef({ x:0, y:0 });
   const socialSwipeHandlers = {
     onTouchStart: (e) => {
@@ -5076,8 +5077,21 @@ const addComment = async (postId, text) => {
   };
   // All bets from teammates (not current player). Clear is local to this account so it does not erase anyone else's history.
   const clearedTeammateBetIds = Array.isArray(points?.[currentPlayer + "_clearedTeammateBetIds"]) ? points[currentPlayer + "_clearedTeammateBetIds"] : [];
+  const getBetTime = (bet = {}) => {
+    const candidates = [bet.placedAt, bet.ts, bet.createdAt, bet.date, bet.updatedAt];
+    if (Array.isArray(bet.legs)) {
+      bet.legs.forEach(leg => candidates.push(leg?.placedAt, leg?.ts, leg?.createdAt, leg?.date));
+    }
+    for (const v of candidates) {
+      const t = new Date(v || 0).getTime();
+      if (Number.isFinite(t) && t > 0) return t;
+    }
+    const numericId = Number(String(bet.id || "").replace(/[^0-9]/g, ""));
+    return Number.isFinite(numericId) ? numericId : 0;
+  };
+  const sortBetsNewestFirst = (list = []) => [...list].sort((a, b) => getBetTime(b) - getBetTime(a));
   const teammateBets = (bets || []).filter(b => b.bettorId !== currentPlayer && !clearedTeammateBetIds.includes(b.id));
-  const sortedTeammateBets = [...teammateBets].sort((a, b) => safeDateObj(b?.placedAt || b?.ts || 0).getTime() - safeDateObj(a?.placedAt || a?.ts || 0).getTime());
+  const sortedTeammateBets = sortBetsNewestFirst(teammateBets);
   const visibleTeammateBets = showAllTeammateBets ? sortedTeammateBets : sortedTeammateBets.slice(0, 5);
   const hiddenTeammateBetCount = Math.max(sortedTeammateBets.length - visibleTeammateBets.length, 0);
   const clearTeammateBets = async () => {
@@ -5241,52 +5255,57 @@ const addComment = async (postId, text) => {
   <div style={{marginBottom:16}}>
     <div style={{...s.sectionLabel,marginBottom:10}}>your bets</div>
     {(() => {
-      const mine = (bets || []).filter(b => b.bettorId === currentPlayer).sort((a,b)=>new Date(b.placedAt||b.ts||0)-new Date(a.placedAt||a.ts||0));
+      const mine = sortBetsNewestFirst((bets || []).filter(b => b.bettorId === currentPlayer));
       if (!mine.length) return <div style={s.emptyQueue}>no bets yet.</div>;
       const grouped = mine.reduce((acc,b)=>{
-        const key = dateKey(new Date(b.placedAt || b.ts || Date.now()));
+        const key = dateKey(new Date(getBetTime(b) || Date.now()));
         if (!acc[key]) acc[key] = [];
         acc[key].push(b);
         return acc;
       }, {});
-      return Object.entries(grouped).slice(0,8).map(([dk, list], idx) => {
+      return Object.entries(grouped).sort((a,b)=>safeDateObj(b[0]+"T00:00:00").getTime()-safeDateObj(a[0]+"T00:00:00").getTime()).slice(0,8).map(([dk, list], idx) => {
+        const sortedDayBets = sortBetsNewestFirst(list);
         const dayOpen = openBetDays[dk] ?? idx === 0;
         return (
         <div key={dk} style={{background:"#11131F",borderRadius:16,padding:12,marginBottom:10,border:"1px solid rgba(255,209,102,0.18)"}}>
           <button onClick={() => setOpenBetDays(prev => ({ ...prev, [dk]: !(prev[dk] ?? idx === 0) }))} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:dayOpen?8:0}}>
-            <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>{fmtDay(new Date(dk+"T00:00:00"))} · {list.length} bet{list.length!==1?"s":""}</div>
+            <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>{fmtDay(new Date(dk+"T00:00:00"))} · {sortedDayBets.length} bet{sortedDayBets.length!==1?"s":""}</div>
             <ChevronRight size={14} color="#FFD166" style={{transform:dayOpen?"rotate(90deg)":"none",transition:"transform .18s ease"}}/>
           </button>
-          {dayOpen && list.map(b => {
+          {dayOpen && sortedDayBets.map(b => {
             const won = b.status === "won";
             const lost = b.status === "lost";
             const statusPill = <div style={{fontSize:10,fontWeight:900,color:won?"#7CFFB2":lost?"#FF5C8A":"#FFD166",background:won?"rgba(124,255,178,0.10)":lost?"rgba(255,92,138,0.10)":"rgba(255,209,102,0.10)",borderRadius:99,padding:"4px 8px",flexShrink:0}}>{won?"WIN":lost?"LOSS":"OPEN"}</div>;
             if (b.isParlay) {
               const legs = Array.isArray(b.legs) ? b.legs : [];
+              const rowKey = `${dk}_${b.id}`;
+              const parlayOpen = openParlayRows[rowKey] ?? false;
               return (
-                <div key={b.id} style={{padding:"9px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
-                    <div style={{fontSize:11,fontWeight:500,color:"#E8ECF4",opacity:.72,letterSpacing:.2}}>{legs.length || 0}-leg parlay</div>
-                    <div style={{fontSize:10,color:"#A78BFA",fontWeight:800}}>{b.multiplier ? `${b.multiplier}x` : "parlay"}</div>
-                    <div style={{marginLeft:"auto"}}>{statusPill}</div>
-                  </div>
-                  {legs.map((leg, i) => (
-                    <div key={`${b.id}_leg_${i}`} style={{marginBottom:i===legs.length-1?0:7}}>
-                      <div style={{fontSize:12.5,fontWeight:850,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(leg)}</div>
-                      <div style={{fontSize:10,color:"#E8ECF4",opacity:.58,marginTop:2,fontWeight:500}}>part of parlay{leg.odds ? ` · ${leg.odds}` : ""}</div>
+                <div key={b.id} style={{borderTop:"1px solid rgba(255,255,255,0.045)",padding:"8px 0"}}>
+                  <button onClick={() => setOpenParlayRows(prev => ({ ...prev, [rowKey]: !(prev[rowKey] ?? false) }))} className="bb-pressable" style={{width:"100%",background:"rgba(167,139,250,0.055)",border:"1px solid rgba(167,139,250,0.16)",borderRadius:12,padding:"10px 10px",display:"flex",alignItems:"center",gap:8,cursor:"pointer",textAlign:"left"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12.5,fontWeight:850,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{legs.length || 0}-leg parlay</div>
                     </div>
-                  ))}
-                  <div style={{fontSize:10,color:"#8B92A8",marginTop:8,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>wager {b.wager || 0} pts · win {b.payout || 0}</div>
+                    <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,flexShrink:0}}>{b.multiplier ? `${b.multiplier}x` : "parlay"}</div>
+                    {statusPill}
+                    <ChevronRight size={14} color="#A78BFA" style={{transform:parlayOpen?"rotate(90deg)":"none",transition:"transform .18s ease",flexShrink:0}}/>
+                  </button>
+                  {parlayOpen && (
+                    <div style={{padding:"8px 2px 0 12px"}}>
+                      {legs.map((leg, i) => (
+                        <div key={`${b.id}_leg_${i}`} style={{fontSize:12.5,fontWeight:800,color:"#E8ECF4",padding:i===0?"0 0 7px":"7px 0",borderTop:i===0?"none":"1px solid rgba(255,255,255,0.045)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                          {formatSingleBetTitle(leg)}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             }
             return (
-              <div key={b.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
+              <div key={b.id} style={{display:"flex",alignItems:"center",gap:9,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
                 <div style={{flex:1,minWidth:0}}>
-                  {(() => { const display = formatBetForDisplay(b); return (<>
-                    <div style={{fontSize:12,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{display.title}</div>
-                    <div style={{fontSize:10,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>wager {b.wager || 0} pts · win {b.payout || 0}{b.odds ? ` · odds ${b.odds}` : ""}</div>
-                  </>); })()}
+                  <div style={{fontSize:12.5,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatBetForDisplay(b).title}</div>
                 </div>
                 {statusPill}
               </div>
@@ -5376,7 +5395,7 @@ const addComment = async (postId, text) => {
                   {(bet.legs || []).map((leg, i) => (
                     <div key={`${bet.id}_leg_${i}`} style={{marginBottom:i===(bet.legs || []).length-1?0:9}}>
                       <div style={{fontSize:14,fontWeight:850,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(leg)}</div>
-                      <div style={{fontSize:10.5,color:"#E8ECF4",opacity:.6,marginTop:3,fontWeight:500}}>part of {bet.legs?.length || 0}-leg parlay{leg.odds ? ` · ${leg.odds}` : ""}</div>
+                      
                     </div>
                   ))}
                   <div style={{ display: "flex", justifyContent: "space-between", gap:8, marginTop: 12, fontSize: 11, color: "#8B92A8", flexWrap:"wrap" }}>
