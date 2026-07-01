@@ -2490,29 +2490,42 @@ function checkTwitchPreviewImage(cleanHandle) {
   });
 }
 
+function isTwitchUptimeTextLive(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  if (/offline|not live|not found|does not exist|doesn't exist|error|invalid|unknown/i.test(t)) return false;
+  // DecAPI uptime only returns a duration while the channel is actively live.
+  // Be conservative: no confirmed uptime text means no red live dot.
+  return /\d|hour|minute|second|day|week|month|year/i.test(t);
+}
+
 function TwitchLiveDot({ handle, size = 8 }) {
   const cleanHandle = normalizeTwitchHandle(handle);
   const [isLive, setIsLive] = useState(false);
   useEffect(() => {
     if (!cleanHandle) { setIsLive(false); return; }
     let alive = true;
+    setIsLive(false);
     const check = async () => {
       let live = false;
       try {
         const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(cleanHandle)}?t=${Date.now()}`, { cache:"no-store" });
         const text = await res.text();
-        if (res.ok && text) {
-          live = !/offline|not live|not found|does not exist|doesn't exist|error|invalid/i.test(text);
-        }
-      } catch (_) {}
-      if (!live) {
-        try { live = await checkTwitchPreviewImage(cleanHandle); } catch (_) {}
+        live = !!(res.ok && isTwitchUptimeTextLive(text));
+      } catch (_) {
+        live = false;
       }
-      if (alive) setIsLive(!!live);
+      if (alive) setIsLive(live);
     };
     check();
-    const timer = setInterval(check, 45000);
-    return () => { alive = false; clearInterval(timer); };
+    const timer = setInterval(check, 20000);
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [cleanHandle]);
   if (!cleanHandle || !isLive) return null;
   return <span className="bb-live-dot" title={`${cleanHandle} is live on Twitch`} aria-label="live on Twitch" style={{display:"inline-block",width:size,height:size,minWidth:size,minHeight:size,borderRadius:99,background:"#FF2D55",boxShadow:"0 0 8px rgba(255,45,85,0.8), 0 0 18px rgba(255,45,85,0.35)",flexShrink:0,verticalAlign:"middle",animation:"livePulse 1.15s ease-in-out infinite"}}/>;
@@ -2542,8 +2555,8 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded 
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
             <button onClick={()=>setActiveStream(null)} className="bb-pressable" style={{...s.backBtn,position:"static",fontSize:13}}><ChevronLeft size={15}/> back</button>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
-              <div className="bb-live-dot" style={{width:8,height:8,borderRadius:99,background:"#FF5C8A"}}/>
-              <span style={{fontWeight:700,fontSize:13}}>{livePlayer.name} · live</span>
+              <TwitchLiveDot handle={twitchHandle} size={8}/>
+              <span style={{fontWeight:700,fontSize:13}}>{livePlayer.name} · stream</span>
             </div>
           </div>
           <div style={s.streamEmbed}>
