@@ -19,6 +19,7 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 // APP58_PROP_BET_PRE_MATCH_LOCK_PTS_NOTIFICATION_PATCH
 // APP63_PARSE_SCORE_SHOP_PROPS_NOTIFICATION_PATCH
 // APP65_FULLSCREEN_SHOP_RACE_SCORE_JAR_PATCH
+// APP69_YOUR_BETS_NO_GRAY_SUBTEXT_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -2493,10 +2494,47 @@ function checkTwitchPreviewImage(cleanHandle) {
 function isTwitchUptimeTextLive(text) {
   const t = String(text || "").trim();
   if (!t) return false;
-  if (/offline|not live|not found|does not exist|doesn't exist|error|invalid|unknown/i.test(t)) return false;
-  // DecAPI uptime only returns a duration while the channel is actively live.
-  // Be conservative: no confirmed uptime text means no red live dot.
-  return /\d|hour|minute|second|day|week|month|year/i.test(t);
+  if (/offline|not live|not found|does not exist|doesn't exist|error|invalid|unknown|last live|last seen|hasn't streamed|never streamed/i.test(t)) return false;
+  // DecAPI uptime is only trusted if it is ONLY a duration, like "1 hour, 12 minutes".
+  // This prevents old/last-live text with numbers from showing fake red dots.
+  return /^(?:\d+\s+(?:year|month|week|day|hour|minute|second)s?)(?:\s*,\s*\d+\s+(?:year|month|week|day|hour|minute|second)s?)*$/i.test(t);
+}
+
+async function checkTwitchLiveStrict(handle) {
+  const cleanHandle = normalizeTwitchHandle(handle).toLowerCase();
+  if (!cleanHandle) return false;
+
+  // First use Twitch's own public GraphQL data. If stream is null, they are not live.
+  try {
+    const gqlRes = await fetch("https://gql.twitch.tv/gql", {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "Client-ID": "kimne78kx3ncx6brgo4mv6wki5h1ko",
+      },
+      body: JSON.stringify({
+        operationName: "BBLiveStatus",
+        variables: { login: cleanHandle },
+        query: "query BBLiveStatus($login: String!) { user(login: $login) { id stream { id type createdAt } } }",
+      }),
+    });
+    if (gqlRes.ok) {
+      const gql = await gqlRes.json();
+      const user = gql?.data?.user;
+      if (!user) return false;
+      return !!user?.stream?.id;
+    }
+  } catch (_) {}
+
+  // Conservative fallback: only accept a pure uptime duration from DecAPI.
+  try {
+    const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(cleanHandle)}?t=${Date.now()}`, { cache:"no-store" });
+    const text = await res.text();
+    return !!(res.ok && isTwitchUptimeTextLive(text));
+  } catch (_) {
+    return false;
+  }
 }
 
 function TwitchLiveDot({ handle, size = 8 }) {
@@ -2507,18 +2545,11 @@ function TwitchLiveDot({ handle, size = 8 }) {
     let alive = true;
     setIsLive(false);
     const check = async () => {
-      let live = false;
-      try {
-        const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(cleanHandle)}?t=${Date.now()}`, { cache:"no-store" });
-        const text = await res.text();
-        live = !!(res.ok && isTwitchUptimeTextLive(text));
-      } catch (_) {
-        live = false;
-      }
-      if (alive) setIsLive(live);
+      const live = await checkTwitchLiveStrict(cleanHandle);
+      if (alive) setIsLive(!!live);
     };
     check();
-    const timer = setInterval(check, 20000);
+    const timer = setInterval(check, 15000);
     const onVisible = () => { if (document.visibilityState === "visible") check(); };
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
     return () => {
@@ -5318,7 +5349,7 @@ const addComment = async (postId, text) => {
             return (
               <div key={b.id} style={{display:"flex",alignItems:"center",gap:9,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12.5,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatBetForDisplay(b).title}</div>
+                  <div style={{fontSize:12.5,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(b)}</div>
                 </div>
                 {statusPill}
               </div>
@@ -10082,20 +10113,14 @@ function formatSingleBetTitle(bet = {}) {
 function formatBetForDisplay(bet = {}) {
   if (bet?.isParlay) {
     const legs = Array.isArray(bet.legs) ? bet.legs : [];
-    const legText = legs.map(leg => formatSingleBetTitle(leg));
-    const preview = legText.slice(0, 2).join(" · ");
-    const extra = legText.length > 2 ? ` +${legText.length - 2} more` : "";
     return {
       title: `${legs.length || 0}-leg parlay`,
-      sub: `${preview}${extra}`.trim(),
+      sub: "",
+      legs: legs.map(leg => formatSingleBetTitle(leg)),
     };
   }
   const title = formatSingleBetTitle(bet);
-  const details = [];
-  if (bet.targetMode || bet.mode) details.push(getBetMode(bet));
-  if (bet.targetText) details.push(bet.targetText);
-  if (bet.odds) details.push(`odds ${bet.odds}`);
-  return { title, sub: details.join(" · ") };
+  return { title, sub: "" };
 }
 
 async function notifyPropBetPlacedPush(bet) {
