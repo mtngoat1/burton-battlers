@@ -695,6 +695,8 @@ function GlobalStyles() {
 @keyframes scaleFadeIn { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
 @keyframes floatUp { 0%{transform:translateY(0) scale(0.5); opacity:0;} 15%{opacity:1;} 100%{transform:translateY(-180px) scale(1.1); opacity:0;} }
 @keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
+@keyframes bbLeafFall { 0%{ transform:translate3d(0,-12vh,0) rotate(0deg); opacity:0; } 12%{ opacity:.52; } 88%{ opacity:.38; } 100%{ transform:translate3d(var(--bb-drift, 30px),112vh,0) rotate(360deg); opacity:0; } }
+@keyframes bbSnowFall { 0%{ transform:translate3d(0,-10vh,0) scale(.72); opacity:0; } 10%{ opacity:.75; } 100%{ transform:translate3d(var(--bb-drift, 18px),112vh,0) scale(1); opacity:0; } }
     * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
     html, body { margin:0; padding:0; width:100%; height:100vh; min-height:100dvh; min-height:var(--bb-real-vh, 100dvh); overflow:hidden; background:#06070D; overscroll-behavior:none; }
 body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-height:var(--bb-real-vh, 100dvh); background:#06070D; }
@@ -1947,6 +1949,8 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
     await storeSet("points", upd);
   };
   const textKitId = owned.find(id => equipped[id] && itemType(id) === "text_color");
+  const customTextKitEquipped = !!(textKitId && getTextKitMeta(textKitId)?.custom);
+  const getTextKitPreview = (id) => getTextKitMeta(id)?.preset || null;
   const renderOwned = (title, ids) => (
     <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:14,marginBottom:14}}>
       <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:1,marginBottom:10}}>{title}</div>
@@ -1956,6 +1960,13 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
             <div key={id} style={{background:equipped[id]?"rgba(184,255,77,0.09)":"rgba(255,255,255,0.035)",border:`1px solid ${equipped[id]?"rgba(184,255,77,0.28)":"rgba(255,255,255,0.06)"}`,borderRadius:12,padding:"10px 8px",minHeight:64}}>
               <div style={{fontSize:18,marginBottom:5,color:player?.color}}>{itemIcon(id)}</div>
               <div style={{fontSize:11,fontWeight:800,color:"#E8ECF4",lineHeight:1.2}}>{itemLabel(id)}</div>
+              {itemType(id) === "text_color" && getTextKitPreview(id) && (
+                <div style={{display:"flex",gap:4,justifyContent:"center",marginTop:7}}>
+                  {["main","muted","accent"].map(part => (
+                    <span key={part} style={{width:16,height:16,borderRadius:6,background:getTextKitPreview(id)[part],border:"1px solid rgba(255,255,255,0.16)"}}/>
+                  ))}
+                </div>
+              )}
               {["color","icon","title","background","border","text_color"].includes(itemType(id)) && (
                 <button onClick={()=>toggleEquip(id)} className="bb-pressable" style={{marginTop:8,width:"100%",background:equipped[id]?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:10,fontWeight:800,color:equipped[id]?"#06070D":"#8B92A8",cursor:"pointer"}}>
                   {equipped[id] ? "equipped" : "equip"}
@@ -2009,9 +2020,11 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
           </div>
         </div>
       ) : (
-        renderOwned(`${sourceTab === "pass" ? "OWNED FROM PASS" : "OWNED FROM SHOP"} · ${kindTab.replace("_"," ")}`, (sourceTab === "pass" ? passOwned : shopOwned).filter(id => itemType(id) === kindTab))
+        kindTab === "text_color"
+          ? renderOwned("TEXT KITS", owned.filter(id => itemType(id) === "text_color"))
+          : renderOwned(`${sourceTab === "pass" ? "OWNED FROM PASS" : "OWNED FROM SHOP"} · ${kindTab.replace("_"," ")}`, (sourceTab === "pass" ? passOwned : shopOwned).filter(id => itemType(id) === kindTab))
       )}
-      {textKitId && (
+      {customTextKitEquipped && (
         <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(184,255,77,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
           <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,marginBottom:10}}>CUSTOM TEXT KIT</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
@@ -2237,7 +2250,7 @@ function MatchEditor({ match, onSave, onClose }) {
     </div></div>
   );
 }
-function BracketTab({ schedule, setSchedule, currentPlayer }) {
+function BracketTab({ schedule, setSchedule, currentPlayer, embedded = false }) {
   const [editing,setEditing]=useState(null);
   const isCaptain=currentPlayer===ADMIN_ID;
   const saveMatch=async(updated)=>{
@@ -2342,7 +2355,7 @@ function TrainingDayCard({ day, isToday, isFutureLocked, completion, onSubmitNum
     </div>
   );
 }
-function TrainingTab({ trainingData, completions, setCompletions, currentPlayer, onOpenComments, jumpKey, onJumpHandled }) {
+function TrainingTab({ trainingData, completions, setCompletions, currentPlayer, onOpenComments, jumpKey, onJumpHandled, embedded = false }) {
   const today=todayAtMidnight();
   const totalDays=Math.ceil((PLAYOFF_END-TRAINING_START)/DAY_MS);
   const startIdx=Math.max(0,Math.floor((today-TRAINING_START)/DAY_MS)-5);
@@ -2354,7 +2367,7 @@ function TrainingTab({ trainingData, completions, setCompletions, currentPlayer,
   const submitNumeric=async(key,amount,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"numeric",amount,proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSetWithPush("completions",upd); };
 
   return (
-    <div className="bb-tab-content" style={s.tabContent}>
+    <div className="bb-tab-content" style={embedded ? { ...s.tabContent, padding:0, minHeight:0, marginBottom:0 } : s.tabContent}>
       <div style={s.sectionLabel}>daily training</div>
       {days.map((day)=>{
         const isToday=day.key===dateKey(today);
@@ -2486,7 +2499,7 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded 
   const twitchHandle = livePlayer && streamProfiles[livePlayer.id]?.twitch;
 
   return (
-    <div className="bb-tab-content" style={s.tabContent}>
+    <div className="bb-tab-content" style={embedded ? { ...s.tabContent, padding:0, minHeight:0, marginBottom:0 } : s.tabContent}>
       {activeStream && twitchHandle ? (
         <>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -4492,14 +4505,40 @@ useEffect(() => {
   });
 }, [text]);           
   const scrollRef = useRef(null);
+  const chatScrollBoxRef = useRef(null);
   const didInitialChatScroll = useRef(false);
-  useEffect(() => {
-    const behavior = didInitialChatScroll.current ? "smooth" : "auto";
+  const [chatKeyboardOpen, setChatKeyboardOpen] = useState(false);
+  const scrollChatToBottom = useCallback((behavior = "smooth") => {
     requestAnimationFrame(() => {
       scrollRef.current?.scrollIntoView({ behavior, block: "end" });
+      const el = chatScrollBoxRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
       didInitialChatScroll.current = true;
     });
-  }, [messages.length]);
+  }, []);
+  useEffect(() => {
+    scrollChatToBottom(didInitialChatScroll.current ? "smooth" : "auto");
+  }, [messages.length, scrollChatToBottom]);
+  useEffect(() => {
+    scrollChatToBottom("smooth");
+  }, [text, typingStatus, chatKeyboardOpen, scrollChatToBottom]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.visualViewport) return;
+    const updateKeyboardState = () => {
+      const vv = window.visualViewport;
+      const keyboardOpen = (window.innerHeight - vv.height) > 120;
+      setChatKeyboardOpen(keyboardOpen);
+      setTimeout(() => scrollChatToBottom("smooth"), keyboardOpen ? 120 : 40);
+      setTimeout(() => scrollChatToBottom("smooth"), keyboardOpen ? 340 : 90);
+    };
+    window.visualViewport.addEventListener("resize", updateKeyboardState);
+    window.visualViewport.addEventListener("scroll", updateKeyboardState);
+    updateKeyboardState();
+    return () => {
+      window.visualViewport?.removeEventListener("resize", updateKeyboardState);
+      window.visualViewport?.removeEventListener("scroll", updateKeyboardState);
+    };
+  }, [scrollChatToBottom]);
 
   const send = async () => {
     if (!text.trim()) return;
@@ -4531,7 +4570,7 @@ return (
   🎙️ join vc
 </button>
       </div>
-      <div style={s.chatScroll}>
+      <div ref={chatScrollBoxRef} style={{...s.chatScroll, paddingBottom: chatKeyboardOpen ? 96 : 18}}>
         {messages.length === 0 && <div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
         {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} />)}
         {(() => {
@@ -4561,7 +4600,7 @@ return (
         <div ref={scrollRef} />
       </div>
       <div style={s.chatInputRow}>
-        <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="message the team..." style={s.chatInput} />
+        <input value={text} onFocus={() => { setChatKeyboardOpen(true); [60, 220, 420].forEach(ms => setTimeout(() => scrollChatToBottom("smooth"), ms)); }} onBlur={() => setTimeout(() => setChatKeyboardOpen(false), 140)} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="message the team..." style={s.chatInput} />
         <button onClick={send} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}><Send size={16} /></button>
       </div>
     </div>
@@ -7533,7 +7572,7 @@ function getNormalizedShopCost(item, idx = 0) {
 }
 
 function withNormalizedShopPrice(item, idx) {
-  return { ...item, cost: getNormalizedShopCost(item, idx) };
+  return { ...item, cost: getNormalizedShopCost(item, idx) + 500 };
 }
 
 function stripLeadingEmojiText(value) {
@@ -7659,7 +7698,13 @@ const SHOP_ITEMS_RAW = [
   { id:"ice_text", label:"ice text kit", desc:"cool blue app text colors", cost:100, type:"text_color", value:"ice", emoji:"🎨" },
   { id:"arcade_text", label:"arcade text kit", desc:"bright retro app text colors", cost:100, type:"text_color", value:"arcade", emoji:"🎨" },
   { id:"shadow_text", label:"shadow text kit", desc:"dark muted app text colors", cost:100, type:"text_color", value:"shadow", emoji:"🎨" },
-  { id:"sunset_text", label:"sunset text kit", desc:"orange pink app text colors", cost:100, type:"text_color", value:"sunset", emoji:"🎨" },
+  { id:"sunset_text", label:"sunset text kit", desc:"warm orange pink app text colors", cost:100, type:"text_color", value:"sunset", emoji:"🎨" },
+  { id:"spring_text", label:"spring text kit", desc:"fresh blossom green app text colors", cost:100, type:"text_color", value:"spring", emoji:"🎨" },
+  { id:"summer_text", label:"summer text kit", desc:"bright beach blue gold app text colors", cost:100, type:"text_color", value:"summer", emoji:"🎨" },
+  { id:"fall_text", label:"fall text kit", desc:"orange yellow red app text colors with slow leaves", cost:100, type:"text_color", value:"fall", emoji:"🎨" },
+  { id:"winter_text", label:"winter text kit", desc:"icy gradient app text colors with snow", cost:100, type:"text_color", value:"winter", emoji:"🎨" },
+  { id:"space_text", label:"space text kit", desc:"deep blue cosmic app text colors", cost:100, type:"text_color", value:"space", emoji:"🎨" },
+  { id:"wizard_text", label:"wizard text kit", desc:"purple magic app text colors", cost:100, type:"text_color", value:"wizard", emoji:"🎨" },
   { id:"slime_text", label:"slime text kit", desc:"toxic green app text colors", cost:100, type:"text_color", value:"slime", emoji:"🎨" },
   { id:"gold_text", label:"gold text kit", desc:"gold accent app text colors", cost:100, type:"text_color", value:"gold", emoji:"🎨" },
   { id:"bubblegum_text", label:"bubblegum text kit", desc:"pink blue app text colors", cost:100, type:"text_color", value:"bubblegum", emoji:"🎨" },
@@ -7688,6 +7733,52 @@ const SHOP_ITEMS_RAW = [
 
 ];
 const SHOP_ITEMS = SHOP_ITEMS_RAW.map(withNormalizedShopPrice);
+
+const TEXT_KIT_PRESETS = {
+  cream: { main:"#FFF4DC", muted:"#BFAF91", accent:"#FFD166" },
+  ice: { main:"#DFF6FF", muted:"#84BFE8", accent:"#75D7FF" },
+  arcade: { main:"#F8F7FF", muted:"#8FB3FF", accent:"#FF61C1" },
+  shadow: { main:"#C8CBD8", muted:"#626A7F", accent:"#8B92A8" },
+  sunset: { main:"#FFE2C6", muted:"#FF8A5B", accent:"#FF61C1" },
+  spring: { main:"#F2FFE7", muted:"#8FD694", accent:"#FFB7D5" },
+  summer: { main:"#FFF7B8", muted:"#60D7FF", accent:"#FFD166" },
+  fall: { main:"#FFE2B8", muted:"#C96A36", accent:"#FFB000" },
+  winter: { main:"#F2FBFF", muted:"#9FD8FF", accent:"#C4A7FF" },
+  space: { main:"#EAF0FF", muted:"#8FB3FF", accent:"#A78BFA" },
+  wizard: { main:"#F0E6FF", muted:"#B794F6", accent:"#FF61C1" },
+  slime: { main:"#D9FFD0", muted:"#86B56D", accent:"#B8FF4D" },
+  gold: { main:"#FFF1B8", muted:"#B89B45", accent:"#FFD166" },
+  bubblegum: { main:"#FFE2F3", muted:"#9FD8FF", accent:"#FF61C1" },
+  terminal: { main:"#D9FFD0", muted:"#75A66E", accent:"#B8FF4D" },
+  ghost: { main:"#F2F5FF", muted:"#AAB4CB", accent:"#C4A7FF" },
+};
+function getTextKitMeta(id) {
+  const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "text_color");
+  if (shop) return { source:"shop", value:shop.value, label:getShopItemDisplayLabel(shop), preset:TEXT_KIT_PRESETS[shop.value] || null, custom:false };
+  const reward = id?.startsWith?.("pass_") ? getPassRewardForOwnedId(id) : null;
+  if (reward?.type === "text_color") return { source:"pass", value:reward.value, label:reward.label || "custom app text kit", preset:TEXT_KIT_PRESETS[reward.value] || null, custom:reward.value === "app_text_colors" };
+  return null;
+}
+function getEquippedTextKitId(points, playerId) {
+  const own = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
+  const eq = points?.[playerId + "_equipped"] || {};
+  return own.find(id => eq[id] && getTextKitMeta(id));
+}
+function getAppliedTextColors(points, playerId, theme, userColor) {
+  const textKitId = getEquippedTextKitId(points, playerId);
+  const meta = getTextKitMeta(textKitId);
+  if (!meta) return {};
+  if (meta.preset) return meta.preset;
+  if (meta.custom) {
+    const saved = points?.[playerId + "_textColors"] || {};
+    return {
+      main: saved.main || theme?.text || "#E8ECF4",
+      muted: saved.muted || "#8B92A8",
+      accent: saved.accent || userColor || "#B8FF4D",
+    };
+  }
+  return {};
+}
 
 const BACKGROUND_ITEM_IDS = SHOP_ITEMS.filter(i => i.type === "background").map(i => i.id);
 function getBackgroundPreview(value) {
@@ -8500,6 +8591,13 @@ const toggleEquip = async (itemId) => {
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:12,fontWeight:900,color:isOwned?accent:"#E8ECF4",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(item)}</div>
           <div style={{fontSize:9.5,color:"#4A5066",marginTop:3,marginBottom:8,lineHeight:1.25}}>{item.desc || item.value || (item.type === "text_color" ? "custom app text colors" : "shop item")}</div>
+          {item.type === "text_color" && TEXT_KIT_PRESETS[item.value] && (
+            <div style={{display:"flex",gap:5,justifyContent:"center",marginBottom:8}}>
+              {["main","muted","accent"].map(part => (
+                <span key={part} style={{width:16,height:16,borderRadius:6,background:TEXT_KIT_PRESETS[item.value][part],border:"1px solid rgba(255,255,255,0.16)"}}/>
+              ))}
+            </div>
+          )}
           {isOwned ? (
             <div style={{display:"flex",gap:6,alignItems:"center",justifyContent:item.type === "background"?"flex-start":"center"}}>
               {isCustomBg && isEquipped && (
@@ -8513,9 +8611,13 @@ const toggleEquip = async (itemId) => {
                   <button onClick={()=>customBgFileRef.current?.click()} className="bb-pressable" style={{background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,padding:"5px 9px",fontSize:10,fontWeight:800,color:"#A78BFA",cursor:"pointer"}}>upload</button>
                 </>
               )}
-              <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",background:isEquipped?accent:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                {isEquipped ? (item.type === "sound" ? "✓ on board" : "✓ equipped") : (item.type === "sound" ? "add" : "equip")}
-              </button>
+              {item.type === "text_color" ? (
+                <div style={{width:"100%",background:"rgba(255,255,255,0.06)",borderRadius:8,padding:"6px 0",fontSize:10.5,fontWeight:900,color:"#8B92A8"}}>owned</div>
+              ) : (
+                <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",background:isEquipped?accent:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  {isEquipped ? (item.type === "sound" ? "✓ on board" : "✓ equipped") : (item.type === "sound" ? "add" : "equip")}
+                </button>
+              )}
             </div>
           ) : (
             <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",background:canAfford?`${accent}18`:"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?`${accent}55`:"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,color:canAfford?accent:"#4A5066",cursor:canAfford?"pointer":"default"}}>
@@ -8855,6 +8957,19 @@ await storeSetWithPush("pings", pingUpd2);
       <div style={{marginBottom:18}}>
         <StreamTab streamProfiles={streamProfiles || {}} setStreamProfiles={setStreamProfiles || (()=>{})} currentPlayer={currentPlayer} embedded/>
       </div>
+
+      {/* Team points leaderboard */}
+      <div style={{...s.sectionLabel,marginBottom:10}}>points leaderboard</div>
+      <div style={{background:"#11131F",borderRadius:13,padding:14,border:"1px solid rgba(255,255,255,0.05)",marginBottom:18}}>
+        {[...PLAYERS].sort((a,b)=>(points?.[b.id]||0)-(points?.[a.id]||0)).map((p,i)=>(
+          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:i<PLAYERS.length-1?10:0,paddingBottom:i<PLAYERS.length-1?10:0,borderBottom:i<PLAYERS.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:600,color:i===0?"#FFD166":"#4A5066",width:20}}>{i+1}</div>
+            <div style={{width:8,height:8,borderRadius:99,background:p.color}}/>
+            <div style={{flex:1,fontSize:13,fontWeight:700}}><PlayerNameDisplay playerId={p.id} points={points}/></div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:p.color}}>{points?.[p.id]||0}<span style={{fontSize:10,color:"#4A5066",marginLeft:3}}>pts</span></div>
+          </div>
+        ))}
+      </div>
  {/* Incoming pings */}
 {myPings.filter(p => p.type !== "flower").length > 0 && (
   <>
@@ -8877,18 +8992,7 @@ await storeSetWithPush("pings", pingUpd2);
   </>
 )}
 
-      {/* Team points leaderboard */}
-      <div style={{...s.sectionLabel,marginBottom:10}}>points leaderboard</div>
-      <div style={{background:"#11131F",borderRadius:13,padding:14,border:"1px solid rgba(255,255,255,0.05)"}}>
-        {[...PLAYERS].sort((a,b)=>(points?.[b.id]||0)-(points?.[a.id]||0)).map((p,i)=>(
-          <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:i<PLAYERS.length-1?10:0,paddingBottom:i<PLAYERS.length-1?10:0,borderBottom:i<PLAYERS.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
-            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:600,color:i===0?"#FFD166":"#4A5066",width:20}}>{i+1}</div>
-            <div style={{width:8,height:8,borderRadius:99,background:p.color}}/>
-            <div style={{flex:1,fontSize:13,fontWeight:700}}><PlayerNameDisplay playerId={p.id} points={points}/></div>
-            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:p.color}}>{points?.[p.id]||0}<span style={{fontSize:10,color:"#4A5066",marginLeft:3}}>pts</span></div>
-          </div>
-        ))}
-      </div>
+
     </div>
   );
 }    
@@ -9243,6 +9347,42 @@ function StarfieldBg() {
     <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0,overflow:"hidden"}}>
       {stars.map((st,i)=>(
         <div key={i} style={{position:"absolute",left:`${st.x}%`,top:`${st.y}%`,width:st.r*2,height:st.r*2,borderRadius:"50%",background:"#7EB8FF",opacity:st.op,animation:`livePulse ${st.dur}s ease-in-out infinite`,animationDelay:`${(i*0.3)%3}s`}}/>
+      ))}
+    </div>
+  );
+}
+function SeasonalTextKitFx({ kitValue }) {
+  if (kitValue !== "fall" && kitValue !== "winter") return null;
+  if (kitValue === "fall") {
+    const leaves = Array.from({ length: 18 }, (_, i) => ({
+      left: (i * 31 + 7) % 100,
+      delay: (i * 1.9) % 11,
+      dur: 15 + (i % 7),
+      drift: ((i % 2 ? -1 : 1) * (22 + (i * 9) % 44)),
+      leaf: i % 3 === 0 ? "🍁" : "🍂",
+      size: 13 + (i % 5),
+      opacity: 0.18 + ((i * 17) % 20) / 100,
+    }));
+    return (
+      <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:1,overflow:"hidden"}}>
+        {leaves.map((leaf, i)=>(
+          <span key={i} style={{position:"absolute",left:`${leaf.left}%`,top:"-12vh",fontSize:leaf.size,opacity:leaf.opacity,filter:"blur(.15px)",animation:`bbLeafFall ${leaf.dur}s linear infinite`,animationDelay:`${leaf.delay}s`,"--bb-drift":`${leaf.drift}px`}}>{leaf.leaf}</span>
+        ))}
+      </div>
+    );
+  }
+  const flakes = Array.from({ length: 44 }, (_, i) => ({
+    left: (i * 19 + 5) % 100,
+    delay: (i * 0.85) % 8,
+    dur: 9 + (i % 9),
+    drift: ((i % 2 ? -1 : 1) * (8 + (i * 5) % 28)),
+    size: 2 + (i % 4),
+    opacity: 0.28 + ((i * 11) % 35) / 100,
+  }));
+  return (
+    <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:1,overflow:"hidden"}}>
+      {flakes.map((flake, i)=>(
+        <span key={i} style={{position:"absolute",left:`${flake.left}%`,top:"-10vh",width:flake.size,height:flake.size,borderRadius:"50%",background:"rgba(240,250,255,.94)",boxShadow:"0 0 8px rgba(159,216,255,.38)",opacity:flake.opacity,animation:`bbSnowFall ${flake.dur}s linear infinite`,animationDelay:`${flake.delay}s`,"--bb-drift":`${flake.drift}px`}}/>
       ))}
     </div>
   );
@@ -9712,6 +9852,9 @@ async function storeSetWithPush(key, value) {
 
 async function showLocalNotification(title, body, data = {}) {
   if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
+  // Phone-style notifications should only fire when the app is not visible.
+  // When the app is open, keep the UI clean and let the notification hub hold it instead.
+  if (typeof document !== "undefined" && !document.hidden) return;
   try {
     const reg = await ensureServiceWorkerRegistered();
     await reg?.showNotification(title, { body, icon:"/icon-192.png", badge:"/icon-192.png", data:{ url:"/", ...data } });
@@ -11044,8 +11187,8 @@ const renderPropsParlayBuilder = () => (
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#7CFFB2"}}>{propsParlayPayout}</div>
           </div>
         </div>
-        <button onClick={placeOwnPropsParlay} disabled={parlayLegs.length<2||myPoints<Number(parlayWager)} className="bb-pressable bb-glow-lime bb-force-dark" style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<Number(parlayWager)?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",minHeight:48}}>
-          submit
+        <button onClick={placeOwnPropsParlay} disabled={parlayLegs.length<2||myPoints<Number(parlayWager)} className="bb-pressable bb-glow-lime bb-force-dark" aria-label="submit parlay" title="submit parlay" style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<Number(parlayWager)?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",minHeight:48}}>
+          <span style={{display:"inline-block",color:"#06070D",fontSize:13,fontWeight:900,letterSpacing:.4,textTransform:"uppercase"}}>submit</span>
         </button>
       </>
     )}
@@ -11329,14 +11472,14 @@ const noBettingWeek = isEventActive("no_betting");
                   <div style={{fontSize:11,color:"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>no twitch linked for this view</div>
                 )}
               </div>
-              <button onClick={()=>canWatchPropStream&&setShowPropStream(v=>!v)} disabled={!canWatchPropStream} className="bb-pressable bb-glow-violet" style={{background:canWatchPropStream?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:12,padding:"10px 13px",fontSize:12,fontWeight:900,color:canWatchPropStream?"#06070D":"#4A5066",cursor:canWatchPropStream?"pointer":"default",display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
-                <Tv size={14}/>{showPropStream ? "hide" : (activePropStreamHandles.length > 1 ? "multiview" : "watch")}
+              <button onClick={()=>canWatchPropStream&&setShowPropStream(v=>!v)} disabled={!canWatchPropStream} className="bb-pressable bb-glow-violet" style={{background:canWatchPropStream?"rgba(167,139,250,0.12)":"rgba(255,255,255,0.04)",border:`1px solid ${canWatchPropStream?"rgba(167,139,250,0.32)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 9px",fontSize:11,fontWeight:800,color:canWatchPropStream?"#A78BFA":"#4A5066",cursor:canWatchPropStream?"pointer":"default",display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
+                <Tv size={13}/>{showPropStream ? "hide" : (activePropStreamHandles.length > 1 ? "multiview" : "watch")}
               </button>
             </div>
             {propModeFilter === "1v1" && (
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:showPropStream&&canWatchPropStream?12:0}}>
                 {["single","multi"].map(view => (
-                  <button key={view} onClick={()=>setPropStreamMode(view)} className="bb-pressable" style={{background:propStreamMode===view?"#A78BFA":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"8px 8px",fontSize:10.5,fontWeight:900,color:propStreamMode===view?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  <button key={view} onClick={()=>setPropStreamMode(view)} className="bb-pressable" style={{background:propStreamMode===view?"rgba(167,139,250,0.16)":"rgba(255,255,255,0.045)",border:`1px solid ${propStreamMode===view?"rgba(167,139,250,0.35)":"rgba(255,255,255,0.07)"}`,borderRadius:8,padding:"6px 7px",fontSize:10.5,fontWeight:800,color:propStreamMode===view?"#A78BFA":"#8B92A8",cursor:"pointer"}}>
                     {view === "single" ? "single POV" : "1v1 multiview"}
                   </button>
                 ))}
@@ -11345,7 +11488,7 @@ const noBettingWeek = isEventActive("no_betting");
             {propModeFilter === "1v1" && propStreamMode === "multi" && oneVOneStreamOptions.length > 0 && (
               <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:showPropStream&&canWatchPropStream?12:0}}>
                 {oneVOneStreamOptions.map(p => (
-                  <button key={p.id} onClick={()=>setPropOneVOneCoStreamPlayerId(p.id)} className="bb-pressable" style={{flex:"1 1 110px",background:oneVOneCoStreamPlayer?.id===p.id?p.color:"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"8px 8px",fontSize:10.5,fontWeight:900,color:oneVOneCoStreamPlayer?.id===p.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  <button key={p.id} onClick={()=>setPropOneVOneCoStreamPlayerId(p.id)} className="bb-pressable" style={{flex:"1 1 110px",background:oneVOneCoStreamPlayer?.id===p.id?"rgba(167,139,250,0.16)":"rgba(255,255,255,0.045)",border:`1px solid ${oneVOneCoStreamPlayer?.id===p.id?"rgba(167,139,250,0.35)":"rgba(255,255,255,0.07)"}`,borderRadius:8,padding:"6px 7px",fontSize:10.5,fontWeight:800,color:oneVOneCoStreamPlayer?.id===p.id?"#A78BFA":"#8B92A8",cursor:"pointer"}}>
                     second POV · {p.name}
                   </button>
                 ))}
@@ -13018,6 +13161,13 @@ const addToast = useCallback((text, icon = "🔔") => {
   setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000);
 }, []);
 
+const addNotificationToast = useCallback((text, icon = "🔔") => {
+  // If phone notifications are enabled, do not also show the same push-style alert as an in-app dropdown.
+  // Normal app feedback still uses addToast directly.
+  if (pushStatusRef.current === "on") return;
+  addToast(text, icon);
+}, [addToast]);
+
   useEffect(() => {
     if (authStage !== "app" || !currentPlayer || !points || Object.keys(points).length === 0) return;
     const grantKey = `${currentPlayer}_wheel_visual_test_spins_v1`;
@@ -13066,7 +13216,7 @@ const addToast = useCallback((text, icon = "🔔") => {
         sessionId: testPing.sessionId,
         minutesUntil: 0,
       });
-      addToast?.("test squad check-in notification", "⏱️");
+      if (pushStatusRef.current !== "on") addToast?.("test squad check-in notification", "⏱️");
       showLocalNotification("⏱️ Squad check-in", "test notification — squad check-in works", { url:makeNotificationUrl("ping", { type:"test_checkin" }), type:"test_checkin", id:testPing.id });
     }, 30 * 60 * 1000);
     return () => clearTimeout(timeoutId);
@@ -13409,13 +13559,13 @@ useEffect(() => {
 useEffect(() => {
   if (catchupStopped || catchupQueue.length === 0) return;
   const [next, ...rest] = catchupQueue;
- addToast(
+ addNotificationToast(
   `${next.fromName} ${next.text}${next.message ? ` — "${next.message}"` : ""}`,
   next.type==="like" ? "❤️" : next.type==="comment" ? "💬" : next.type==="prop" ? "🎯" : "🔔"
 );
   const timer = setTimeout(() => setCatchupQueue(rest), 1400);
   return () => clearTimeout(timer);
-}, [catchupQueue, catchupStopped]);   
+}, [catchupQueue, catchupStopped, addNotificationToast]);   
                       
 
 useEffect(() => {
@@ -13474,7 +13624,7 @@ document.addEventListener("mousemove", updateActive, { passive: true });
     if (appIsVisible()) {
       newMsgs.forEach(m => {
         const sender = PLAYERS.find(pl => pl.id === m.playerId);
-        addToast(`${sender?.name}: ${m.text}`, "💬");
+        addNotificationToast(`${sender?.name}: ${m.text}`, "💬");
       });
     }
     return value;
@@ -13503,14 +13653,14 @@ if (key === "active_race") {
     if (value.startedBy !== currentPlayer) {
       const starter = PLAYERS.find(p => p.id === value.startedBy);
       const obj = RACE_OBJECTIVES.find(o => o.id === value.objectiveId);
-      addToast(`${starter?.name} started a race — ${obj?.label}${value?.entryFee ? ` · ${value.entryFee} pt jar` : ""}! Go to Race tab.`, obj?.emoji || "🏁");
+      addNotificationToast(`${starter?.name} started a race — ${obj?.label}${value?.entryFee ? ` · ${value.entryFee} pt jar` : ""}! Go to Race tab.`, obj?.emoji || "🏁");
     }
   } else {
     setActiveRace(null);
     setRaceStart(null);
     if (value?.cancelled && value?.cancelledBy !== currentPlayer) {
       const canceller = PLAYERS.find(p => p.id === value.cancelledBy);
-      addToast(`${canceller?.name} cancelled the race.`, "❌");
+      addNotificationToast(`${canceller?.name} cancelled the race.`, "❌");
     }
   }
 }
@@ -13536,9 +13686,9 @@ if (key === "activity_feed") {
   const myFeed = (Array.isArray(value)?value:[]).filter(e=>e.to===currentPlayer);
   const prev = activityFeed || [];
   const newEntries = myFeed.filter(e=>!prev.find(p=>p.id===e.id)&&!e.seen);
-  if (appIsVisible()) {
+  if (appIsVisible() && pushStatusRef.current !== "on") {
     newEntries.forEach((e,i)=>{
-      setTimeout(()=>addToast(`${e.fromName} ${e.text}`,e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"),i*800);
+      setTimeout(()=>addNotificationToast(`${e.fromName} ${e.text}`,e.type==="like"?"❤️":e.type==="comment"?"💬":"🔔"),i*800);
     });
   }
   setActivityFeed(myFeed);
@@ -13551,7 +13701,7 @@ return () => {
     document.removeEventListener("mousemove", updateActive);
     window.removeEventListener("focus", updateActive);
   };
-  }, [currentPlayer]);
+  }, [currentPlayer, addNotificationToast]);
 
   useEffect(() => {
   if (!currentPlayer) return;
@@ -13951,8 +14101,9 @@ const TABS=[
   const own = points?.[currentPlayer+"_owned"] || [];
   const bgId = own.find(id => eq[id] && BACKGROUND_ITEM_IDS.includes(id));
   const customUrl = points?.[currentPlayer+"_customBg"];
-  const hasTextKitEquipped = own.some(id => eq[id] && ((id.startsWith("pass_premium_") && getPassRewardForOwnedId(id)?.type === "text_color") || SHOP_ITEMS.find(i => i.id === id)?.type === "text_color"));
-  const textColors = hasTextKitEquipped ? (points?.[currentPlayer+"_textColors"] || {}) : {};
+  const equippedTextKitId = getEquippedTextKitId(points, currentPlayer);
+  const equippedTextKitMeta = getTextKitMeta(equippedTextKitId);
+  const textColors = getAppliedTextColors(points, currentPlayer, theme, userColor);
   const bgStyle = getBackgroundVisualStyle(bgId, customUrl, theme);
 
   const acceptSessionFromBanner = async () => {
@@ -13972,10 +14123,11 @@ const TABS=[
   };
 
   return (
-    <div key={`${currentPlayer}-${bgId || "default"}-${customUrl || ""}`} style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
+    <div key={`${currentPlayer}-${bgId || "default"}-${customUrl || ""}-${equippedTextKitId || "defaultText"}`} style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {false&&loading&&authStage==="app"&&<div style={{position:"fixed",top:"max(12px, env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1200,width:22,height:22,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.16)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/>}
       {(points?.[currentPlayer+"_showStars"] !== false) && <StarfieldBg/>}
+      <SeasonalTextKitFx kitValue={equippedTextKitMeta?.value}/>
 
 {toasts.length > 0 && (
   <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto"}}>
@@ -14390,14 +14542,14 @@ modalBox:{background:"linear-gradient(180deg,#121526,#0B0D17)",borderRadius:"24p
   counterVal:{fontFamily:"'Oswald',sans-serif",fontSize:26,fontWeight:600,minWidth:50,textAlign:"center"},
   chatTabWrap:{display:"flex",flexDirection:"column",flex:1,minHeight:0},
   chatHeader:{padding:"16px 16px 8px",flexShrink:0},
-  chatScroll:{flex:1,overflowY:"auto",padding:"0 16px",WebkitOverflowScrolling:"touch",scrollBehavior:"auto",minHeight:0},
+  chatScroll:{flex:1,overflowY:"auto",padding:"0 16px 18px",WebkitOverflowScrolling:"touch",scrollBehavior:"auto",minHeight:0,overscrollBehavior:"contain"},
   chatEmpty:{textAlign:"center",color:"#4A5066",fontSize:13,marginTop:40},
   chatMsgRow:{display:"flex",marginBottom:10},
   chatBubble:{maxWidth:"78%",borderRadius:17,padding:"10px 13px",boxShadow:"0 8px 18px rgba(0,0,0,0.14)"},
   chatAuthor:{fontSize:11,fontWeight:700,marginBottom:3},
   chatText:{fontSize:14.5,lineHeight:1.4},
   chatTime:{fontSize:10,marginTop:4,textAlign:"right"},
-chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, env(safe-area-inset-bottom))",borderTop:"1px solid rgba(255,255,255,0.08)",background:"rgba(6,7,13,0.96)",flexShrink:0},
+chatInputRow:{display:"flex",gap:8,padding:"12px 16px",paddingBottom:"max(12px, env(safe-area-inset-bottom))",borderTop:"1px solid rgba(255,255,255,0.08)",background:"rgba(6,7,13,0.96)",flexShrink:0,position:"relative",zIndex:5},
   chatInput:{flex:1,background:"#11131F",border:"1px solid rgba(255,255,255,0.12)",borderRadius:99,padding:"12px 16px",color:"#E8ECF4",fontSize:14,outline:"none",boxShadow:"inset 0 0 0 1px rgba(255,255,255,0.02)"},
   chatSendBtn:{width:42,height:42,background:"#B8FF4D",border:"none",borderRadius:99,color:"#06070D",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0},
   commentItem:{display:"flex",gap:8,marginBottom:14},
