@@ -1913,20 +1913,22 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const [kindTab, setKindTab] = useState("title");
   const profileKindTabs = sourceTab === "pass"
     ? [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"}]
-    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"border",label:"borders"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"}];
+    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"border",label:"borders"},{id:"text_color",label:"text"},{id:"sound",label:"sounds"},{id:"background",label:"backgrounds"}];
   useEffect(() => {
-    if (sourceTab === "pass" && kindTab === "sound") setKindTab("title");
+    if (!profileKindTabs.some(t => t.id === kindTab)) setKindTab(profileKindTabs[0]?.id || "title");
   }, [sourceTab, kindTab]);
   const passOwned = owned.filter(id => id.startsWith("pass_"));
   const shopOwned = owned.filter(id => SHOP_ITEMS.find(i => i.id === id));
   const itemLabel = (id) => {
     const shopItem = SHOP_ITEMS.find(i => i.id === id);
-    if (shopItem) return shopItem.label || shopItem.value || id;
+    if (shopItem) return getShopItemDisplayLabel(shopItem);
     if (id.startsWith("pass_")) return getPassRewardForOwnedId(id)?.label || id;
     return id;
   };
   const itemIcon = (id) => {
     const shopItem = SHOP_ITEMS.find(i => i.id === id);
+    if (shopItem?.type === "background") return "▧";
+    if (shopItem?.type === "sound") return "SFX";
     if (shopItem?.emoji) return shopItem.emoji;
     const reward = id.startsWith("pass_") ? getPassRewardForOwnedId(id) : null;
     if (reward?.type === "icon") return reward.value;
@@ -2004,7 +2006,6 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
       {sourceTab === "shop" && kindTab === "sound" ? (
         <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(77,158,255,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
           <div style={{fontSize:10,color:player?.color||"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:10}}>SOUNDBOARD SELECTIONS</div>
-          <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>pick up to 6 custom sounds for your voice room board. default sounds are always available and do not use a slot.</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             {Array.from(new Set([...DEFAULT_SOUNDBOARD_IDS, ...shopOwned.filter(isSoundboardSoundId)])).map(id => {
               const snd = getSoundboardSound(id);
@@ -2258,7 +2259,7 @@ function BracketTab({ schedule, setSchedule, currentPlayer }) {
     await storeSet("schedule",next);
   };
   return (
-    <div className="bb-tab-content" style={s.tabContent}>
+    <div className="bb-tab-content" style={embedded ? {...s.tabContent, padding:"0", minHeight:0} : s.tabContent}>
       {editing&&<MatchEditor match={editing} onSave={saveMatch} onClose={()=>setEditing(null)}/>}
       <div style={s.sectionLabel}>league play · swiss format</div>
       <div style={s.sectionSubLabel}>jul 20 – aug 23 · best-of-5 · 1 match/week</div>
@@ -2480,7 +2481,7 @@ function TwitchLiveDot({ handle, size = 8 }) {
   return <div className="bb-live-dot" title="live on twitch" style={{width:size,height:size,borderRadius:99,background:"#FF2D55",boxShadow:"0 0 8px rgba(255,45,85,0.7)",flexShrink:0}}/>;
 }
 
-function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer }) {
+function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded = false }) {
   const [editingTwitch,setEditingTwitch]=useState(false);
   const [draft,setDraft]=useState(streamProfiles[currentPlayer]?.twitch||"");
   const [activeStream,setActiveStream]=useState(null);
@@ -6249,7 +6250,7 @@ const PARSE_STAT_ALIASES = {
   saves: ["saves", "save"],
   shots: ["shots", "shot"],
   demos: ["demos", "demolitions", "demolition"],
-  score: ["score", "player score", "playerscore", "player_score", "core score", "corescore", "total score", "totalscore", "points", "player points", "stat score"],
+  score: ["score", "player score", "playerscore", "player_score", "core score", "corescore", "core points", "corepoints", "total score", "totalscore", "score points", "scorepoints", "points", "player points", "stat score", "stat points", "match score"],
 };
 function normalizeParseStatName(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -6330,6 +6331,9 @@ function getMatchStatValue(match, field) {
       stats?.coreScore,
       stats?.totalScore,
       stats?.points,
+      stats?.core?.score,
+      stats?.coreScore,
+      stats?.corePoints,
       stats?.rating?.metadata?.score,
       match?.score,
       match?.playerScore,
@@ -6493,7 +6497,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
   const demos = getMatchStatValue(match, "demos") || 0;
   const parsedScore = getMatchStatValue(match, "score");
   const estimatedScore = estimateRocketLeagueScoreFromStats({ goals, assists, saves, shots, demos });
-  const score = Number(parsedScore) > 0 ? Number(parsedScore) : estimatedScore;
+  const score = Number(parsedScore) > 0 ? Number(parsedScore) : 0;
   const teamScore = getMatchTeamScoreInfo(match, player);
   const matchStart = getMatchStartInfo(match);
   const detectedOurScore = Number.isFinite(teamScore.ourScore) ? teamScore.ourScore : null;
@@ -6517,7 +6521,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     demos,
     playerScore: Number(score) || 0,
     score: Number(score) || 0,
-    scoreSource: Number(parsedScore) > 0 ? "parse" : "estimated_from_stats",
+    scoreSource: Number(parsedScore) > 0 ? "parse" : "missing_from_parse",
     ourScore: Number.isFinite(detectedOurScore) && (detectedOurScore > 0 || (Number(goals) || 0) <= 0) ? detectedOurScore : (Number(goals) || 0),
     theirScore: Number.isFinite(detectedTheirScore) ? detectedTheirScore : null,
     parseDetectedOurScore: detectedOurScore,
@@ -6529,7 +6533,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     ratingDelta: getMatchRatingDelta(match),
     source: "parse_sessions",
     syncedAt: new Date().toISOString(),
-    parseScoreDebug: { parsedScore: Number(parsedScore) || 0, estimatedScore, savedScore: Number(score) || 0, scoreAliases: collectParseStatValuesByAlias(match, "score"), hasOpponentScore: Number.isFinite(detectedTheirScore) },
+    parseScoreDebug: { parsedScore: Number(parsedScore) || 0, estimatedScorePreviewOnly: estimatedScore, savedScore: Number(score) || 0, scoreAliases: collectParseStatValuesByAlias(match, "score"), hasOpponentScore: Number.isFinite(detectedTheirScore) },
   };
 }
 
@@ -7563,6 +7567,25 @@ function withNormalizedShopPrice(item, idx) {
   return { ...item, cost: getNormalizedShopCost(item, idx) };
 }
 
+function stripLeadingEmojiText(value) {
+  return String(value || "").replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F\s]+/u, "").trim();
+}
+
+function getShopItemDisplayLabel(itemOrId) {
+  const item = typeof itemOrId === "string" ? SHOP_ITEMS.find(i => i.id === itemOrId) : itemOrId;
+  if (!item) return String(itemOrId || "item");
+  const raw = item.label || item.value || item.id;
+  if (item.type === "sound") return stripLeadingEmojiText(raw) || String(item.id || "sound").replace(/^sb_/, "").replace(/_/g, " ");
+  return String(raw || item.id || "item");
+}
+
+function getShopItemRevealIcon(item) {
+  if (item?.type === "background") return "▧";
+  if (item?.type === "sound") return "SFX";
+  return item?.emoji || (item?.type === "text_color" ? "Aa" : item?.type === "title" ? "T" : "✨");
+}
+
+
 const SHOP_ITEMS_RAW = [
   // colors
   { id:"lime_name",   label:"lime",     desc:"lime green name glow",   cost:50,  type:"color", value:"#B8FF4D", emoji:"🟢" },
@@ -8499,12 +8522,12 @@ const toggleEquip = async (itemId) => {
       ? <div style={{width:42,height:42,borderRadius:10,flexShrink:0,background:getBackgroundPreview(item.value),border:"1px solid rgba(255,255,255,0.08)"}} />
       : item.type === "border"
         ? <div style={{height:36,borderRadius:10,marginBottom:8,background:"linear-gradient(135deg,#11131F,#0C0E18)",...getPresenceBorderVisualStyle({ [currentPlayer + "_owned"]:[item.id], [currentPlayer + "_equipped"]:{ [item.id]:true } }, currentPlayer, true)}} />
-        : <div style={{fontSize:item.type === "icon" ? 28 : 22,marginBottom:6,color:accent}}>{item.emoji || (item.type === "text_color" ? "Aa" : item.type === "title" ? "T" : "◆")}</div>;
+        : <div style={{fontSize:item.type === "icon" ? 28 : item.type === "sound" ? 13 : 22,marginBottom:6,color:accent,fontWeight:900}}>{getShopItemRevealIcon(item)}</div>;
     return (
       <div key={item.id} style={{background:isEquipped?`${accent}14`:"rgba(255,255,255,0.03)",borderRadius:14,padding:item.type === "background" ? "12px 14px" : "12px",border:`1px solid ${isEquipped?`${accent}55`:isOwned?"rgba(255,255,255,0.12)":"rgba(255,255,255,0.06)"}`,display:item.type === "background"?"flex":"block",alignItems:"center",gap:12,textAlign:item.type === "background"?"left":"center"}}>
         {preview}
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:12,fontWeight:900,color:isOwned?accent:"#E8ECF4",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.label || item.value || item.id}</div>
+          <div style={{fontSize:12,fontWeight:900,color:isOwned?accent:"#E8ECF4",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(item)}</div>
           <div style={{fontSize:9.5,color:"#4A5066",marginTop:3,marginBottom:8,lineHeight:1.25}}>{item.desc || item.value || (item.type === "text_color" ? "custom app text colors" : "shop item")}</div>
           {isOwned ? (
             <div style={{display:"flex",gap:6,alignItems:"center",justifyContent:item.type === "background"?"flex-start":"center"}}>
@@ -8782,7 +8805,6 @@ await storeSetWithPush("pings", pingUpd2);
     🕐 resets in {String(Math.floor(shopCountdown / 3600000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 3600000) / 60000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 60000) / 1000)).padStart(2,"0")}
   </div>
 </div>
-          <div style={{fontSize:11,color:"#4A5066",marginBottom:12}}>daily rotation shows up to 10 items per category. prices are tuned so cosmetics feel earned, not impossible.</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
             {shopTabDefs.map(t => (
               <button key={t.id} onClick={()=>setShopTab(t.id)} className="bb-pressable" style={{background:shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.045)",border:`1px solid ${shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:shopTab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
@@ -8810,10 +8832,10 @@ await storeSetWithPush("pings", pingUpd2);
               </button>
             ) : (
               <div>
-                <div style={{fontSize:54,animation:"scaleFadeIn .2s ease"}}>{purchaseReveal.item.emoji || "✨"}</div>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,color:"#E8ECF4",marginTop:8}}>{purchaseReveal.item.label}</div>
+                <div style={{fontSize:purchaseReveal.item.type === "sound" ? 28 : 54,animation:"scaleFadeIn .2s ease",fontWeight:900}}>{getShopItemRevealIcon(purchaseReveal.item)}</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,color:"#E8ECF4",marginTop:8}}>{getShopItemDisplayLabel(purchaseReveal.item)}</div>
                 <div style={{fontSize:12,color:"#8B92A8",marginTop:4}}>{purchaseReveal.item.desc || "added to your collection"}</div>
-                <button onClick={()=>setPurchaseReveal(null)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:18}}>claim</button>
+                <button onClick={()=>setPurchaseReveal(null)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:18}}>claim {getShopItemDisplayLabel(purchaseReveal.item)}</button>
               </div>
             )}
           </div>
@@ -8860,7 +8882,7 @@ await storeSetWithPush("pings", pingUpd2);
 </div>
       {/* squad streams section inside squad */}
       <div style={{marginBottom:18}}>
-        <StreamTab streamProfiles={streamProfiles || {}} setStreamProfiles={setStreamProfiles || (()=>{})} currentPlayer={currentPlayer}/>
+        <StreamTab streamProfiles={streamProfiles || {}} setStreamProfiles={setStreamProfiles || (()=>{})} currentPlayer={currentPlayer} embedded/>
       </div>
  {/* Incoming pings */}
 {myPings.filter(p => p.type !== "flower").length > 0 && (
@@ -10802,7 +10824,7 @@ const [predSide, setPredSide] = useState(null);
 
   const myPoints = points?.[currentPlayer] || 0;
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
-  useEffect(() => { if (section === "predict") setSection("props"); }, [section]);
+  useEffect(() => { if (section === "predict" || section === "parlay") setSection("props"); }, [section]);
 
   // Build player props from stats across 1v1 / 2v2 / 3v3.
   const PROP_FIELD_CONFIG = {
@@ -10966,6 +10988,88 @@ const toggleParlayLeg = (leg) => {
   });
 };
 const isParlayLegSelected = (legId) => parlayLegs.some(l => l.id === legId);
+
+const getParlayLegDecimalOdds = (odds) => {
+  const raw = String(odds || "+100");
+  const numeric = Number(raw.replace("+", ""));
+  if (!Number.isFinite(numeric) || numeric === 0) return 2;
+  return raw.startsWith("+") ? (numeric / 100) + 1 : (100 / Math.abs(numeric)) + 1;
+};
+const propsParlayMultiplier = parlayLegs.reduce((m, leg) => m * Math.min(getParlayLegDecimalOdds(leg.odds), 3), 1);
+const propsParlayPayout = Math.round(Number(parlayWager || 0) * propsParlayMultiplier);
+const placeOwnPropsParlay = async () => {
+  const cleanWager = Number(parlayWager) || 0;
+  if (parlayLegs.length < 2 || myPoints < cleanWager || cleanWager <= 0) return;
+  const parlayBet = {
+    id: Date.now().toString(),
+    bettorId: currentPlayer,
+    isParlay: true,
+    legs: parlayLegs.map(l => ({
+      propKey: l.propKey,
+      playerId: l.playerId,
+      playerName: l.playerName,
+      field: l.field,
+      fieldLabel: l.fieldLabel,
+      line: l.line,
+      side: l.side,
+      odds: l.odds,
+      targetMode: l.targetMode || l.mode || "3v3",
+      duoIds: l.duoIds || null,
+      duoLabel: l.duoLabel || "",
+      combined: !!l.combined,
+    })),
+    wager: cleanWager,
+    payout: propsParlayPayout,
+    multiplier: propsParlayMultiplier.toFixed(2),
+    status: "open",
+    placedAt: new Date().toISOString(),
+    settleAt: nextTenAmIso(),
+  };
+  const upd = { ...points, [currentPlayer]: myPoints - cleanWager };
+  setPoints(upd); await storeSet("points", upd);
+  const updBets = [...(bets || []), parlayBet];
+  setBets(updBets); await storeSet("bets", updBets);
+  setParlayLegs([]);
+  setParlayWager(10);
+  setShowParlay(false);
+};
+const renderPropsParlayBuilder = () => (
+  <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,209,102,0.25)"}}>
+    <div style={{fontSize:12,color:"#FFD166",fontWeight:900,letterSpacing:.8,marginBottom:8}}>PARLAY BUILDER</div>
+    {parlayLegs.length===0 ? (
+      <div style={{fontSize:12,color:"#4A5066"}}>no legs selected</div>
+    ) : (
+      <>
+        {parlayLegs.map((leg,i)=>(
+          <div key={leg.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px"}}>
+            <div>
+              <div style={{fontSize:12,fontWeight:800,color:"#E8ECF4"}}>{leg.playerName} {leg.side} {leg.line} {leg.fieldLabel || leg.field}</div>
+              <div style={{fontSize:10,color:"#4A5066"}}>{leg.odds}</div>
+            </div>
+            <button onClick={()=>setParlayLegs(prev=>prev.filter((_,idx)=>idx!==i))} className="bb-pressable" style={{background:"none",border:"none",color:"#FF5C8A",cursor:"pointer"}}><X size={14}/></button>
+          </div>
+        ))}
+        <div style={{display:"flex",gap:8,marginTop:10,alignItems:"center"}}>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>MULTIPLIER</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#FFD166"}}>{propsParlayMultiplier.toFixed(2)}x</div>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>WAGER</div>
+            <input type="number" min="1" max="200" inputMode="numeric" value={parlayWager} onChange={e=>setParlayWager(clampWager(e.target.value, parlayWager))} style={{...s.modalInput,padding:"8px 10px",fontSize:14}}/>
+          </div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>TO WIN</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#7CFFB2"}}>{propsParlayPayout}</div>
+          </div>
+        </div>
+        <button onClick={placeOwnPropsParlay} disabled={parlayLegs.length<2||myPoints<Number(parlayWager)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<Number(parlayWager)?0.4:1}}>
+          place {parlayLegs.length}-leg parlay — {parlayWager} pts to win {propsParlayPayout}
+        </button>
+      </>
+    )}
+  </div>
+);
 
 const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "", postId = "", commentId = "" }) => {
   const existing = await storeGet("activity_feed") || [];
@@ -11139,7 +11243,7 @@ const noBettingWeek = isEventActive("no_betting");
 
       {/* Section tabs */}
       <div style={{display:"flex",gap:8,marginBottom:18}}>
-     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"parlay",label:"parlay"},{id:"games",label:"games"}].map(sec=>(
+     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"games",label:"games"}].map(sec=>(
           <button key={sec.id} onClick={()=>setSection(sec.id)} className="bb-pressable"
             style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?playerColor:"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
             {sec.label}
@@ -11284,6 +11388,15 @@ const noBettingWeek = isEventActive("no_betting");
               </div>
             )}
           </div>
+          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
+            <button onClick={()=>setShowParlay(v=>!v)} className="bb-pressable" style={{flex:1,background:showParlay?"#FFD166":"rgba(255,209,102,0.12)",border:"1px solid rgba(255,209,102,0.32)",borderRadius:12,padding:"11px 12px",fontSize:12,fontWeight:900,color:showParlay?"#06070D":"#FFD166",cursor:"pointer"}}>
+              parlay {parlayLegs.length ? `(${parlayLegs.length})` : ""}
+            </button>
+            {parlayLegs.length>0&&(
+              <button onClick={()=>setParlayLegs([])} className="bb-pressable" style={{background:"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.22)",borderRadius:12,padding:"11px 12px",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>clear</button>
+            )}
+          </div>
+          {showParlay&&renderPropsParlayBuilder()}
           <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
             <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>player</div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
@@ -11322,6 +11435,10 @@ const noBettingWeek = isEventActive("no_betting");
             const lineIdx = lineIndexByProp[card.id] ?? Math.floor(card.lineOptions.length/2);
             const current = card.lineOptions[lineIdx];
             const isSelected = selectedProp===card.id;
+            const overParlayLeg = {id:`${card.id}_over_${current.line}`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"over",odds:current.overOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
+            const underParlayLeg = {id:`${card.id}_under_${current.line}`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"under",odds:current.underOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
+            const overInParlay = isParlayLegSelected(overParlayLeg.id);
+            const underInParlay = isParlayLegSelected(underParlayLeg.id);
             return (
               <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${isSelected?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.05)"}`}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
@@ -11372,6 +11489,14 @@ const noBettingWeek = isEventActive("no_betting");
                     <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="under"?"#06070D":"#FF5C8A"}}>{current.underOdds.american}</div>
                   </button>
                 </div>
+                <div style={{display:"flex",gap:8,marginTop:8}}>
+                  <button onClick={()=>{toggleParlayLeg(overParlayLeg);setShowParlay(true);}} className="bb-pressable" style={{flex:1,background:overInParlay?"rgba(124,255,178,0.18)":"rgba(255,209,102,0.08)",border:`1px solid ${overInParlay?"rgba(124,255,178,0.35)":"rgba(255,209,102,0.24)"}`,borderRadius:10,padding:"8px 0",fontSize:11,fontWeight:900,color:overInParlay?"#7CFFB2":"#FFD166",cursor:"pointer"}}>
+                    {overInParlay ? "✓ over in parlay" : "+ over parlay"}
+                  </button>
+                  <button onClick={()=>{toggleParlayLeg(underParlayLeg);setShowParlay(true);}} className="bb-pressable" style={{flex:1,background:underInParlay?"rgba(255,92,138,0.18)":"rgba(255,209,102,0.08)",border:`1px solid ${underInParlay?"rgba(255,92,138,0.35)":"rgba(255,209,102,0.24)"}`,borderRadius:10,padding:"8px 0",fontSize:11,fontWeight:900,color:underInParlay?"#FF5C8A":"#FFD166",cursor:"pointer"}}>
+                    {underInParlay ? "✓ under in parlay" : "+ under parlay"}
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -11403,12 +11528,7 @@ const noBettingWeek = isEventActive("no_betting");
                       <div style={{fontSize:10,color:"#4A5066",marginBottom:2}}>TO WIN</div>
                       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#B8FF4D"}}>{payout} pts</div>
                     </div>
-                                                                                 
-                    <div style={{flex:1,fontSize:11,color:"#8B92A8",lineHeight:1.35}}>
-                      must be placed before match start · applies to {card?.targetText || `next logged ${card?.mode || "game"} game`}
-                    </div>
-
-                    <button onClick={()=>placeBet(current?.line)} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
+<button onClick={()=>placeBet(current?.line)} disabled={myPoints<propWager} className="bb-pressable bb-glow-lime"
                       style={{flex:1,background:"#B8FF4D",border:"none",borderRadius:10,padding:"14px 0",fontSize:13,fontWeight:700,color:"#06070D",cursor:"pointer",opacity:myPoints<propWager?0.4:1}}>
                       place bet
                     </button>
@@ -11470,7 +11590,6 @@ const noBettingWeek = isEventActive("no_betting");
         };
         return (
           <div>
-            <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>match 3 for a big win. match 2 for a small win. no match — you lose your wager.</div>
             <div style={{background:"linear-gradient(135deg,#1A0A2E,#0A0818)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:18,padding:"24px 16px",marginBottom:16,textAlign:"center"}}>
               <div style={{fontSize:11,color:"#A78BFA",fontWeight:700,letterSpacing:1,marginBottom:16}}>SLOTS</div>
               <div style={{display:"flex",justifyContent:"center",gap:12,marginBottom:20}}>
@@ -11519,105 +11638,8 @@ const noBettingWeek = isEventActive("no_betting");
         );
       })()}
     
-    {/* PARLAY */}
-      {section==="parlay"&&(
-        <div>
-          <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>build a parlay from your open props or teammate bets. all legs must hit to win.</div>
-          <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(255,209,102,0.25)"}}>
-            <div style={{fontSize:12,color:"#FFD166",fontWeight:700,letterSpacing:0.5,marginBottom:8}}>PARLAY BUILDER</div>
-            {parlayLegs.length===0?(
-              <div style={{fontSize:12,color:"#4A5066",marginBottom:10}}>tap + on any prop or bet below to add a leg. up to 4 legs.</div>
-            ):(
-              <>
-                {parlayLegs.map((leg,i)=>(
-                  <div key={leg.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px"}}>
-                    <div>
-                      <div style={{fontSize:12,fontWeight:700,color:"#E8ECF4"}}>{leg.playerName} {leg.side} {leg.line} {leg.field}</div>
-                      <div style={{fontSize:10,color:"#4A5066"}}>{leg.odds}</div>
-                    </div>
-                    <button onClick={()=>setParlayLegs(prev=>prev.filter((_,idx)=>idx!==i))} className="bb-pressable"
-                      style={{background:"none",border:"none",color:"#FF5C8A",cursor:"pointer"}}><X size={14}/></button>
-                  </div>
-                ))}
-                {(()=>{
-                 const mult = parlayLegs.reduce((m,leg)=>{
-  const dec = parseFloat(leg.odds?.replace("+","") || "100");
-  const od = Math.min(leg.odds?.startsWith("+")?(dec/100)+1:(100/Math.abs(dec))+1, 3);
-  return m*od;
-},1);
-                  const payout = Math.round(parlayWager*mult);
-                  return (
-                    <>
-                      <div style={{display:"flex",gap:8,marginTop:10,alignItems:"center"}}>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>MULTIPLIER</div>
-                          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#FFD166"}}>{mult.toFixed(2)}x</div>
-                        </div>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>WAGER</div>
-                          <input type="number" min="1" max="200" inputMode="numeric" value={parlayWager} onChange={e=>setParlayWager(clampWager(e.target.value, parlayWager))}
-                            style={{...s.modalInput,padding:"8px 10px",fontSize:14}}/>
-                        </div>
-                        <div style={{flex:1}}>
-                          <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>TO WIN</div>
-                          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#7CFFB2"}}>{payout}</div>
-                        </div>
-                      </div>
-                      <button onClick={async()=>{
-                        if(parlayLegs.length<2||myPoints<parlayWager) return;
-                        const parlayBet={id:Date.now().toString(),bettorId:currentPlayer,isParlay:true,legs:parlayLegs.map(l=>({propKey:l.propKey,playerId:l.playerId,playerName:l.playerName,field:l.field,fieldLabel:l.fieldLabel,line:l.line,side:l.side,odds:l.odds,targetMode:l.targetMode || l.mode || "3v3",duoIds:l.duoIds || null,duoLabel:l.duoLabel || "",combined:!!l.combined})),wager:parlayWager,payout,multiplier:mult.toFixed(2),status:"open",placedAt:new Date().toISOString(),settleAt:nextTenAmIso()};
-                        const upd={...points,[currentPlayer]:myPoints-parlayWager};
-                        setPoints(upd); await storeSet("points",upd);
-                        const updBets=[...(bets||[]),parlayBet];
-                        setBets(updBets); await storeSet("bets",updBets);
-                        setParlayLegs([]); setParlayWager(10);
-                      }} disabled={parlayLegs.length<2||myPoints<parlayWager} className="bb-pressable bb-glow-lime"
-                        style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<parlayWager?0.4:1}}>
-                        place {parlayLegs.length}-leg parlay — {parlayWager} pts to win {payout}
-                      </button>
-                    </>
-                  );
-                })()}
-              </>
-            )}
-          </div>
-
-          <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:0.5,marginBottom:10}}>AVAILABLE PROPS</div>
-          {props.map(card=>{
-            const lineIdx = Math.floor(card.lineOptions.length/2);
-            const current = card.lineOptions[lineIdx];
-            const overLeg = {id:`${card.id}_over`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"over",odds:current.overOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
-            const underLeg = {id:`${card.id}_under`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"under",odds:current.underOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
-            return (
-              <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(255,255,255,0.05)"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
-                  <div style={{width:8,height:8,borderRadius:99,background:card.playerColor}}/>
-                  <span style={{fontWeight:700,fontSize:13,color:card.playerColor}}>{card.playerName}</span>
-                  <span style={{fontSize:13,color:"#E8ECF4",marginLeft:4}}>· {card.fieldLabel || card.field}</span>
-                  <span style={{fontSize:10,color:"#4A5066",fontWeight:800,textTransform:"uppercase",marginLeft:4}}>{card.mode}{card.combined?" · duo total":""}</span>
-                  <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>line: {current.line}</span>
-                </div>
-                <div style={{display:"flex",gap:8}}>
-                  <button onClick={()=>toggleParlayLeg(overLeg)} className="bb-pressable"
-                    style={{flex:1,background:isParlayLegSelected(overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.08)",border:`1px solid ${isParlayLegSelected(overLeg.id)?"#7CFFB2":"rgba(124,255,178,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
-                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700}}>OVER {current.line}</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isParlayLegSelected(overLeg.id)?"#06070D":"#7CFFB2"}}>{current.overOdds.american}</div>
-                  </button>
-                  <button onClick={()=>toggleParlayLeg(underLeg)} className="bb-pressable"
-                    style={{flex:1,background:isParlayLegSelected(underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.08)",border:`1px solid ${isParlayLegSelected(underLeg.id)?"#FF5C8A":"rgba(255,92,138,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer",textAlign:"center"}}>
-                    <div style={{fontSize:10,color:"#4A5066",fontWeight:700}}>UNDER {current.line}</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isParlayLegSelected(underLeg.id)?"#06070D":"#FF5C8A"}}>{current.underOdds.american}</div>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
 
     
-
-
       {section==="games"&&(<GamesTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={null} setActiveRace={()=>{}} raceStart={null} setRaceStart={()=>{}}/>)}
 
     {/* PREDICTION MARKET */}
@@ -12134,7 +12156,6 @@ const RACE_OBJECTIVES = [
   { id:"assists_15",   label:"15 Assists",   field:"assists", target:15,  emoji:"🍀", color:"#A78BFA" },
   { id:"goals_50",     label:"50 Goals",     field:"goals",   target:50,  emoji:"⚽", color:"#FFD166" },
   { id:"demos_30",     label:"30 Demos",     field:"demos",   target:30,  emoji:"💥", color:"#FF8C42" },
-  { id:"wins_10",      label:"10 Wins",      field:null,      target:10,  emoji:"🏆", color:"#FF61C1" },
 ];
 
 function RaceModeTab({ stats, currentPlayer, points, setPoints, activeRace, setActiveRace, raceStart, setRaceStart }) {
@@ -13803,6 +13824,17 @@ const touchStartY = useRef(0);
   const scrollContainerRef = useRef(null);
 const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
+  const handleTouchMove = (e) => {
+    const el = scrollContainerRef.current;
+    const t = e.touches?.[0];
+    if (!el || !t) return;
+    const dy = t.clientY - touchStartY.current;
+    const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+    if ((el.scrollTop <= 0 && dy > 0) || (el.scrollTop >= maxScroll - 1 && dy < 0)) {
+      if (e.cancelable) e.preventDefault();
+      el.scrollTop = dy > 0 ? 0 : maxScroll;
+    }
+  };
   const handleTouchEnd = (e) => {
     if (tab !== "home") return; // only allow pull-to-refresh on the home tab
     const el = scrollContainerRef.current;
@@ -13832,7 +13864,7 @@ const TABS=[
     {id:"garage",   icon:Trophy,     label:"pass"},
 ];
   const badges = {
-    social: Math.max(0, posts.length - lastSeen.social),
+    social: 0,
     chat: lastSeen.chat > 0 ? Math.max(0, messages.length - lastSeen.chat) : 0,
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
@@ -14074,7 +14106,7 @@ const TABS=[
         </div>
       )}
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setJumpKey(key); setShowTrainingFull(true); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
-      <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+      <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1}} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
 <AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>
 {tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
@@ -14186,8 +14218,8 @@ topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",paddin
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"max(96px, calc(env(safe-area-inset-bottom, 0px) + 76px))",WebkitOverflowScrolling:"touch",minHeight:0,height:"100%",scrollbarWidth:"none",msOverflowStyle:"none",background:"transparent"},
-  tabContent:{padding:"16px 16px max(120px, calc(env(safe-area-inset-bottom, 0px) + 96px))",minHeight:"calc(var(--bb-real-vh, 100dvh) - 92px)"},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:0,WebkitOverflowScrolling:"touch",overscrollBehaviorY:"contain",minHeight:0,height:"100%",scrollbarWidth:"none",msOverflowStyle:"none",background:"transparent"},
+  tabContent:{padding:"16px 16px max(18px, env(safe-area-inset-bottom, 0px))",minHeight:"calc(var(--bb-real-vh, 100dvh) - 92px)"},
 pageButtonNav:{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"10px 14px",paddingBottom:8,background:"transparent",borderBottom:"1px solid transparent",scrollbarWidth:"none",msOverflowStyle:"none",position:"relative",zIndex:5,flexShrink:0},
 pageButtonNavItem:{flexShrink:0,minWidth:72,borderRadius:16,padding:"10px 10px",display:"flex",alignItems:"center",justifyContent:"center",gap:7,cursor:"pointer",backdropFilter:"blur(10px)"},
 tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px) - 10px)",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_DROP_FINAL: drops buttons into bottom safe-area gap */},
