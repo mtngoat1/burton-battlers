@@ -5260,15 +5260,35 @@ const addComment = async (postId, text) => {
           {dayOpen && list.map(b => {
             const won = b.status === "won";
             const lost = b.status === "lost";
+            const statusPill = <div style={{fontSize:10,fontWeight:900,color:won?"#7CFFB2":lost?"#FF5C8A":"#FFD166",background:won?"rgba(124,255,178,0.10)":lost?"rgba(255,92,138,0.10)":"rgba(255,209,102,0.10)",borderRadius:99,padding:"4px 8px",flexShrink:0}}>{won?"WIN":lost?"LOSS":"OPEN"}</div>;
+            if (b.isParlay) {
+              const legs = Array.isArray(b.legs) ? b.legs : [];
+              return (
+                <div key={b.id} style={{padding:"9px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                    <div style={{fontSize:11,fontWeight:500,color:"#E8ECF4",opacity:.72,letterSpacing:.2}}>{legs.length || 0}-leg parlay</div>
+                    <div style={{fontSize:10,color:"#A78BFA",fontWeight:800}}>{b.multiplier ? `${b.multiplier}x` : "parlay"}</div>
+                    <div style={{marginLeft:"auto"}}>{statusPill}</div>
+                  </div>
+                  {legs.map((leg, i) => (
+                    <div key={`${b.id}_leg_${i}`} style={{marginBottom:i===legs.length-1?0:7}}>
+                      <div style={{fontSize:12.5,fontWeight:850,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(leg)}</div>
+                      <div style={{fontSize:10,color:"#E8ECF4",opacity:.58,marginTop:2,fontWeight:500}}>part of parlay{leg.odds ? ` · ${leg.odds}` : ""}</div>
+                    </div>
+                  ))}
+                  <div style={{fontSize:10,color:"#8B92A8",marginTop:8,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>wager {b.wager || 0} pts · win {b.payout || 0}</div>
+                </div>
+              );
+            }
             return (
               <div key={b.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
                 <div style={{flex:1,minWidth:0}}>
                   {(() => { const display = formatBetForDisplay(b); return (<>
                     <div style={{fontSize:12,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{display.title}</div>
-                    <div style={{fontSize:10,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{display.sub ? `${display.sub} · ` : ""}wager {b.wager || 0} pts · win {b.payout || 0}</div>
+                    <div style={{fontSize:10,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>wager {b.wager || 0} pts · win {b.payout || 0}{b.odds ? ` · odds ${b.odds}` : ""}</div>
                   </>); })()}
                 </div>
-                <div style={{fontSize:10,fontWeight:900,color:won?"#7CFFB2":lost?"#FF5C8A":"#FFD166",background:won?"rgba(124,255,178,0.10)":lost?"rgba(255,92,138,0.10)":"rgba(255,209,102,0.10)",borderRadius:99,padding:"4px 8px",flexShrink:0}}>{won?"WIN":lost?"LOSS":"OPEN"}</div>
+                {statusPill}
               </div>
             );
           })}
@@ -5353,15 +5373,13 @@ const addComment = async (postId, text) => {
                       </span>
                     )}
                   </div>
-                  {(bet.legs || []).map((leg, i) => {
-                    const display = formatBetForDisplay(leg);
-                    return (
-                      <div key={i} style={{ fontSize: 12, color: "#8B92A8", marginBottom: 4 }}>
-                        <span style={{ color: "#E8ECF4", fontWeight: 600 }}>{display.title}</span> <span style={{ color: "#A78BFA" }}>{leg.odds}</span>
-                      </div>
-                    );
-                  })}
-                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 11, color: "#8B92A8" }}>
+                  {(bet.legs || []).map((leg, i) => (
+                    <div key={`${bet.id}_leg_${i}`} style={{marginBottom:i===(bet.legs || []).length-1?0:9}}>
+                      <div style={{fontSize:14,fontWeight:850,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(leg)}</div>
+                      <div style={{fontSize:10.5,color:"#E8ECF4",opacity:.6,marginTop:3,fontWeight:500}}>part of {bet.legs?.length || 0}-leg parlay{leg.odds ? ` · ${leg.odds}` : ""}</div>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap:8, marginTop: 12, fontSize: 11, color: "#8B92A8", flexWrap:"wrap" }}>
                     <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
                     <span>{bet.multiplier}x multiplier</span>
                     <span>to win <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{bet.payout} pts</span></span>
