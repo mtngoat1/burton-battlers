@@ -4941,6 +4941,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
   const [parlayLegs, setParlayLegs] = useState([]);
   const [parlayWager, setParlayWager] = useState(10);
   const [showParlay, setShowParlay] = useState(false);
+  const [showAllTeammateBets, setShowAllTeammateBets] = useState(false);
   const [openBetDays, setOpenBetDays] = useState({});
   const socialSwipeRef = useRef({ x:0, y:0 });
   const socialSwipeHandlers = {
@@ -5076,6 +5077,9 @@ const addComment = async (postId, text) => {
   // All bets from teammates (not current player). Clear is local to this account so it does not erase anyone else's history.
   const clearedTeammateBetIds = Array.isArray(points?.[currentPlayer + "_clearedTeammateBetIds"]) ? points[currentPlayer + "_clearedTeammateBetIds"] : [];
   const teammateBets = (bets || []).filter(b => b.bettorId !== currentPlayer && !clearedTeammateBetIds.includes(b.id));
+  const sortedTeammateBets = [...teammateBets].sort((a, b) => safeDateObj(b?.placedAt || b?.ts || 0).getTime() - safeDateObj(a?.placedAt || a?.ts || 0).getTime());
+  const visibleTeammateBets = showAllTeammateBets ? sortedTeammateBets : sortedTeammateBets.slice(0, 5);
+  const hiddenTeammateBetCount = Math.max(sortedTeammateBets.length - visibleTeammateBets.length, 0);
   const clearTeammateBets = async () => {
     const ids = (bets || []).filter(b => b.bettorId !== currentPlayer).map(b => b.id).filter(Boolean);
     if (!ids.length) return;
@@ -5326,22 +5330,53 @@ const addComment = async (postId, text) => {
             </div>
           )}
 
-          {teammateBets.filter(b => !b.isParlay).length === 0 && (
+          {sortedTeammateBets.length === 0 && (
             <div style={s.emptyQueue}>no teammate bets yet — check back after someone visits the boost tab.</div>
           )}
 
-          {teammateBets.filter(b => !b.isParlay).map(bet => {
+          {visibleTeammateBets.map(bet => {
             const bettor = PLAYERS.find(p => p.id === bet.bettorId);
-            const subject = PLAYERS.find(p => p.id === bet.playerId);
-            const isInParlay = parlayLegs.find(l => l.id === bet.id);
             const won = bet.status === "won";
             const lost = bet.status === "lost";
+
+            if (bet.isParlay) {
+              return (
+                <div key={bet.id} style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 10, border: "1px solid rgba(167,139,250,0.2)" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <div style={{ width: 7, height: 7, borderRadius: 99, background: bettor?.color }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: bettor?.color }}>{bettor?.name}</span>
+                    <span style={{ fontSize: 10, color: "#A78BFA", fontWeight: 700, marginLeft: 4 }}>{bet.legs?.length || 0}-leg parlay</span>
+                    <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt || bet.ts)}</span>
+                    {bet.status !== "open" && (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: won ? "#7CFFB2" : "#FF5C8A", background: won ? "rgba(124,255,178,0.1)" : "rgba(255,92,138,0.1)", padding: "2px 7px", borderRadius: 99 }}>
+                        {won ? "WON" : "LOST"}
+                      </span>
+                    )}
+                  </div>
+                  {(bet.legs || []).map((leg, i) => {
+                    const display = formatBetForDisplay(leg);
+                    return (
+                      <div key={i} style={{ fontSize: 12, color: "#8B92A8", marginBottom: 4 }}>
+                        <span style={{ color: "#E8ECF4", fontWeight: 600 }}>{display.title}</span> <span style={{ color: "#A78BFA" }}>{leg.odds}</span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 11, color: "#8B92A8" }}>
+                    <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
+                    <span>{bet.multiplier}x multiplier</span>
+                    <span>to win <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{bet.payout} pts</span></span>
+                  </div>
+                </div>
+              );
+            }
+
+            const isInParlay = parlayLegs.find(l => l.id === bet.id);
             return (
               <div key={bet.id} style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 10, border: `1px solid ${bet.status === "open" ? "rgba(255,209,102,0.15)" : won ? "rgba(124,255,178,0.15)" : "rgba(255,92,138,0.1)"}` }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
                   <div style={{ width: 7, height: 7, borderRadius: 99, background: bettor?.color }} />
                   <span style={{ fontSize: 12, fontWeight: 700, color: bettor?.color }}>{bettor?.name}</span>
-                  <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt)}</span>
+                  <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt || bet.ts)}</span>
                   {bet.status !== "open" && (
                     <span style={{ fontSize: 10, fontWeight: 700, color: won ? "#7CFFB2" : "#FF5C8A", background: won ? "rgba(124,255,178,0.1)" : "rgba(255,92,138,0.1)", padding: "2px 7px", borderRadius: 99 }}>
                       {won ? "WON" : "LOST"}
@@ -5372,35 +5407,12 @@ const addComment = async (postId, text) => {
             );
           })}
 
-          {/* Teammate parlays */}
-          {teammateBets.filter(b => b.isParlay).length > 0 && (
-            <>
-              <div style={{ ...s.sectionLabel, marginTop: 20, marginBottom: 10 }}>teammate parlays</div>
-              {teammateBets.filter(b => b.isParlay).map(bet => {
-                const bettor = PLAYERS.find(p => p.id === bet.bettorId);
-                const won = bet.status === "won";
-                return (
-                  <div key={bet.id} style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 10, border: "1px solid rgba(167,139,250,0.2)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                      <div style={{ width: 7, height: 7, borderRadius: 99, background: bettor?.color }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: bettor?.color }}>{bettor?.name}</span>
-                      <span style={{ fontSize: 10, color: "#A78BFA", fontWeight: 700, marginLeft: 4 }}>{bet.legs?.length}-leg parlay</span>
-                      <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt)}</span>
-                    </div>
-                    {(bet.legs || []).map((leg, i) => (
-                      <div key={i} style={{ fontSize: 12, color: "#8B92A8", marginBottom: 4 }}>
-                        <span style={{ color: "#E8ECF4", fontWeight: 600 }}>{leg.playerName}</span> {leg.side} {leg.line} {leg.field} <span style={{ color: "#A78BFA" }}>{leg.odds}</span>
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 10, fontSize: 11, color: "#8B92A8" }}>
-                      <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
-                      <span>{bet.multiplier}x multiplier</span>
-                      <span>to win <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{bet.payout} pts</span></span>
-                    </div>
-                  </div>
-                );
-              })}
-            </>
+          {sortedTeammateBets.length > 5 && (
+            <button onClick={() => setShowAllTeammateBets(v => !v)} className="bb-pressable bb-glow-violet"
+              style={{ width: "100%", background: "rgba(167,139,250,0.10)", border: "1px solid rgba(167,139,250,0.28)", borderRadius: 12, padding: "10px 12px", marginTop: 2, marginBottom: 12, color: "#A78BFA", fontSize: 12, fontWeight: 900, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+              {showAllTeammateBets ? "show less" : `show ${hiddenTeammateBetCount} older bet${hiddenTeammateBetCount === 1 ? "" : "s"}`}
+              <ChevronRight size={14} style={{ transform: showAllTeammateBets ? "rotate(-90deg)" : "rotate(90deg)", transition: "transform .18s ease" }} />
+            </button>
           )}
         </>
       )}
