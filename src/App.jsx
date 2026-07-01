@@ -862,10 +862,12 @@ function TrackerSetup({ player, onComplete, onUseCredit }) {
     setError(null);
     try {
       const res = await fetch(
-       `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${player.platform}&username=${player.name}`,
+       `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${encodeURIComponent(player.platform)}&username=${encodeURIComponent(player.name)}`,
         { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
       );
+      if (!res.ok) throw new Error(`profile sync returned ${res.status}`);
       const json = await res.json();
+      if (json?.status && json.status !== "success") throw new Error(json?.message || "profile sync failed");
       const segments = json?.data?.segments || [];
       const playlistIds = { "Ranked Duel 1v1": 10, "Ranked Doubles 2v2": 11, "Ranked Standard 3v3": 13 };
       const ranks = RL_PLAYLISTS.map(name => {
@@ -2459,28 +2461,61 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
 
 // ===================== Streaming Tab =====================
 
+function normalizeTwitchHandle(handle) {
+  const raw = String(handle || "").trim();
+  if (!raw) return "";
+  return raw
+    .replace(/^@+/, "")
+    .replace(/^https?:\/\/(www\.)?twitch\.tv\//i, "")
+    .replace(/^twitch\.tv\//i, "")
+    .split(/[/?#\s]/)[0]
+    .replace(/[^a-zA-Z0-9_]/g, "")
+    .trim();
+}
+
+function checkTwitchPreviewImage(cleanHandle) {
+  return new Promise((resolve) => {
+    if (typeof Image === "undefined" || !cleanHandle) return resolve(false);
+    let done = false;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      resolve(!!value);
+    };
+    const img = new Image();
+    const timer = setTimeout(() => finish(false), 4500);
+    img.onload = () => { clearTimeout(timer); finish(true); };
+    img.onerror = () => { clearTimeout(timer); finish(false); };
+    img.src = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${cleanHandle.toLowerCase()}-80x45.jpg?bb=${Date.now()}`;
+  });
+}
+
 function TwitchLiveDot({ handle, size = 8 }) {
+  const cleanHandle = normalizeTwitchHandle(handle);
   const [isLive, setIsLive] = useState(false);
   useEffect(() => {
-    if (!handle) { setIsLive(false); return; }
+    if (!cleanHandle) { setIsLive(false); return; }
     let alive = true;
-    const cleanHandle = String(handle).replace(/^@/, "").trim();
     const check = async () => {
+      let live = false;
       try {
         const res = await fetch(`https://decapi.me/twitch/uptime/${encodeURIComponent(cleanHandle)}?t=${Date.now()}`, { cache:"no-store" });
         const text = await res.text();
-        const live = !!text && !/offline|not live|not found|error/i.test(text);
-        if (alive) setIsLive(live);
-      } catch (_) {
-        if (alive) setIsLive(false);
+        if (res.ok && text) {
+          live = !/offline|not live|not found|does not exist|doesn't exist|error|invalid/i.test(text);
+        }
+      } catch (_) {}
+      if (!live) {
+        try { live = await checkTwitchPreviewImage(cleanHandle); } catch (_) {}
       }
+      if (alive) setIsLive(!!live);
     };
     check();
-    const timer = setInterval(check, 60000);
+    const timer = setInterval(check, 45000);
     return () => { alive = false; clearInterval(timer); };
-  }, [handle]);
-  if (!handle || !isLive) return null;
-  return <div className="bb-live-dot" title="live on twitch" style={{width:size,height:size,borderRadius:99,background:"#FF2D55",boxShadow:"0 0 8px rgba(255,45,85,0.7)",flexShrink:0}}/>;
+  }, [cleanHandle]);
+  if (!cleanHandle || !isLive) return null;
+  return <span className="bb-live-dot" title={`${cleanHandle} is live on Twitch`} aria-label="live on Twitch" style={{display:"inline-block",width:size,height:size,minWidth:size,minHeight:size,borderRadius:99,background:"#FF2D55",boxShadow:"0 0 8px rgba(255,45,85,0.8), 0 0 18px rgba(255,45,85,0.35)",flexShrink:0,verticalAlign:"middle",animation:"livePulse 1.15s ease-in-out infinite"}}/>;
 }
 
 function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded = false }) {
@@ -2489,14 +2524,16 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded 
   const [activeStream,setActiveStream]=useState(null);
 
   const saveTwitch=async()=>{
-    const upd={...streamProfiles,[currentPlayer]:{...streamProfiles[currentPlayer],twitch:draft.trim()}};
+    const clean = normalizeTwitchHandle(draft);
+    const upd={...streamProfiles,[currentPlayer]:{...streamProfiles[currentPlayer],twitch:clean}};
     setStreamProfiles(upd);
+    setDraft(clean);
     await storeSet("stream_profiles",upd);
     setEditingTwitch(false);
   };
 
   const livePlayer = activeStream && PLAYERS.find((p)=>p.id===activeStream);
-  const twitchHandle = livePlayer && streamProfiles[livePlayer.id]?.twitch;
+  const twitchHandle = livePlayer && normalizeTwitchHandle(streamProfiles[livePlayer.id]?.twitch);
 
   return (
     <div className="bb-tab-content" style={embedded ? { ...s.tabContent, padding:0, minHeight:0, marginBottom:0 } : s.tabContent}>
@@ -2511,7 +2548,7 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded 
           </div>
           <div style={s.streamEmbed}>
             <iframe
-              src={`https://player.twitch.tv/?channel=${twitchHandle}&parent=${window.location.hostname}&autoplay=true&muted=false`}
+              src={`https://player.twitch.tv/?channel=${encodeURIComponent(twitchHandle)}&parent=${window.location.hostname}&autoplay=true&muted=false`}
               style={{width:"100%",height:"100%",border:"none",borderRadius:14}}
               allowFullScreen
             />
@@ -2537,7 +2574,7 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded 
 
           <div style={{display:"flex",flexDirection:"column",gap:12,marginTop:10}}>
             {PLAYERS.map((p)=>{
-              const handle=streamProfiles[p.id]?.twitch;
+              const handle=normalizeTwitchHandle(streamProfiles[p.id]?.twitch);
               return (
                 <div key={p.id} style={s.streamPlayerCard}>
                   <div style={{display:"flex",alignItems:"center",gap:10,flex:1}}>
@@ -5064,6 +5101,7 @@ const addComment = async (postId, text) => {
       playerId: copiedBet.playerId,
       playerName: copiedBet.playerName,
       field: copiedBet.field,
+      fieldLabel: copiedBet.fieldLabel || copiedBet.field,
       line: copiedBet.line,
       side: copiedBet.side,
       wager,
@@ -5072,6 +5110,11 @@ const addComment = async (postId, text) => {
       status: "open",
       placedAt: new Date().toISOString(),
       settleAt: getBetSettleAt(copiedBet),
+      targetMode: copiedBet.targetMode || copiedBet.mode || getBetMode(copiedBet),
+      targetText: copiedBet.targetText || "",
+      duoIds: copiedBet.duoIds || null,
+      duoLabel: copiedBet.duoLabel || "",
+      combined: !!copiedBet.combined,
       copiedFrom: copiedBet.bettorId,
     };
     const newPts = myPoints - wager;
@@ -5081,6 +5124,7 @@ const addComment = async (postId, text) => {
     const updBets = [...(bets || []), newBet];
     setBets(updBets);
     await storeSet("bets", updBets);
+    await notifyPropBetPlacedPush(newBet);
     addToast?.("bet copied and placed!", "🎯");
     setCopiedBet(null);
   };
@@ -5109,7 +5153,7 @@ const addComment = async (postId, text) => {
       id: Date.now().toString(),
       bettorId: currentPlayer,
       isParlay: true,
-      legs: parlayLegs.map(l => ({ playerId: l.playerId, playerName: l.playerName, field: l.field, line: l.line, side: l.side, odds: l.odds })),
+      legs: parlayLegs.map(l => ({ playerId: l.playerId, playerName: l.playerName, field: l.field, fieldLabel: l.fieldLabel || l.field, line: l.line, side: l.side, odds: l.odds, targetMode: l.targetMode || l.mode || getBetMode(l), targetText: l.targetText || "", duoIds: l.duoIds || null, duoLabel: l.duoLabel || "", combined: !!l.combined })),
       wager: parlayWager,
       payout: parlayPayout,
       multiplier: parlayMultiplier.toFixed(2),
@@ -5123,6 +5167,7 @@ const addComment = async (postId, text) => {
     const updBets = [...(bets || []), parlayBet];
     setBets(updBets);
     await storeSet("bets", updBets);
+    await notifyPropBetPlacedPush(parlayBet);
     addToast?.(`${parlayLegs.length}-leg parlay placed!`, "🎰");
     setParlayLegs([]);
     setShowParlay(false);
@@ -5145,7 +5190,7 @@ const addComment = async (postId, text) => {
             </div>
             <div style={{ background: "rgba(184,255,77,0.06)", border: "1px solid rgba(184,255,77,0.2)", borderRadius: 14, padding: 16, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#E8ECF4", marginBottom: 6 }}>
-                {copiedBet.playerName} {copiedBet.side} {copiedBet.line} {copiedBet.field}
+                {formatBetForDisplay(copiedBet).title}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#8B92A8" }}>
                 <span>wager: <span style={{ color: "#B8FF4D", fontWeight: 700 }}>{copiedBet.wager} pts</span></span>
@@ -5214,8 +5259,10 @@ const addComment = async (postId, text) => {
             return (
               <div key={b.id} style={{display:"flex",alignItems:"center",gap:9,padding:"8px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
                 <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.question || `${b.playerName || b.team || "bet"} ${b.side || ""} ${b.line || ""} ${b.field || ""}`}</div>
-                  <div style={{fontSize:10,color:"#8B92A8",marginTop:3}}>wager {b.wager || 0} pts · win {b.payout || 0}</div>
+                  {(() => { const display = formatBetForDisplay(b); return (<>
+                    <div style={{fontSize:12,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{display.title}</div>
+                    <div style={{fontSize:10,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{display.sub ? `${display.sub} · ` : ""}wager {b.wager || 0} pts · win {b.payout || 0}</div>
+                  </>); })()}
                 </div>
                 <div style={{fontSize:10,fontWeight:900,color:won?"#7CFFB2":lost?"#FF5C8A":"#FFD166",background:won?"rgba(124,255,178,0.10)":lost?"rgba(255,92,138,0.10)":"rgba(255,209,102,0.10)",borderRadius:99,padding:"4px 8px",flexShrink:0}}>{won?"WIN":lost?"LOSS":"OPEN"}</div>
               </div>
@@ -5248,7 +5295,7 @@ const addComment = async (postId, text) => {
                   {parlayLegs.map((leg, i) => (
                     <div key={leg.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "8px 10px" }}>
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#E8ECF4" }}>{leg.playerName} {leg.side} {leg.line} {leg.field}</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#E8ECF4" }}>{formatSingleBetTitle(leg)}</div>
                         <div style={{ fontSize: 10, color: "#4A5066" }}>{leg.odds}</div>
                       </div>
                       <button onClick={() => setParlayLegs(prev => prev.filter((_, idx) => idx !== i))} className="bb-pressable"
@@ -5302,7 +5349,7 @@ const addComment = async (postId, text) => {
                   )}
                 </div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: "#E8ECF4", marginBottom: 6 }}>
-                  {bet.playerName} {bet.side} {bet.line} {bet.field}
+                  {formatBetForDisplay(bet).title}
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8B92A8", marginBottom: 10 }}>
                   <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
@@ -7189,12 +7236,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     if (currentPlayer !== ADMIN_ID || rankSyncing) return;
     setRankSyncing(true);
     addToast?.("syncing all ranks…", "🔄");
+    let syncedCount = 0;
+    const failedNames = [];
     try {
       const nextProfiles = { ...(mmrProfiles || {}) };
       for (const player of PLAYERS) {
         if (useParseCredit) {
           const creditOk = await useParseCredit(currentPlayer);
-          if (!creditOk) break;
+          if (!creditOk) { failedNames.push(`${player.name} credits`); continue; }
         }
         const existing = nextProfiles[player.id] || {
           platform: player.platform,
@@ -7202,12 +7251,35 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           ranks: RL_PLAYLISTS.map(playlist => ({ playlist, mmr: 0, rank: "Unranked", division: "" })),
           source: "synced",
         };
-        const res = await fetch(
-          `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${existing.platform || player.platform}&username=${existing.handle || player.name}`,
-          { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
-        );
-        if (!res.ok) throw new Error(`rank sync failed for ${player.name}`);
-        const json = await res.json();
+        const candidates = [
+          { platform: existing.platform || player.platform, handle: existing.handle || player.name },
+          { platform: player.platform, handle: player.name },
+        ].filter((v, i, arr) => v.platform && v.handle && arr.findIndex(x => x.platform === v.platform && x.handle === v.handle) === i);
+
+        let json = null;
+        let lastErr = null;
+        for (const c of candidates) {
+          try {
+            const res = await fetch(
+              `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${encodeURIComponent(c.platform)}&username=${encodeURIComponent(c.handle)}`,
+              { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
+            );
+            if (!res.ok) throw new Error(`${res.status}`);
+            const candidateJson = await res.json();
+            if (candidateJson?.status && candidateJson.status !== "success") throw new Error(candidateJson?.message || "api status failed");
+            json = candidateJson;
+            break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+
+        if (!json) {
+          console.warn("rank sync skipped", player.name, lastErr);
+          failedNames.push(player.name);
+          continue;
+        }
+
         const segments = json?.data?.segments || [];
         const newRanks = RL_PLAYLISTS.map(playlist => {
           const oldRank = (existing.ranks || []).find(r => r.playlist === playlist) || { playlist, mmr: 0, rank: "Unranked", division: "" };
@@ -7219,12 +7291,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         const updated = { ...existing, platform: existing.platform || player.platform, handle: existing.handle || player.name, ranks: newRanks, lastSynced: new Date().toISOString(), source: "synced" };
         nextProfiles[player.id] = updated;
         await setMMR(player.id, updated);
+        syncedCount += 1;
       }
       setMmrProfiles(nextProfiles);
-      addToast?.("all ranks updated", "✅");
+      if (syncedCount) addToast?.(`${syncedCount}/${PLAYERS.length} ranks updated${failedNames.length ? ` · skipped ${failedNames.join(", ")}` : ""}`, "✅");
+      else addToast?.("rank sync unavailable right now", "⚠️");
     } catch(e) {
       console.error(e);
-      addToast?.("rank sync failed", "❌");
+      addToast?.(syncedCount ? `${syncedCount}/${PLAYERS.length} ranks updated` : "rank sync unavailable right now", syncedCount ? "✅" : "⚠️");
     }
     setRankSyncing(false);
   };
@@ -8933,7 +9007,7 @@ await storeSetWithPush("pings", pingUpd2);
    {PLAYERS.map(p=>{
   const online = isOnline(safePresence?.[p.id]);
   const isMe = p.id === currentPlayer;
-  const twitchHandle = streamProfiles?.[p.id]?.twitch;
+  const twitchHandle = normalizeTwitchHandle(streamProfiles?.[p.id]?.twitch);
   const borderVisual = getPresenceBorderVisualStyle(points, p.id, online);
   return (
     <div key={p.id} style={{background:"#11131F",borderRadius:13,padding:"12px 14px",...borderVisual,display:"flex",alignItems:"center",gap:12}}>
@@ -9931,6 +10005,65 @@ function getBetMode(bet) {
   const raw = String(bet?.targetMode || bet?.mode || "3v3").replace(/^next_/, "");
   const mode = normalizeGameMode(raw);
   return ["1v1", "2v2", "3v3"].includes(mode) ? mode : "3v3";
+}
+
+function formatSingleBetTitle(bet = {}) {
+  const field = bet.fieldLabel || bet.marketLabel || bet.field || bet.market || "prop";
+  const rawQuestion = String(bet.question || "").trim();
+  if (rawQuestion && !/^bet$/i.test(rawQuestion)) return rawQuestion;
+  const subject = bet.combined && bet.duoLabel ? bet.duoLabel : (bet.playerName || bet.team || bet.subject || "prop");
+  const side = bet.side ? String(bet.side).toLowerCase().replace(/^./, c => c.toUpperCase()) : "";
+  const line = bet.line !== undefined && bet.line !== null && bet.line !== "" ? bet.line : "";
+  return `${subject} ${side} ${line} ${field}`.replace(/\s+/g, " ").trim() || "prop bet";
+}
+
+function formatBetForDisplay(bet = {}) {
+  if (bet?.isParlay) {
+    const legs = Array.isArray(bet.legs) ? bet.legs : [];
+    const legText = legs.map(leg => formatSingleBetTitle(leg));
+    const preview = legText.slice(0, 2).join(" · ");
+    const extra = legText.length > 2 ? ` +${legText.length - 2} more` : "";
+    return {
+      title: `${legs.length || 0}-leg parlay`,
+      sub: `${preview}${extra}`.trim(),
+    };
+  }
+  const title = formatSingleBetTitle(bet);
+  const details = [];
+  if (bet.targetMode || bet.mode) details.push(getBetMode(bet));
+  if (bet.targetText) details.push(bet.targetText);
+  if (bet.odds) details.push(`odds ${bet.odds}`);
+  return { title, sub: details.join(" · ") };
+}
+
+async function notifyPropBetPlacedPush(bet) {
+  if (!bet?.id || !bet?.bettorId) return;
+  const targetIds = new Set();
+  if (bet.isParlay) {
+    (Array.isArray(bet.legs) ? bet.legs : []).forEach(leg => {
+      if (leg?.combined && Array.isArray(leg.duoIds)) leg.duoIds.forEach(id => targetIds.add(id));
+      else if (leg?.playerId) targetIds.add(leg.playerId);
+    });
+  } else if (bet.combined && Array.isArray(bet.duoIds)) {
+    bet.duoIds.forEach(id => targetIds.add(id));
+  } else if (bet.playerId) {
+    targetIds.add(bet.playerId);
+  }
+  targetIds.delete(bet.bettorId);
+  const targets = [...targetIds].filter(Boolean);
+  if (!targets.length) return;
+  const display = formatBetForDisplay(bet);
+  const bettor = playerNameById(bet.bettorId);
+  const stake = Number(bet.wager || 0);
+  const payout = Number(bet.payout || 0);
+  const body = `${bettor} placed ${display.title}${display.sub ? ` — ${display.sub}` : ""}${stake ? ` · ${stake} pts` : ""}${payout ? ` to win ${payout}` : ""}`;
+  return sendPushToPlayersOnce(
+    `bet-placed:${bet.id}`,
+    targets,
+    "🎯 New prop on you",
+    body,
+    { url:makeNotificationUrl("social", { subTab:"bets", id:bet.id }), type:"prop_placed", id:bet.id }
+  );
 }
 
 function duoMatchesGame(game, duoIds) {
@@ -11147,6 +11280,7 @@ const placeOwnPropsParlay = async () => {
   setPoints(upd); await storeSet("points", upd);
   const updBets = [...(bets || []), parlayBet];
   setBets(updBets); await storeSet("bets", updBets);
+  await notifyPropBetPlacedPush(parlayBet);
   setParlayLegs([]);
   setParlayWager(50);
   setShowParlay(false);
@@ -11161,7 +11295,7 @@ const renderPropsParlayBuilder = () => (
         {parlayLegs.map((leg,i)=>(
           <div key={leg.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px"}}>
             <div>
-              <div style={{fontSize:12,fontWeight:800,color:"#E8ECF4"}}>{leg.playerName} {leg.side} {leg.line} {leg.fieldLabel || leg.field}</div>
+              <div style={{fontSize:12,fontWeight:800,color:"#E8ECF4"}}>{formatSingleBetTitle(leg)}</div>
               <div style={{fontSize:10,color:"#4A5066"}}>{leg.odds}</div>
             </div>
             <button onClick={()=>setParlayLegs(prev=>prev.filter((_,idx)=>idx!==i))} className="bb-pressable" style={{background:"none",border:"none",color:"#FF5C8A",cursor:"pointer"}}><X size={14}/></button>
@@ -11212,7 +11346,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
     seen: false
   };
 
-  await storeSetWithPush("activity_feed", [entry, ...existing].slice(0, 80));
+  await storeSet("activity_feed", [entry, ...existing].slice(0, 80));
 };             
   const myOpenBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status === "open");
   const mySettledBets = (bets || []).filter(b => b.bettorId === currentPlayer && b.status !== "open");
@@ -11323,6 +11457,7 @@ const placeBet = async (chosenLine) => {
   const updBets = [...(bets || []), bet];
   setBets(updBets);
   await storeSet("bets", updBets);
+  await notifyPropBetPlacedPush(bet);
 
   await pushActivity({
     to: card.playerId,
@@ -11500,11 +11635,11 @@ const noBettingWeek = isEventActive("no_betting");
                   <div key={`${player.id}-${handle}`} style={{borderRadius:14,overflow:"hidden",background:"#05060C",border:`1px solid ${player.color}44`}}>
                     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",background:"rgba(255,255,255,0.04)"}}>
                       <div style={{display:"flex",alignItems:"center",gap:7,fontSize:11,fontWeight:900,color:player.color}}><TwitchLiveDot handle={handle} size={7}/>{player.name} POV</div>
-                      <div style={{fontSize:10,color:"#4A5066"}}>twitch.tv/{handle}</div>
+                      <div style={{fontSize:10,color:"#4A5066"}}>twitch.tv/{normalizeTwitchHandle(handle)}</div>
                     </div>
                     <div style={{position:"relative",paddingTop:"56.25%"}}>
                       <iframe
-                        src={`https://player.twitch.tv/?channel=${encodeURIComponent(handle)}&parent=${twitchParent}&autoplay=${idx===0?"true":"false"}&muted=${idx===0?"false":"true"}`}
+                        src={`https://player.twitch.tv/?channel=${encodeURIComponent(normalizeTwitchHandle(handle))}&parent=${twitchParent}&autoplay=${idx===0?"true":"false"}&muted=${idx===0?"false":"true"}`}
                         title={`${player.name} Twitch stream`}
                         allow="autoplay; fullscreen; picture-in-picture"
                         allowFullScreen
@@ -11910,7 +12045,7 @@ const noBettingWeek = isEventActive("no_betting");
                 <div key={bet.id} style={{background:"#11131F",borderRadius:13,padding:14,marginBottom:8,border:"1px solid rgba(255,209,102,0.2)",display:"flex",alignItems:"center",gap:10}}>
                   <div style={{flex:1}}>
                     <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-                      <span style={{fontSize:13,fontWeight:700,color:"#FFD166"}}>{bet.playerName} {bet.side} {bet.line} {bet.field}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:"#FFD166"}}>{formatBetForDisplay(bet).title}</span>
                       <span style={{fontSize:11,color:"#4A5066"}}>{bet.odds}</span>
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between"}}>
@@ -11954,7 +12089,7 @@ const noBettingWeek = isEventActive("no_betting");
                           const won = bet.status==="won";
                           return (
                             <div key={bet.id} style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:5,fontSize:11}}>
-                              <span style={{color:"#E8ECF4"}}>{bet.playerName} {bet.side} {bet.line} {bet.field}</span>
+                              <span style={{color:"#E8ECF4"}}>{formatBetForDisplay(bet).title}</span>
                               <span style={{fontWeight:800,color:won?"#7CFFB2":"#FF5C8A"}}>{won?"WON":"LOST"}</span>
                             </div>
                           );
