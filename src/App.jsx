@@ -18,7 +18,7 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 // APP62_WIZARD_SOUNDBOARD_EQUIP_FIX
 // APP58_PROP_BET_PRE_MATCH_LOCK_PTS_NOTIFICATION_PATCH
 // APP63_PARSE_SCORE_SHOP_PROPS_NOTIFICATION_PATCH
-// APP64_FORCE_PARSE_SCORE_ODDS_VARIETY_PATCH
+// APP65_FULLSCREEN_SHOP_RACE_SCORE_JAR_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -195,7 +195,7 @@ function normalizeGameMode(mode) {
 
 function gameIsWin(game) {
   if (game?.result) return ["victory", "win", "won"].includes(String(game.result).toLowerCase());
-  const our = getDisplayedOurScore(game);
+  const our = Number(game?.ourScore);
   const their = Number(game?.theirScore);
   return Number.isFinite(our) && Number.isFinite(their) && our > their;
 }
@@ -203,11 +203,11 @@ function getDisplayedOurScore(game) {
   const rawOur = Number(game?.ourScore);
   const goals = Number(game?.goals);
   const detectedOur = Number(game?.parseDetectedOurScore);
-  // Parse sometimes returns player goals but not a final team score.
-  // If stored/detected team score is blank or 0 while the player clearly scored, show goals as our score.
-  if (Number.isFinite(goals) && goals > 0 && (!Number.isFinite(rawOur) || rawOur === 0) && (!Number.isFinite(detectedOur) || detectedOur === 0)) return goals;
+  // Parse sometimes returns player goals but not final team score, or returns team score as 0.
+  // Never let a saved/detected 0 hide a player who actually scored.
+  if ((!Number.isFinite(rawOur) || rawOur <= 0) && Number.isFinite(goals) && goals > 0) return goals;
   if (Number.isFinite(rawOur)) return rawOur;
-  if (Number.isFinite(detectedOur)) return detectedOur;
+  if (Number.isFinite(detectedOur) && detectedOur > 0) return detectedOur;
   return Number.isFinite(goals) ? goals : 0;
 }
 function formatGameScore(game) {
@@ -224,16 +224,18 @@ function applySyncedTeamScores(importedGames, result) {
   const detectedTheirScores = games
     .map(g => Number(g?.parseDetectedTheirScore))
     .filter(n => Number.isFinite(n));
-  const detectedOurScore = detectedOurScores.length && detectedOurScores.every(n => n === detectedOurScores[0])
+  const rawDetectedOurScore = detectedOurScores.length && detectedOurScores.every(n => n === detectedOurScores[0])
     ? detectedOurScores[0]
     : null;
   const detectedTheirScore = detectedTheirScores.length && detectedTheirScores.every(n => n === detectedTheirScores[0])
     ? detectedTheirScores[0]
     : null;
   const summedGoals = games.reduce((sum, g) => sum + (Number(g?.goals) || 0), 0);
+  const detectedOurScore = Number.isFinite(rawDetectedOurScore) && (rawDetectedOurScore > 0 || summedGoals <= 0) ? rawDetectedOurScore : null;
   const fallbackOurScore = Number.isFinite(detectedOurScore) ? detectedOurScore : summedGoals;
   return games.map(g => {
-    const ownDetected = Number(g?.parseDetectedOurScore);
+    const ownDetectedRaw = Number(g?.parseDetectedOurScore);
+    const ownDetected = Number.isFinite(ownDetectedRaw) && (ownDetectedRaw > 0 || (Number(g?.goals) || 0) <= 0) ? ownDetectedRaw : null;
     const theirDetected = Number(g?.parseDetectedTheirScore);
     const nextOurScore = Number.isFinite(ownDetected) ? ownDetected : fallbackOurScore;
     const nextTheirScore = g.opponentScoreManual
@@ -688,10 +690,10 @@ function GlobalStyles() {
 @keyframes floatUp { 0%{transform:translateY(0) scale(0.5); opacity:0;} 15%{opacity:1;} 100%{transform:translateY(-180px) scale(1.1); opacity:0;} }
 @keyframes dropUp { from { transform:translateY(100%); opacity:0; } to { transform:translateY(0); opacity:1; } }
     * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
-    html, body { margin:0; padding:0; width:100%; height:var(--bb-real-vh, 100dvh); min-height:var(--bb-real-vh, 100dvh); overflow:hidden; background:#06070D; overscroll-behavior:none; }
-body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:var(--bb-real-vh, 100dvh); }
-#root { width:100%; height:var(--bb-real-vh, 100dvh); min-height:var(--bb-real-vh, 100dvh); background:#06070D; overflow:hidden; }
-@supports (-webkit-touch-callout: none) { html, body, #root { min-height:var(--bb-real-vh, 100dvh); } }
+    html, body { margin:0; padding:0; width:100%; height:100vh; min-height:100dvh; min-height:var(--bb-real-vh, 100dvh); overflow:hidden; background:#06070D; overscroll-behavior:none; }
+body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-height:var(--bb-real-vh, 100dvh); background:#06070D; }
+#root { width:100%; height:100dvh; min-height:var(--bb-real-vh, 100dvh); background:#06070D; overflow:hidden; }
+@supports (-webkit-touch-callout: none) { html, body, #root { min-height:100dvh; min-height:var(--bb-real-vh, 100dvh); } }
       input::placeholder, textarea::placeholder { color:#4A5066; }
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
@@ -6241,205 +6243,109 @@ function findDeepNumberByKey(obj, keyRegex, maxDepth = 5, seen = new Set()) {
   return null;
 }
 
-function normalizeStatAliasName(value) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
-
 const PARSE_STAT_ALIASES = {
-  goals: ["goals", "goal", "goalscore", "goals_scored"],
+  goals: ["goals", "goal"],
   assists: ["assists", "assist"],
   saves: ["saves", "save"],
   shots: ["shots", "shot"],
-  demos: ["demos", "demo", "demolitions", "demolition"],
-  score: [
-    "score",
-    "playerscore",
-    "player_score",
-    "core_score",
-    "corescore",
-    "totalscore",
-    "total_score",
-    "points",
-    "matchscore",
-    "stat_score",
-    "statScore",
-    "rocketleague_score",
-    "rlscore",
-  ],
+  demos: ["demos", "demolitions", "demolition"],
+  score: ["score", "player score", "playerscore", "player_score", "core score", "corescore", "total score", "totalscore", "points", "player points", "stat score"],
 };
-
-function getStatLabels(key, value) {
-  const labels = [key];
-  if (value && typeof value === "object") {
-    labels.push(
-      value.key,
-      value.name,
-      value.label,
-      value.slug,
-      value.displayName,
-      value.displayValueName,
-      value.type,
-      value.stat,
-      value.statName,
-      value.metadata?.key,
-      value.metadata?.name,
-      value.metadata?.label,
-      value.metadata?.displayName,
-      value.metadata?.statName,
-      value.metadata?.slug,
-    );
-    if (value.stat && typeof value.stat === "object") {
-      labels.push(value.stat.key, value.stat.name, value.stat.label, value.stat.displayName, value.stat.slug);
-    }
-  }
-  return labels.filter(v => v !== null && v !== undefined && v !== "").map(normalizeStatAliasName);
+function normalizeParseStatName(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
-
-function parseStatNumberish(value) {
-  if (value === null || value === undefined || value === "") return null;
-  if (typeof value === "object") {
-    const direct = firstNumberish(
-      value.value,
-      value.displayValue,
-      value.amount,
-      value.score,
-      value.points,
-      value.total,
-      value.count,
-      value.statValue,
-      value.current,
-      value.metadata?.value,
-      value.metadata?.displayValue,
-      value.metadata?.amount,
-      value.metadata?.score,
-      value.metadata?.points,
-      value.metadata?.total,
-      value.metadata?.count,
-      value.stats?.value,
-      value.stats?.score,
-      value.stats?.points,
-    );
-    if (Number.isFinite(direct)) return direct;
-  }
-  return parseNumberish(value);
+function getParseStatAliasSet(field) {
+  return new Set((PARSE_STAT_ALIASES[field] || [field]).map(normalizeParseStatName));
 }
-
-function statAliasSet(field) {
-  return new Set((PARSE_STAT_ALIASES[field] || [field]).map(normalizeStatAliasName));
+function readParseStatObjectValue(value) {
+  if (!value || typeof value !== "object") return parseNumberish(value);
+  return firstNumberish(
+    value.value,
+    value.displayValue,
+    value.amount,
+    value.total,
+    value.score,
+    value.points,
+    value.metadata?.value,
+    value.metadata?.displayValue,
+    value.metadata?.amount,
+    value.metadata?.score,
+    value.metadata?.points,
+    value.stats?.value,
+    value.stats?.score,
+    value.stat?.value
+  );
 }
-
-function getStatValueByAliases(container, field, maxDepth = 4, seen = new Set()) {
-  if (!container || maxDepth < 0 || seen.has(container)) return null;
-  if (typeof container !== "object") return null;
-  seen.add(container);
-  const aliases = statAliasSet(field);
-
-  if (Array.isArray(container)) {
-    for (const item of container) {
-      const labels = getStatLabels("", item);
-      if (labels.some(l => aliases.has(l))) {
-        const n = parseStatNumberish(item);
-        if (Number.isFinite(n)) return n;
-      }
-    }
-    for (const item of container) {
-      const n = getStatValueByAliases(item, field, maxDepth - 1, seen);
-      if (Number.isFinite(n)) return n;
-    }
-    return null;
+function collectParseStatValuesByAlias(obj, field, maxDepth = 7, seen = new Set(), found = []) {
+  if (!obj || typeof obj !== "object" || maxDepth < 0 || seen.has(obj)) return found;
+  seen.add(obj);
+  const aliases = getParseStatAliasSet(field);
+  const labelCandidates = [obj.name, obj.label, obj.displayName, obj.displayCategory, obj.key, obj.slug, obj.stat, obj.statName, obj.metadata?.name, obj.metadata?.label, obj.metadata?.displayName];
+  if (labelCandidates.some(v => aliases.has(normalizeParseStatName(v)))) {
+    const n = readParseStatObjectValue(obj);
+    if (Number.isFinite(n)) found.push(n);
   }
-
-  for (const [key, value] of Object.entries(container)) {
-    const labels = getStatLabels(key, value);
-    if (labels.some(l => aliases.has(l))) {
-      const n = parseStatNumberish(value);
-      if (Number.isFinite(n)) return n;
+  if (Array.isArray(obj)) {
+    obj.forEach(item => collectParseStatValuesByAlias(item, field, maxDepth - 1, seen, found));
+    return found;
+  }
+  for (const [key, value] of Object.entries(obj)) {
+    if (aliases.has(normalizeParseStatName(key))) {
+      const n = readParseStatObjectValue(value);
+      if (Number.isFinite(n)) found.push(n);
     }
+    if (value && typeof value === "object") collectParseStatValuesByAlias(value, field, maxDepth - 1, seen, found);
   }
-
-  // Some Tracker/Parse responses use friendly names like "Core Score" or "Player Score" as nested labels.
-  for (const [key, value] of Object.entries(container)) {
-    if (!value || typeof value !== "object") continue;
-    const labels = getStatLabels(key, value);
-    if (labels.some(l => aliases.has(l) || (field === "score" && /^(core|player|total|match)?score$/.test(l)))) {
-      const n = parseStatNumberish(value);
-      if (Number.isFinite(n)) return n;
-    }
+  return found;
+}
+function getBestParseStatValue(match, field) {
+  const values = collectParseStatValuesByAlias(match, field).filter(Number.isFinite);
+  if (!values.length) return null;
+  if (field === "score") {
+    const positives = values.filter(v => v > 0);
+    return positives.length ? Math.max(...positives) : values[0];
   }
-
-  for (const value of Object.values(container)) {
-    const n = getStatValueByAliases(value, field, maxDepth - 1, seen);
-    if (Number.isFinite(n)) return n;
-  }
-  return null;
+  return values[0];
 }
 
 function getMatchStatValue(match, field) {
   const stats = match?.stats || {};
-
-  // First: strict stat-object extraction. This handles both object maps and arrays like
-  // [{name:"Score", value:632}], [{metadata:{name:"Core Score"}, displayValue:"632"}], etc.
-  const fromStats = getStatValueByAliases(stats, field, 5);
-  if (Number.isFinite(fromStats)) return fromStats;
-
-  // Second: common player stat containers outside match.stats.
-  const fromPlayerContainers = getStatValueByAliases(
-    [
-      match?.playerStats,
-      match?.player?.stats,
-      match?.metadata?.playerStats,
-      match?.metadata?.stats,
-      match?.segments,
-      match?.data?.stats,
-    ].filter(Boolean),
-    field,
-    5
-  );
-  if (Number.isFinite(fromPlayerContainers)) return fromPlayerContainers;
-
+  const stat = stats?.[field];
   const direct = firstNumberish(
+    stat?.value,
+    stat?.displayValue,
+    stat?.metadata?.value,
+    stat?.metadata?.displayValue,
     match?.[field],
-    match?.metadata?.[field],
-    match?.data?.[field]
+    match?.metadata?.[field]
   );
-  if (Number.isFinite(direct)) return direct;
+  const aliasValue = getBestParseStatValue(match, field);
 
   if (field === "score") {
-    // Avoid using generic metadata.score first because that can be the team scoreboard object.
     const explicitScore = firstNumberish(
+      stats?.score,
+      stats?.Score,
+      stats?.playerScore,
+      stats?.player_score,
+      stats?.coreScore,
+      stats?.totalScore,
+      stats?.points,
+      stats?.rating?.metadata?.score,
+      match?.score,
       match?.playerScore,
-      match?.player_score,
-      match?.coreScore,
-      match?.core_score,
-      match?.totalScore,
-      match?.total_score,
-      match?.points,
-      match?.metadata?.playerScore,
-      match?.metadata?.player_score,
-      match?.metadata?.coreScore,
-      match?.metadata?.core_score,
-      match?.metadata?.totalScore,
-      match?.metadata?.total_score,
-      match?.metadata?.points,
-      match?.data?.playerScore,
-      match?.data?.coreScore,
-      match?.data?.totalScore,
-      match?.data?.points,
+      match?.metadata?.playerScore
     );
-    if (Number.isFinite(explicitScore)) return explicitScore;
-
-    const deepScore = findDeepNumberByKey(
-      { stats: match?.stats, playerStats: match?.playerStats, player: match?.player, data: match?.data },
-      /^(score|playerScore|player_score|coreScore|core_score|totalScore|total_score|points)$/i,
-      7
-    );
-    return Number.isFinite(deepScore) ? deepScore : 0;
+    const candidates = [direct, explicitScore, aliasValue]
+      .map(Number)
+      .filter(n => Number.isFinite(n) && n > 0);
+    if (candidates.length) return Math.max(...candidates);
+    const deep = findDeepNumberByKey(match, /^(playerScore|player_score|coreScore|totalScore|points)$/i, 6);
+    return Number.isFinite(deep) ? deep : 0;
   }
 
-  const deep = findDeepNumberByKey(stats, new RegExp(`^${field}$`, "i"), 5);
-  return Number.isFinite(deep) ? deep : 0;
+  if (Number.isFinite(direct)) return direct;
+  if (Number.isFinite(aliasValue)) return aliasValue;
+  return findDeepNumberByKey(stats, new RegExp(`^${field}$`, "i"), 4) ?? 0;
 }
 
 function getMatchTeamScoreInfo(match, player = null) {
@@ -6609,10 +6515,10 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     saves: Number(saves) || 0,
     shots: Number(shots) || 0,
     demos,
-    score: Number(score) || 0,
     playerScore: Number(score) || 0,
+    score: Number(score) || 0,
     scoreSource: Number(parsedScore) > 0 ? "parse" : "estimated_from_stats",
-    ourScore: Number.isFinite(detectedOurScore) && !(Number(detectedOurScore) === 0 && Number(goals) > 0) ? detectedOurScore : (Number(goals) || 0),
+    ourScore: Number.isFinite(detectedOurScore) && (detectedOurScore > 0 || (Number(goals) || 0) <= 0) ? detectedOurScore : (Number(goals) || 0),
     theirScore: Number.isFinite(detectedTheirScore) ? detectedTheirScore : null,
     parseDetectedOurScore: detectedOurScore,
     parseDetectedTheirScore: detectedTheirScore,
@@ -6623,7 +6529,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     ratingDelta: getMatchRatingDelta(match),
     source: "parse_sessions",
     syncedAt: new Date().toISOString(),
-    parseScoreDebug: { parsedScore: Number(parsedScore) || 0, estimatedScore, savedScore: Number(score) || 0, hasOpponentScore: Number.isFinite(detectedTheirScore) },
+    parseScoreDebug: { parsedScore: Number(parsedScore) || 0, estimatedScore, savedScore: Number(score) || 0, scoreAliases: collectParseStatValuesByAlias(match, "score"), hasOpponentScore: Number.isFinite(detectedTheirScore) },
   };
 }
 
@@ -7008,10 +6914,9 @@ useEffect(() => {
     const fallbackGoals = Number(g.goals) || 0;
     const groupedOur = g.sessionCode ? (groupedScores[groupKey] ?? fallbackGoals) : fallbackGoals;
     const currentOur = Number(g.ourScore);
-    const bestGoalFallback = Math.max(Number.isFinite(currentOur) ? currentOur : 0, groupedOur, fallbackGoals);
-    const nextOurScore = Number.isFinite(detectedOur) && !(detectedOur === 0 && bestGoalFallback > 0)
+    const nextOurScore = Number.isFinite(detectedOur)
       ? detectedOur
-      : bestGoalFallback;
+      : Math.max(Number.isFinite(currentOur) ? currentOur : 0, groupedOur, fallbackGoals);
     const nextTheirScore = g.opponentScoreManual
       ? g.theirScore
       : Number.isFinite(detectedTheir)
@@ -7603,15 +7508,26 @@ function getDailyShopSeed() {
 
 function getDailyShopItems() {
   const seed = getDailyShopSeed();
-  let h = seed;
-  const seeded = (items, salt = 0) => [...items].map((item, i) => {
-    h = ((h * 1664525 + 1013904223) + i * 7919 + salt) & 0xffffffff;
-    return { item, sort: Math.abs(h) };
-  }).sort((a, b) => a.sort - b.sort).map(x => x.item);
-  const backgrounds = seeded(SHOP_ITEMS.filter(i => i.type === "background"), 9001).slice(0, 8);
-  const borders = SHOP_ITEMS.filter(i => i.type === "border");
-  const others = seeded(SHOP_ITEMS.filter(i => i.type !== "background" && i.type !== "border"), 1337).slice(0, 14);
-  return [...others, ...borders, ...backgrounds];
+  const seeded = (items, salt = 0) => {
+    let h = seed + salt;
+    return [...items].map((item, i) => {
+      h = ((h * 1664525 + 1013904223) + i * 7919 + salt) & 0xffffffff;
+      return { item, sort: Math.abs(h) };
+    }).sort((a, b) => a.sort - b.sort).map(x => x.item);
+  };
+  const byType = (type, salt) => seeded(
+    SHOP_ITEMS.filter(i => i.type === type && (type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(i.id))),
+    salt
+  ).slice(0, 10);
+  return [
+    ...byType("icon", 1101),
+    ...byType("color", 1202),
+    ...byType("text_color", 1303),
+    ...byType("title", 1404),
+    ...byType("border", 1505),
+    ...byType("sound", 1606),
+    ...byType("background", 1707),
+  ];
 }
 
 function getTimeUntilNextShop() {
@@ -7625,20 +7541,22 @@ function getTimeUntilNextShop() {
 
 function getNormalizedShopCost(item, idx = 0) {
   const type = item?.type || "other";
-  const ranges = {
-    color: [1500, 2600],
-    sound: [1800, 4200],
-    icon: [2200, 5200],
-    title: [2500, 6500],
-    border: [3500, 7500],
-    background: [5500, 10000],
-    other: [1500, 10000],
-  };
-  const [min, max] = ranges[type] || ranges.other;
-  const seed = String(item?.id || idx).split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0) + idx * 97;
-  const step = 250;
-  const raw = min + (seed % (max - min + 1));
-  return Math.max(1500, Math.min(10000, Math.round(raw / step) * step));
+  if (type === "icon") return 750;
+  if (type === "color" || type === "text_color") return 350;
+  if (type === "title") return 500;
+  if (type === "border") return 1000;
+  if (type === "sound") return 1500;
+  if (type === "background") {
+    const low = new Set(["carbon", "spring", "turf", "moss", "midnight"]);
+    const mid = new Set(["whiteout", "pinkboost", "matrix", "morse", "goalnet", "crt", "ocean", "sunset"]);
+    const high = new Set(["aurora", "nebula", "vapor", "lava", "thunder", "snow", "holo", "gold", "void", "slime", "ice", "city", "comet", "custom"]);
+    if (low.has(item?.value)) return 800;
+    if (mid.has(item?.value)) return 1200;
+    if (high.has(item?.value)) return item?.value === "custom" ? 2000 : 1600;
+    const seed = String(item?.id || idx).split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0) + idx * 97;
+    return 800 + ((seed % 6) * 200);
+  }
+  return 500;
 }
 
 function withNormalizedShopPrice(item, idx) {
@@ -7739,6 +7657,42 @@ const SHOP_ITEMS_RAW = [
   { id:"bg_city",      label:"Neon City",      emoji:"🌃", desc:"night city window lights",        cost:260, type:"background", value:"city" },
   { id:"bg_comet",     label:"Comet Trail",    emoji:"☄️", desc:"streaking stars and motion",      cost:240, type:"background", value:"comet" },
   { id:"bg_custom",    label:"Ultimate BG",  emoji:"🖼️", desc:"upload your own image",           cost:5000, type:"background", value:"custom" },
+
+  // extra shop variety
+  { id:"mint_name", label:"mint", desc:"soft mint name glow", cost:75, type:"color", value:"#7CFFB2", emoji:"🍃" },
+  { id:"ice_name", label:"ice", desc:"icy blue name glow", cost:75, type:"color", value:"#75D7FF", emoji:"🧊" },
+  { id:"lavender_name", label:"lavender", desc:"soft purple name glow", cost:75, type:"color", value:"#C4A7FF", emoji:"🪻" },
+  { id:"laser_name", label:"laser red", desc:"bright red name glow", cost:75, type:"color", value:"#FF2D55", emoji:"🔴" },
+  { id:"cream_text", label:"cream text kit", desc:"warmer app text colors", cost:100, type:"text_color", value:"cream", emoji:"🎨" },
+  { id:"ice_text", label:"ice text kit", desc:"cool blue app text colors", cost:100, type:"text_color", value:"ice", emoji:"🎨" },
+  { id:"arcade_text", label:"arcade text kit", desc:"bright retro app text colors", cost:100, type:"text_color", value:"arcade", emoji:"🎨" },
+  { id:"shadow_text", label:"shadow text kit", desc:"dark muted app text colors", cost:100, type:"text_color", value:"shadow", emoji:"🎨" },
+  { id:"sunset_text", label:"sunset text kit", desc:"orange pink app text colors", cost:100, type:"text_color", value:"sunset", emoji:"🎨" },
+  { id:"slime_text", label:"slime text kit", desc:"toxic green app text colors", cost:100, type:"text_color", value:"slime", emoji:"🎨" },
+  { id:"gold_text", label:"gold text kit", desc:"gold accent app text colors", cost:100, type:"text_color", value:"gold", emoji:"🎨" },
+  { id:"bubblegum_text", label:"bubblegum text kit", desc:"pink blue app text colors", cost:100, type:"text_color", value:"bubblegum", emoji:"🎨" },
+  { id:"terminal_text", label:"terminal text kit", desc:"green terminal app text colors", cost:100, type:"text_color", value:"terminal", emoji:"🎨" },
+  { id:"ghost_text", label:"ghost text kit", desc:"pale ghost app text colors", cost:100, type:"text_color", value:"ghost", emoji:"🎨" },
+  { id:"icon_ufo", label:"ufo", cost:90, type:"icon", value:"🛸", emoji:"🛸" },
+  { id:"icon_moon", label:"moon", cost:70, type:"icon", value:"🌙", emoji:"🌙" },
+  { id:"icon_clover", label:"clover", cost:70, type:"icon", value:"🍀", emoji:"🍀" },
+  { id:"icon_hammer", label:"hammer", cost:80, type:"icon", value:"🔨", emoji:"🔨" },
+  { id:"icon_magnet", label:"magnet", cost:80, type:"icon", value:"🧲", emoji:"🧲" },
+  { id:"title_zero_boost", type:"title", value:"zero boost menace", label:"zero boost menace", emoji:"🛞" },
+  { id:"title_backboard", type:"title", value:"backboard bully", label:"backboard bully", emoji:"🥅" },
+  { id:"title_boost_rat", type:"title", value:"boost rat", label:"boost rat", emoji:"🐀" },
+  { id:"title_air_dribbler", type:"title", value:"air dribbler", label:"air dribbler", emoji:"🪽" },
+  { id:"title_timeout", type:"title", value:"timeout merchant", label:"timeout merchant", emoji:"⏱️" },
+  { id:"title_floor_is_lava", type:"title", value:"floor is lava", label:"floor is lava", emoji:"🌋" },
+  { id:"border_matrix", label:"matrix frame", desc:"green code presence border", type:"border", value:"matrix", emoji:"▣" },
+  { id:"border_sunset", label:"sunset frame", desc:"orange pink presence border", type:"border", value:"sunset", emoji:"▣" },
+  { id:"border_slime", label:"slime frame", desc:"toxic green presence border", type:"border", value:"slime", emoji:"▣" },
+  { id:"border_void", label:"void frame", desc:"dark eclipse presence border", type:"border", value:"void", emoji:"▣" },
+  { id:"border_arcade", label:"arcade frame", desc:"retro neon presence border", type:"border", value:"arcade", emoji:"▣" },
+  { id:"sb_no_way", label:"no way", desc:"instant disbelief", type:"sound", value:"sb_no_way", file:"no-way.mp3", emoji:"😳" },
+  { id:"sb_locked_in", label:"locked in", desc:"focus callout", type:"sound", value:"sb_locked_in", file:"locked-in.mp3", emoji:"🔒" },
+  { id:"sb_demo_call", label:"demo call", desc:"demo reaction", type:"sound", value:"sb_demo_call", file:"demo-call.mp3", emoji:"💥" },
+  { id:"sb_goal_horn2", label:"goal horn 2", desc:"alternate goal blast", type:"sound", value:"sb_goal_horn2", file:"goal-horn-2.mp3", emoji:"📣" },
 
 ];
 const SHOP_ITEMS = SHOP_ITEMS_RAW.map(withNormalizedShopPrice);
@@ -8052,6 +8006,11 @@ function getPresenceBorderVisualStyle(points, playerId, online = false) {
     violet: { border:"1px solid rgba(167,139,250,0.68)", boxShadow:"0 0 0 1px rgba(167,139,250,0.14), 0 0 24px rgba(167,139,250,0.12)" },
     ice:    { border:"1px solid rgba(77,158,255,0.70)", boxShadow:"0 0 0 1px rgba(77,158,255,0.15), 0 0 24px rgba(77,158,255,0.13)" },
     danger: { border:"1px solid rgba(255,92,138,0.72)", boxShadow:"0 0 0 1px rgba(255,92,138,0.14), 0 0 24px rgba(255,92,138,0.13)" },
+    matrix: { border:"1px solid rgba(184,255,77,0.70)", boxShadow:"0 0 0 1px rgba(184,255,77,0.14), 0 0 24px rgba(184,255,77,0.14)" },
+    sunset: { border:"1px solid rgba(255,140,50,0.72)", boxShadow:"0 0 0 1px rgba(255,97,193,0.14), 0 0 24px rgba(255,140,50,0.13)" },
+    slime: { border:"1px solid rgba(109,255,138,0.72)", boxShadow:"0 0 0 1px rgba(109,255,138,0.14), 0 0 24px rgba(109,255,138,0.13)" },
+    void: { border:"1px solid rgba(126,184,255,0.42)", boxShadow:"0 0 0 1px rgba(126,184,255,0.10), 0 0 26px rgba(0,0,0,0.38)" },
+    arcade: { border:"1px solid rgba(255,97,193,0.72)", boxShadow:"0 0 0 1px rgba(77,158,255,0.14), 0 0 24px rgba(255,97,193,0.13)" },
   };
   return map[item.value] || map.lime;
 }
@@ -8076,6 +8035,10 @@ const SOUNDBOARD_SOUNDS = [
   { id:"sb_iconic_intro", label:"iconic intro", desc:"intro clip", cost:175, type:"sound", value:"sb_iconic_intro", file:"iconic intro.mp3", emoji:"🎬" },
   { id:"sb_sassy_burton", label:"sassy burton", desc:"burton clip", cost:175, type:"sound", value:"sb_sassy_burton", file:"sassy burton.mp3", emoji:"💅" },
   { id:"sb_doin_all_that_chattin", label:"doin all that chattin", desc:"chat callout", cost:175, type:"sound", value:"sb_doin_all_that_chattin", file:"doinallthatchattin.mp3", emoji:"🗣️" },
+  { id:"sb_no_way", label:"no way", desc:"instant disbelief", cost:1500, type:"sound", value:"sb_no_way", file:"no-way.mp3", emoji:"😳" },
+  { id:"sb_locked_in", label:"locked in", desc:"focus callout", cost:1500, type:"sound", value:"sb_locked_in", file:"locked-in.mp3", emoji:"🔒" },
+  { id:"sb_demo_call", label:"demo call", desc:"demo reaction", cost:1500, type:"sound", value:"sb_demo_call", file:"demo-call.mp3", emoji:"💥" },
+  { id:"sb_goal_horn2", label:"goal horn 2", desc:"alternate goal blast", cost:1500, type:"sound", value:"sb_goal_horn2", file:"goal-horn-2.mp3", emoji:"📣" },
 ];
 const DEFAULT_SOUNDBOARD_IDS = ["sb_laugh","sb_buzzer","sb_goal"];
 function getSoundboardSound(id) {
@@ -8416,6 +8379,7 @@ function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, po
 
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
+  const [shopTab, setShopTab] = useState("icon");
   const [showRecap, setShowRecap] = useState(false);
   const [showFlowers, setShowFlowers] = useState(false);
   const [shopCountdown, setShopCountdown] = useState(getTimeUntilNextShop());
@@ -8514,6 +8478,60 @@ const toggleEquip = async (itemId) => {
   const upd = { ...safePoints, [currentPlayer + "_equipped"]: newEquipped };
   setPoints(upd); await storeSet("points", upd);
 };
+
+  const shopTabDefs = [
+    { id:"icon", label:"icons", types:["icon"] },
+    { id:"color", label:"name/text", types:["color", "text_color"] },
+    { id:"title", label:"titles", types:["title"] },
+    { id:"border", label:"borders", types:["border"] },
+    { id:"sound", label:"sounds", types:["sound"] },
+    { id:"background", label:"backgrounds", types:["background"] },
+  ];
+  const currentShopTab = shopTabDefs.find(t => t.id === shopTab) || shopTabDefs[0];
+  const shopDisplayItems = dailyShopItems.filter(item => currentShopTab.types.includes(item.type) && (item.type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(item.id)));
+  const renderShopItemCard = (item) => {
+    const isOwned = owned.includes(item.id);
+    const isEquipped = !!equipped[item.id];
+    const canAfford = myPoints >= item.cost;
+    const accent = item.type === "background" ? "#A78BFA" : item.type === "sound" ? playerColor : item.type === "border" ? playerColor : item.value || playerColor;
+    const isCustomBg = item.type === "background" && item.value === "custom";
+    const preview = item.type === "background"
+      ? <div style={{width:42,height:42,borderRadius:10,flexShrink:0,background:getBackgroundPreview(item.value),border:"1px solid rgba(255,255,255,0.08)"}} />
+      : item.type === "border"
+        ? <div style={{height:36,borderRadius:10,marginBottom:8,background:"linear-gradient(135deg,#11131F,#0C0E18)",...getPresenceBorderVisualStyle({ [currentPlayer + "_owned"]:[item.id], [currentPlayer + "_equipped"]:{ [item.id]:true } }, currentPlayer, true)}} />
+        : <div style={{fontSize:item.type === "icon" ? 28 : 22,marginBottom:6,color:accent}}>{item.emoji || (item.type === "text_color" ? "Aa" : item.type === "title" ? "T" : "◆")}</div>;
+    return (
+      <div key={item.id} style={{background:isEquipped?`${accent}14`:"rgba(255,255,255,0.03)",borderRadius:14,padding:item.type === "background" ? "12px 14px" : "12px",border:`1px solid ${isEquipped?`${accent}55`:isOwned?"rgba(255,255,255,0.12)":"rgba(255,255,255,0.06)"}`,display:item.type === "background"?"flex":"block",alignItems:"center",gap:12,textAlign:item.type === "background"?"left":"center"}}>
+        {preview}
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12,fontWeight:900,color:isOwned?accent:"#E8ECF4",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{item.label || item.value || item.id}</div>
+          <div style={{fontSize:9.5,color:"#4A5066",marginTop:3,marginBottom:8,lineHeight:1.25}}>{item.desc || item.value || (item.type === "text_color" ? "custom app text colors" : "shop item")}</div>
+          {isOwned ? (
+            <div style={{display:"flex",gap:6,alignItems:"center",justifyContent:item.type === "background"?"flex-start":"center"}}>
+              {isCustomBg && isEquipped && (
+                <>
+                  <input ref={customBgFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{
+                    const f=e.target.files?.[0]; if(!f)return;
+                    const url=URL.createObjectURL(f);
+                    const upd={...safePoints,[currentPlayer+"_customBg"]:url};
+                    setPoints(upd); await storeSet("points",upd);
+                  }}/>
+                  <button onClick={()=>customBgFileRef.current?.click()} className="bb-pressable" style={{background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,padding:"5px 9px",fontSize:10,fontWeight:800,color:"#A78BFA",cursor:"pointer"}}>upload</button>
+                </>
+              )}
+              <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",background:isEquipped?accent:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                {isEquipped ? (item.type === "sound" ? "✓ on board" : "✓ equipped") : (item.type === "sound" ? "add" : "equip")}
+              </button>
+            </div>
+          ) : (
+            <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",background:canAfford?`${accent}18`:"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?`${accent}55`:"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,color:canAfford?accent:"#4A5066",cursor:canAfford?"pointer":"default"}}>
+              {item.cost} pts
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   // Weekly recap
   const weekStart = new Date(); weekStart.setDate(weekStart.getDate() - weekStart.getDay()); weekStart.setHours(0,0,0,0);
@@ -8764,177 +8782,22 @@ await storeSetWithPush("pings", pingUpd2);
     🕐 resets in {String(Math.floor(shopCountdown / 3600000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 3600000) / 60000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 60000) / 1000)).padStart(2,"0")}
   </div>
 </div>
-          <div style={{fontSize:11,color:"#4A5066",marginBottom:12}}>earn pts by logging games (+10) and getting training approved (+15). weekly stat leaders get +50 jackpot.</div>
-          <div style={{marginBottom:10}}>
-            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8}}>NAME COLORS</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}}>
-              {dailyShopItems.filter(i=>i.type==="color").map(item=>{
-                const isOwned=owned.includes(item.id);
-                const isEquipped=equipped[item.id];
-                const canAfford=myPoints>=item.cost;
-                return (
-                  <div key={item.id} style={{background:isEquipped?`${item.value}15`:"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",border:`1px solid ${isEquipped?item.value:isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,position:"relative"}}>
-                    {isEquipped&&<div style={{position:"absolute",top:8,right:8,width:6,height:6,borderRadius:99,background:item.value}}/>}
-                    <div style={{fontSize:22,marginBottom:6}}>{item.emoji}</div>
-                    <div style={{fontSize:13,fontWeight:700,color:isOwned?item.value:"#E8ECF4",marginBottom:2}}>{item.label}</div>
-                    <div style={{fontSize:10,color:"#4A5066",marginBottom:10}}>{item.desc}</div>
-                    {isOwned?(
-                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?item.value:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                        {isEquipped?"✓ equipped":"equip"}
-                      </button>
-                    ):(
-                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                        {item.cost} pts
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8}}>ICONS</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-              {dailyShopItems.filter(i=>i.type==="icon").map(item=>{
-                const isOwned=owned.includes(item.id);
-                const isEquipped=equipped[item.id];
-                const canAfford=myPoints>=item.cost;
-                return (
-                  <div key={item.id} style={{background:isEquipped?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px 8px",border:`1px solid ${isEquipped?"rgba(184,255,77,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,textAlign:"center"}}>
-                    <div style={{fontSize:26,marginBottom:4}}>{item.emoji}</div>
-                    <div style={{fontSize:11,fontWeight:700,color:isOwned?"#B8FF4D":"#E8ECF4",marginBottom:2}}>{item.label}</div>
-                    <div style={{fontSize:9,color:"#4A5066",marginBottom:8}}>{item.desc}</div>
-                    {isOwned?(
-                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:7,padding:"5px 0",fontSize:10,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                        {isEquipped?"✓":"equip"}
-                      </button>
-                    ):(
-                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:7,padding:"5px 0",fontSize:10,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                        {item.cost}pts
-                      </button>
-                    )}
-</div>
-                );
-              })}
-</div>
-            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>TITLES</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {dailyShopItems.filter(i=>i.type==="title").map(item=>{
-                const isOwned=owned.includes(item.id);
-                const isEquipped=equipped[item.id];
-                const canAfford=myPoints>=item.cost;
-                return (
-                  <div key={item.id} style={{background:isEquipped?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",border:`1px solid ${isEquipped?"rgba(184,255,77,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,textAlign:"center"}}>
-                    <div style={{fontSize:22,marginBottom:4}}>{item.emoji}</div>
-                    <div style={{fontSize:11,fontWeight:700,color:isOwned?"#B8FF4D":"#E8ECF4",marginBottom:2}}>{item.label}</div>
-                    <div style={{fontSize:9,color:"#4A5066",marginBottom:8}}>{item.value}</div>
-                    {isOwned?(
-                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                        {isEquipped?"✓ equipped":"equip"}
-                      </button>
-                    ):(
-                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?"#B8FF4D":"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                        {item.cost} pts
-</button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>PRESENCE BORDERS</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {dailyShopItems.filter(i=>i.type==="border").map(item=>{
-                const isOwned=owned.includes(item.id);
-                const isEquipped=equipped[item.id];
-                const canAfford=myPoints>=item.cost;
-                const previewStyle = getPresenceBorderVisualStyle({ [currentPlayer + "_owned"]:[item.id], [currentPlayer + "_equipped"]:{ [item.id]:true } }, currentPlayer, true);
-                return (
-                  <div key={item.id} style={{background:isEquipped?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",...previewStyle,textAlign:"center"}}>
-                    <div style={{height:32,borderRadius:10,marginBottom:8,background:"linear-gradient(135deg,#11131F,#0C0E18)",...previewStyle}} />
-                    <div style={{fontSize:11,fontWeight:800,color:isOwned?playerColor:"#E8ECF4",marginBottom:2}}>{item.label}</div>
-                    <div style={{fontSize:9,color:"#4A5066",marginBottom:8}}>{item.desc}</div>
-                    {isOwned?(
-                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?playerColor:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                        {isEquipped?"✓ equipped":"equip"}
-                      </button>
-                    ):(
-                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?`${playerColor}18`:"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?`${playerColor}55`:"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?playerColor:"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                        {item.cost} pts
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>SOUNDBOARD SOUNDS</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {SHOP_ITEMS.filter(i=>i.type==="sound" && !DEFAULT_SOUNDBOARD_IDS.includes(i.id)).map(item=>{
-                const isOwned=owned.includes(item.id);
-                const isEquipped=equipped[item.id];
-                const canAfford=myPoints>=item.cost;
-                return (
-                  <div key={item.id} style={{background:isEquipped?`${playerColor}14`:"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px",border:`1px solid ${isEquipped?`${playerColor}55`:isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,textAlign:"center"}}>
-                    <div style={{fontSize:11,fontWeight:700,color:isOwned?playerColor:"#E8ECF4",marginBottom:2}}>{item.label}</div>
-                    <div style={{fontSize:9,color:"#4A5066",marginBottom:8}}>{item.desc}</div>
-                    {isOwned?(
-                      <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:"100%",background:isEquipped?playerColor:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                        {isEquipped?"✓ on board":"add"}
-                      </button>
-                    ):(
-                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:"100%",background:canAfford?`${playerColor}18`:"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?`${playerColor}55`:"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 0",fontSize:11,fontWeight:700,color:canAfford?playerColor:"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                        {item.cost} pts
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-<div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:8,marginTop:16}}>BACKGROUNDS</div>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {dailyShopItems.filter(i=>i.type==="background").map(item => {
-                const isOwned = owned.includes(item.id);
-                const isEquipped = equipped[item.id];
-                const canAfford = myPoints >= item.cost;
-                const isCustom = item.value === "custom";
-                return (
-                  <div key={item.id} style={{background:isEquipped?"rgba(167,139,250,0.08)":"rgba(255,255,255,0.03)",borderRadius:13,padding:"12px 14px",border:`1px solid ${isEquipped?"rgba(167,139,250,0.3)":isOwned?"rgba(255,255,255,0.1)":"rgba(255,255,255,0.05)"}`,display:"flex",alignItems:"center",gap:12}}>
-                    <div style={{width:36,height:36,borderRadius:8,flexShrink:0,background:getBackgroundPreview(item.value)}}/>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:13,fontWeight:700,color:isOwned?"#A78BFA":"#E8ECF4"}}>{item.label}</div>
-                      <div style={{fontSize:10,color:"#4A5066",marginTop:1}}>{item.desc}{item.cost===5000?" · 5000 pts":""}</div>
-                    </div>
-                    {isOwned ? (
-                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        {isCustom && isEquipped && (
-                          <>
-                            <input ref={customBgFileRef} type="file" accept="image/*" style={{display:"none"}} onChange={async e=>{
-                              const f=e.target.files?.[0]; if(!f)return;
-                              const url=URL.createObjectURL(f);
-                              const upd={...points,[currentPlayer+"_customBg"]:url};
-                              setPoints(upd); await storeSet("points",upd);
-                            }}/>
-                            <button onClick={()=>customBgFileRef.current?.click()} className="bb-pressable"
-                              style={{background:"rgba(167,139,250,0.15)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:8,padding:"5px 10px",fontSize:10,fontWeight:700,color:"#A78BFA",cursor:"pointer"}}>
-                              upload
-                            </button>
-                          </>
-                        )}
-                        <button onClick={()=>toggleEquip(item.id)} className="bb-pressable"
-                          style={{background:isEquipped?"#A78BFA":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                          {isEquipped?"✓ on":"equip"}
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable"
-                        style={{background:canAfford?"rgba(167,139,250,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?"rgba(167,139,250,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:canAfford?"#A78BFA":"#4A5066",cursor:canAfford?"pointer":"default"}}>
-                        {item.cost} pts
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+          <div style={{fontSize:11,color:"#4A5066",marginBottom:12}}>daily rotation shows up to 10 items per category. prices are tuned so cosmetics feel earned, not impossible.</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
+            {shopTabDefs.map(t => (
+              <button key={t.id} onClick={()=>setShopTab(t.id)} className="bb-pressable" style={{background:shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.045)",border:`1px solid ${shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:shopTab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                {t.label}
+              </button>
+            ))}
           </div>
+          <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>{currentShopTab.label} · {shopDisplayItems.length}/10 today</div>
+          {shopDisplayItems.length === 0 ? (
+            <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:14,fontSize:12,color:"#8B92A8"}}>nothing in this shop category today.</div>
+          ) : (
+            <div style={{display:"grid",gridTemplateColumns:shopTab==="background"?"1fr":"1fr 1fr",gap:8,marginBottom:4}}>
+              {shopDisplayItems.map(renderShopItemCard)}
+            </div>
+          )}
         </div>
       )}
       {purchaseReveal && (
@@ -9831,7 +9694,7 @@ async function dispatchPushForStoreChange(key, before, after) {
     if (newRaceId && newRaceId !== oldRaceId) {
       const obj = typeof RACE_OBJECTIVES !== "undefined" ? RACE_OBJECTIVES.find(o => o.id === newRaceId) : null;
       const targets = PLAYERS.map(p => p.id).filter(pid => pid !== after.startedBy);
-      await sendPushToPlayersOnce(`race:${newRaceId}`, targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}`, { url:makeNotificationUrl("boost", { type:"race", id:newRaceId }), type:"race", id:newRaceId });
+      await sendPushToPlayersOnce(`race:${newRaceId}`, targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}${after?.entryFee ? ` · jar ${after.entryFee} pts to join` : ""}`, { url:makeNotificationUrl("boost", { type:"race", id:newRaceId }), type:"race", id:newRaceId });
     }
   }
 
@@ -10944,10 +10807,10 @@ const [predSide, setPredSide] = useState(null);
   // Build player props from stats across 1v1 / 2v2 / 3v3.
   const PROP_FIELD_CONFIG = {
     goals:   { label:"goals",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
-    assists: { label:"assists", lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
+    assists: { label:"assists", lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5] },
     saves:   { label:"saves",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
     shots:   { label:"shots",   lines: [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5] },
-    score:   { label:"score",   lines: [99.5, 199.5, 299.5, 399.5, 499.5, 599.5, 799.5, 999.5] },
+    score:   { label:"score",   lines: [199.5, 299.5, 399.5, 499.5, 599.5, 699.5, 799.5, 999.5] },
   };
 
   const propBetPlayers = PLAYERS.filter(p => p.id !== currentPlayer);
@@ -11081,7 +10944,7 @@ const [predSide, setPredSide] = useState(null);
           avg: avg.toFixed(field === "score" ? 0 : 1),
           gamesPlayed: values.length,
           targetText: `next logged 2v2 game with ${activePropDuo.label}`,
-          lineOptions: makeLineOptions(values, field === "score" ? [199.5, 399.5, 599.5, 799.5, 999.5, 1199.5, 1399.5, 1599.5] : cfg.lines.map(v => v + 1)),
+          lineOptions: makeLineOptions(values, field === "score" ? [399.5, 599.5, 799.5, 999.5, 1199.5, 1399.5, 1599.5, 1999.5] : cfg.lines.map(v => v + 1)),
         });
       });
     }
@@ -12277,6 +12140,13 @@ const RACE_OBJECTIVES = [
 function RaceModeTab({ stats, currentPlayer, points, setPoints, activeRace, setActiveRace, raceStart, setRaceStart }) {
 
   const weekStart = getWeekStart();
+  const [raceEntryFee, setRaceEntryFee] = useState(25);
+  const [raceJar, setRaceJar] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    storeGet("active_race").then(r => { if (alive) setRaceJar(r?.objectiveId ? r : null); }).catch(() => {});
+    return () => { alive = false; };
+  }, [activeRace, raceStart]);
 
   const getProgress = (playerId, objective) => {
     const cutoff = raceStart ? new Date(raceStart) : weekStart;
@@ -12293,11 +12163,33 @@ function RaceModeTab({ stats, currentPlayer, points, setPoints, activeRace, setA
 const startRace = async (obj) => {
     const existing = await storeGet("active_race");
     if (existing && existing.objectiveId) return; // already one running
+    const fee = clampWager(raceEntryFee, 25);
+    const freshPts = await storeGet("points") || points || {};
+    if ((Number(freshPts[currentPlayer]) || 0) < fee) return;
     const ts = new Date().toISOString();
-    const raceData = { objectiveId: obj.id, startedAt: ts, startedBy: currentPlayer };
+    const raceData = { objectiveId: obj.id, startedAt: ts, startedBy: currentPlayer, entryFee: fee, pot: fee, participants:[currentPlayer] };
+    const updPts = { ...freshPts, [currentPlayer]: Math.max(0, (Number(freshPts[currentPlayer]) || 0) - fee) };
+    setPoints(updPts);
+    await storeSet("points", updPts);
+    setRaceJar(raceData);
     setActiveRace(obj.id);
     setRaceStart(ts);
     await storeSetWithPush("active_race", raceData);
+  };
+  const joinRaceJar = async () => {
+    const savedRace = await storeGet("active_race");
+    if (!savedRace?.objectiveId || savedRace.settledAt || savedRace.cancelled) return;
+    const participants = Array.isArray(savedRace.participants) ? savedRace.participants : [];
+    if (participants.includes(currentPlayer)) return;
+    const fee = clampWager(savedRace.entryFee || raceEntryFee, 25);
+    const freshPts = await storeGet("points") || points || {};
+    if ((Number(freshPts[currentPlayer]) || 0) < fee) return;
+    const updatedRace = { ...savedRace, entryFee: fee, participants:[...participants, currentPlayer], pot:(Number(savedRace.pot) || 0) + fee, lastJoinedBy: currentPlayer, lastJoinedAt: new Date().toISOString() };
+    const updPts = { ...freshPts, [currentPlayer]: Math.max(0, (Number(freshPts[currentPlayer]) || 0) - fee) };
+    setPoints(updPts);
+    await storeSet("points", updPts);
+    setRaceJar(updatedRace);
+    await storeSetWithPush("active_race", updatedRace);
   };
 const endRace = async () => {
     setActiveRace(null);
@@ -12324,15 +12216,17 @@ const endRace = async () => {
     if (!savedRace?.objectiveId || savedRace.settledAt) return;
     const raceWinner = winner || leaderboard[0];
     const pts = await storeGet("points") || {};
+    const pot = Number(savedRace.pot || 0);
     let updPts = pts;
-    if (raceWinner?.player?.id) {
-      updPts = { ...pts, [raceWinner.player.id]: (pts[raceWinner.player.id] || 0) + 50 };
+    if (raceWinner?.player?.id && pot > 0) {
+      updPts = { ...pts, [raceWinner.player.id]: (Number(pts[raceWinner.player.id]) || 0) + pot };
       setPoints(updPts);
       await storeSet("points", updPts);
     }
+    setRaceJar(null);
     setActiveRace(null);
     setRaceStart(null);
-    await storeSetWithPush("active_race", { objectiveId:null, settled:true, settledAt:new Date().toISOString(), settledBy:currentPlayer, winnerId:raceWinner?.player?.id || null, reason });
+    await storeSetWithPush("active_race", { objectiveId:null, settled:true, settledAt:new Date().toISOString(), settledBy:currentPlayer, winnerId:raceWinner?.player?.id || null, pot, participants:savedRace.participants || [], reason });
   };
 
   useEffect(() => {
@@ -12346,6 +12240,20 @@ const endRace = async () => {
     <div className="bb-tab-content" style={s.tabContent}>
       {!activeRace ? (
         <>
+          <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:"1px solid rgba(255,209,102,0.22)",borderRadius:16,padding:14,marginBottom:14}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:9}}>
+              <div>
+                <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>fund jar</div>
+                <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>everyone who joins pays in. winner takes the whole pot.</div>
+              </div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,color:"#FFD166",fontWeight:700}}>{raceEntryFee}<span style={{fontSize:10,color:"#4A5066",marginLeft:3}}>pts</span></div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7}}>
+              {[25,50,75,100].map(amt => (
+                <button key={amt} onClick={()=>setRaceEntryFee(amt)} className="bb-pressable" style={{background:raceEntryFee===amt?"#FFD166":"rgba(255,255,255,0.05)",border:`1px solid ${raceEntryFee===amt?"#FFD166":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:11,fontWeight:900,color:raceEntryFee===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>{amt}</button>
+              ))}
+            </div>
+          </div>
           <div style={{...s.sectionLabel,marginBottom:12}}>pick an objective</div>
           {RACE_OBJECTIVES.map(obj => (
             <button key={obj.id} onClick={() => startRace(obj)} disabled={!!activeRace} className="bb-pressable"
@@ -12353,7 +12261,7 @@ const endRace = async () => {
               <span style={{fontSize:32}}>{obj.emoji}</span>
               <div style={{flex:1}}>
                 <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:obj.color}}>{obj.label}</div>
-                <div style={{fontSize:11,color:"#4A5066",marginTop:3}}>first to {obj.target} · winner gets +50 pts bonus</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:3}}>first to {obj.target} · {raceEntryFee} pts to join · winner takes jar</div>
               </div>
               <ChevronRight size={16} color="#4A5066"/>
             </button>
@@ -12366,9 +12274,16 @@ const endRace = async () => {
             <div style={{fontSize:11,color:currentObj.color,fontWeight:700,letterSpacing:1,marginBottom:6}}>RACE IN PROGRESS</div>
             <div style={{fontSize:42,marginBottom:6}}>{currentObj.emoji}</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"#E8ECF4",marginBottom:4}}>{currentObj.label}</div>
-            <div style={{fontSize:12,color:"#8B92A8"}}>first to {currentObj.target} wins +50 pts</div>
+            <div style={{fontSize:12,color:"#8B92A8"}}>first to {currentObj.target} wins the jar</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:26,color:"#FFD166",fontWeight:700,marginTop:8}}>🏺 {Number(raceJar?.pot || 0)} pts</div>
+            <div style={{fontSize:10,color:"#4A5066",marginTop:3}}>{(raceJar?.participants || []).length || 0} joined · {Number(raceJar?.entryFee || 0)} pts entry</div>
             {raceStart && <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>started {fmtRelTime(raceStart)} · closes in {raceTimeLeftLabel}</div>}
           </div>
+          {raceJar?.objectiveId && (
+            <button onClick={joinRaceJar} disabled={(raceJar?.participants || []).includes(currentPlayer) || (Number(points?.[currentPlayer]) || 0) < Number(raceJar?.entryFee || 0)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:(raceJar?.participants || []).includes(currentPlayer)?"rgba(124,255,178,0.12)":"rgba(255,209,102,0.12)",border:`1px solid ${(raceJar?.participants || []).includes(currentPlayer)?"rgba(124,255,178,0.35)":"rgba(255,209,102,0.35)"}`,borderRadius:14,padding:"12px 14px",fontSize:12,fontWeight:900,color:(raceJar?.participants || []).includes(currentPlayer)?"#7CFFB2":"#FFD166",cursor:(raceJar?.participants || []).includes(currentPlayer)?"default":"pointer",marginBottom:16}}>
+              {(raceJar?.participants || []).includes(currentPlayer) ? "✓ you are in the fund jar" : `tap jar to join — ${Number(raceJar?.entryFee || 0)} pts`}
+            </button>
+          )}
 
           {/* Winner banner */}
           {winner && (
@@ -12377,7 +12292,7 @@ const endRace = async () => {
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#FFD166",marginBottom:4}}>
                 {winner.player.name} wins!
               </div>
-              <div style={{fontSize:12,color:"#8B92A8"}}>+50 pts bonus awarded</div>
+              <div style={{fontSize:12,color:"#8B92A8"}}>wins the {Number(raceJar?.pot || 0)} pt jar</div>
               <button onClick={()=>settleRace("winner")} className="bb-pressable bb-glow-lime"
                 style={{...s.primaryBtn,marginTop:12,background:"#FFD166",color:"#06070D"}}>
                 settle race
@@ -12933,10 +12848,11 @@ const [toasts, setToasts] = useState([]);
   useEffect(() => {
     if (typeof window === "undefined") return;
     const applyViewport = () => {
-      const h = Math.max(window.innerHeight || 0, window.visualViewport?.height || 0);
+      const h = Math.ceil(Math.max(window.innerHeight || 0, window.visualViewport?.height || 0, document.documentElement?.clientHeight || 0));
       if (h) document.documentElement.style.setProperty("--bb-real-vh", `${h}px`);
       document.documentElement.style.setProperty("--bb-safe-bottom", "env(safe-area-inset-bottom, 0px)");
       document.body?.classList?.add("bb-pwa-shell");
+      document.body.style.background = "#06070D";
       let meta = document.querySelector('meta[name="viewport"]');
       if (!meta) {
         meta = document.createElement("meta");
@@ -13516,7 +13432,7 @@ if (key === "active_race") {
     if (value.startedBy !== currentPlayer) {
       const starter = PLAYERS.find(p => p.id === value.startedBy);
       const obj = RACE_OBJECTIVES.find(o => o.id === value.objectiveId);
-      addToast(`${starter?.name} started a race — ${obj?.label}! Go to Race tab.`, obj?.emoji || "🏁");
+      addToast(`${starter?.name} started a race — ${obj?.label}${value?.entryFee ? ` · ${value.entryFee} pt jar` : ""}! Go to Race tab.`, obj?.emoji || "🏁");
     }
   } else {
     setActiveRace(null);
@@ -13952,7 +13868,7 @@ const TABS=[
   const own = points?.[currentPlayer+"_owned"] || [];
   const bgId = own.find(id => eq[id] && BACKGROUND_ITEM_IDS.includes(id));
   const customUrl = points?.[currentPlayer+"_customBg"];
-  const hasTextKitEquipped = own.some(id => eq[id] && id.startsWith("pass_premium_") && getPassRewardForOwnedId(id)?.type === "text_color");
+  const hasTextKitEquipped = own.some(id => eq[id] && ((id.startsWith("pass_premium_") && getPassRewardForOwnedId(id)?.type === "text_color") || SHOP_ITEMS.find(i => i.id === id)?.type === "text_color"));
   const textColors = hasTextKitEquipped ? (points?.[currentPlayer+"_textColors"] || {}) : {};
   const bgStyle = getBackgroundVisualStyle(bgId, customUrl, theme);
 
@@ -14262,17 +14178,17 @@ export default function App() {
 
 // ===================== Styles =====================
 const s = {
-appShell:{display:"flex",flexDirection:"column",height:"var(--bb-real-vh, 100dvh)",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:0,backgroundSize:"cover",backgroundPosition:"center",backgroundRepeat:"no-repeat"},
-  screen:{height:"var(--bb-real-vh, 100dvh)",minHeight:"100dvh",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto",backgroundSize:"cover",backgroundPosition:"center",backgroundRepeat:"no-repeat"},
+appShell:{display:"flex",flexDirection:"column",height:"100dvh",minHeight:"var(--bb-real-vh, 100dvh)",background:"#06070D",color:"#E8ECF4",fontFamily:"\'Inter\',-apple-system,sans-serif",width:"100%",position:"fixed",inset:0,overflow:"hidden",paddingBottom:0,backgroundSize:"cover",backgroundPosition:"center",backgroundRepeat:"no-repeat"},
+  screen:{height:"100dvh",minHeight:"var(--bb-real-vh, 100dvh)",background:"#06070D",color:"#E8ECF4",fontFamily:"'Inter',-apple-system,sans-serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto",backgroundSize:"cover",backgroundPosition:"center",backgroundRepeat:"no-repeat"},
 topBar:{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 18px 12px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0,position:"relative"},
   topBarTitle:{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600,letterSpacing:0.8,textTransform:"lowercase"},
   topBarRight:{display:"flex",alignItems:"center",gap:8},
   youDot:{width:8,height:8,borderRadius:99},
   youName:{fontSize:13,color:"#8B92A8"},
   logoutBtn:{background:"none",border:"none",color:"#4A5066",padding:4,marginLeft:4,cursor:"pointer"},
-  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"max(28px, env(safe-area-inset-bottom, 0px))",WebkitOverflowScrolling:"touch",minHeight:0,scrollbarWidth:"none",msOverflowStyle:"none",background:"transparent"},
-  tabContent:{padding:"16px 16px max(34px, env(safe-area-inset-bottom, 0px))",minHeight:"calc(var(--bb-real-vh, 100dvh) - 118px)"},
-pageButtonNav:{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"10px 14px",paddingBottom:8,background:"rgba(6,7,13,0.72)",borderBottom:"1px solid rgba(255,255,255,0.06)",scrollbarWidth:"none",msOverflowStyle:"none",position:"relative",zIndex:5,flexShrink:0},
+  tabBody:{flex:1,overflowY:"auto",overflowX:"hidden",paddingBottom:"max(96px, calc(env(safe-area-inset-bottom, 0px) + 76px))",WebkitOverflowScrolling:"touch",minHeight:0,height:"100%",scrollbarWidth:"none",msOverflowStyle:"none",background:"transparent"},
+  tabContent:{padding:"16px 16px max(120px, calc(env(safe-area-inset-bottom, 0px) + 96px))",minHeight:"calc(var(--bb-real-vh, 100dvh) - 92px)"},
+pageButtonNav:{display:"flex",gap:8,overflowX:"auto",WebkitOverflowScrolling:"touch",padding:"10px 14px",paddingBottom:8,background:"transparent",borderBottom:"1px solid transparent",scrollbarWidth:"none",msOverflowStyle:"none",position:"relative",zIndex:5,flexShrink:0},
 pageButtonNavItem:{flexShrink:0,minWidth:72,borderRadius:16,padding:"10px 10px",display:"flex",alignItems:"center",justifyContent:"center",gap:7,cursor:"pointer",backdropFilter:"blur(10px)"},
 tabBar:{display:"flex",borderTop:"none",background:"#0A0C16",flexShrink:0,paddingTop:8,paddingBottom:"calc(10px + env(safe-area-inset-bottom, 0px))",overflowX:"auto",WebkitOverflowScrolling:"touch",position:"fixed",left:0,right:0,bottom:"calc(-1 * env(safe-area-inset-bottom, 0px) - 10px)",zIndex:600,maxWidth:480,margin:"0 auto",boxShadow:"0 -14px 28px rgba(0,0,0,0.35)",/* PWA_NAV_DROP_FINAL: drops buttons into bottom safe-area gap */},
 tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"7px 4px 5px",cursor:"pointer",outline:"none",WebkitTapHighlightColor:"transparent",borderRadius:14},
