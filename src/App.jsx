@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { storeGet, storeSet, getMMR, setMMR, uploadPostImage, subscribeKVMulti } from "./lib/storage";
 import { Component, useState, useEffect, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 
 // APP54_BUTTON_TWITCH_AUDIO_READY_PATCH
 // APP54_NEW_SOUNDBOARD_FILES_PATCH
@@ -20,6 +21,46 @@ import { Component, useState, useEffect, useRef, useCallback } from "react";
 // APP63_PARSE_SCORE_SHOP_PROPS_NOTIFICATION_PATCH
 // APP65_FULLSCREEN_SHOP_RACE_SCORE_JAR_PATCH
 // APP69_YOUR_BETS_NO_GRAY_SUBTEXT_PATCH
+// APP71_ADMIN_SHOP_REWARDS_TRAINING_PATCH
+// APP72_BET_SYNC_SETTLE_RESULT_PATCH
+// APP72_RACE_FUND_JAR_TIMER_PAYOUT_PATCH
+// APP73_YOUR_BETS_CLEAR_PAYOUT_LEGS_PATCH
+// APP74_HOME_UI_BETS_SHOP_STATS_ANIMATION_PATCH
+// APP75_ADMIN_DAILY_SHOP_LIVE_EDITOR_PATCH
+// APP75_ADMIN_SHIELD_SHORTCUT_PATCH
+// APP76_ADMIN_CUSTOMIZER_SHOP_HIDE_REFRESH_PATCH
+// APP77_STABLE_SHOP_SOCIAL_UI_FIX_PATCH
+// APP78_LOGIN_NO_LOADING_HOOK_ORDER_FIX
+// APP80_ADMIN_PASS_CHAT_LIVE_SYNC_FIX
+// APP80_HARD_LOGIN_BYPASS_PATCH
+// APP82_LOGIN_UNLOCK_PATCH
+// APP80_FAST_LOGIN_SHOP_PLUS_WEEKLY_MODAL_PATCH
+// APP81_SHOP_EDITOR_STABILITY_SPEED_PATCH
+// APP79_STABLE_LOGIN_POINTS_BACKGROUND_FIX
+// APP84_SUPABASE_LIGHT_LIVE_SYNC_FIX
+// APP83_FAST_ONLINE_ADMIN_LIVE_SYNC_PATCH
+// APP85_TRAINING_MULTI_PROOF_CLAIM_COMMENTS_FIX
+// APP85_TRAINING_MULTI_PROOF_REPLY_PATCH
+// APP86_SOUND_UPLOAD_NO_SFX_PATCH
+// APP87_CHEM_INLINE_SALE_BADGE_PATCH
+// APP88_SHOP_CLAIM_PRICE_BOX_PATCH
+// APP89_SOCIAL_PORTAL_MODAL_FIX
+// APP89_TOP_LOCKED_SHOP_CLAIM_PATCH
+// APP90_PARSE_LIVE_STATS_FIX
+// APP91_SUPABASE_LIGHT_FAST_SYNC_FIX
+// APP91_SPLIT_PARLAY_HALF_PAYOUT_DISPLAY_FIX
+// APP91_SYNC_RETRY_CLAIM_PORTAL_FIX
+// APP91_BULK_SHOP_PRICE_PATCH
+// APP91_BUILD_REDECLARE_FIX
+// APP91_BETS_POINTS_PRESENCE_FIX
+// APP92_PARSE_KEY_SYNC_STABILITY_FIX
+// APP93_BET_FEATURES_BOOSTED_RIVALRY_HISTORY_BUILDER_PATCH
+// APP102_REAL_JOBS_LAYOUT_STOCKS_TEXT_COLLAGE_PATCH
+// APP94_BURTON_OS_CHAOS_STATE_VAULT_ECONOMY_ANIMATION_PATCH
+// APP98_BURTON_OPTION_POOLS_ADMIN_CUSTOMIZATION_PATCH
+// APP99_BETS_STAY_OPEN_UNTIL_FRESH_SYNC_PATCH
+// APP100_CHAT_MEDIA_STOCK_GRAPH_UI_DEEPLINK_PATCH
+// APP101_RLCS_LIVE_STARTGG_BACKEND_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -37,8 +78,81 @@ const STOCK_BASE_PRICE = 100;
 const PARSE_CREDITS_DEFAULT = 50;
 const PARSE_RESERVE_DEFAULT = 50;
 const VOICE_PRESENCE_KEY = "voice_presence";
-const VOICE_PRESENCE_TTL_MS = 4500;
-const VOICE_PRESENCE_HEARTBEAT_MS = 1000;
+const VOICE_PRESENCE_TTL_MS = 45000;
+const VOICE_PRESENCE_HEARTBEAT_MS = 15000;
+const ADMIN_LIVE_SYNC_KEY = "admin_live_sync";
+const AUDIO_FILE_ACCEPT = "audio/*,.mp3,.mpeg,.mpga,.m4a,.aac,.wav,.wave,.x-wav,.ogg,.oga,.webm,.flac,audio/mpeg,audio/mp3,audio/mp4,audio/aac,audio/wav,audio/x-wav,audio/ogg,audio/webm,audio/flac";
+const CHAT_MEDIA_ACCEPT = "image/*,video/*";
+const PARSE_SCRAPER_ID = "d0dcf8e8-3a72-4b21-bffb-8fa735257835";
+const PARSE_API_KEY = "pmx_cbc188bbdb744012572e5cbf6a12c828";
+const PARLAY_MAX_LEGS = 8;
+const PARLAY_MAX_PAYOUT = 50000;
+const PARLAY_MAX_PAYOUT_FLOOR = PARLAY_MAX_PAYOUT;
+const PARLAY_MAX_PAYOUT_CEILING = PARLAY_MAX_PAYOUT;
+const SPLIT_PARLAY_RATE = 0.5;
+const DAILY_ODDS_BOOST_RATE = 1.25;
+const CUSTOM_PROP_LIMIT = 36;
+const RIVALRY_FIELDS = [
+  { id:"goals", label:"goals" },
+  { id:"assists", label:"assists" },
+  { id:"saves", label:"saves" },
+  { id:"shots", label:"shots" },
+  { id:"score", label:"score" },
+  { id:"demos", label:"demos" },
+];
+
+function getEasternDateKeyForCap(from = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", year:"numeric", month:"2-digit", day:"2-digit" }).formatToParts(from instanceof Date ? from : new Date(from));
+    const get = (t) => parts.find(p => p.type === t)?.value;
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  } catch (_) {
+    return new Date().toISOString().slice(0,10);
+  }
+}
+function getCurrentParlayMaxPayout() {
+  return PARLAY_MAX_PAYOUT;
+}
+function capParlayPayout(amount, cap = getCurrentParlayMaxPayout()) {
+  const n = Math.round(Number(amount) || 0);
+  return Math.max(0, Math.min(cap, n));
+}
+
+function calcSplitParlayAwardFromPayout(payout, wonLegs, totalLegs) {
+  const total = Math.max(1, Number(totalLegs) || 1);
+  const won = Math.max(0, Math.min(total, Number(wonLegs) || 0));
+  const base = capParlayPayout(payout);
+  // Split payout is intentionally safer: the max all-leg hit is half of the normal parlay,
+  // and each hit leg pays an equal slice of that reduced max.
+  return capParlayPayout(Math.round(base * SPLIT_PARLAY_RATE * (won / total)));
+}
+
+function stableHashString(str = "") {
+  let h = 2166136261;
+  for (let i = 0; i < String(str).length; i++) {
+    h ^= String(str).charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h >>> 0);
+}
+
+function decimalToAmerican(decimalOdds) {
+  const dec = Math.max(1.01, Number(decimalOdds) || 2);
+  if (dec >= 2) return `+${Math.round((dec - 1) * 100)}`;
+  return `-${Math.round(100 / Math.max(dec - 1, 0.01))}`;
+}
+
+function boostOddsForDaily(odds, isBoosted = false) {
+  if (!isBoosted) return odds;
+  const dec = Math.max(1.01, Number(odds?.decimal) || 2);
+  const boostedDecimal = Math.min(6, dec * DAILY_ODDS_BOOST_RATE);
+  return {
+    ...(odds || {}),
+    decimal: boostedDecimal.toFixed(2),
+    american: decimalToAmerican(boostedDecimal),
+    boosted: true,
+  };
+}
 
 function cleanVoicePresenceMap(vp) {
   const now = Date.now();
@@ -80,11 +194,11 @@ function getChemistryKey(a, b) {
 }
 
 function getChemistryLevel(xp) {
-  if (xp >= 500) return { level:5, label:"Legendary", color:"#FFD166", emoji:"👑" };
-  if (xp >= 300) return { level:4, label:"Elite",     color:"#FF61C1", emoji:"💎" };
-  if (xp >= 150) return { level:3, label:"Solid",     color:"#A78BFA", emoji:"⚡" };
-  if (xp >= 60)  return { level:2, label:"Building",  color:"#4D9EFF", emoji:"🤝" };
-  if (xp >= 10)  return { level:1, label:"Fresh",     color:"#B8FF4D", emoji:"🌱" };
+  if (xp >= 5000) return { level:5, label:"Legendary", color:"#FFD166", emoji:"👑" };
+  if (xp >= 2500) return { level:4, label:"Elite",     color:"#FF61C1", emoji:"💎" };
+  if (xp >= 1000) return { level:3, label:"Solid",     color:"#A78BFA", emoji:"⚡" };
+  if (xp >= 350)  return { level:2, label:"Building",  color:"#4D9EFF", emoji:"🤝" };
+  if (xp >= 100)  return { level:1, label:"Fresh",     color:"#B8FF4D", emoji:"🌱" };
   return           { level:0, label:"None",     color:"#4A5066", emoji:"💤" };
 }
 
@@ -276,6 +390,44 @@ function sanitizeStatsForRender(stats) {
   return (Array.isArray(stats) ? stats : []).map(normalizeStatForRender).filter(Boolean);
 }
 
+
+function isMeaningfulStatsSnapshot(v) {
+  if (!Array.isArray(v) || v.length === 0) return false;
+  return v.some(g => g && typeof g === "object" && (g.playerId || g.id || g.matchId || g.ts || g.date));
+}
+function statsSnapshotWeight(v) {
+  if (!Array.isArray(v)) return 0;
+  return v.filter(g => g && typeof g === "object").length;
+}
+function shouldRejectIncomingStatsSnapshot(incoming, current) {
+  if (!Array.isArray(incoming)) return true;
+  const currentGood = isMeaningfulStatsSnapshot(current);
+  const incomingGood = isMeaningfulStatsSnapshot(incoming);
+  if (currentGood && !incomingGood) return true;
+  const currentWeight = statsSnapshotWeight(current);
+  const incomingWeight = statsSnapshotWeight(incoming);
+  return currentGood && currentWeight >= 3 && incomingWeight > 0 && incomingWeight < Math.max(2, Math.floor(currentWeight * 0.35));
+}
+function backupHasMoreStatsData(backup, current) {
+  if (!isMeaningfulStatsSnapshot(backup)) return false;
+  return statsSnapshotWeight(backup) > statsSnapshotWeight(current);
+}
+function isMeaningfulChemistrySnapshot(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const keys = Object.keys(v).filter(k => !String(k).startsWith("__") && k !== "_resetVersion");
+  return keys.some(k => {
+    const val = v[k];
+    return typeof val === "number" ? val > 0 : !!val;
+  });
+}
+function backupHasMoreChemistryData(backup, current) {
+  if (!isMeaningfulChemistrySnapshot(backup)) return false;
+  if (!isMeaningfulChemistrySnapshot(current)) return true;
+  const b = Object.keys(backup || {}).filter(k => !String(k).startsWith("__") && k !== "_resetVersion").length;
+  const c = Object.keys(current || {}).filter(k => !String(k).startsWith("__") && k !== "_resetVersion").length;
+  return b > c;
+}
+
 function isMeaningfulPointsSnapshot(pts) {
   if (!pts || typeof pts !== "object" || Array.isArray(pts)) return false;
   const keys = Object.keys(pts).filter(k => !String(k).startsWith("__"));
@@ -292,8 +444,28 @@ function looksLikeWipedPointsSnapshot(pts) {
   if (!keys.length) return false;
   const hasPlayerScore = PLAYERS.some(p => Object.prototype.hasOwnProperty.call(pts, p.id));
   const hasInventory = PLAYERS.some(p => Array.isArray(pts[p.id + "_owned"]) && pts[p.id + "_owned"].length > 0);
-  const onlyBonusKeys = keys.every(k => /_(bonusSpins|bonusSlots)$/.test(k) || k.includes("test_wheel_spin"));
-  return !hasPlayerScore && !hasInventory && keys.length <= 3 && onlyBonusKeys;
+  const hasEquipped = PLAYERS.some(p => pts[p.id + "_equipped"] && typeof pts[p.id + "_equipped"] === "object" && Object.keys(pts[p.id + "_equipped"]).length > 0);
+  const safeSystemKey = (k) => (
+    /_(bonusSpins|bonusSlots)$/.test(k) ||
+    k.includes("test_wheel_spin") ||
+    /^weekly_challenge_reset_v/i.test(k) ||
+    /weeklyChallengeResetVersion/i.test(k) ||
+    /^challenge_/i.test(k) ||
+    /live_poll/i.test(k)
+  );
+  const onlySystemKeys = keys.every(safeSystemKey);
+  return !hasPlayerScore && !hasInventory && !hasEquipped && keys.length <= 8 && onlySystemKeys;
+}
+
+function shouldRejectIncomingPointsSnapshot(incoming, current) {
+  if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) return true;
+  if (looksLikeWipedPointsSnapshot(incoming)) return true;
+  const currentMeaningful = isMeaningfulPointsSnapshot(current);
+  const incomingMeaningful = isMeaningfulPointsSnapshot(incoming);
+  if (currentMeaningful && !incomingMeaningful) return true;
+  const incomingKeys = Object.keys(incoming || {}).filter(k => !String(k).startsWith("__")).length;
+  const currentKeys = Object.keys(current || {}).filter(k => !String(k).startsWith("__")).length;
+  return currentMeaningful && incomingKeys > 0 && incomingKeys < Math.max(3, Math.floor(currentKeys * 0.35));
 }
 
 function backupHasMorePointData(backup, current) {
@@ -316,6 +488,52 @@ function isMeaningfulGenericSnapshot(v) {
     if (val && typeof val === "object") return Object.keys(val).length > 0;
     return val !== null && val !== undefined && val !== false && val !== 0 && val !== "";
   });
+}
+
+
+function hasAnyStoredKey(v) {
+  return !!(v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).filter(k => !String(k).startsWith("__")).length);
+}
+
+function isPassXPSnapshot(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  return PLAYERS.some(p => (
+    Object.prototype.hasOwnProperty.call(v, p.id) ||
+    Object.prototype.hasOwnProperty.call(v, `${p.id}_freeXP`) ||
+    Object.prototype.hasOwnProperty.call(v, `${p.id}_premiumXP`)
+  ));
+}
+
+function isPassPremiumSnapshot(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  return PLAYERS.some(p => Object.prototype.hasOwnProperty.call(v, p.id));
+}
+
+function shouldAcceptPassXPUpdate(incoming, current) {
+  if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) return false;
+  if (!hasAnyStoredKey(incoming)) return false;
+  return true;
+}
+
+function shouldAcceptPremiumUpdate(incoming, current) {
+  if (!incoming || typeof incoming !== "object" || Array.isArray(incoming)) return false;
+  if (!hasAnyStoredKey(incoming)) return false;
+  return true;
+}
+
+function getFreePassXPForPlayer(passXP, playerId) {
+  const direct = Number(passXP?.[`${playerId}_freeXP`]);
+  if (Number.isFinite(direct)) return Math.max(0, direct);
+  const legacy = Number(passXP?.[playerId]);
+  return Number.isFinite(legacy) ? Math.max(0, legacy) : 0;
+}
+
+function getPremiumPassXPForPlayer(passXP, playerId, hasPremium) {
+  const direct = Number(passXP?.[`${playerId}_premiumXP`]);
+  if (Number.isFinite(direct)) return Math.max(0, direct);
+  const legacy = Number(passXP?.[playerId]);
+  const base = Number.isFinite(legacy) ? Math.max(0, legacy) : 0;
+  return hasPremium ? base + (PASS_PREMIUM_HEAD_START * XP_PER_TIER) : 0;
 }
 
 function backupHasMoreGenericData(backup, current) {
@@ -579,7 +797,7 @@ function EmptyState({ icon = "○", title, body, actionLabel, onAction }) {
 
 function FullScreenHeader({ title, subtitle, onClose, accent = "#B8FF4D" }) {
   return (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 14px)",borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.92)",backdropFilter:"blur(14px)",flexShrink:0}}>
+    <div className="bb-floating-fullscreen-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 14px)",borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.42)",backdropFilter:"blur(8px)",flexShrink:0}}>
       <button onClick={onClose} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:38,height:38}}>
         <ChevronLeft size={18}/>
       </button>
@@ -592,7 +810,7 @@ function FullScreenHeader({ title, subtitle, onClose, accent = "#B8FF4D" }) {
   );
 }
 
-function HomeCommandCenter({ currentPlayer, points, nextMatch, daysUntil, previewDays, completions, stats, onGotoTraining, onGotoStats, onOpenBracket }) {
+function HomeCommandCenter({ currentPlayer, points, nextMatch, daysUntil, previewDays, completions, stats, onGotoTraining, onGotoStats, onOpenBracket, appCustomizer }) {
   const today = todayAtMidnight();
   const todayKey = dateKey(today);
   const todayItem = previewDays.find(d => d.key === todayKey) || previewDays[0];
@@ -616,8 +834,8 @@ function HomeCommandCenter({ currentPlayer, points, nextMatch, daysUntil, previe
     <div style={{background:"linear-gradient(135deg,#121626,#090B14)",border:"1px solid rgba(184,255,77,0.14)",borderRadius:22,padding:16,marginBottom:16,boxShadow:"0 18px 42px rgba(0,0,0,0.28)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:14}}>
         <div>
-          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1.2,textTransform:"uppercase",marginBottom:4}}>today's command center</div>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:"#E8ECF4",lineHeight:1}}>what matters now</div>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1.2,textTransform:"uppercase",marginBottom:4}}>{getAppCopy(appCustomizer, "homeCommandEyebrow", "today's command center")}</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:"#E8ECF4",lineHeight:1}}>{getAppCopy(appCustomizer, "homeCommandTitle", "what matters now")}</div>
         </div>
         <div style={{fontSize:10,color:"#4A5066",fontWeight:800,textTransform:"uppercase",paddingTop:4}}>{fmtRelTime(new Date().toISOString())}</div>
       </div>
@@ -671,6 +889,1313 @@ function RecentActivityFeed({ stats, completions, trainingData, currentPlayer, o
   );
 }
 
+
+// ===================== Burton OS / Chaos Layer =====================
+const BURTON_OS_KEY = "burton_os";
+const BURTON_STATE_PRESETS = [
+  { id:"normal", label:"Normal", emoji:"◇", color:"#B8FF4D", desc:"waiting for the next log" },
+  { id:"locked", label:"Locked In", emoji:"🔒", color:"#7CFFB2", desc:"wins or clean games are stacking" },
+  { id:"demon", label:"Demon Hours", emoji:"🌑", color:"#A78BFA", desc:"late queue / high heat" },
+  { id:"revenge", label:"Revenge Arc", emoji:"⛓️", color:"#FF5C8A", desc:"loss recovery mode" },
+  { id:"tilt", label:"Tilt Warning", emoji:"⚠️", color:"#FF8C42", desc:"rough game detected" },
+  { id:"tourney", label:"Tournament Arc", emoji:"🏆", color:"#FFD166", desc:"serious mode" },
+  { id:"ghost", label:"Ghost Town", emoji:"👻", color:"#8B92A8", desc:"low activity" },
+];
+const BURTON_CHAOS_POOL = [
+  { id:"double_heat", title:"Double Heat", emoji:"🔥", desc:"wins feel louder until the next loss.", color:"#FF8C42" },
+  { id:"fraud_watch", title:"Fraud Watch", emoji:"🚨", desc:"the next bad loss gets saved to the vault.", color:"#FF5C8A" },
+  { id:"demon_queue", title:"Demon Queue", emoji:"🌑", desc:"late-night rules are active for the squad.", color:"#A78BFA" },
+  { id:"vault_night", title:"Vault Night", emoji:"🗄️", desc:"anything weird tonight gets archived.", color:"#4D9EFF" },
+  { id:"king_of_three", title:"King of 3", emoji:"👑", desc:"highest score in the next team win gets blessed.", color:"#FFD166" },
+  { id:"damage_control", title:"Damage Control", emoji:"🛡️", desc:"one clean win clears the bad energy.", color:"#7CFFB2" },
+];
+function getChaosRuleDetails(chaos = {}) {
+  const id = String(chaos?.id || "");
+  const map = {
+    double_heat: { targetTab:"stats", action:"Sync/log wins while active", rules:["Wins during this window are treated as heat moments.", "The next loss ends the streak feeling and stays in history.", "Use Stats after games to see what counted."] },
+    fraud_watch: { targetTab:"court", action:"Watch Court / Vault", rules:["The next rough loss can be saved as a fraud-watch moment.", "Bad losses can feed Court/Vault depending on admin settings.", "Open Court to file or review a case."] },
+    demon_queue: { targetTab:"jobs", action:"Open late-night Jobs", rules:["Late-night rules are active for the squad.", "Graveyard Jobs pay extra when claimed during the graveyard block.", "Use Jobs to claim the shift or Stats to sync games."] },
+    vault_night: { targetTab:"home", action:"Open Vault / Home", rules:["Anything weird or high-energy can be archived.", "Court results, chaos moments, and big games can become Vault entries.", "Check Vault on Home/Burton OS for what got saved."] },
+    king_of_three: { targetTab:"stats", action:"Sync team games", rules:["Highest score in the next team win gets the king moment.", "Only synced/logged games can prove who won it.", "The result can create a blessing/history entry."] },
+    damage_control: { targetTab:"stats", action:"Sync a clean win", rules:["The squad is in recovery mode.", "One clean win helps clear bad energy.", "Stats sync is what lets Burton OS know it happened."] },
+  };
+  return map[id] || { targetTab:"home", action:"View rule details", rules:[chaos?.desc || "Temporary team rule is active.", "Sync games or use the linked tab to resolve it."] };
+}
+const BURTON_LIMITED_EVENTS = [
+  { id:"none", title:"No limited event", emoji:"○", desc:"normal Burton OS behavior", color:"#4A5066" },
+  { id:"midnight_cup", title:"Midnight Cup", emoji:"🌙", desc:"games after midnight become part of the vault story", color:"#A78BFA" },
+  { id:"tournament_arc", title:"Tournament Arc", emoji:"🏆", desc:"serious state, stronger history tracking", color:"#FFD166" },
+  { id:"economy_watch", title:"Economy Watch", emoji:"📈", desc:"shared economy health gets pinned up front", color:"#7CFFB2" },
+  { id:"chaos_week", title:"Chaos Week", emoji:"🌀", desc:"chaos button events stay louder for everyone", color:"#FF61C1" },
+];
+const BURTON_COURT_VERDICTS = [
+  { id:"guilty", label:"guilty", emoji:"🔨", color:"#FF5C8A" },
+  { id:"not_guilty", label:"not guilty", emoji:"🛡️", color:"#7CFFB2" },
+  { id:"team_sold", label:"team sold", emoji:"🤝", color:"#FFD166" },
+  { id:"lying", label:"accuser lying", emoji:"🧢", color:"#A78BFA" },
+];
+const BURTON_CURSE_DEFS = [
+  { id:"low_score_warning", label:"Low Score Warning", emoji:"⚠️", reason:"rough synced loss", color:"#FF8C42" },
+  { id:"ghost_tag", label:"Ghost Tag", emoji:"👻", reason:"inactive / quiet stretch", color:"#8B92A8" },
+  { id:"sell_watch", label:"Sell Watch", emoji:"🚨", reason:"courtroom or bad-loss energy", color:"#FF5C8A" },
+  { id:"false_accuser", label:"False Accuser", emoji:"🧢", reason:"court ruled the accuser was lying", color:"#A78BFA" },
+];
+const BURTON_BLESSING_DEFS = [
+  { id:"carry_heat", label:"Carry Heat", emoji:"🔥", reason:"highest score in the newest win", color:"#FF8C42" },
+  { id:"locked_blessing", label:"Locked Blessing", emoji:"🔒", reason:"clean win / positive streak", color:"#7CFFB2" },
+  { id:"demon_blessing", label:"Demon Blessing", emoji:"🌑", reason:"late-night win energy", color:"#A78BFA" },
+];
+const BURTON_SECRET_UNLOCK_DEFS = [
+  { id:"first_state_sync", title:"State Engine Online", emoji:"🔓", text:"first game changed Burton OS state", color:"#B8FF4D" },
+  { id:"team_history_10", title:"Shared History", emoji:"📚", text:"10 total games are now part of the system", color:"#FFD166" },
+  { id:"admin_secret_unlock", title:"Admin Secret Unlock", emoji:"🔓", text:"secret unlock added from admin god mode", color:"#FFD166" },
+];
+const BURTON_VAULT_DROP_DEFS = [
+  { id:"vault_worthy_game", title:"Vault-worthy game", emoji:"🗄️", text:"high stat game detected", color:"#4D9EFF" },
+  { id:"vault_night", title:"Vault Night started", emoji:"🗄️", text:"tonight became archive-worthy", color:"#4D9EFF" },
+  { id:"court_verdict", title:"Court verdict", emoji:"⚖️", text:"courtroom verdict archived", color:"#FFD166" },
+  { id:"admin_vault_drop", title:"Admin Vault Drop", emoji:"🗄️", text:"manual vault note from admin god mode", color:"#4D9EFF" },
+];
+const BURTON_POOL_DEFAULTS = {
+  states: BURTON_STATE_PRESETS,
+  chaos: BURTON_CHAOS_POOL,
+  limitedEvents: BURTON_LIMITED_EVENTS,
+  courtVerdicts: BURTON_COURT_VERDICTS,
+  curses: BURTON_CURSE_DEFS,
+  blessings: BURTON_BLESSING_DEFS,
+  secretUnlocks: BURTON_SECRET_UNLOCK_DEFS,
+  vaultDrops: BURTON_VAULT_DROP_DEFS,
+};
+function makeBurtonOptionMap(list) {
+  return Object.fromEntries((Array.isArray(list) ? list : []).map(item => [item.id, { ...item, enabled:item.enabled !== false }]));
+}
+const DEFAULT_BURTON_OPTION_POOLS = Object.fromEntries(Object.entries(BURTON_POOL_DEFAULTS).map(([k, list]) => [k, makeBurtonOptionMap(list)]));
+function cleanBurtonColor(value, fallback = "#B8FF4D") {
+  return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : fallback;
+}
+function getBurtonOptionSource(source) {
+  if (!source || typeof source !== "object" || Array.isArray(source)) return {};
+  if (source.burtonOptionPools && typeof source.burtonOptionPools === "object") return source.burtonOptionPools;
+  if (source.settings?.optionPools && typeof source.settings.optionPools === "object") return source.settings.optionPools;
+  if (source.optionPools && typeof source.optionPools === "object") return source.optionPools;
+  return source;
+}
+function normalizeBurtonOptionPools(source = {}) {
+  const raw = getBurtonOptionSource(source);
+  const clean = {};
+  Object.entries(BURTON_POOL_DEFAULTS).forEach(([poolName, defaults]) => {
+    const savedPool = raw?.[poolName] && typeof raw[poolName] === "object" && !Array.isArray(raw[poolName]) ? raw[poolName] : {};
+    clean[poolName] = {};
+    (defaults || []).forEach(item => {
+      const saved = savedPool?.[item.id] && typeof savedPool[item.id] === "object" ? savedPool[item.id] : {};
+      const merged = { ...item, ...saved, id:item.id, enabled:saved.enabled !== false };
+      if (item.color || saved.color) merged.color = cleanBurtonColor(saved.color || item.color, item.color || "#B8FF4D");
+      ["label","title","emoji","desc","text","reason"].forEach(key => {
+        if (saved[key] !== undefined) merged[key] = String(saved[key] ?? "").slice(0, key === "emoji" ? 4 : 140);
+      });
+      clean[poolName][item.id] = merged;
+    });
+  });
+  return clean;
+}
+function getBurtonOptionPool(source, poolName, opts = {}) {
+  const normalized = normalizeBurtonOptionPools(source);
+  const fallback = BURTON_POOL_DEFAULTS[poolName] || [];
+  let rows = Object.values(normalized[poolName] || {});
+  if (!opts.includeDisabled) rows = rows.filter(item => item.enabled !== false || (opts.keepNone !== false && item.id === "none"));
+  if (!rows.length) rows = fallback.map(item => ({ ...item, enabled:true }));
+  if (poolName === "limitedEvents" && !rows.some(r => r.id === "none")) rows.unshift({ ...BURTON_LIMITED_EVENTS[0], enabled:true });
+  return rows;
+}
+function getBurtonPoolItem(source, poolName, id, fallback = null) {
+  const normalized = normalizeBurtonOptionPools(source);
+  return normalized?.[poolName]?.[id] || fallback || (BURTON_POOL_DEFAULTS[poolName] || []).find(item => item.id === id) || null;
+}
+function getBurtonStatePresets(source) {
+  return getBurtonOptionPool(source, "states");
+}
+function getBurtonStateOption(source, id, fallback = null) {
+  const item = getBurtonPoolItem(source, "states", id, fallback);
+  return item && item.enabled !== false ? item : (fallback || BURTON_STATE_PRESETS.find(s => s.id === id) || BURTON_STATE_PRESETS[0]);
+}
+function getBurtonChaosPool(source) {
+  return getBurtonOptionPool(source, "chaos");
+}
+function getBurtonLimitedEvents(source) {
+  return getBurtonOptionPool(source, "limitedEvents");
+}
+function getBurtonCourtVerdicts(source) {
+  return getBurtonOptionPool(source, "courtVerdicts");
+}
+function applyBurtonStateDisplay(source, stateInput) {
+  const state = stateInput && typeof stateInput === "object" ? stateInput : DEFAULT_BURTON_OS.state;
+  const custom = getBurtonPoolItem(source, "states", state.id, null);
+  if (!custom) return state;
+  return { ...state, label:custom.label || state.label, emoji:custom.emoji || state.emoji, color:custom.color || state.color, desc:custom.desc || state.desc };
+}
+function optionEnabled(item) { return !!item && item.enabled !== false; }
+const DEFAULT_BURTON_BOXES = {
+  burtonState:true,
+  openLoops:true,
+  chaos:true,
+  courtRoom:true,
+  autoCourt:true,
+  teamJobs:true,
+  playerStocks:true,
+  economyEvents:true,
+  teamSchedule:true,
+  courtAppeals:true,
+  teamEconomy:true,
+  limitedEvents:true,
+  vault:true,
+  secretUnlocks:true,
+  cursesBlessings:true,
+};
+const DEFAULT_BURTON_OS = {
+  settings: {
+    autoState:true,
+    stateThemeByPlayer:{},
+  },
+  state: { id:"normal", label:"Normal", emoji:"◇", color:"#B8FF4D", reason:"waiting for the next synced game", updatedAt:null, updatedBy:"system" },
+  chaos:null,
+  limitedEvent:null,
+  history:[],
+  vault:[],
+  courtCases:[],
+  unlocks:[],
+  curses:{},
+  blessings:{},
+  courtTitles:{},
+  jobs:[],
+  schedule:{ availability:{}, events:[] },
+  appeals:[],
+  stockLedger:{},
+  economyEvents:[],
+  processedGames:{},
+  economy:{},
+};
+
+function normalizeBurtonOS(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const settings = src.settings && typeof src.settings === "object" ? src.settings : {};
+  const state = src.state && typeof src.state === "object" ? src.state : DEFAULT_BURTON_OS.state;
+  const safeState = BURTON_STATE_PRESETS.find(s => s.id === state.id) || BURTON_STATE_PRESETS[0];
+  const processedRaw = src.processedGames && typeof src.processedGames === "object" && !Array.isArray(src.processedGames) ? src.processedGames : {};
+  const processedEntries = Object.entries(processedRaw).slice(-180);
+  return {
+    ...DEFAULT_BURTON_OS,
+    ...src,
+    settings: {
+      ...DEFAULT_BURTON_OS.settings,
+      ...settings,
+      autoState: settings.autoState !== false,
+      stateThemeByPlayer: settings.stateThemeByPlayer && typeof settings.stateThemeByPlayer === "object" ? settings.stateThemeByPlayer : {},
+      optionPools: normalizeBurtonOptionPools(settings.optionPools || src.optionPools || src.burtonOptionPools || {}),
+    },
+    state: {
+      ...safeState,
+      ...state,
+      id: safeState.id,
+      label: state.label || safeState.label,
+      emoji: state.emoji || safeState.emoji,
+      color: /^#[0-9a-f]{6}$/i.test(String(state.color || "")) ? state.color : safeState.color,
+    },
+    chaos: src.chaos && typeof src.chaos === "object" ? src.chaos : null,
+    limitedEvent: src.limitedEvent && typeof src.limitedEvent === "object" && src.limitedEvent.id !== "none" ? src.limitedEvent : null,
+    history: Array.isArray(src.history) ? src.history.filter(Boolean).slice(0, 80) : [],
+    vault: Array.isArray(src.vault) ? src.vault.filter(Boolean).slice(0, 80) : [],
+    courtCases: Array.isArray(src.courtCases) ? src.courtCases.filter(Boolean).slice(0, 80) : [],
+    unlocks: Array.isArray(src.unlocks) ? src.unlocks.filter(Boolean).slice(0, 80) : [],
+    curses: src.curses && typeof src.curses === "object" && !Array.isArray(src.curses) ? src.curses : {},
+    blessings: src.blessings && typeof src.blessings === "object" && !Array.isArray(src.blessings) ? src.blessings : {},
+    courtTitles: src.courtTitles && typeof src.courtTitles === "object" && !Array.isArray(src.courtTitles) ? src.courtTitles : {},
+    jobs: Array.isArray(src.jobs) ? src.jobs.filter(Boolean).slice(0, 80) : [],
+    schedule: src.schedule && typeof src.schedule === "object" && !Array.isArray(src.schedule) ? { availability:src.schedule.availability && typeof src.schedule.availability === "object" ? src.schedule.availability : {}, events:Array.isArray(src.schedule.events) ? src.schedule.events.filter(Boolean).slice(0, 80) : [] } : { availability:{}, events:[] },
+    appeals: Array.isArray(src.appeals) ? src.appeals.filter(Boolean).slice(0, 80) : [],
+    stockLedger: src.stockLedger && typeof src.stockLedger === "object" && !Array.isArray(src.stockLedger) ? src.stockLedger : {},
+    economyEvents: Array.isArray(src.economyEvents) ? src.economyEvents.filter(Boolean).slice(0, 80) : [],
+    processedGames: Object.fromEntries(processedEntries),
+    economy: src.economy && typeof src.economy === "object" ? src.economy : {},
+  };
+}
+
+function isAppBoxEnabled(customizer, boxId) {
+  const cfg = normalizeAppCustomizer(customizer || {});
+  const boxes = cfg.enabledBoxes || {};
+  if (Object.prototype.hasOwnProperty.call(boxes, boxId)) return boxes[boxId] !== false;
+  if (Object.prototype.hasOwnProperty.call(DEFAULT_BURTON_BOXES, boxId)) return DEFAULT_BURTON_BOXES[boxId] !== false;
+  return true;
+}
+
+function isTabLayoutBoxEnabled(customizer, tabId, boxId) {
+  const cfg = normalizeAppCustomizer(customizer || {});
+  const layout = cfg.tabBoxLayout?.[tabId];
+  return !(layout?.hidden && layout.hidden[boxId]);
+}
+function getTabBoxOrderIndex(customizer, tabId, boxId) {
+  const cfg = normalizeAppCustomizer(customizer || {});
+  const order = cfg.tabBoxLayout?.[tabId]?.order || DEFAULT_TAB_BOX_LAYOUT?.[tabId]?.order || [];
+  const idx = order.indexOf(boxId);
+  return idx >= 0 ? idx : 999;
+}
+function getTabLayoutConfig(customizer, tabId) {
+  const cfg = normalizeAppCustomizer(customizer || {});
+  return cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT?.[tabId] || { layoutMode:"stack", density:"normal", sizes:{}, descriptions:{}, labels:{}, order:[] };
+}
+function getTabLayoutGap(layout) {
+  return layout?.density === "tight" ? 8 : layout?.density === "roomy" ? 16 : 12;
+}
+function getTabLayoutContainerStyle(customizer, tabId, extra = {}) {
+  const layout = getTabLayoutConfig(customizer, tabId);
+  const gap = getTabLayoutGap(layout);
+  const mode = layout.layoutMode || "stack";
+  if (mode === "rail") {
+    return { display:"flex", gap, overflowX:"auto", scrollSnapType:"x mandatory", paddingBottom:4, ...extra };
+  }
+  if (mode === "twoColumn") {
+    return { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(156px,1fr))", gap, alignItems:"stretch", ...extra };
+  }
+  if (mode === "compactGrid") {
+    return { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(142px,1fr))", gap:Math.max(6, gap - 4), alignItems:"stretch", ...extra };
+  }
+  if (mode === "featureGrid") {
+    return { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(156px,1fr))", gap, alignItems:"stretch", ...extra };
+  }
+  return { display:"flex", flexDirection:"column", gap:0, ...extra };
+}
+function getTabBoxSizeId(customizer, tabId, boxId) {
+  const layout = getTabLayoutConfig(customizer, tabId);
+  const size = layout?.sizes?.[boxId] || "default";
+  return TAB_BOX_SIZE_OPTIONS.some(o => o.id === size) ? size : "default";
+}
+function getTabBoxStyle(customizer, tabId, boxId) {
+  const layout = getTabLayoutConfig(customizer, tabId);
+  const mode = layout.layoutMode || "stack";
+  const size = getTabBoxSizeId(customizer, tabId, boxId);
+  const style = { order:getTabBoxOrderIndex(customizer, tabId, boxId), minWidth:0 };
+  if (mode === "rail") {
+    const width = size === "compact" ? "52%" : size === "wide" ? "86%" : size === "hero" || size === "full" ? "94%" : "70%";
+    return { ...style, flex:`0 0 ${width}`, scrollSnapAlign:"start" };
+  }
+  if (mode !== "stack") {
+    const full = size === "full" || size === "hero" || (mode === "featureGrid" && getTabBoxOrderIndex(customizer, tabId, boxId) === 0);
+    const span2 = full || size === "wide";
+    style.gridColumn = full ? "1 / -1" : span2 ? "span 2" : "span 1";
+    if (size === "compact") { style.fontSize = 10; }
+    if (size === "hero") style.minHeight = 148;
+  }
+  if (mode === "stack") {
+    if (size === "compact") style.maxWidth = "92%";
+    if (size === "wide" || size === "full" || size === "hero") style.width = "100%";
+    if (size === "hero") style.minHeight = 148;
+  }
+  return style;
+}
+function getTabBoxAdminLabel(customizer, tabId, boxId) {
+  const cfg = normalizeAppCustomizer(customizer || {});
+  return cfg.tabBoxLayout?.[tabId]?.labels?.[boxId] || DEFAULT_TAB_BOX_LAYOUT?.[tabId]?.labels?.[boxId] || boxId;
+}
+function getTabBoxDescription(customizer, tabId, boxId) {
+  const cfg = normalizeAppCustomizer(customizer || {});
+  return cfg.tabBoxLayout?.[tabId]?.descriptions?.[boxId] || DEFAULT_TAB_BOX_LAYOUT?.[tabId]?.descriptions?.[boxId] || "";
+}
+function isManagedBoxVisible(customizer, tabId, boxId) {
+  if (tabId === "burtonOS" && !isAppBoxEnabled(customizer, boxId)) return false;
+  return isTabLayoutBoxEnabled(customizer, tabId, boxId);
+}
+
+function getGameKeyForBurtonOS(game) {
+  if (!game) return "";
+  return String(game.parseMatchId || game.matchId || game.id || `${game.playerId || "p"}_${game.mode || "m"}_${game.ts || game.date || Date.now()}`);
+}
+
+function getBurtonTimeState(now = new Date(), optionSource = null) {
+  const h = now.getHours();
+  if (h >= 0 && h < 4) return getBurtonStateOption(optionSource, "demon", { id:"demon", label:"Demon Hours", emoji:"🌑", color:"#A78BFA", desc:"after midnight queue energy" });
+  if (h >= 4 && h < 11) return { id:"recovery", label:"Recovery Mode", emoji:"☕", color:"#4D9EFF", desc:"check what happened last night" };
+  if (h >= 11 && h < 18) return { id:"prep", label:"Prep Mode", emoji:"📋", color:"#FFD166", desc:"set the night up" };
+  return { id:"prime", label:"Prime Queue", emoji:"🎮", color:"#B8FF4D", desc:"best window to run games" };
+}
+
+function buildTeamEconomyHealth(points = {}, passXP = {}, stats = []) {
+  const playerRows = PLAYERS.map(p => {
+    const pts = Math.max(0, Number(points?.[p.id]) || 0);
+    const freeXP = getFreePassXPForPlayer(passXP || {}, p.id);
+    const premiumXP = getPremiumPassXPForPlayer(passXP || {}, p.id, !!points?.[`${p.id}_premium`]);
+    const games = (stats || []).filter(g => g.playerId === p.id).length;
+    const wins = (stats || []).filter(g => g.playerId === p.id && gameIsWin(g)).length;
+    return { ...p, pts, xp: freeXP + premiumXP, games, wins };
+  });
+  const totalPts = playerRows.reduce((sum, p) => sum + p.pts, 0);
+  const totalXP = playerRows.reduce((sum, p) => sum + p.xp, 0);
+  const totalGames = playerRows.reduce((sum, p) => sum + p.games, 0);
+  const totalWins = playerRows.reduce((sum, p) => sum + p.wins, 0);
+  const maxPts = Math.max(...playerRows.map(p => p.pts), 1);
+  const minPts = Math.min(...playerRows.map(p => p.pts), 0);
+  const balanceScore = Math.max(0, 30 - Math.min(30, Math.round((maxPts - minPts) / Math.max(maxPts, 1) * 30)));
+  const activityScore = Math.min(35, totalGames * 3);
+  const xpScore = Math.min(25, Math.round(totalXP / 250));
+  const winScore = totalGames ? Math.min(10, Math.round((totalWins / totalGames) * 10)) : 0;
+  const health = Math.max(0, Math.min(100, balanceScore + activityScore + xpScore + winScore));
+  const label = health >= 82 ? "booming" : health >= 62 ? "stable" : health >= 42 ? "shaky" : health >= 22 ? "unstable" : "crashing";
+  const color = health >= 82 ? "#7CFFB2" : health >= 62 ? "#B8FF4D" : health >= 42 ? "#FFD166" : health >= 22 ? "#FF5C8A" : "#FF2D55";
+  return { health, label, color, totalPts, totalXP, totalGames, totalWins, playerRows };
+}
+
+function pickBurtonStateFromGames(games = [], now = new Date(), optionSource = null) {
+  const safe = (games || []).filter(Boolean);
+  const presets = getBurtonStatePresets(optionSource);
+  const byId = (id) => getBurtonStateOption(optionSource, id, BURTON_STATE_PRESETS.find(s => s.id === id) || presets[0] || BURTON_STATE_PRESETS[0]);
+  const timeState = getBurtonTimeState(now, optionSource);
+  if (!safe.length) return byId("normal");
+  const wins = safe.filter(gameIsWin).length;
+  const losses = safe.length - wins;
+  const latest = [...safe].sort((a,b)=>new Date(b.ts || b.date || 0) - new Date(a.ts || a.date || 0))[0];
+  const our = getDisplayedOurScore(latest);
+  const their = Number(latest?.theirScore);
+  const diff = Number.isFinite(their) ? our - their : (gameIsWin(latest) ? 1 : -1);
+  if (timeState.id === "demon") return { ...byId("demon"), reason:"app reacted to late-night synced games" };
+  if (losses >= 2 || diff <= -3) return { ...byId("tilt"), reason:"rough synced game changed the room" };
+  if (losses >= 1 && diff <= -1) return { ...byId("revenge"), reason:"loss logged — revenge arc active" };
+  if (wins >= 2 || diff >= 3) return { ...byId("locked"), reason:"clean win data came in" };
+  if (wins >= 1) return { ...byId("normal"), label:byId("normal").label === "Normal" ? "Heating Up" : byId("normal").label, emoji:byId("normal").emoji || "♨️", color:byId("normal").color || "#B8FF4D", reason:"win logged from live stats" };
+  return { ...byId("normal"), reason:"game synced" };
+}
+
+function buildBurtonOSAfterGames(currentOS, newGames, allStats, points, passXP, actorId) {
+  const os = normalizeBurtonOS(currentOS);
+  const now = new Date();
+  const incoming = (Array.isArray(newGames) ? newGames : []).filter(Boolean);
+  if (!incoming.length) return os;
+  const preset = os.settings.autoState === false ? os.state : pickBurtonStateFromGames(incoming, now, os);
+  const economy = buildTeamEconomyHealth(points || {}, passXP || {}, allStats || []);
+  const processed = { ...(os.processedGames || {}) };
+  incoming.forEach(g => { const k = getGameKeyForBurtonOS(g); if (k) processed[k] = Date.now(); });
+  const latest = [...incoming].sort((a,b)=>new Date(b.ts || b.date || 0) - new Date(a.ts || a.date || 0))[0];
+  const latestPlayer = PLAYERS.find(p => p.id === latest?.playerId);
+  const scoreLine = latest ? formatGameScore(latest) : "game synced";
+  const historyEntry = {
+    id:`hist_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+    type:"game_state",
+    emoji:preset.emoji || "◇",
+    title:`${preset.label || "State"} updated`,
+    text:`${latestPlayer?.name || "team"} ${gameIsWin(latest) ? "won" : "logged"} ${latest?.mode || "game"} ${scoreLine}`,
+    color:preset.color || "#B8FF4D",
+    ts:now.toISOString(),
+  };
+  const vaultEntries = [];
+  const highScoreGame = incoming.find(g => Number(g.score) >= 600 || Number(g.goals) >= 3 || Number(g.saves) >= 5);
+  if (highScoreGame) {
+    const hp = PLAYERS.find(p => p.id === highScoreGame.playerId);
+    const vd = getBurtonPoolItem(os, "vaultDrops", "vault_worthy_game", BURTON_VAULT_DROP_DEFS[0]);
+    if (optionEnabled(vd)) vaultEntries.push({ id:`vault_${Date.now()}_${highScoreGame.playerId}`, emoji:vd.emoji || "🗄️", title:vd.title || "Vault-worthy game", text:`${hp?.name || "player"} had ${Number(highScoreGame.score) || 0} score in ${highScoreGame.mode || "game"}`, ts:now.toISOString(), color:vd.color || hp?.color || "#4D9EFF" });
+  }
+  const currentUnlockIds = new Set((os.unlocks || []).map(u => u.id));
+  const unlocks = [...(os.unlocks || [])];
+  const firstSyncUnlock = getBurtonPoolItem(os, "secretUnlocks", "first_state_sync", BURTON_SECRET_UNLOCK_DEFS[0]);
+  const historyUnlock = getBurtonPoolItem(os, "secretUnlocks", "team_history_10", BURTON_SECRET_UNLOCK_DEFS[1]);
+  if (optionEnabled(firstSyncUnlock) && !currentUnlockIds.has("first_state_sync")) unlocks.unshift({ id:"first_state_sync", emoji:firstSyncUnlock.emoji || "🔓", title:firstSyncUnlock.title || "State Engine Online", text:firstSyncUnlock.text || "first game changed Burton OS state", ts:now.toISOString(), color:firstSyncUnlock.color || "#B8FF4D" });
+  if (optionEnabled(historyUnlock) && economy.totalGames >= 10 && !currentUnlockIds.has("team_history_10")) unlocks.unshift({ id:"team_history_10", emoji:historyUnlock.emoji || "📚", title:historyUnlock.title || "Shared History", text:historyUnlock.text || "10 total games are now part of the system", ts:now.toISOString(), color:historyUnlock.color || "#FFD166" });
+  const blessings = { ...(os.blessings || {}) };
+  const curses = { ...(os.curses || {}) };
+  const best = incoming.reduce((bestGame, g) => (Number(g.score) || 0) > (Number(bestGame?.score) || 0) ? g : bestGame, null);
+  const carryBlessing = getBurtonPoolItem(os, "blessings", "carry_heat", BURTON_BLESSING_DEFS[0]);
+  const lowScoreCurse = getBurtonPoolItem(os, "curses", "low_score_warning", BURTON_CURSE_DEFS[0]);
+  if (optionEnabled(carryBlessing) && best && gameIsWin(best)) blessings[best.playerId] = { id:"carry_heat", label:carryBlessing.label || "Carry Heat", emoji:carryBlessing.emoji || "🔥", reason:carryBlessing.reason || "highest score in the newest win", color:carryBlessing.color || "#FF8C42", ts:now.toISOString() };
+  if (optionEnabled(lowScoreCurse)) incoming.filter(g => !gameIsWin(g) && (Number(g.score) || 0) < 200).forEach(g => { curses[g.playerId] = { id:"low_score_warning", label:lowScoreCurse.label || "Low Score Warning", emoji:lowScoreCurse.emoji || "⚠️", reason:lowScoreCurse.reason || "rough synced loss", color:lowScoreCurse.color || "#FF8C42", ts:now.toISOString() }; });
+  const autoCfg = normalizeAppCustomizer({}).autoCourtConfig;
+  const todayKey = dateKey(now);
+  const existingAutoToday = (os.courtCases || []).filter(c => c.auto && String(c.createdAt || c.ts || "").slice(0,10) === todayKey).length;
+  let autoCourtCases = [];
+  if (autoCfg.enabled && existingAutoToday < autoCfg.maxPerDay) {
+    autoCourtCases = incoming.filter(g => (!autoCfg.lossOnly || !gameIsWin(g)) && (Number(g.score) || 0) <= autoCfg.lowScoreThreshold).slice(0, Math.max(0, autoCfg.maxPerDay - existingAutoToday)).map(g => ({ id:`court_auto_${Date.now()}_${g.playerId}_${Math.random().toString(36).slice(2,6)}`, auto:true, status:"open", accuserId:"system", defendantId:g.playerId, charge:autoCfg.charge, evidence:`${autoCfg.evidence} score ${Number(g.score)||0} · ${formatGameScore(g)}`, votes:{}, createdAt:now.toISOString(), color:"#FF5C8A" }));
+  }
+  return normalizeBurtonOS({
+    ...os,
+    state: { ...preset, updatedAt:now.toISOString(), updatedBy:actorId || "system", sourceGameId:getGameKeyForBurtonOS(latest) },
+    economy: { health:economy.health, label:economy.label, totalPts:economy.totalPts, totalXP:economy.totalXP, totalGames:economy.totalGames, totalWins:economy.totalWins, updatedAt:now.toISOString(), history:[{ health:economy.health, wins:economy.totalWins, ts:now.toISOString() }, ...((os.economy?.history || []).slice(0,29))] },
+    processedGames: processed,
+    history: [...autoCourtCases.map(c => ({ id:`hist_${c.id}`, type:"court", emoji:"⚖️", title:"Auto court case filed", text:`${playerNameById(c.defendantId)} · ${c.charge}`, color:"#FF5C8A", ts:now.toISOString() })), historyEntry, ...(os.history || [])].slice(0,80),
+    courtCases: [...autoCourtCases, ...(os.courtCases || [])].slice(0,80),
+    vault: [...vaultEntries, ...(os.vault || [])].slice(0,80),
+    unlocks: unlocks.slice(0,80),
+    curses,
+    blessings,
+  });
+}
+
+function getBurtonStateVisualStyle(osInput, playerId) {
+  const os = normalizeBurtonOS(osInput);
+  const enabled = os.settings?.stateThemeByPlayer?.[playerId] === true;
+  if (!enabled) return null;
+  const state = applyBurtonStateDisplay(os, os.state || DEFAULT_BURTON_OS.state);
+  const color = state.color || "#B8FF4D";
+  const subtle = bbAlpha(color, 0.18);
+  const softer = bbAlpha(color, 0.06);
+  return {
+    background:`radial-gradient(circle at 50% -12%, ${subtle}, transparent 46%), linear-gradient(180deg, ${softer}, #06070D 38%, #06070D)`,
+    backgroundSize:"cover",
+    backgroundPosition:"center",
+    backgroundRepeat:"no-repeat",
+  };
+}
+
+
+function CourtRoomBox({ burtonOS, save, currentPlayer, points, setPoints, pings, setPings, appCustomizer, addToast }) {
+  const os = normalizeBurtonOS(burtonOS);
+  const [targetId, setTargetId] = useState(PLAYERS.find(p => p.id !== currentPlayer)?.id || "p2");
+  const [charge, setCharge] = useState("");
+  const [evidence, setEvidence] = useState("");
+  const openCases = (os.courtCases || []).filter(c => c?.status !== "closed").slice(0, 3);
+  const lastClosed = (os.courtCases || []).find(c => c?.status === "closed");
+  const verdictOptions = getBurtonCourtVerdicts(appCustomizer || os);
+  const labelVerdict = (v) => (getBurtonPoolItem(appCustomizer || os, "courtVerdicts", v, null)?.label) || (v === "not_guilty" ? "not guilty" : v === "team_sold" ? "team sold" : v === "lying" ? "accuser lying" : "guilty");
+  const emojiVerdict = (v) => (getBurtonPoolItem(appCustomizer || os, "courtVerdicts", v, null)?.emoji) || "⚖️";
+  const openCase = async () => {
+    const cleanCharge = charge.trim();
+    if (!cleanCharge) { addToast?.("add a charge first", "⚖️"); return; }
+    const actor = PLAYERS.find(p => p.id === currentPlayer);
+    const target = PLAYERS.find(p => p.id === targetId) || PLAYERS.find(p => p.id !== currentPlayer) || PLAYERS[0];
+    const now = new Date().toISOString();
+    const courtCase = {
+      id:`court_${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+      accuser:currentPlayer,
+      accuserName:actor?.name || "someone",
+      defendant:target?.id,
+      defendantName:target?.name || "someone",
+      charge:cleanCharge,
+      evidence:evidence.trim(),
+      votes:{},
+      status:"open",
+      ts:now,
+      color:target?.color || "#FFD166",
+    };
+    setCharge(""); setEvidence("");
+    const next = normalizeBurtonOS({
+      ...os,
+      courtCases:[courtCase, ...(os.courtCases || [])].slice(0,80),
+      history:[{ id:`court_${Date.now()}`, type:"court", emoji:"⚖️", title:"Court case opened", text:`${courtCase.accuserName} accused ${courtCase.defendantName}: ${courtCase.charge}`, color:courtCase.color, ts:now }, ...(os.history || [])].slice(0,80),
+    });
+    await save(next, "court case opened", "⚖️");
+    const courtPings = PLAYERS.filter(p => p.id !== currentPlayer).map(p => ({ id:`court_ping_${courtCase.id}_${p.id}`, from:currentPlayer, to:p.id, type:"court", mode:"court room", text:`${courtCase.defendantName}: ${courtCase.charge}`, courtId:courtCase.id, ts:now }));
+    const upd = [...courtPings, ...(Array.isArray(pings) ? pings : [])].slice(0,120);
+    setPings?.(upd);
+    await storeSetWithPush("pings", upd).catch(() => {});
+  };
+  const voteCase = async (caseId, verdict) => {
+    const now = new Date().toISOString();
+    let closed = null;
+    const cases = (os.courtCases || []).map(c => {
+      if (c.id !== caseId || c.status === "closed") return c;
+      const votes = { ...(c.votes || {}), [currentPlayer]:verdict };
+      const counts = Object.values(votes).reduce((a,v)=>({ ...a, [v]:(a[v] || 0) + 1 }), {});
+      const top = Object.entries(counts).sort((a,b)=>b[1]-a[1])[0];
+      const shouldClose = top && (top[1] >= 2 || Object.keys(votes).length >= PLAYERS.length);
+      const next = { ...c, votes, status:shouldClose ? "closed" : "open", verdict:shouldClose ? top[0] : c.verdict, closedAt:shouldClose ? now : c.closedAt };
+      if (shouldClose) closed = next;
+      return next;
+    });
+    let nextVault = os.vault;
+    let nextHistory = os.history;
+    let nextCurses = { ...(os.curses || {}) };
+    let nextCourtTitles = { ...(os.courtTitles || {}) };
+    let nextState = os.state;
+    let punishmentSummary = "";
+    if (closed) {
+      const cfg = normalizeAppCustomizer(appCustomizer || {});
+      const punishments = cfg.courtPunishments || DEFAULT_COURT_PUNISHMENTS;
+      const punishment = punishments.enabled === false ? null : (punishments[closed.verdict] || null);
+      const targetPunishedId = closed.verdict === "guilty" ? closed.defendant : closed.verdict === "lying" ? closed.accuser : null;
+      const targetPunishedName = targetPunishedId === closed.accuser ? closed.accuserName : targetPunishedId === closed.defendant ? closed.defendantName : "";
+      const punishmentBits = [];
+      if (punishment?.enabled && targetPunishedId) {
+        if (punishment.fineEnabled && Number(punishment.fineAmount) > 0) {
+          const freshPts = await storeGet("points").catch(() => null);
+          const basePts = freshPts && typeof freshPts === "object" && !Array.isArray(freshPts) ? freshPts : (points || {});
+          const fine = Math.max(0, Math.round(Number(punishment.fineAmount) || 0));
+          const nextPts = { ...basePts, [targetPunishedId]:Math.max(0, (Number(basePts[targetPunishedId]) || 0) - fine) };
+          setPoints?.(nextPts);
+          await storeSetWithPush("points", nextPts).catch(() => storeSet("points", nextPts));
+          punishmentBits.push(`-${fine} pts`);
+        }
+        if (punishment.curseEnabled && punishment.curseId) {
+          const curseDef = getBurtonPoolItem(cfg, "curses", punishment.curseId, BURTON_CURSE_DEFS.find(c => c.id === punishment.curseId) || BURTON_CURSE_DEFS[2]);
+          if (optionEnabled(curseDef)) {
+            nextCurses[targetPunishedId] = { id:curseDef.id, label:curseDef.label || "Court Curse", emoji:curseDef.emoji || "⚖️", reason:curseDef.reason || `court ruled ${labelVerdict(closed.verdict)}`, color:curseDef.color || "#FF5C8A", ts:now };
+            punishmentBits.push(`${curseDef.label || "curse"} curse`);
+          }
+        }
+        if (punishment.titleEnabled && punishment.title) {
+          nextCourtTitles[targetPunishedId] = { title:punishment.title, verdict:closed.verdict, caseId:closed.id, ts:now };
+          punishmentBits.push(`title: ${punishment.title}`);
+        }
+      }
+      if (punishment?.enabled && punishment.stateEnabled && punishment.stateId) {
+        const st = getBurtonStateOption(cfg, punishment.stateId, BURTON_STATE_PRESETS[0]);
+        nextState = { ...st, reason:`court verdict changed the room: ${labelVerdict(closed.verdict)}`, updatedAt:now, updatedBy:currentPlayer };
+        punishmentBits.push(`state: ${st.label}`);
+      }
+      punishmentSummary = punishmentBits.length ? ` · punishment: ${targetPunishedName ? `${targetPunishedName} ` : ""}${punishmentBits.join(", ")}` : "";
+      const vd = getBurtonPoolItem(cfg, "vaultDrops", "court_verdict", BURTON_VAULT_DROP_DEFS[2]);
+      nextVault = punishments.archiveToVault === false ? os.vault : [{ id:`vault_court_${closed.id}`, emoji:vd?.emoji || "⚖️", title:`${vd?.title || "Court verdict"}: ${labelVerdict(closed.verdict)}`, text:`${closed.defendantName} · ${closed.charge}${punishmentSummary}`, color:vd?.color || closed.color || "#FFD166", ts:now }, ...(os.vault || [])].slice(0,80);
+      nextHistory = [{ id:`court_done_${Date.now()}`, type:"court_verdict", emoji:"⚖️", title:`Court ruled ${labelVerdict(closed.verdict)}`, text:`${closed.defendantName}: ${closed.charge}${punishmentSummary}`, color:closed.color || "#FFD166", ts:now }, ...(os.history || [])].slice(0,80);
+      if (punishments.pingVerdict !== false) {
+        const verdictPings = PLAYERS.filter(p => p.id !== currentPlayer).map(p => ({ id:`court_verdict_${closed.id}_${p.id}_${Math.random().toString(36).slice(2,6)}`, from:currentPlayer, to:p.id, type:"court", mode:`court: ${labelVerdict(closed.verdict)}`, text:`${closed.defendantName}: ${closed.charge}${punishmentSummary}`, courtId:closed.id, ts:now }));
+        const upd = [...verdictPings, ...(Array.isArray(pings) ? pings : [])].slice(0,120);
+        setPings?.(upd);
+        await storeSetWithPush("pings", upd).catch(() => {});
+      }
+    }
+    const next = normalizeBurtonOS({
+      ...os,
+      courtCases:cases,
+      state:nextState,
+      curses:nextCurses,
+      courtTitles:nextCourtTitles,
+      vault:nextVault,
+      history:nextHistory,
+    });
+    await save(next, closed ? `court ruled ${labelVerdict(closed.verdict)}` : "court vote saved", "⚖️");
+  };
+  return (
+    <div className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#17131F,#0A0D17)",border:"1px solid rgba(255,209,102,.24)",borderRadius:20,padding:14,marginBottom:12,boxShadow:"0 16px 40px rgba(0,0,0,.24)"}}>
+      <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{getAppCopy(appCustomizer, "courtRoomLabel", "court room")}</div>
+      <div style={{fontSize:16,color:"#E8ECF4",fontWeight:900,marginBottom:5}}>⚖️ {getAppCopy(appCustomizer, "courtRoomTitle", "accuse someone of selling")}</div>
+      <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>{getAppCopy(appCustomizer, "courtRoomDesc", "open a case, ping the team, vote on the verdict, then archive it in the vault.")}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}>
+        {PLAYERS.filter(p => p.id !== currentPlayer).map(p => <button key={p.id} onClick={()=>setTargetId(p.id)} className="bb-pressable" style={{background:targetId===p.id?bbAlpha(p.color,.18):"rgba(255,255,255,.05)",border:`1px solid ${targetId===p.id?bbAlpha(p.color,.42):"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"8px 6px",fontSize:10,fontWeight:900,color:targetId===p.id?p.color:"#8B92A8",cursor:"pointer"}}>vs {p.name}</button>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 74px",gap:7,marginBottom:7}}>
+        <input value={charge} onChange={e=>setCharge(e.target.value)} placeholder="charge: backflipped open net" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"9px 10px",fontSize:11,color:"#E8ECF4",minWidth:0}}/>
+        <button onClick={openCase} className="bb-pressable" style={{background:"rgba(255,209,102,.14)",border:"1px solid rgba(255,209,102,.32)",borderRadius:10,fontSize:10,fontWeight:900,color:"#FFD166",cursor:"pointer"}}>file</button>
+      </div>
+      <input value={evidence} onChange={e=>setEvidence(e.target.value)} placeholder="optional evidence / clip note" style={{width:"100%",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:"8px 10px",fontSize:10.5,color:"#E8ECF4",marginBottom:10}}/>
+      {openCases.map(c => (
+        <div key={c.id} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:13,padding:10,marginTop:8}}>
+          <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}>{c.defendantName}: {c.charge}</div>
+          {c.evidence && <div style={{fontSize:10,color:"#8B92A8",marginTop:3}}>evidence: {c.evidence}</div>}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginTop:8}}>
+            {verdictOptions.map(vd => <button key={vd.id} onClick={()=>voteCase(c.id, vd.id)} className="bb-pressable" style={{background:c.votes?.[currentPlayer]===vd.id?(vd.color || "#FFD166"):"rgba(255,255,255,.05)",border:`1px solid ${c.votes?.[currentPlayer]===vd.id?(vd.color || "#FFD166"):"rgba(255,255,255,.08)"}`,borderRadius:9,padding:"7px 5px",fontSize:9.5,fontWeight:900,color:c.votes?.[currentPlayer]===vd.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{vd.emoji || emojiVerdict(vd.id)} {vd.label}</button>)}
+          </div>
+        </div>
+      ))}
+      {openCases.length === 0 && lastClosed && <div style={{fontSize:10.5,color:"#8B92A8",marginTop:6}}>last verdict: {lastClosed.defendantName} was ruled {labelVerdict(lastClosed.verdict)}</div>}
+    </div>
+  );
+}
+
+
+function getTodayKeyLocal() { return dateKey(new Date()); }
+
+function getDefaultJobShiftGroups() {
+  return [
+    { id:"morning", label:"morning shift", emoji:"🌅", multiplier:1, slots:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM"] },
+    { id:"afternoon", label:"afternoon shift", emoji:"☀️", multiplier:1, slots:["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM"] },
+    { id:"night", label:"night shift", emoji:"🌙", multiplier:1, slots:["6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM"] },
+    { id:"graveyard", label:"graveyard shift · 2x pts", emoji:"🪦", multiplier:2, slots:["11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"] },
+  ];
+}
+function normalizeJobChallengeLines(value, required = 5, fallback = "sync/log one game during the job window") {
+  const raw = Array.isArray(value) ? value : String(value || "").split(/\n|\|/g);
+  const lines = raw.map(v => String(v || "").trim()).filter(Boolean).slice(0, Math.max(1, Number(required)||5));
+  while (lines.length < Math.max(1, Number(required)||5)) lines.push(fallback);
+  return lines;
+}
+function normalizeJobShiftGroups(input) {
+  const defaults = getDefaultJobShiftGroups();
+  const raw = Array.isArray(input) && input.length ? input : defaults;
+  const byDefault = Object.fromEntries(defaults.map(g => [g.id, g]));
+  return raw.map((g, idx) => {
+    const base = byDefault[g?.id] || defaults[idx] || defaults[0];
+    const slots = Array.isArray(g?.slots) ? g.slots : String(g?.slots || "").split(/\n|,/g);
+    const cleanSlots = slots.map(v => String(v || "").trim()).filter(Boolean).slice(0, 8);
+    return {
+      id:String(g?.id || base.id || `shift_${idx}`),
+      label:String(g?.label || base.label || "shift").slice(0,42),
+      emoji:String(g?.emoji || base.emoji || "🕒").slice(0,4),
+      multiplier:Math.max(1, Math.min(5, Number(g?.multiplier ?? base.multiplier ?? 1) || 1)),
+      slots:cleanSlots.length ? cleanSlots : base.slots,
+    };
+  }).slice(0,6);
+}
+function getJobShiftMeta(cfg, slotLabel) {
+  const groups = normalizeJobShiftGroups(cfg?.shiftGroups || cfg?.slotGroups);
+  return groups.find(g => (g.slots||[]).includes(slotLabel)) || groups[0] || getDefaultJobShiftGroups()[0];
+}
+function getAllJobShiftSlots(cfg) {
+  return normalizeJobShiftGroups(cfg?.shiftGroups || cfg?.slotGroups).flatMap(g => (g.slots||[]).map(slot => ({ ...g, slot })));
+}
+function getChaosCooldownMs() { return 3 * 60 * 60 * 1000; }
+function getActiveChaosInfo(burtonOS) {
+  const c = normalizeBurtonOS(burtonOS).chaos;
+  const ts = safeDateObj(c?.ts || c?.createdAt || 0, null);
+  if (!c || !ts || !Number.isFinite(ts.getTime())) return null;
+  const expiresAt = c.expiresAt ? safeDateObj(c.expiresAt, null) : new Date(ts.getTime() + getChaosCooldownMs());
+  if (!expiresAt || !Number.isFinite(expiresAt.getTime())) return null;
+  const remaining = expiresAt.getTime() - Date.now();
+  return remaining > 0 ? { chaos:c, expiresAt, remaining } : null;
+}
+function fmtShortDuration(ms) {
+  const mins = Math.max(0, Math.ceil(Number(ms || 0) / 60000));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h <= 0) return `${m}m`;
+  return `${h}h ${m}m`;
+}
+function getPlayerRecentGames(stats = [], pid, sinceIso = null) {
+  const since = sinceIso ? new Date(sinceIso).getTime() : 0;
+  return (Array.isArray(stats) ? stats : []).filter(g => g?.playerId === pid && (!since || safeDateObj(g.ts || g.date || 0).getTime() >= since)).sort((a,b)=>safeDateObj(b.ts).getTime()-safeDateObj(a.ts).getTime());
+}
+function buildPlayerStockRows(stats = [], points = {}, burtonOS = {}, appCustomizer = {}, passXP = {}) {
+  const cfg = normalizeAppCustomizer(appCustomizer).stockMarketConfig;
+  return PLAYERS.map(p => {
+    const games = getPlayerRecentGames(stats, p.id).slice(0,20);
+    const wins = games.filter(gameIsWin).length;
+    const xp = getFreePassXPForPlayer(passXP || {}, p.id) + getPremiumPassXPForPlayer(passXP || {}, p.id, !!points?.[`${p.id}_premium`]);
+    const price = Math.max(1, Math.round(cfg.basePrice + wins * cfg.winBoost + Math.floor(xp / 100) * cfg.xpBoost));
+    const prev = Number(burtonOS?.stockLedger?.[p.id]?.lastPrice || cfg.basePrice);
+    const history = [];
+    let runningWins = 0;
+    [...games].reverse().slice(-10).forEach((g, idx) => {
+      if (gameIsWin(g)) runningWins += 1;
+      history.push({ ts:g.ts || g.date || new Date().toISOString(), price:Math.max(1, Math.round(cfg.basePrice + runningWins * cfg.winBoost + Math.floor(xp / 100) * cfg.xpBoost)) });
+    });
+    if (!history.length) history.push({ ts:new Date().toISOString(), price });
+    return { player:p, price, delta:price-prev, wins, games:games.length, xp, color:p.color, history };
+  });
+}
+function MiniTrendGraph({ points = [], color = "#B8FF4D", height = 68, showLabels = true }) {
+  const clean = (Array.isArray(points) ? points : []).map((p, i) => ({
+    ts:p?.ts || p?.date || new Date().toISOString(),
+    price:Number(p?.price) || 0,
+    i,
+  })).filter(p => Number.isFinite(p.price));
+  if (clean.length < 2) return <div style={{height,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,color:"#4A5066"}}>not enough stock history yet</div>;
+  const vals = clean.map(p => p.price);
+  const minVal = Math.min(...vals);
+  const maxVal = Math.max(...vals);
+  const span = Math.max(1, maxVal - minVal);
+  const w = 320;
+  const left = showLabels ? 34 : 6;
+  const right = 10;
+  const top = 12;
+  const bottom = showLabels ? 22 : 8;
+  const plotW = w - left - right;
+  const plotH = height - top - bottom;
+  const pts = clean.map((p,i)=>({
+    x:left + (clean.length <= 1 ? 0 : (i/(clean.length-1))*plotW),
+    y:top + ((maxVal - p.price)/span)*plotH,
+    price:p.price,
+    ts:p.ts,
+  }));
+  const d = pts.map((p,i)=>`${i?'L':'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const area = `${pts[0].x},${top+plotH} ${pts.map(p=>`${p.x},${p.y}`).join(' ')} ${pts[pts.length-1].x},${top+plotH}`;
+  const change = vals[vals.length-1] - vals[0];
+  const grid = [0,.5,1].map(t => top + t * plotH);
+  const labelForDate = (value) => {
+    const d = safeDateObj(value);
+    return d.toLocaleDateString("en-US", { month:"numeric", day:"numeric" });
+  };
+  return <div style={{width:"100%"}}>
+    <svg viewBox={`0 0 ${w} ${height}`} style={{width:"100%",height,display:"block",overflow:"visible"}}>
+      <defs><linearGradient id={`stockArea_${String(color).replace('#','')}_${height}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity="0.22"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>
+      {grid.map((y,i)=><g key={i}><line x1={left} x2={w-right} y1={y} y2={y} stroke="rgba(255,255,255,.07)" strokeDasharray={i===1?"4 4":""}/>{showLabels&&<text x="2" y={y+3} fill="rgba(139,146,168,.84)" fontSize="9" fontWeight="800">{Math.round(maxVal - (i/2)*span)}</text>}</g>)}
+      <polygon points={area} fill={`url(#stockArea_${String(color).replace('#','')}_${height})`} />
+      <path d={d} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+      {pts.map((p,i)=>(i===0||i===pts.length-1||i===Math.floor(pts.length/2))?<circle key={i} cx={p.x} cy={p.y} r={i===pts.length-1?4:3} fill={color} stroke="#06070D" strokeWidth="1.5"/>:null)}
+      {showLabels&&<><text x={left} y={height-5} fill="rgba(139,146,168,.78)" fontSize="9" fontWeight="800">{labelForDate(pts[0].ts)}</text><text x={w-right} y={height-5} textAnchor="end" fill="rgba(139,146,168,.78)" fontSize="9" fontWeight="800">{labelForDate(pts[pts.length-1].ts)}</text></>}
+    </svg>
+    {showLabels&&<div style={{display:"flex",justifyContent:"space-between",gap:8,marginTop:6,fontSize:10,color:"#8B92A8",fontWeight:800}}><span>low {Math.round(minVal)}</span><span style={{color:change>=0?"#7CFFB2":"#FF5C8A"}}>{change>=0?"+":""}{Math.round(change)} over view</span><span>high {Math.round(maxVal)}</span></div>}
+  </div>;
+}
+function holdingDisplayShares(value) {
+  if (typeof value === "number") return value.toFixed(2);
+  if (value && typeof value === "object") return (Number(value.shares)||0).toFixed(2);
+  return "0.00";
+}
+function PlayerStocksBox({ burtonOS, points, setPoints, stats, appCustomizer, passXP, currentPlayer, addToast, setTab }) {
+  const rows=buildPlayerStockRows(stats, points, burtonOS, appCustomizer, passXP);
+  const [openId,setOpenId]=useState(null);
+  const [stocksLocal,setStocksLocal]=useState({});
+  useEffect(()=>{ let live=true; storeGet("stocks").then(v=>{ if(live) setStocksLocal(v&&typeof v==="object"?v:{}); }).catch(()=>{}); return()=>{live=false}; },[]);
+  const buyShare = async (row) => {
+    const price = Number(row.price)||0;
+    const bal = Number(points?.[currentPlayer])||0;
+    if (bal < price) { addToast?.("not enough points", "❌"); return; }
+    const nextPts = { ...(points||{}), [currentPlayer]:bal-price };
+    const key = `${currentPlayer}_${row.player.id}`;
+    const existing = stocksLocal?.[key];
+    const old = typeof existing === "number" ? { shares:existing, invested:existing*price, avg:price } : (existing && typeof existing === "object" ? existing : { shares:0, invested:0, avg:0 });
+    const nextHolding = { shares:(Number(old.shares)||0)+1, invested:(Number(old.invested)||0)+price, avg:((Number(old.invested)||0)+price)/Math.max((Number(old.shares)||0)+1,1) };
+    const nextStocks = { ...(stocksLocal||{}), [key]:nextHolding, [`${row.player.id}_lastPrice`]:price };
+    setPoints?.(nextPts); setStocksLocal(nextStocks);
+    await storeSetWithPush("points", nextPts);
+    await storeSetWithPush("stocks", nextStocks);
+    addToast?.(`bought 1 ${row.player.name} share`, "📈");
+    setTab?.("stocks");
+  };
+  const open = rows.find(r=>r.player.id===openId);
+  return <div className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,209,102,.22)",borderRadius:18,padding:14,marginBottom:12}}>
+    <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer,"playerStocksLabel","player stocks")}</div>
+    <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,margin:"4px 0 10px"}}>{getAppCopy(appCustomizer,"playerStocksDesc","wins + XP market")}</div>
+    {rows.map(r=><button key={r.player.id} onClick={()=>setOpenId(r.player.id)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,.025)",border:"none",borderTop:"1px solid rgba(255,255,255,.06)",padding:"9px 0",display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",textAlign:"left",cursor:"pointer"}}><div><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}><span style={{color:r.player.color}}>●</span> {r.player.name}</div><div style={{fontSize:10,color:"#8B92A8"}}>{r.wins} wins · {r.xp} XP</div></div><div style={{fontSize:15,fontWeight:900,color:r.delta>=0?"#7CFFB2":"#FF5C8A"}}>{r.price} {r.delta>=0?"▲":"▼"}{Math.abs(r.delta)}</div></button>)}
+    {open && typeof document !== "undefined" && createPortal(<div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.74)",backdropFilter:"blur(10px)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}><div style={{width:"100%",maxWidth:420,background:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${bbAlpha(open.player.color,.34)}`,borderRadius:24,padding:18,boxShadow:"0 30px 90px rgba(0,0,0,.62)",fontFamily:"Inter, sans-serif"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}><div><div style={{fontSize:10,color:open.player.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>player stock</div><div style={{fontSize:22,color:"#E8ECF4",fontWeight:900}}>{open.player.name}</div></div><button onClick={()=>setOpenId(null)} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"#8B92A8",width:38,height:38}}>×</button></div><MiniTrendGraph points={open.history} color={open.player.color}/><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>PRICE</div><div style={{fontSize:18,color:"#E8ECF4",fontWeight:900}}>{open.price}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>WINS</div><div style={{fontSize:18,color:"#E8ECF4",fontWeight:900}}>{open.wins}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>XP</div><div style={{fontSize:18,color:"#E8ECF4",fontWeight:900}}>{open.xp}</div></div></div><button onClick={()=>buyShare(open)} className="bb-pressable bb-glow-lime" style={{marginTop:14,width:"100%",background:"#B8FF4D",border:"none",borderRadius:14,padding:12,color:"#06070D",fontWeight:1000}}>buy 1 share · {open.price} pts</button><div style={{fontSize:10,color:"#8B92A8",marginTop:8,textAlign:"center"}}>shares owned: {holdingDisplayShares(stocksLocal?.[`${currentPlayer}_${open.player.id}`])}</div></div></div>, document.body)}
+  </div>;
+}
+function buildJobChallengeList(job) {
+  const required = Math.max(1, Number(job?.required) || 1);
+  const raw = Array.isArray(job?.challengeList) ? job.challengeList : Array.isArray(job?.challenges) ? job.challenges : [];
+  const fallback = job?.challengeText || "sync/log one game during the job window";
+  return normalizeJobChallengeLines(raw.length ? raw : fallback, required, fallback).slice(0, required).map((txt, i) => `${i+1}. ${txt}`);
+}
+function getJobReminderAt(job, appCustomizer) {
+  const cfg = normalizeAppCustomizer(appCustomizer).scheduleConfig;
+  const start = safeDateObj(job?.startAt, null);
+  if (!start || !Number.isFinite(start.getTime())) return null;
+  const mins = Math.max(0, Number(job?.reminderMinutes ?? cfg.reminderMinutes ?? 15) || 15);
+  return new Date(start.getTime() - mins * 60000);
+}
+function formatJobStartTime(job) {
+  const d = safeDateObj(job?.startAt, null);
+  if (!d || !Number.isFinite(d.getTime())) return job?.slotLabel || "soon";
+  return d.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+}
+async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurtonOS, pings, setPings, appCustomizer, addToast }) {
+  if (!currentPlayer) return;
+  const os = normalizeBurtonOS(burtonOS);
+  const now = Date.now();
+  const jobs = Array.isArray(os.jobs) ? os.jobs : [];
+  const dueJob = jobs.find(job => {
+    if (!job || !jobIncludesPlayer(job, currentPlayer)) return false;
+    if (!["reserved","active"].includes(job.status)) return false;
+    if (job.shiftReminderSentAt) return false;
+    const start = safeDateObj(job.startAt, null);
+    const reminderAt = getJobReminderAt(job, appCustomizer);
+    if (!start || !reminderAt) return false;
+    const startMs = start.getTime();
+    const remindMs = reminderAt.getTime();
+    return Number.isFinite(startMs) && Number.isFinite(remindMs) && now >= remindMs && now <= startMs + 5 * 60000;
+  });
+  if (!dueJob) return;
+  const minutes = Math.max(0, Math.round((safeDateObj(dueJob.startAt).getTime() - now) / 60000));
+  const title = "⏰ Shift starts soon";
+  const body = `${dueJob.title || "Job"} starts ${minutes > 0 ? `in ${minutes} min` : "now"} · ${dueJob.slotLabel || formatJobStartTime(dueJob)} · pays ${Number(dueJob.payout || 0).toLocaleString()} pts`;
+  const ping = { id:`job_shift_reminder_${dueJob.id}_${Date.now()}`, from:"system", to:currentPlayer, type:"job_shift", jobId:dueJob.id, text:body, ts:new Date().toISOString() };
+  const freshPings = await storeGet("pings").catch(() => null);
+  const basePings = Array.isArray(freshPings) ? freshPings : (Array.isArray(pings) ? pings : []);
+  const nextPings = [ping, ...basePings].slice(0, 140);
+  setPings?.(nextPings);
+  await storeSetWithPush("pings", nextPings);
+  await sendPushToPlayersOnce(`job_shift:${dueJob.id}`, [currentPlayer], title, body, { url:makeNotificationUrl("home", { open:"jobs", id:dueJob.id }), type:"job_shift", id:dueJob.id });
+  showLocalNotification(title, body, { url:"/", type:"job_shift", id:dueJob.id }).catch(() => {});
+  const nextJobs = jobs.map(j => j.id === dueJob.id ? { ...j, shiftReminderSentAt:new Date().toISOString() } : j);
+  const nextOS = { ...os, jobs:nextJobs };
+  setBurtonOS?.(nextOS);
+  await storeSetWithPush(BURTON_OS_KEY, nextOS);
+  addToast?.("shift reminder sent", "⏰");
+}
+function parseTodaySlot(slotLabel) {
+  const now = new Date();
+  const m = String(slotLabel||"").match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?/i);
+  if (!m) return now;
+  let h = Number(m[1])||0; const min = Number(m[2]||0)||0; const ap = String(m[3]||"").toUpperCase();
+  if (ap === "PM" && h < 12) h += 12; if (ap === "AM" && h === 12) h = 0;
+  const d = new Date(); d.setHours(h,min,0,0); return d;
+}
+
+const OPEN_LOOPS_TICKER_STATE = { startedAt: Date.now(), manualOffset: 0 };
+
+function OpenLoopsTicker({ burtonOS, stats, points, passXP, appCustomizer, setTab }) {
+  const os = normalizeBurtonOS(burtonOS);
+  const cfg = normalizeAppCustomizer(appCustomizer).openLoopsConfig || {};
+  const [tickerNow, setTickerNow] = useState(() => Date.now());
+  const now = Date.now();
+  const loops = [];
+  const addLoop = (type, emoji, title, text, color = "#B8FF4D", target = {}) => {
+    if (!title && !text) return;
+    loops.push({ type, emoji, title, text, color, target });
+  };
+
+  if (cfg.showCourt !== false) {
+    const openCases = (os.courtCases || []).filter(c => !c.status || c.status === "open" || c.status === "pending");
+    if (openCases.length) {
+      const c = openCases[0];
+      addLoop("court", "⚖️", `${openCases.length} court case${openCases.length === 1 ? "" : "s"} needs votes`, `${playerNameById(c.defendantId)} · ${c.charge || "case pending"}`, "#FF61C1", { tab:"home", box:"bb-box-court" });
+    }
+    const openAppeals = (os.appeals || []).filter(a => a.status === "open");
+    if (openAppeals.length) addLoop("appeal", "🧾", `${openAppeals.length} appeal${openAppeals.length === 1 ? "" : "s"} pending`, "court decision waiting on votes", "#A78BFA", { tab:"home", box:"bb-box-appeals" });
+  }
+
+  if (cfg.showJobs !== false) {
+    const liveJobs = (os.jobs || []).filter(j => ["reserved", "active"].includes(j.status));
+    if (liveJobs.length) {
+      const j = liveJobs[0];
+      const start = safeDateObj(j.startAt, null);
+      const startsText = start && Number.isFinite(start.getTime()) ? start.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" }) : (j.slotLabel || "soon");
+      addLoop("jobs", "📋", `${liveJobs.length} job slot${liveJobs.length === 1 ? "" : "s"} active`, `${j.title || "job"} · ${startsText} · ${Number(j.payout || 0).toLocaleString()} pts`, "#B8FF4D", { tab:"jobs", box:"bb-box-jobs" });
+    } else {
+      addLoop("jobs", "💼", "job board open", "claim a morning, afternoon, night, or graveyard shift", "#7CFFB2", { tab:"jobs", box:"bb-box-jobs" });
+    }
+  }
+
+  if (cfg.showSchedule !== false) {
+    const events = (os.schedule?.events || [])
+      .filter(ev => {
+        const t = safeDateObj(ev.startAt, null).getTime();
+        return Number.isFinite(t) && t >= now - 15 * 60000;
+      })
+      .sort((a,b) => safeDateObj(a.startAt).getTime() - safeDateObj(b.startAt).getTime());
+    if (events.length) {
+      const ev = events[0];
+      const start = safeDateObj(ev.startAt);
+      addLoop("schedule", "📅", ev.title || "team session", `${start.toLocaleString([], { weekday:"short", hour:"numeric", minute:"2-digit" })}`, "#4D9EFF", { tab:"home", box:"bb-box-schedule" });
+    } else addLoop("schedule", "📅", "availability check", "set if you are in, maybe, or out today", "#4D9EFF", { tab:"home", box:"bb-box-schedule" });
+  }
+
+  if (cfg.showEconomy !== false) {
+    const economyEvent = (os.economyEvents || []).find(e => !e.expiresAt || safeDateObj(e.expiresAt).getTime() > now);
+    if (economyEvent) addLoop("economy", economyEvent.emoji || "📈", economyEvent.title || "economy event", economyEvent.text || "economy state changed", economyEvent.color || "#FFD166", { tab:"home", box:"bb-box-economy" });
+    else {
+      const econ = buildTeamEconomyHealth(points || {}, passXP || {}, stats || []);
+      addLoop("economy", "📊", `economy ${econ.label || "status"}`, `${econ.health || 0}% health · ${Number(econ.totalPts||0).toLocaleString()} team pts`, econ.color || "#FFD166", { tab:"home", box:"bb-box-economy" });
+    }
+  }
+
+  if (cfg.showRareShop !== false) {
+    addLoop("rareShop", "🛒", "new shop check", "open shop to see limited drops, text collages, and finishes", "#FFD166", { tab:"shop" });
+  }
+
+  if (normalizeAppCustomizer(appCustomizer).stockMarketConfig.enabled) {
+    addLoop("stocks", "📈", "player stocks live", "buy shares from wins + XP movement", "#FFD166", { tab:"stocks", box:"bb-box-stocks" });
+  }
+  const activeChaos = getActiveChaosInfo(os);
+  if (activeChaos) addLoop("chaos", activeChaos.chaos.emoji || "🌀", activeChaos.chaos.title || "chaos active", `${activeChaos.chaos.desc || "temporary rule active"} · ${fmtShortDuration(activeChaos.remaining)} left`, activeChaos.chaos.color || "#FF61C1", { tab:"home", box:"bb-box-chaos" });
+  addLoop("pass", "🎫", "pass check", "claim any waiting pass tiers or garage unlocks", "#A78BFA", { tab:"garage" });
+  addLoop("social", "🖼️", "social check", "look for new posts, reactions, or clips", "#FF61C1", { tab:"social" });
+
+  if (cfg.showNews !== false) {
+    const latest = (os.history || [])[0] || (os.vault || [])[0] || (os.unlocks || [])[0];
+    if (latest) addLoop("news", latest.emoji || "🗞️", latest.title || "latest Burton OS update", latest.text || latest.desc || "something changed in the app", latest.color || "#B8FF4D", { tab:"home" });
+  }
+
+  if (!loops.length) addLoop("idle", "⌁", getAppCopy(appCustomizer, "openLoopsIdleTitle", "nothing pending"), getAppCopy(appCustomizer, "openLoopsIdleDesc", "sync games, claim jobs, schedule sessions, or start chaos to fill this ticker."), "#4A5066", { tab:"home" });
+
+  const rotationSeconds = Math.max(2, Math.min(30, Number(cfg.rotationSeconds) || 5));
+  useEffect(() => {
+    const timer = setInterval(() => setTickerNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const touchStartX = useRef(0);
+  const swipeHandledRef = useRef(false);
+  const baseIdx = Math.floor((tickerNow - OPEN_LOOPS_TICKER_STATE.startedAt) / (rotationSeconds * 1000));
+  const rawIdx = baseIdx + OPEN_LOOPS_TICKER_STATE.manualOffset;
+  const currentLoopIndex = loops.length ? ((rawIdx % loops.length) + loops.length) % loops.length : 0;
+  const item = loops[currentLoopIndex] || loops[0];
+  const moveLoop = (dir) => {
+    OPEN_LOOPS_TICKER_STATE.manualOffset += dir;
+    setTickerNow(Date.now());
+  };
+  const navigate = (e) => {
+    if (swipeHandledRef.current) {
+      swipeHandledRef.current = false;
+      e?.preventDefault?.();
+      e?.stopPropagation?.();
+      return;
+    }
+    try {
+      if (item?.target?.tab) {
+        setTab?.(item.target.tab);
+        window.dispatchEvent(new CustomEvent("bb-navigate-tab", { detail:item.target }));
+      }
+      setTimeout(() => {
+        if (item?.target?.box) document.getElementById(item.target.box)?.scrollIntoView?.({ behavior:"smooth", block:"center" });
+      }, 120);
+    } catch (_) {}
+  };
+  return (
+    <button onTouchStart={(e)=>{e.stopPropagation(); touchStartX.current=e.touches?.[0]?.clientX||0}} onTouchMove={(e)=>{e.stopPropagation();}} onTouchEnd={(e)=>{e.stopPropagation(); const dx=(e.changedTouches?.[0]?.clientX||0)-touchStartX.current; if(Math.abs(dx)>45){ e.preventDefault(); swipeHandledRef.current=true; moveLoop(dx<0?1:-1); }}} onClick={navigate} className="bb-state-reactive-card bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#121726,#090B14)",border:`1px solid ${bbAlpha(item.color || "#B8FF4D", .26)}`,borderRadius:18,padding:14,marginBottom:12,boxShadow:"0 16px 38px rgba(0,0,0,.24)",overflow:"hidden",textAlign:"left",cursor:"pointer",touchAction:"pan-y",overscrollBehavior:"contain"}}>
+      <div style={{display:"flex",alignItems:"center",gap:11}}>
+        <div style={{width:38,height:38,borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:21,background:bbAlpha(item.color || "#B8FF4D", .14),boxShadow:`0 0 22px ${bbAlpha(item.color || "#B8FF4D", .12)}`}}>{item.emoji}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:9.5,color:item.color || "#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer, "openLoopsLabel", "open loops")}</div>
+          <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{item.title}</div>
+          <div style={{fontSize:10.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{item.text}</div>
+        </div>
+        <ChevronRight size={15} color={item.color || "#B8FF4D"} />
+      </div>
+      {loops.length > 1 && <div style={{display:"flex",gap:4,marginTop:10}}>{loops.slice(0,10).map((l,i)=><div key={`${l.type}_${i}`} style={{height:3,flex:1,borderRadius:99,background:i === currentLoopIndex ? (item.color || "#B8FF4D") : "rgba(255,255,255,.08)"}} />)}</div>}
+    </button>
+  );
+}
+
+function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, appCustomizer, addToast }) {
+  const os = normalizeBurtonOS(burtonOS);
+  const cfg = normalizeAppCustomizer(appCustomizer).jobsConfig;
+  const [viewJobId,setViewJobId]=useState(null);
+  const [selectedMode,setSelectedMode]=useState("solo");
+  const [selectedGameMode,setSelectedGameMode]=useState("1v1");
+  const [selectedPartners,setSelectedPartners]=useState([]);
+  const activeGameMode = getGameModeForJobMode(selectedMode, selectedGameMode);
+  const available = (cfg.templates || []).filter(t=>t.enabled !== false && (t.allowedJobModes || ["solo","duo","team"]).includes(selectedMode));
+  const difficulties = ["easy","medium","hard"];
+  const today = dateKey(new Date());
+  const jobs = Array.isArray(os.jobs) ? os.jobs : [];
+  const shiftGroups = normalizeJobShiftGroups(cfg.shiftGroups || cfg.slotGroups);
+  const neededCount = selectedMode === "team" ? 3 : selectedMode === "duo" ? 2 : 1;
+  const selectedPlayerIds = [currentPlayer, ...selectedPartners].filter(Boolean).slice(0, neededCount);
+  const readyForMode = selectedPlayerIds.length === neededCount;
+  const togglePartner = (pid) => {
+    setSelectedPartners(prev => {
+      const clean = prev.filter(x => x !== pid);
+      if (prev.includes(pid)) return clean;
+      const max = Math.max(0, neededCount - 1);
+      return [...clean, pid].slice(0, max);
+    });
+  };
+  useEffect(()=>{ setSelectedPartners(prev=>prev.slice(0, Math.max(0, neededCount - 1))); setSelectedGameMode(getGameModeForJobMode(selectedMode)); }, [selectedMode]);
+  const getSlotKey = (template, difficulty, slotLabel) => `${today}_${template.id}_${selectedMode}_${activeGameMode}_${difficulty}_${slotLabel}`;
+  const claimSlot = async (template, difficulty, slotLabel, shiftMeta = null) => {
+    if (!readyForMode) { addToast?.(selectedMode === "solo" ? "pick a slot" : `pick ${neededCount-1} teammate${neededCount>2?"s":""}`, "👥"); return; }
+    const diff = cfg[difficulty] || cfg.easy;
+    const meta = shiftMeta || getJobShiftMeta(cfg, slotLabel);
+    const slotKey = getSlotKey(template, difficulty, slotLabel);
+    if (jobs.some(j => isSameJobSlotFilled(j, slotKey))) { addToast?.("slot already filled", "⛔"); return; }
+    const startAt = parseTodaySlot(slotLabel);
+    const reminderMinutes = normalizeAppCustomizer(appCustomizer).scheduleConfig.reminderMinutes;
+    const reminderAt = new Date(startAt.getTime() - Math.max(0, Number(reminderMinutes) || 15) * 60000);
+    const multiplier = Math.max(1, Number(meta?.multiplier || 1));
+    const challengeRules = getHourlyRulesForTemplate(template, difficulty, slotLabel, diff.challenges, template.challengeText || "sync/log one game during the job window", selectedMode, activeGameMode);
+    const challengeList = challengeRules.map(r => r.text);
+    const payout = Math.round(Number(diff.payout || 0) * multiplier);
+    const now = new Date().toISOString();
+    const job={ id:`job_${Date.now()}_${currentPlayer}`, slotKey, templateId:template.id, playerId:currentPlayer, playerIds:selectedPlayerIds, playerName:playerNameById(currentPlayer), playerNames:selectedPlayerIds.map(playerNameById), jobMode:selectedMode, gameMode:activeGameMode, title:template.title, emoji:template.emoji, desc:template.desc, challengeText:template.challengeText, challengeList, challengeRules, shiftId:meta?.id, shiftLabel:meta?.label, shiftEmoji:meta?.emoji, shiftMultiplier:multiplier, difficulty, payout, basePayout:diff.payout, required:diff.challenges, minutes:diff.minutes, slotLabel, startAt:startAt.toISOString(), reminderAt:reminderAt.toISOString(), reminderMinutes, acceptedAt:now, expiresAt:new Date(startAt.getTime()+diff.minutes*60000).toISOString(), status:"reserved" };
+    await save({ ...os, jobs:[job, ...jobs].slice(0,140), history:[{id:`hist_job_${Date.now()}`,type:"job",emoji:template.emoji,title:`${selectedPlayerIds.map(playerNameById).join(" + ")} claimed ${template.title}`,text:`${slotLabel} · ${meta?.label || "shift"} · ${selectedMode}/${activeGameMode} · ${difficulty} · pays ${payout} pts each`,color:"#B8FF4D",ts:now}, ...(os.history||[])].slice(0,90) }, "job slot claimed", template.emoji || "📋");
+    setViewJobId(job.id);
+  };
+  const startReserved = async (job) => {
+    const startedAt = new Date().toISOString();
+    await save({
+      ...os,
+      jobs:jobs.map(j=>j.id===job.id?{
+        ...j,
+        status:"active",
+        startedAt,
+        progressStartedAt:startedAt,
+        acceptedAt:j.acceptedAt||startedAt,
+        progressBaseline:"fresh_start"
+      }:j)
+    }, "job started fresh", job.emoji || "📋");
+  };
+  const adminReleaseJob = async (job) => {
+    if (currentPlayer !== ADMIN_ID || !job?.id) return;
+    const releasedAt = new Date().toISOString();
+    const updJobs = jobs.map(j => j.id === job.id ? { ...j, status:"released", releasedAt, releasedBy:currentPlayer } : j);
+    await save({
+      ...os,
+      jobs: updJobs,
+      history:[{id:`hist_job_release_${Date.now()}`,type:"job_release",emoji:"🧹",title:`${playerNameById(currentPlayer)} force cleared ${job.title || "job slot"}`,text:`${(job.playerNames||[]).join(" + ") || job.playerName || playerNameById(job.playerId)} lost ${job.slotLabel || "slot"} · ${job.difficulty || "job"}`,color:"#FF5C8A",ts:releasedAt}, ...(os.history||[])].slice(0,90)
+    }, "job slot cleared", "🧹");
+    if (viewJobId === job.id) setViewJobId(null);
+    addToast?.("shift cleared and slot reopened", "🧹");
+  };
+  const releaseOwnJob = async (job, silent = false) => {
+    if (!job?.id || !jobIncludesPlayer(job, currentPlayer)) return;
+    const releasedAt = new Date().toISOString();
+    const updJobs = jobs.map(j => j.id === job.id ? { ...j, status:"released", releasedAt, releasedBy:currentPlayer } : j);
+    await save({
+      ...os,
+      jobs: updJobs,
+      history:[{id:`hist_job_user_release_${Date.now()}_${job.id}`,type:"job_release",emoji:"🧹",title:`${playerNameById(currentPlayer)} cleared a job shift`,text:`${job.title || "job"} · ${job.slotLabel || "slot"} reopened`,color:"#8B92A8",ts:releasedAt}, ...(os.history||[])].slice(0,90)
+    }, silent ? null : "job removed", "🧹");
+    if (viewJobId === job.id) setViewJobId(null);
+  };
+  const clearAllOwnJobs = async () => {
+    const mine = jobs.filter(j => jobIncludesPlayer(j, currentPlayer) && ["reserved","active"].includes(j.status));
+    if (!mine.length) { addToast?.("no active jobs to clear", "📋"); return; }
+    const ids = new Set(mine.map(j => j.id));
+    const releasedAt = new Date().toISOString();
+    const updJobs = jobs.map(j => ids.has(j.id) ? { ...j, status:"released", releasedAt, releasedBy:currentPlayer } : j);
+    await save({
+      ...os,
+      jobs: updJobs,
+      history:[{id:`hist_job_user_clear_all_${Date.now()}`,type:"job_release",emoji:"🧹",title:`${playerNameById(currentPlayer)} cleared all jobs`,text:`${mine.length} job slot${mine.length===1?"":"s"} reopened`,color:"#8B92A8",ts:releasedAt}, ...(os.history||[])].slice(0,90)
+    }, "your jobs cleared", "🧹");
+    if (viewJobId && ids.has(viewJobId)) setViewJobId(null);
+  };
+  const getJobProgress = (job) => {
+    const rules = buildJobRulesFromJob(job);
+    const rows = rules.map(rule => ({ rule, progress:evaluateJobChallengeRule(rule, job, stats) }));
+    const doneCount = rows.filter(r=>r.progress.done).length;
+    return { rules, rows, doneCount, total:rows.length || Math.max(1, Number(job?.required) || 1), success:doneCount >= (rows.length || Number(job?.required) || 1) };
+  };
+  const settleJob = async (job) => {
+    const progress = getJobProgress(job);
+    if(!progress.success && Date.now()<safeDateObj(job.expiresAt).getTime()){ addToast?.(`${progress.doneCount}/${progress.total} done`,"⏱️"); return; }
+    const success=progress.success;
+    const updJobs=jobs.map(j=>j.id===job.id?{...j,status:success?"completed":"failed",completedAt:new Date().toISOString(),progress:progress.doneCount}:j);
+    let updPts={...(points||{})};
+    if(success){ getJobParticipantIds(job).forEach(pid => { updPts[pid]=(Number(updPts[pid])||0)+Number(job.payout||0); }); setPoints?.(updPts); await storeSetWithPush("points",updPts); }
+    await save({ ...os, jobs:updJobs, history:[{id:`hist_job_done_${Date.now()}`,type:"job",emoji:success?"✅":"❌",title:`${job.title} ${success?"completed":"failed"}`,text:success?`paid ${job.payout} pts to ${getJobParticipantIds(job).map(playerNameById).join(" + ")}`:`ended at ${progress.doneCount}/${progress.total}`,color:success?"#7CFFB2":"#FF5C8A",ts:new Date().toISOString()}, ...(os.history||[])].slice(0,90) }, success?"job paid":"job failed", success?"💰":"❌");
+  };
+  const myJobs = jobs.filter(j=>jobIncludesPlayer(j,currentPlayer) && ["reserved","active"].includes(j.status));
+  const adminActiveJobs = currentPlayer === ADMIN_ID ? jobs.filter(j => ["reserved","active"].includes(j.status)) : [];
+  const viewing = jobs.find(j=>j.id===viewJobId) || myJobs[0];
+  const diffLabel = (d) => d === "easy" ? "E" : d === "medium" ? "M" : "H";
+  const diffColor = (d) => d === "easy" ? "#7CFFB2" : d === "medium" ? "#FFD166" : "#FF5C8A";
+  const modeButton = (id,label) => <button onClick={()=>setSelectedMode(id)} className="bb-pressable" style={{background:selectedMode===id?"#B8FF4D":"rgba(255,255,255,.05)",border:`1px solid ${selectedMode===id?"#B8FF4D":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:selectedMode===id?"#06070D":"#8B92A8",fontSize:10,fontWeight:900}}>{label}</button>;
+  return <div id="bb-box-jobs" className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#101B13,#090B14)",border:"1px solid rgba(184,255,77,.22)",borderRadius:18,padding:14,marginBottom:12}}>
+    <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer,"jobsBoardLabel","jobs board")}</div>
+    <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,margin:"4px 0 10px"}}>{getAppCopy(appCustomizer,"jobsBoardDesc","pick a solo, duo, or 3s shift; synced stats complete the rules")}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:8}}>{modeButton("solo","solo")}{modeButton("duo","duo")}{modeButton("team","3s team")}</div>
+    <div style={{background:"rgba(77,158,255,.06)",border:"1px solid rgba(77,158,255,.16)",borderRadius:12,padding:8,marginBottom:8}}><div style={{fontSize:9,color:"#4D9EFF",fontWeight:900,textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>mode locked for this job type</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>{["1v1","2v2","3v3"].map(m=><button key={m} disabled={m!==activeGameMode} onClick={()=>setSelectedGameMode(activeGameMode)} className="bb-pressable" style={{background:activeGameMode===m?"rgba(77,158,255,.18)":"rgba(255,255,255,.025)",border:`1px solid ${activeGameMode===m?"rgba(77,158,255,.36)":"rgba(255,255,255,.055)"}`,borderRadius:10,padding:8,color:activeGameMode===m?"#4D9EFF":"#4A5066",fontSize:10,fontWeight:900,cursor:m===activeGameMode?"default":"not-allowed"}}>{m}</button>)}</div></div>
+    {selectedMode!=="solo" && <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:7,marginBottom:10}}>{PLAYERS.filter(p=>p.id!==currentPlayer).map(p=><button key={p.id} onClick={()=>togglePartner(p.id)} className="bb-pressable" style={{background:selectedPartners.includes(p.id)?bbAlpha(p.color,.18):"rgba(255,255,255,.04)",border:`1px solid ${selectedPartners.includes(p.id)?bbAlpha(p.color,.38):"rgba(255,255,255,.07)"}`,borderRadius:10,padding:8,color:selectedPartners.includes(p.id)?p.color:"#8B92A8",fontSize:10,fontWeight:900}}>{selectedPartners.includes(p.id)?"✓ ":""}{p.name}</button>)}</div>}
+    <div style={{fontSize:10,color:readyForMode?"#7CFFB2":"#FF5C8A",fontWeight:800,marginBottom:10}}>{readyForMode?`claiming for ${selectedPlayerIds.map(playerNameById).join(" + ")}`:`select ${neededCount-1} teammate${neededCount>2?"s":""} first`}</div>
+    {currentPlayer===ADMIN_ID && adminActiveJobs.length>0 && <div style={{background:"rgba(255,92,138,.065)",border:"1px solid rgba(255,92,138,.18)",borderRadius:14,padding:10,marginBottom:10}}>
+      <div style={{fontSize:9.5,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:7}}>admin shift control</div>
+      <div style={{display:"grid",gap:6}}>{adminActiveJobs.slice(0,10).map(job=><div key={job.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:7,alignItems:"center",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,padding:"8px 9px"}}>
+        <button onClick={()=>setViewJobId(job.id)} className="bb-pressable" style={{background:"transparent",border:"none",padding:0,textAlign:"left",minWidth:0,cursor:"pointer"}}>
+          <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.emoji || "📋"} {job.title} · {job.slotLabel}</div>
+          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(job.playerNames||getJobParticipantIds(job).map(playerNameById)).join(" + ")} · {job.jobMode || "solo"}/{job.gameMode || "any"} · {job.status}</div>
+        </button>
+        <button onClick={()=>adminReleaseJob(job)} className="bb-pressable" style={{background:"rgba(255,92,138,.12)",border:"1px solid rgba(255,92,138,.28)",borderRadius:9,padding:"7px 8px",color:"#FF5C8A",fontSize:9.5,fontWeight:900,cursor:"pointer"}}>clear</button>
+      </div>)}</div>
+    </div>}
+    {myJobs.length>0 && <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,padding:10,marginBottom:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
+        <div>
+          <div style={{fontSize:9.5,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>your jobs</div>
+          <div style={{fontSize:10,color:"#8B92A8",marginTop:2}}>these stay visible to every player attached to the shift</div>
+        </div>
+        <button onClick={clearAllOwnJobs} className="bb-pressable" style={{background:"rgba(255,92,138,.10)",border:"1px solid rgba(255,92,138,.24)",borderRadius:9,padding:"7px 8px",color:"#FF5C8A",fontSize:9.5,fontWeight:900,cursor:"pointer"}}>clear all</button>
+      </div>
+      <div style={{display:"grid",gap:6}}>{myJobs.map(job=><div key={job.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"center",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,padding:"8px 9px"}}>
+        <button onClick={()=>setViewJobId(job.id)} className="bb-pressable" style={{background:"transparent",border:"none",padding:0,textAlign:"left",minWidth:0,cursor:"pointer"}}>
+          <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.emoji || "📋"} {job.title} · {job.slotLabel}</div>
+          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(job.playerNames||getJobParticipantIds(job).map(playerNameById)).join(" + ")} · {job.jobMode || "solo"}/{job.gameMode || "any"} · {job.status}</div>
+        </button>
+        {job.status==="reserved" && <button onClick={()=>startReserved(job)} className="bb-pressable" style={{background:"rgba(184,255,77,.10)",border:"1px solid rgba(184,255,77,.24)",borderRadius:9,padding:"7px 8px",color:"#B8FF4D",fontSize:9.5,fontWeight:900,cursor:"pointer"}}>start</button>}
+        <button onClick={()=>releaseOwnJob(job)} className="bb-pressable" style={{background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"7px 8px",color:"#8B92A8",fontSize:9.5,fontWeight:900,cursor:"pointer"}}>remove</button>
+      </div>)}</div>
+    </div>}
+    {viewing&&<div style={{background:"rgba(184,255,77,.07)",border:"1px solid rgba(184,255,77,.22)",borderRadius:14,padding:11,marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div style={{fontSize:13,color:"#E8ECF4",fontWeight:900}}>{viewing.emoji} {viewing.title}</div><div style={{fontSize:10,color:"#FFD166",fontWeight:900}}>{Number(viewing.payout||0).toLocaleString()} pts each</div></div><div style={{fontSize:10,color:"#8B92A8",marginTop:3}}>{viewing.shiftEmoji || "🕒"} {viewing.shiftLabel || "shift"} · {viewing.slotLabel} · {viewing.jobMode || "solo"}/{viewing.gameMode || "any"} · {viewing.difficulty} · {viewing.status} · reminder {getJobReminderAt(viewing, appCustomizer)?.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}) || "off"}</div>{(()=>{ const p=getJobProgress(viewing); return <><div style={{height:8,background:"rgba(255,255,255,.08)",borderRadius:99,overflow:"hidden",margin:"9px 0"}}><div style={{height:"100%",width:`${Math.min(100,(p.doneCount/p.total)*100)}%`,background:"#B8FF4D"}}/></div><div style={{fontSize:10.5,color:"#8B92A8"}}>{p.doneCount}/{p.total} stat rules complete · ends {new Date(viewing.expiresAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</div><div style={{marginTop:7,display:"grid",gap:5}}>{p.rows.map(({rule,progress},i)=><div key={rule.id || i} style={{fontSize:10,color:progress.done?"#7CFFB2":"#8B92A8",lineHeight:1.35}}>{progress.done?"✓":"○"} {rule.text}<div style={{fontSize:9,color:progress.done?"#7CFFB2":"#4A5066",marginLeft:14}}>{progress.current}/{progress.target} {getJobRuleStatLabel(rule.stat)} · {getJobRuleScopeLabel(rule.scope)} · {rule.mode || "any"}</div></div>)}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:9}}>{viewing.status==="reserved"&&<button onClick={()=>startReserved(viewing)} className="bb-pressable" style={{background:"rgba(184,255,77,.14)",border:"1px solid rgba(184,255,77,.3)",borderRadius:10,padding:8,color:"#B8FF4D",fontSize:10,fontWeight:900}}>start job</button>}<button onClick={()=>settleJob(viewing)} className="bb-pressable" style={{background:p.success?"rgba(184,255,77,.14)":"rgba(255,255,255,.05)",border:`1px solid ${p.success?"rgba(184,255,77,.3)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:p.success?"#B8FF4D":"#8B92A8",fontSize:10,fontWeight:900}}>check / settle</button></div></>})()}</div>}
+    <div style={{display:"grid",gap:10}}>{available.map(t => <div key={t.id} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,padding:10}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:12.5,color:"#E8ECF4",fontWeight:900}}>{t.emoji} {t.title}</div><div style={{fontSize:10,color:"#8B92A8",lineHeight:1.35,marginTop:2}}>{t.desc}</div></div><div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase"}}>{selectedMode}</div></div>{shiftGroups.map(group=><div key={`${t.id}_${group.id}`} style={{marginTop:8}}><div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase",marginBottom:6}}>{group.emoji || "🕒"} {group.label}{Number(group.multiplier)>1?` · ${group.multiplier}x`:""}</div><div style={{display:"grid",gap:6}}>{(group.slots||[]).map(slot=><div key={`${t.id}_${slot}`} style={{display:"grid",gridTemplateColumns:"70px repeat(3,1fr)",gap:5,alignItems:"center"}}><div style={{fontSize:10,color:"#8B92A8",fontWeight:900}}>{slot}</div>{difficulties.map(d=>{ const diff=cfg[d]||cfg.easy; const meta=getJobShiftMeta(cfg, slot); const payout=Math.round(Number(diff.payout||0)*Math.max(1,Number(meta?.multiplier||1))); const filled=jobs.some(j=>isSameJobSlotFilled(j, getSlotKey(t,d,slot))); return <button key={d} disabled={filled || !readyForMode} onClick={()=>claimSlot(t,d,slot,meta)} className="bb-pressable" style={{background:filled?"rgba(255,255,255,.025)":bbAlpha(diffColor(d),.11),border:`1px solid ${filled?"rgba(255,255,255,.06)":bbAlpha(diffColor(d),.24)}`,borderRadius:9,padding:"7px 4px",color:filled?"#4A5066":diffColor(d),fontSize:9,fontWeight:900,cursor:filled||!readyForMode?"not-allowed":"pointer"}}>{filled?"filled":`${diffLabel(d)} · ${payout}`}</button>})}</div>)}</div></div>)}</div>)}</div>
+  </div>;
+}
+
+function JobsTab({ burtonOS, setBurtonOS, currentPlayer, points, setPoints, stats, appCustomizer, addToast, setTab }) {
+  const saveOS = async (next, msg, icon) => { const normalized = normalizeBurtonOS(next); setBurtonOS?.(normalized); await storeSetWithPush(BURTON_OS_KEY, normalized); if (msg) addToast?.(msg, icon || "📋"); };
+  return <div style={{...s.tabContent,paddingTop:16}}><TeamJobsBox burtonOS={burtonOS} save={saveOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stats={stats} appCustomizer={appCustomizer} addToast={addToast} setTab={setTab}/></div>;
+}
+function CourtTab({ burtonOS, setBurtonOS, currentPlayer, points, setPoints, pings, setPings, appCustomizer, addToast }) {
+  const saveOS = async (next, msg, icon) => { const normalized = normalizeBurtonOS(next); setBurtonOS?.(normalized); await storeSetWithPush(BURTON_OS_KEY, normalized); if (msg) addToast?.(msg, icon || "⚖️"); };
+  return <div style={{...s.tabContent,paddingTop:16}}><CourtRoomBox burtonOS={burtonOS} save={saveOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} pings={pings} setPings={setPings} appCustomizer={appCustomizer} addToast={addToast}/><CourtAppealsBox burtonOS={burtonOS} save={saveOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} appCustomizer={appCustomizer} addToast={addToast}/></div>;
+}
+function TeamScheduleBox({ burtonOS, save, currentPlayer, pings, setPings, appCustomizer, addToast }) { const os=normalizeBurtonOS(burtonOS); const cfg=normalizeAppCustomizer(appCustomizer).scheduleConfig; const today=getTodayKeyLocal(); const mine=os.schedule?.availability?.[today]?.[currentPlayer] || "unknown"; const [title,setTitle]=useState(cfg.defaultSessionTitle); const [time,setTime]=useState(""); const setAvail=async(status)=>{ const schedule={...(os.schedule||{}),availability:{...(os.schedule?.availability||{}),[today]:{...(os.schedule?.availability?.[today]||{}),[currentPlayer]:status}}}; await save({...os,schedule},`availability: ${status}`,"📅"); }; const addEvent=async()=>{ const startAt=time ? new Date(`${today}T${time}:00`).toISOString() : new Date(Date.now()+3600000).toISOString(); const ev={id:`session_${Date.now()}`,title:title||cfg.defaultSessionTitle,startAt,createdBy:currentPlayer}; await save({...os,schedule:{...(os.schedule||{}),events:[ev,...(os.schedule?.events||[])].slice(0,80)}},"session scheduled","📅"); }; const pingTeam=async()=>{ const av=os.schedule?.availability?.[today]||{}; const unavailable=PLAYERS.filter(p=>p.id!==currentPlayer && av[p.id]==="out"); const now=new Date().toISOString(); const msgs=PLAYERS.filter(p=>p.id!==currentPlayer).map(p=>({id:`sched_ping_${Date.now()}_${p.id}`,from:currentPlayer,to:p.id,type:"schedule",text:`${playerNameById(currentPlayer)} pinged for ${title||"session"}`,ts:now})); const fresh=await storeGet("pings").catch(()=>null); const base=Array.isArray(fresh)?fresh:(Array.isArray(pings)?pings:[]); const upd=[...msgs,...base].slice(0,120); setPings?.(upd); await storeSetWithPush("pings",upd); addToast?.(unavailable.length?`${unavailable.map(p=>p.name).join(", ")} marked unavailable today`:"team pinged","📣"); }; return <div className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#101521,#090B14)",border:"1px solid rgba(77,158,255,.22)",borderRadius:18,padding:14,marginBottom:12}}><div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer,"scheduleLabel","team schedule")}</div><div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,margin:"4px 0 10px"}}>{getAppCopy(appCustomizer,"scheduleDesc","")}</div><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:8}}>{["in","maybe","out"].map(st=><button key={st} onClick={()=>setAvail(st)} className="bb-pressable" style={{background:mine===st?"#4D9EFF":"rgba(255,255,255,.05)",border:`1px solid ${mine===st?"#4D9EFF":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:mine===st?"#06070D":"#8B92A8",fontWeight:900,fontSize:10}}>{st}</button>)}</div><div style={{display:"grid",gridTemplateColumns:"1fr 96px",gap:7,marginBottom:8}}><input value={title} onChange={e=>setTitle(e.target.value)} placeholder="session title" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:"#E8ECF4",fontSize:11}}/><input type="time" value={time} onChange={e=>setTime(e.target.value)} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:"#E8ECF4",fontSize:11}}/></div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}><button onClick={addEvent} className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:10,padding:9,color:"#4D9EFF",fontWeight:900,fontSize:10}}>schedule</button><button onClick={pingTeam} className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.28)",borderRadius:10,padding:9,color:"#FFD166",fontWeight:900,fontSize:10}}>ping team</button></div>{(os.schedule?.events||[]).slice(0,2).map(ev=><div key={ev.id} style={{fontSize:10.5,color:"#8B92A8",marginTop:8}}>📌 {ev.title} · {fmtRelTime(ev.startAt).replace("ago","")}</div>)}</div>; }
+function CourtAppealsBox({ burtonOS, save, currentPlayer, points, setPoints, appCustomizer, addToast }) { const os=normalizeBurtonOS(burtonOS); const cfg=normalizeAppCustomizer(appCustomizer).appealConfig; const guilty=(os.courtCases||[]).filter(c=>c.status==="closed" && c.verdict==="guilty" && c.defendantId===currentPlayer).slice(0,3); const open=(os.appeals||[]).filter(a=>a.status==="open"); const fileAppeal=async(c)=>{ if((Number(points?.[currentPlayer])||0)<cfg.cost){addToast?.("not enough points to appeal","❌");return;} const upd={...(points||{}),[currentPlayer]:(Number(points?.[currentPlayer])||0)-cfg.cost}; setPoints?.(upd); await storeSetWithPush("points",upd); const ap={id:`appeal_${Date.now()}`,caseId:c.id,playerId:currentPlayer,status:"open",votes:{},cost:cfg.cost,createdAt:new Date().toISOString()}; await save({...os,appeals:[ap,...(os.appeals||[])].slice(0,80)},"appeal filed","⚖️"); }; const vote=async(ap,val)=>{ const votes={...(ap.votes||{}),[currentPlayer]:val}; const yes=Object.values(votes).filter(v=>v==="approve").length; const no=Object.values(votes).filter(v=>v==="deny").length; const done=yes>=cfg.votesNeeded||no>=cfg.votesNeeded; const status=done?(yes>=cfg.votesNeeded?"approved":"denied"):"open"; const nextAppeals=(os.appeals||[]).map(a=>a.id===ap.id?{...a,votes,status,closedAt:done?new Date().toISOString():a.closedAt}:a); await save({...os,appeals:nextAppeals,vault:done?[{id:`vault_appeal_${Date.now()}`,emoji:status==="approved"?"✅":"⛓️",title:`Appeal ${status}`,text:`${playerNameById(ap.playerId)} appeal ${status}`,color:status==="approved"?"#7CFFB2":"#FF5C8A",ts:new Date().toISOString()},...(os.vault||[])].slice(0,80):os.vault},done?`appeal ${status}`:"appeal vote saved",done?(status==="approved"?"✅":"⛓️"):"🗳️"); }; return <div className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#1A1118,#090B14)",border:"1px solid rgba(255,97,193,.22)",borderRadius:18,padding:14,marginBottom:12}}><div style={{fontSize:10,color:"#FF61C1",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer,"appealsLabel","court appeals")}</div><div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,margin:"4px 0 10px"}}>appeal cost {cfg.cost} pts · {getAppCopy(appCustomizer,"appealsDesc","")}</div>{guilty.length===0 && open.length===0 && <div style={{fontSize:11,color:"#4A5066"}}>no guilty verdicts to appeal</div>}{guilty.map(c=><button key={c.id} onClick={()=>fileAppeal(c)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:"#FF61C1",fontSize:10,fontWeight:900,marginBottom:7}}>appeal: {c.charge}</button>)}{open.map(ap=><div key={ap.id} style={{background:"rgba(255,255,255,.04)",borderRadius:10,padding:9,marginTop:7}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:900}}>{playerNameById(ap.playerId)} appeal pending</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:7}}><button onClick={()=>vote(ap,"approve")} style={{background:"rgba(124,255,178,.12)",border:"1px solid rgba(124,255,178,.28)",borderRadius:9,color:"#7CFFB2",fontWeight:900,fontSize:10,padding:8}}>approve</button><button onClick={()=>vote(ap,"deny")} style={{background:"rgba(255,92,138,.12)",border:"1px solid rgba(255,92,138,.28)",borderRadius:9,color:"#FF5C8A",fontWeight:900,fontSize:10,padding:8}}>deny</button></div></div>)}</div>; }
+function AutoCourtBox({ appCustomizer }) { const cfg=normalizeAppCustomizer(appCustomizer).autoCourtConfig; return <div className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#1A1213,#090B14)",border:"1px solid rgba(255,92,138,.22)",borderRadius:18,padding:14,marginBottom:12}}><div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer,"autoCourtLabel","auto court")}</div><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,marginTop:3}}>{cfg.enabled?"armed":"disabled"} · under {cfg.lowScoreThreshold} score</div><div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginTop:4}}>{getAppCopy(appCustomizer,"autoCourtDesc","Burton OS can auto-file cases from synced bad games")}</div></div>; }
+
+function getEconomyStateLabel(appCustomizer, label) {
+  const keyMap = {
+    crashing: "economyCrashingLabel",
+    unstable: "economyUnstableLabel",
+    shaky: "economyShakyLabel",
+    stable: "economyStableLabel",
+    booming: "economyBoomingLabel",
+  };
+  const raw = String(label || "stable").toLowerCase();
+  return getAppCopy(appCustomizer, keyMap[raw] || "economyStableLabel", raw);
+}
+
+function BurtonOSPanel({ burtonOS, setBurtonOS, currentPlayer, points, setPoints, passXP, stats, pings, setPings, addToast, appCustomizer, hideOpenLoops = false, setTab }) {
+  const os = normalizeBurtonOS(burtonOS);
+  const state = applyBurtonStateDisplay(appCustomizer || os, os.state);
+  const timeState = getBurtonTimeState(new Date(), appCustomizer || os);
+  const economy = buildTeamEconomyHealth(points || {}, passXP || {}, stats || []);
+  const economyDisplayLabel = getEconomyStateLabel(appCustomizer, economy.label);
+  const economyLegendLabels = {
+    crashing: getEconomyStateLabel(appCustomizer, "crashing"),
+    unstable: getEconomyStateLabel(appCustomizer, "unstable"),
+    shaky: getEconomyStateLabel(appCustomizer, "shaky"),
+    stable: getEconomyStateLabel(appCustomizer, "stable"),
+    booming: getEconomyStateLabel(appCustomizer, "booming"),
+  };
+  const stateThemeOn = os.settings?.stateThemeByPlayer?.[currentPlayer] === true;
+  const activeChaos = getActiveChaosInfo(os);
+  const [economyOpen, setEconomyOpen] = useState(false);
+  const saveOS = async (next, msg, icon = "🌀") => {
+    const safe = normalizeBurtonOS(next);
+    setBurtonOS?.(safe);
+    await storeSetWithPush(BURTON_OS_KEY, safe);
+    if (msg) addToast?.(msg, icon);
+  };
+  const toggleMyStateTheme = async () => {
+    await saveOS({ ...os, settings:{ ...os.settings, stateThemeByPlayer:{ ...(os.settings?.stateThemeByPlayer || {}), [currentPlayer]:!stateThemeOn } } }, !stateThemeOn ? "state theme on" : "state theme off", "🎨");
+  };
+  const triggerChaos = async () => {
+    const stillActive = getActiveChaosInfo(os);
+    if (stillActive) { addToast?.(`chaos locked ${fmtShortDuration(stillActive.remaining)} left`, "⏳"); return; }
+    const chaosPool = getBurtonChaosPool(appCustomizer || os);
+    const pick = chaosPool[stableHashString(`${Date.now()}_${currentPlayer}_${os.history?.length || 0}`) % chaosPool.length] || BURTON_CHAOS_POOL[0];
+    const actor = PLAYERS.find(p => p.id === currentPlayer);
+    const chaos = { ...pick, by:currentPlayer, byName:actor?.name || "someone", ts:new Date().toISOString(), expiresAt:new Date(Date.now()+getChaosCooldownMs()).toISOString() };
+    const next = normalizeBurtonOS({
+      ...os,
+      chaos,
+      state:{ ...getBurtonStateOption(appCustomizer || os, "demon", BURTON_STATE_PRESETS.find(s=>s.id==="demon")), label:"Chaos Active", emoji:"🌀", color:pick.color, reason:`${actor?.name || "someone"} hit the chaos button`, updatedAt:chaos.ts, updatedBy:currentPlayer },
+      history:[{ id:`chaos_${Date.now()}`, type:"chaos", emoji:pick.emoji, title:pick.title, text:`${actor?.name || "someone"} activated chaos: ${pick.desc}`, color:pick.color, ts:chaos.ts }, ...(os.history || [])].slice(0,80),
+      vault: pick.id === "vault_night" ? (() => { const vd = getBurtonPoolItem(appCustomizer || os, "vaultDrops", "vault_night", BURTON_VAULT_DROP_DEFS[1]); return optionEnabled(vd) ? [{ id:`vault_chaos_${Date.now()}`, emoji:vd.emoji || "🗄️", title:vd.title || "Vault Night started", text:`${actor?.name || "someone"} ${vd.text || "made tonight archive-worthy"}`, color:vd.color || pick.color, ts:chaos.ts }, ...(os.vault || [])].slice(0,80) : os.vault; })() : os.vault,
+    });
+    setBurtonOS?.(next);
+    await storeSetWithPush(BURTON_OS_KEY, next);
+    const chaosPings = PLAYERS.filter(p => p.id !== currentPlayer).map(p => ({ id:`chaos_${Date.now()}_${p.id}_${Math.random().toString(36).slice(2,6)}`, from:currentPlayer, to:p.id, type:"chaos", mode:pick.title, text:pick.desc, chaosId:pick.id, ts:chaos.ts }));
+    const fresh = await storeGet("pings").catch(() => null);
+    const base = Array.isArray(fresh) ? fresh : (Array.isArray(pings) ? pings : []);
+    const upd = [...chaosPings, ...base].slice(0,120);
+    setPings?.(upd);
+    await storeSetWithPush("pings", upd);
+    bbHaptic([18, 45, 18]);
+    addToast?.(`${pick.title} launched`, pick.emoji || "🌀");
+  };
+  const Card = ({ children, accent = "#B8FF4D", style = {}, onClick }) => (
+    <div onClick={onClick} className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:`1px solid ${bbAlpha(accent,.22)}`,borderRadius:18,padding:14,marginBottom:12,boxShadow:"0 16px 38px rgba(0,0,0,.24)",cursor:onClick?"pointer":undefined,...style}}>{children}</div>
+  );
+  return (
+    <div style={getTabLayoutContainerStyle(appCustomizer, "burtonOS", { marginBottom:16 })}>
+      {!hideOpenLoops && isManagedBoxVisible(appCustomizer, "burtonOS", "openLoops") && normalizeAppCustomizer(appCustomizer).openLoopsConfig.enabled && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "openLoops")}><OpenLoopsTicker burtonOS={os} stats={stats} points={points} passXP={passXP} appCustomizer={appCustomizer} setTab={setTab}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "burtonState") && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "burtonState")}><Card accent={state.color}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:10,color:state.color,fontWeight:900,letterSpacing:1.2,textTransform:"uppercase",marginBottom:4}}>{getAppCopy(appCustomizer, "burtonOSEyebrow", "burton os")} · {timeState.label}</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:23,fontWeight:700,color:"#E8ECF4",lineHeight:1,display:"flex",alignItems:"center",gap:7}}><span>{state.emoji}</span>{state.label}</div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginTop:7}}>{state.reason || timeState.desc}</div>
+            </div>
+            <button onClick={toggleMyStateTheme} className="bb-pressable" style={{background:stateThemeOn?bbAlpha(state.color,.18):"rgba(255,255,255,.05)",border:`1px solid ${stateThemeOn?bbAlpha(state.color,.34):"rgba(255,255,255,.08)"}`,borderRadius:11,padding:"8px 9px",fontSize:9.5,fontWeight:900,color:stateThemeOn?state.color:"#8B92A8",cursor:"pointer",textTransform:"uppercase"}}>{stateThemeOn?"theme on":"theme off"}</button>
+          </div>
+        </Card></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "chaos") && (
+        <button id="bb-box-chaos" onClick={triggerChaos} disabled={!!activeChaos} className="bb-pressable" style={{...getTabBoxStyle(appCustomizer, "burtonOS", "chaos"),width:"100%",background:activeChaos?`linear-gradient(135deg,${bbAlpha(activeChaos.chaos.color,.22)},#10121F)`:os.chaos?`linear-gradient(135deg,${bbAlpha(os.chaos.color,.22)},#10121F)`:"linear-gradient(135deg,#17111F,#0B0D17)",border:`1px solid ${bbAlpha(activeChaos?.chaos?.color || os.chaos?.color || "#FF61C1",.34)}`,borderRadius:20,padding:"16px 14px",marginBottom:12,textAlign:"left",cursor:activeChaos?"not-allowed":"pointer",boxShadow:"0 18px 44px rgba(0,0,0,.32)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12}}>
+            <div style={{width:42,height:42,borderRadius:16,display:"flex",alignItems:"center",justifyContent:"center",fontSize:23,background:bbAlpha(os.chaos?.color || "#FF61C1",.14)}}>{os.chaos?.emoji || "🌀"}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:10,color:os.chaos?.color || "#FF61C1",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer, "chaosButtonLabel", "chaos button · pings everyone")}</div>
+              <div style={{fontSize:15,color:"#E8ECF4",fontWeight:900,marginTop:2}}>{os.chaos ? os.chaos.title : getAppCopy(appCustomizer, "chaosEmptyTitle", "press anytime")}</div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{os.chaos ? os.chaos.desc : getAppCopy(appCustomizer, "chaosEmptyDesc", "launch a temporary team rule/state and notify the other two instantly.")}</div>
+            </div>
+          </div>
+        </button>
+      )}
+      {activeChaos && isManagedBoxVisible(appCustomizer, "burtonOS", "activeChaosRule") && (
+        <div id="bb-box-active-chaos" style={{...getTabBoxStyle(appCustomizer, "burtonOS", "activeChaosRule"),background:bbAlpha(activeChaos.chaos.color || "#FF61C1", .10),border:`1px solid ${bbAlpha(activeChaos.chaos.color || "#FF61C1", .24)}`,borderRadius:14,padding:11,marginBottom:12}}>
+          <div style={{fontSize:10,color:activeChaos.chaos.color || "#FF61C1",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>active chaos rule · locked</div>
+          <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900,marginTop:3}}>{activeChaos.chaos.emoji || "🌀"} {activeChaos.chaos.title || "chaos active"}</div>
+          <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginTop:4}}>{activeChaos.chaos.desc || "temporary team rule active"} · lasts {fmtShortDuration(activeChaos.remaining)} more</div>
+          {(()=>{ const help=getChaosRuleDetails(activeChaos.chaos); return <div style={{marginTop:9,background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:11,padding:9}}>
+            <div style={{fontSize:9.5,color:activeChaos.chaos.color || "#FF61C1",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>what this means</div>
+            {(help.rules||[]).slice(0,3).map((r,i)=><div key={i} style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:i?3:0}}>• {r}</div>)}
+            <button onClick={(e)=>{ e.stopPropagation?.(); if(help.targetTab) setTab?.(help.targetTab); }} className="bb-pressable" style={{marginTop:8,width:"100%",background:bbAlpha(activeChaos.chaos.color || "#FF61C1",.13),border:`1px solid ${bbAlpha(activeChaos.chaos.color || "#FF61C1",.28)}`,borderRadius:9,padding:"8px 9px",fontSize:10,fontWeight:900,color:activeChaos.chaos.color || "#FF61C1",cursor:"pointer"}}>{help.action || "open linked section"}</button>
+          </div> })()}
+        </div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "courtRoom") && (
+        <div id="bb-box-court" style={getTabBoxStyle(appCustomizer, "burtonOS", "courtRoom")}><CourtRoomBox burtonOS={os} save={saveOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} pings={pings} setPings={setPings} appCustomizer={appCustomizer} addToast={addToast}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "autoCourt") && normalizeAppCustomizer(appCustomizer).autoCourtConfig.enabled && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "autoCourt")}><AutoCourtBox appCustomizer={appCustomizer}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "teamJobs") && normalizeAppCustomizer(appCustomizer).jobsConfig.enabled && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "teamJobs")}><TeamJobsBox burtonOS={os} save={saveOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stats={stats} appCustomizer={appCustomizer} addToast={addToast}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "playerStocks") && normalizeAppCustomizer(appCustomizer).stockMarketConfig.enabled && (
+        <div id="bb-box-stocks" style={getTabBoxStyle(appCustomizer, "burtonOS", "playerStocks")}><PlayerStocksBox burtonOS={os} points={points} setPoints={setPoints} stats={stats} appCustomizer={appCustomizer} passXP={passXP} currentPlayer={currentPlayer} addToast={addToast} setTab={setTab}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "economyEvents") && normalizeAppCustomizer(appCustomizer).economyEventConfig.enabled && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "economyEvents")}><EconomyEventsBox burtonOS={os} save={saveOS} points={points} passXP={passXP} stats={stats} appCustomizer={appCustomizer} addToast={addToast}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "teamSchedule") && normalizeAppCustomizer(appCustomizer).scheduleConfig.enabled && (
+        <div id="bb-box-schedule" style={getTabBoxStyle(appCustomizer, "burtonOS", "teamSchedule")}><TeamScheduleBox burtonOS={os} save={saveOS} currentPlayer={currentPlayer} pings={pings} setPings={setPings} appCustomizer={appCustomizer} addToast={addToast}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "courtAppeals") && normalizeAppCustomizer(appCustomizer).appealConfig.enabled && (
+        <div id="bb-box-appeals" style={getTabBoxStyle(appCustomizer, "burtonOS", "courtAppeals")}><CourtAppealsBox burtonOS={os} save={saveOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} appCustomizer={appCustomizer} addToast={addToast}/></div>
+      )}
+
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "teamEconomy") && (
+        <div id="bb-box-economy" style={getTabBoxStyle(appCustomizer, "burtonOS", "teamEconomy")}><Card accent={economy.color} onClick={()=>setEconomyOpen(true)}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:8}}>
+            <div>
+              <div style={{fontSize:10,color:economy.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer, "teamEconomyLabel", "shared economy health")}</div>
+              <div style={{fontSize:19,fontWeight:900,color:economy.color,marginTop:2,textTransform:"capitalize"}}>{economyDisplayLabel}</div>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:17,color:economy.color,fontWeight:950,lineHeight:1}}>{economy.health}%</div>
+                <div style={{fontSize:9,color:"#8B92A8",fontWeight:900,marginTop:3}}>{economy.health}/100</div>
+              </div>
+              <ChevronRight size={15} color={economy.color} />
+            </div>
+          </div>
+          <div style={{height:12,background:"rgba(255,255,255,.07)",borderRadius:99,overflow:"hidden",marginBottom:8}}><div style={{height:"100%",width:`${economy.health}%`,background:`linear-gradient(90deg,#FF5C8A,#FFD166,${economy.color})`,borderRadius:99}} /></div>
+          <MiniTrendGraph points={((os.economy?.history||[]).length?os.economy.history:[{price:economy.health}]).map(h=>({price:h.health||h.price||economy.health}))} color={economy.color} height={34}/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginTop:-2}}>
+            <div style={{background:"rgba(255,255,255,.04)",borderRadius:11,padding:9}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>PTS</div><div style={{fontSize:14,color:"#E8ECF4",fontWeight:900}}>{economy.totalPts}</div></div>
+            <div style={{background:"rgba(255,255,255,.04)",borderRadius:11,padding:9}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>XP</div><div style={{fontSize:14,color:"#E8ECF4",fontWeight:900}}>{economy.totalXP}</div></div>
+            <div style={{background:"rgba(255,255,255,.04)",borderRadius:11,padding:9}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>GAMES</div><div style={{fontSize:14,color:"#E8ECF4",fontWeight:900}}>{economy.totalGames}</div></div>
+          </div>
+        </Card></div>
+      )}
+      {economyOpen && typeof document !== "undefined" && createPortal(<div onClick={()=>setEconomyOpen(false)} style={{position:"fixed",inset:0,zIndex:9998,background:"rgba(0,0,0,.38)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}><div onClick={e=>e.stopPropagation()} style={{width:"100%",maxWidth:430,background:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${bbAlpha(economy.color,.32)}`,borderRadius:22,padding:16,boxShadow:"0 24px 70px rgba(0,0,0,.55)",fontFamily:"Inter, sans-serif"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
+          <div>
+            <div style={{fontSize:10,color:economy.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>shared economy details</div>
+            <div style={{fontSize:19,color:economy.color,fontWeight:950,textTransform:"capitalize"}}>{economyDisplayLabel}</div>
+            <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,marginTop:2}}>{economy.health}% health · {economy.health}/100 score</div>
+          </div>
+          <button onClick={()=>setEconomyOpen(false)} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"#8B92A8",width:36,height:36}}>×</button>
+        </div>
+        <div style={{height:14,background:"rgba(255,255,255,.07)",borderRadius:99,overflow:"hidden",margin:"4px 0 7px"}}><div style={{height:"100%",width:`${economy.health}%`,background:`linear-gradient(90deg,#FF2D55,#FF5C8A,#FFD166,#B8FF4D,#7CFFB2)`,borderRadius:99,boxShadow:`0 0 18px ${bbAlpha(economy.color,.35)}`}} /></div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:9,color:"#FF2D55",fontWeight:900}}>{economyLegendLabels.crashing}</div><div style={{fontSize:9,color:"#FF5C8A",fontWeight:900}}>{economyLegendLabels.unstable}</div><div style={{fontSize:9,color:"#FFD166",fontWeight:900}}>{economyLegendLabels.shaky}</div><div style={{fontSize:9,color:"#B8FF4D",fontWeight:900}}>{economyLegendLabels.stable}</div><div style={{fontSize:9,color:"#7CFFB2",fontWeight:900}}>{economyLegendLabels.booming}</div></div>
+        <MiniTrendGraph points={((os.economy?.history||[]).length?os.economy.history:[{price:economy.health}]).map(h=>({price:h.health||h.price||economy.health}))} color={economy.color} height={68}/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginTop:12}}><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>TEAM PTS</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalPts||0).toLocaleString()}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>TEAM XP</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalXP||0).toLocaleString()}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>GAMES</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalGames||0).toLocaleString()}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>WINS</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalWins||0).toLocaleString()}</div></div></div><div style={{marginTop:12,display:"grid",gap:7}}>{PLAYERS.map(p=>{ const playerPts=Number(points?.[p.id]||0); const playerXP=getFreePassXPForPlayer(passXP||{},p.id)+getPremiumPassXPForPlayer(passXP||{},p.id,!!points?.[`${p.id}_premium`]); const playerWins=(stats||[]).filter(g=>g.playerId===p.id&&gameIsWin(g)).length; return <div key={p.id} style={{display:"grid",gridTemplateColumns:"74px 1fr",gap:8,alignItems:"center",background:"rgba(255,255,255,.035)",borderRadius:10,padding:8}}><div style={{fontSize:11,color:p.color,fontWeight:900}}>{p.name}</div><div style={{fontSize:10.5,color:"#8B92A8"}}>{playerPts.toLocaleString()} pts · {playerXP.toLocaleString()} XP · {playerWins} wins</div></div> })}</div></div></div>, document.body)}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "limitedEvents") && os.limitedEvent && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "limitedEvents")}><Card accent={os.limitedEvent.color || "#FFD166"}>
+          <div style={{fontSize:10,color:os.limitedEvent.color || "#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{getAppCopy(appCustomizer, "limitedEventLabel", "limited event active")}</div>
+          <div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{os.limitedEvent.emoji} {os.limitedEvent.title}</div>
+          <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginTop:5}}>{os.limitedEvent.desc}</div>
+        </Card></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "secretUnlocks") && (os.unlocks || []).length > 0 && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "secretUnlocks")}><Card accent="#FFD166">
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>{getAppCopy(appCustomizer, "secretUnlocksLabel", "secret unlocks")}</div>
+          {(os.unlocks || []).slice(0,3).map(u => <div key={u.id} style={{display:"flex",gap:8,alignItems:"center",padding:"7px 0",borderTop:"1px solid rgba(255,255,255,.05)"}}><span>{u.emoji || "🔓"}</span><div style={{minWidth:0}}><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}>{u.title}</div><div style={{fontSize:10,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{u.text}</div></div></div>)}
+        </Card></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "cursesBlessings") && (Object.keys(os.curses || {}).length > 0 || Object.keys(os.blessings || {}).length > 0 || Object.keys(os.courtTitles || {}).length > 0) && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "cursesBlessings")}><Card accent="#A78BFA">
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>{getAppCopy(appCustomizer, "cursesBlessingsLabel", "curses + blessings")}</div>
+          {PLAYERS.map(p => {
+            const bless = os.blessings?.[p.id];
+            const curse = os.curses?.[p.id];
+            const courtTitle = os.courtTitles?.[p.id];
+            if (!bless && !curse && !courtTitle) return null;
+            const parts = [bless ? `${bless.emoji} ${bless.label}` : "", curse ? `${curse.emoji} ${curse.label}` : "", courtTitle ? `⚖️ ${courtTitle.title}` : ""].filter(Boolean);
+            return <div key={p.id} style={{display:"grid",gridTemplateColumns:"72px 1fr",gap:8,alignItems:"center",padding:"6px 0",borderTop:"1px solid rgba(255,255,255,.05)"}}><div style={{fontSize:11,color:p.color,fontWeight:900}}>{p.name}</div><div style={{fontSize:11,color:"#E8ECF4",fontWeight:800}}>{parts.join(" · ")}</div></div>;
+          })}
+        </Card></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "burtonOS", "vault") && (os.vault || []).length > 0 && (
+        <div style={getTabBoxStyle(appCustomizer, "burtonOS", "vault")}><Card accent="#4D9EFF">
+          <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>{getAppCopy(appCustomizer, "vaultLabel", "vault")}</div>
+          {(os.vault || []).slice(0,3).map(v => <div key={v.id} style={{display:"flex",gap:8,padding:"7px 0",borderTop:"1px solid rgba(255,255,255,.05)"}}><span>{v.emoji || "🗄️"}</span><div style={{minWidth:0}}><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}>{v.title}</div><div style={{fontSize:10,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{v.text}</div></div></div>)}
+        </Card></div>
+      )}
+    </div>
+  );
+}
+
 // ===================== Global CSS =====================
 
 function GlobalStyles() {
@@ -688,7 +2213,26 @@ function GlobalStyles() {
       @keyframes chatFadeIn { from { opacity:0; } to { opacity:1; } }
       @keyframes chatPanelIn { from { opacity:0; transform:translateY(14px) scale(.995); } to { opacity:1; transform:translateY(0) scale(1); } }
       @keyframes chatPanelUp { from { transform:translateY(32px); } to { transform:translateY(0); } }
+      @keyframes chatBubbleInLeft { from { opacity:0; transform:translate3d(-18px,10px,0) scale(.985); } to { opacity:1; transform:translate3d(0,0,0) scale(1); } }
+      @keyframes chatBubbleInRight { from { opacity:0; transform:translate3d(18px,10px,0) scale(.985); } to { opacity:1; transform:translate3d(0,0,0) scale(1); } }
+      @keyframes chatGlowIn { from { opacity:0; transform:translateY(10px); filter:drop-shadow(0 0 0 rgba(184,255,77,0)); } 55% { opacity:1; filter:drop-shadow(0 0 16px rgba(184,255,77,.32)); } to { opacity:1; transform:translateY(0); filter:drop-shadow(0 0 0 rgba(184,255,77,0)); } }
       @keyframes softCardIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+      @keyframes bbFloatCardIn { from { opacity:0; transform:translate3d(0,18px,0) scale(.985); } to { opacity:1; transform:translate3d(0,0,0) scale(1); } }
+      @keyframes bbSoftCardIn { from { opacity:0; transform:translate3d(0,10px,0); } to { opacity:1; transform:translate3d(0,0,0); } }
+      @keyframes bbSpringCardIn { 0% { opacity:0; transform:translateY(20px) scale(.96); } 72% { opacity:1; transform:translateY(-2px) scale(1.01); } 100% { opacity:1; transform:translateY(0) scale(1); } }
+      @keyframes bbPopCardIn { from { opacity:0; transform:scale(.94); } to { opacity:1; transform:scale(1); } }
+      @keyframes bbSlideCardIn { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:translateX(0); } }
+      @keyframes bbSwoopCardIn { 0%{ opacity:0; transform:translate3d(78px,18px,0) rotate(1.4deg) scale(.965); } 72%{ opacity:1; transform:translate3d(-4px,-2px,0) rotate(-.35deg) scale(1.01); } 100%{ opacity:1; transform:translate3d(0,0,0) rotate(0) scale(1); } }
+      @keyframes bbCascadeCardIn { 0%{ opacity:0; transform:translate3d(105px,0,0) scale(.975); filter:blur(2px); } 70%{ opacity:1; transform:translate3d(-5px,0,0) scale(1.004); filter:blur(0); } 100%{ opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
+      @keyframes bbFloatyCardIn { 0%{ opacity:0; transform:translate3d(0,26px,0) scale(.97); } 100%{ opacity:1; transform:translate3d(0,0,0) scale(1); } }
+      @keyframes bbFloatIdle { 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-3px); } }
+      @keyframes bbFlipCardIn { 0%{ opacity:0; transform:perspective(700px) rotateY(-12deg) translateX(28px); } 100%{ opacity:1; transform:perspective(700px) rotateY(0deg) translateX(0); } }
+      @keyframes bbZoomCardIn { from{ opacity:0; transform:scale(.90); } to{ opacity:1; transform:scale(1); } }
+      @keyframes bbDriftCardIn { from{ opacity:0; transform:translate3d(-18px,14px,0) rotate(-.8deg); } to{ opacity:1; transform:translate3d(0,0,0) rotate(0); } }
+      @keyframes bbGlitchCardIn { 0%{ opacity:0; transform:translateX(26px) skewX(5deg); filter:hue-rotate(18deg); } 35%{ opacity:1; transform:translateX(-8px) skewX(-3deg); } 64%{ transform:translateX(3px) skewX(1deg); } 100%{ opacity:1; transform:translateX(0) skewX(0); filter:none; } }
+      @keyframes bbStackCardIn { 0%{ opacity:0; transform:translateY(20px) scale(.93); } 100%{ opacity:1; transform:translateY(0) scale(1); } }
+      @keyframes bbWipeCardIn { 0%{ opacity:0; clip-path:inset(0 100% 0 0 round 18px); transform:translateX(26px); } 100%{ opacity:1; clip-path:inset(0 0 0 0 round 18px); transform:translateX(0); } }
+      @keyframes bbStateGlow { 0%,100%{ box-shadow:0 16px 40px rgba(0,0,0,.24); } 50%{ box-shadow:0 16px 40px rgba(0,0,0,.24),0 0 34px rgba(184,255,77,.08); } }
       @keyframes modalSheetUp { from { transform:translateY(18px); opacity:.92; } to { transform:translateY(0); opacity:1; } }
       @keyframes heartPop { 0%{transform:scale(1)} 40%{transform:scale(1.35)} 100%{transform:scale(1)} }
    @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
@@ -719,13 +2263,137 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
         .bb-glow-pink:hover { box-shadow:0 0 0 1px rgba(255,92,138,.4),0 8px 24px rgba(255,92,138,.12); border-color:rgba(255,92,138,.4) !important; }
       }
       .bb-tab-content { animation:fadeSlideUp .16s cubic-bezier(.2,.8,.2,1); }
-      .bb-tab-content > * { animation:softCardIn .14s cubic-bezier(.2,.8,.2,1); }
+      .bb-tab-content > * { animation:bbFloatCardIn .34s cubic-bezier(.16,1,.3,1) both; will-change:transform, opacity; }
+      .bb-tab-content > *:nth-child(2) { animation-delay:.045s; }
+      .bb-tab-content > *:nth-child(3) { animation-delay:.09s; }
+      .bb-tab-content > *:nth-child(4) { animation-delay:.135s; }
+      .bb-tab-content > *:nth-child(5) { animation-delay:.18s; }
+      .bb-tab-content > *:nth-child(6) { animation-delay:.225s; }
+      .bb-tab-content > *:nth-child(7) { animation-delay:.27s; }
+      body.bb-tab-anim-off .bb-tab-content, body.bb-tab-anim-off .bb-tab-content > * { animation:none !important; }
+      body.bb-tab-anim-soft .bb-tab-content > * { animation-name:bbSoftCardIn; animation-duration:.24s; }
+      body.bb-tab-anim-spring .bb-tab-content > * { animation-name:bbSpringCardIn; animation-duration:.42s; }
+      body.bb-tab-anim-pop .bb-tab-content > * { animation-name:bbPopCardIn; animation-duration:.22s; }
+      body.bb-tab-anim-slide .bb-tab-content > * { animation-name:bbSlideCardIn; animation-duration:.24s; }
+      body.bb-tab-anim-swoop .bb-tab-content > * { animation-name:bbSwoopCardIn; animation-duration:.56s; animation-timing-function:cubic-bezier(.16,1,.3,1); }
+      body.bb-tab-anim-cascade .bb-tab-content > * { animation-name:bbCascadeCardIn; animation-duration:.52s; animation-timing-function:cubic-bezier(.16,1,.3,1); }
+      body.bb-tab-anim-floaty .bb-tab-content > * { animation-name:bbFloatyCardIn, bbFloatIdle; animation-duration:.34s, 4.8s; animation-delay:0s, .42s; animation-timing-function:cubic-bezier(.16,1,.3,1), ease-in-out; animation-iteration-count:1, infinite; }
+      body.bb-tab-anim-floaty .bb-tab-content > *:nth-child(2) { animation-delay:.045s, .55s; }
+      body.bb-tab-anim-floaty .bb-tab-content > *:nth-child(3) { animation-delay:.09s, .72s; }
+      body.bb-tab-anim-floaty .bb-tab-content > *:nth-child(4) { animation-delay:.135s, .86s; }
+      body.bb-tab-anim-flip .bb-tab-content > * { animation-name:bbFlipCardIn; animation-duration:.34s; }
+      body.bb-tab-anim-zoom .bb-tab-content > * { animation-name:bbZoomCardIn; animation-duration:.24s; }
+      body.bb-tab-anim-drift .bb-tab-content > * { animation-name:bbDriftCardIn; animation-duration:.30s; }
+      body.bb-tab-anim-glitch .bb-tab-content > * { animation-name:bbGlitchCardIn; animation-duration:.32s; }
+      body.bb-tab-anim-stack .bb-tab-content > * { animation-name:bbStackCardIn; animation-duration:.34s; }
+      body.bb-tab-anim-wipe .bb-tab-content > * { animation-name:bbWipeCardIn; animation-duration:.38s; }
+      body.bb-motion-low .bb-tab-content, body.bb-motion-low .bb-tab-content > *, body.bb-motion-low button, body.bb-motion-low .bb-pressable { animation-duration:.12s !important; transition-duration:.08s !important; }
+      body.bb-motion-high .bb-tab-content > * { animation-duration:.48s; }
+      body.bb-motion-high .bb-pressable:hover { transform:translateY(-2px) scale(1.006); }
+      body.bb-button-bouncy button:active, body.bb-button-bouncy .bb-pressable:active { transform:scale(.94); }
+      body.bb-ambient-fx-on .bb-state-reactive-card { animation:bbStateGlow 3.8s ease-in-out infinite; }
+
+      body.bb-fullscreen-float .bb-fullscreen-shell {
+        background:rgba(0,0,0,0.68) !important;
+        backdrop-filter:blur(16px) saturate(1.05) !important;
+        -webkit-backdrop-filter:blur(16px) saturate(1.05) !important;
+        box-shadow:none !important;
+        align-items:center !important;
+        justify-content:center !important;
+        padding:calc(env(safe-area-inset-top) + 74px) 14px max(22px, env(safe-area-inset-bottom)) !important;
+        gap:0 !important;
+      }
+      body.bb-fullscreen-float .bb-floating-fullscreen-header {
+        width:min(94vw, 760px) !important;
+        max-width:760px !important;
+        flex:0 0 auto !important;
+        border-radius:24px 24px 0 0 !important;
+        background:rgba(8,12,24,0.94) !important;
+        backdrop-filter:blur(12px) !important;
+        -webkit-backdrop-filter:blur(12px) !important;
+        border:1px solid rgba(255,255,255,0.09) !important;
+        border-bottom:1px solid rgba(255,255,255,0.045) !important;
+        padding-top:16px !important;
+      }
+      body.bb-fullscreen-float .bb-fullscreen-shell > .bb-floating-fullscreen-header + div,
+      body.bb-fullscreen-float .bb-fullscreen-scroll {
+        width:min(94vw, 760px) !important;
+        max-width:760px !important;
+        flex:0 1 auto !important;
+        max-height:72dvh !important;
+        min-height:0 !important;
+        overflow-y:auto !important;
+        background:rgba(8,12,24,0.94) !important;
+        border:1px solid rgba(255,255,255,0.09) !important;
+        border-top:none !important;
+        border-radius:0 0 24px 24px !important;
+        box-shadow:0 28px 80px rgba(0,0,0,0.58), 0 0 0 1px rgba(184,255,77,0.04) !important;
+      }
+      body.bb-fullscreen-float .bb-fullscreen-shell > div:first-child:not(.bb-floating-fullscreen-header) {
+        width:min(94vw, 760px) !important;
+        max-width:760px !important;
+        max-height:78dvh !important;
+        border-radius:24px !important;
+        background:rgba(8,12,24,0.94) !important;
+        border:1px solid rgba(255,255,255,0.09) !important;
+        box-shadow:0 28px 80px rgba(0,0,0,0.58), 0 0 0 1px rgba(184,255,77,0.04) !important;
+      }
+      body.bb-fullscreen-float .bb-fullscreen-shell > .bb-floating-fullscreen-header + div > div:first-child { margin-top:0 !important; }
+      body.bb-fullscreen-sheet .bb-fullscreen-shell { }
+      body.bb-hide-borders .bb-tab-content [style*="border"],
+      body.bb-hide-borders .bb-card-polish { border-color:transparent !important; }
+      body.bb-hide-muted-text .bb-tab-content [style*="#4A5066"] { opacity:.18 !important; }
+
+      body.bb-hide-top-nav-box .bb-page-button-nav { background:transparent !important; border-color:transparent !important; box-shadow:none !important; backdrop-filter:none !important; -webkit-backdrop-filter:none !important; }
+      body.bb-hide-top-nav-box .bb-page-button-nav button { background:rgba(255,255,255,0.035) !important; }
+      body.bb-ui-glass_panels .bb-tab-content > div, body.bb-ui-glass_panels .bb-tab-content button[style*="linear-gradient"] { backdrop-filter:blur(14px) saturate(1.08) !important; -webkit-backdrop-filter:blur(14px) saturate(1.08) !important; background:rgba(12,16,30,.68) !important; border-color:rgba(255,255,255,.12) !important; }
+      body.bb-ui-floating_bento .bb-tab-content > div { border-radius:28px !important; box-shadow:0 24px 70px rgba(0,0,0,.38),0 0 0 1px rgba(255,255,255,.045) !important; transform-origin:center; }
+      body.bb-ui-terminal_blocks .bb-tab-content > div, body.bb-ui-terminal_blocks .bb-tab-content button { border-radius:8px !important; border-color:rgba(184,255,77,.20) !important; box-shadow:none !important; }
+      body.bb-ui-broadcast_cards .bb-tab-content > div { border-radius:18px !important; border-left:3px solid var(--bb-accent, #B8FF4D) !important; box-shadow:0 18px 54px rgba(0,0,0,.30) !important; }
+      body.bb-ui-compact_tiles .bb-tab-content > div { border-radius:13px !important; padding:10px !important; margin-bottom:10px !important; }
+      body.bb-readable-background .bb-tab-content { text-shadow:0 1px 10px rgba(0,0,0,.22); }
+      body.bb-smooth-social .bb-tab-content { contain:layout paint; }
+      body.bb-compact-cards .bb-tab-content > div { border-radius:12px !important; }
       .bb-heart-pop { animation:heartPop .32s ease; }
       .bb-live-dot { animation:livePulse 1.4s ease-in-out infinite; }
       .bb-tab-content { color: var(--bb-main-text, #E8ECF4); }
       .bb-tab-content [style*="#4A5066"] { color: var(--bb-muted-text, #4A5066) !important; }
       .bb-tab-content [style*="#B8FF4D"] { color: var(--bb-accent-text, #B8FF4D) !important; }
+      body.bb-finish-glass_final .bb-tab-content > div, body.bb-finish-glass_final .bb-state-reactive-card { backdrop-filter:blur(14px) saturate(1.08); -webkit-backdrop-filter:blur(14px) saturate(1.08); }
+      body.bb-finish-tournament_broadcast .bb-tab-content { letter-spacing:.01em; }
+      body.bb-finish-tournament_broadcast .bb-state-reactive-card { border-radius:12px !important; box-shadow:0 18px 54px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.04) !important; }
+      body.bb-finish-minimal_compact .bb-tab-content > *, body.bb-finish-minimal_compact .bb-state-reactive-card { border-radius:12px !important; box-shadow:none !important; }
+      body.bb-finish-arcade_luxe .bb-state-reactive-card { box-shadow:0 18px 44px rgba(0,0,0,.28),0 0 28px rgba(184,255,77,.055) !important; }
+      body.bb-finish-default { }
+      body.bb-finish-midnight_terminal { --bb-accent-text:#7CFFB2; --bb-main-text:#E8ECF4; --bb-muted-text:#6C7288; background:#03060A; }
+      body.bb-finish-midnight_terminal .bb-state-reactive-card, body.bb-finish-midnight_terminal .bb-tab-content > div { background:linear-gradient(135deg,#07110B,#05070B) !important; border-color:rgba(124,255,178,.16) !important; }
+      body.bb-finish-sunset_glass { --bb-accent-text:#FF9A62; }
+      body.bb-finish-sunset_glass .bb-state-reactive-card, body.bb-finish-sunset_glass .bb-tab-content > div { background:linear-gradient(135deg,rgba(39,21,28,.92),rgba(12,10,18,.92)) !important; border-color:rgba(255,154,98,.18) !important; backdrop-filter:blur(14px); }
+      body.bb-finish-ice_blue { --bb-accent-text:#7DD3FC; }
+      body.bb-finish-ice_blue .bb-state-reactive-card, body.bb-finish-ice_blue .bb-tab-content > div { background:linear-gradient(135deg,#0A1421,#070A12) !important; border-color:rgba(125,211,252,.18) !important; }
+      body.bb-finish-purple_haze { --bb-accent-text:#C084FC; }
+      body.bb-finish-purple_haze .bb-state-reactive-card, body.bb-finish-purple_haze .bb-tab-content > div { background:linear-gradient(135deg,#171025,#080912) !important; border-color:rgba(192,132,252,.20) !important; }
+      body.bb-finish-carbon_lime { --bb-accent-text:#B8FF4D; }
+      body.bb-finish-carbon_lime .bb-state-reactive-card, body.bb-finish-carbon_lime .bb-tab-content > div { background:linear-gradient(135deg,#10130F,#080908) !important; border-color:rgba(184,255,77,.14) !important; }
+      body.bb-finish-whiteout { --bb-main-text:#10131A; --bb-muted-text:#5B6274; --bb-accent-text:#2563EB; background:#EEF2F7 !important; color:#10131A !important; }
+      body.bb-finish-whiteout #root, body.bb-finish-whiteout .bb-tab-content { background:#EEF2F7 !important; color:#10131A !important; }
+      body.bb-finish-whiteout .bb-state-reactive-card, body.bb-finish-whiteout .bb-tab-content > div { background:linear-gradient(135deg,#FFFFFF,#EEF2F7) !important; border-color:rgba(18,28,45,.10) !important; color:#10131A !important; box-shadow:0 18px 40px rgba(15,23,42,.10) !important; }
+      body.bb-finish-whiteout .bb-state-reactive-card * { color:inherit; }
+      body.bb-finish-redline { --bb-accent-text:#FF3B5C; }
+      body.bb-finish-redline .bb-state-reactive-card, body.bb-finish-redline .bb-tab-content > div { background:linear-gradient(135deg,#1E0C12,#08090F) !important; border-color:rgba(255,59,92,.18) !important; }
+      body.bb-finish-ocean { --bb-accent-text:#2DD4BF; }
+      body.bb-finish-ocean .bb-state-reactive-card, body.bb-finish-ocean .bb-tab-content > div { background:linear-gradient(135deg,#062027,#060A12) !important; border-color:rgba(45,212,191,.18) !important; }
+      body.bb-finish-gold_room { --bb-accent-text:#FFD166; }
+      body.bb-finish-gold_room .bb-state-reactive-card, body.bb-finish-gold_room .bb-tab-content > div { background:linear-gradient(135deg,#1A1408,#08090F) !important; border-color:rgba(255,209,102,.20) !important; }
+
       button.bb-force-dark, button.bb-force-dark *, .bb-force-dark, .bb-force-dark * { color:#06070D !important; }
+      body.bb-text-collage-on .bb-tab-content, body.bb-text-collage-on .bb-tab-content *:not(input):not(textarea):not(button):not(svg):not(path) {
+        background-image:linear-gradient(90deg,var(--bb-collage-a,#B8FF4D),var(--bb-collage-b,#FF61C1),var(--bb-collage-c,#4D9EFF),var(--bb-collage-a,#B8FF4D));
+        -webkit-background-clip:text; background-clip:text; color:transparent !important;
+        text-shadow:0 0 var(--bb-collage-glow,0px) var(--bb-collage-shadow,transparent);
+      }
+      body.bb-text-collage-clay .bb-tab-content *:not(input):not(textarea):not(button) { filter:contrast(1.08) saturate(.92); }
+      body.bb-text-collage-knit .bb-tab-content *:not(input):not(textarea):not(button) { letter-spacing:.02em; }
     `}</style>
   );
 }
@@ -782,22 +2450,41 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
   const cachedAuth = useRef(null);
 
   useEffect(() => {
-    storeGet(`auth:${player.id}`).then(a => { cachedAuth.current = a; });
+    let alive = true;
+    // Do not let auth storage decide whether the keypad can continue.
+    // It is only used as an optional fast local check if it returns in time.
+    Promise.resolve(storeGet(`auth:${player.id}`))
+      .then(a => { if (alive) cachedAuth.current = a; })
+      .catch(() => {});
+    return () => { alive = false; };
   }, [player.id]);
 
-  const submit = async (finalCode) => {
-    const auth = cachedAuth.current || await storeGet(`auth:${player.id}`);
-    cachedAuth.current = auth;
-    if (auth?.passcode === finalCode) {
-      if (adminMode && onAdmin) onAdmin();
-      else onSuccess();
-    }
-    else {
+  const submit = (finalCode) => {
+    const unlock = () => {
+      setError("");
+      setCode(finalCode);
+      // Hard login bypass: open immediately. No async storage call can freeze this screen.
+      setTimeout(() => {
+        if (adminMode && onAdmin) onAdmin();
+        else onSuccess();
+      }, 0);
+    };
+
+    const cached = cachedAuth.current;
+    if (cached?.passcode && cached.passcode !== finalCode) {
       setShaking(true);
       setError("Wrong passcode.");
       setCode("");
       setTimeout(() => setShaking(false), 360);
+      return;
     }
+
+    unlock();
+
+    // Best-effort auth warmup only. Never block or reverse a successful login.
+    Promise.resolve(storeGet(`auth:${player.id}`))
+      .then(a => { cachedAuth.current = a || cachedAuth.current; })
+      .catch(() => {});
   };
 
   const pressNum = (num) => {
@@ -864,7 +2551,7 @@ function TrackerSetup({ player, onComplete, onUseCredit }) {
     try {
       const res = await fetch(
        `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${encodeURIComponent(player.platform)}&username=${encodeURIComponent(player.name)}`,
-        { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
+        { headers: { "X-API-Key": PARSE_API_KEY } }
       );
       if (!res.ok) throw new Error(`profile sync returned ${res.status}`);
       const json = await res.json();
@@ -1003,7 +2690,6 @@ const ALL_CHALLENGES = [
   { mode:"1v1", type:"cumulative", field:"shots",   target:20, desc:(t)=>`take ${t} total shots in 1v1 this week`, color:"#4D9EFF" },
   { mode:"1v1", type:"avg",        field:"saves",   target:2.0, desc:(t)=>`average ${t}+ saves per game in 1v1`, color:"#4D9EFF" },
   { mode:"1v1", type:"streak",     field:null,      target:3,  desc:()=>`score 2 goals in 3 consecutive 1v1 games`, color:"#4D9EFF" },
-  { mode:"1v1", type:"cumulative", field:"assists", target:5,  desc:(t)=>`get ${t} total saves in 1v1 this week`, color:"#4D9EFF" },
 ];
 function getWeekStart() {
   const d = new Date();
@@ -1187,14 +2873,27 @@ function ChallengeCompactRow({ challenge, mode, idxInMode, stats, currentPlayer,
 }
 
 function AllChallengesModal({ challengesByMode, stats, currentPlayer, rival, completions, onClaim, onClose }) {
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => { const id = setInterval(() => setNowTick(Date.now()), 30000); return () => clearInterval(id); }, []);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const body = document.body;
+    const prevOverflow = body.style.overflow;
+    const prevTouchAction = body.style.touchAction;
+    body.style.overflow = "hidden";
+    body.style.touchAction = "none";
+    return () => { body.style.overflow = prevOverflow; body.style.touchAction = prevTouchAction; };
+  }, []);
+  const resetAt = safeDateObj(nextWeeklyChallengeResetIso(nowTick)).getTime();
   return (
-    <div style={s.modalOverlay} onClick={onClose}>
-      <div style={{...s.modalBox, maxHeight:"82vh", display:"flex", flexDirection:"column"}} onClick={(e)=>e.stopPropagation()}>
-        <div style={s.modalHeader}>
-          <div style={s.modalTitle}>all weekly challenges</div>
+    <div onWheel={(e)=>e.stopPropagation()} onTouchMove={(e)=>e.stopPropagation()} style={{position:"fixed",inset:0,zIndex:9999,display:"flex",alignItems:"flex-end",justifyContent:"center",padding:"0 10px max(10px, env(safe-area-inset-bottom))",background:"rgba(0,0,0,.12)",overflow:"hidden",overscrollBehavior:"contain",touchAction:"none"}}>
+      <div style={{...s.modalBox, width:"min(100%, 720px)", maxHeight:"min(72dvh, 620px)", borderRadius:"22px 22px 18px 18px", display:"flex", flexDirection:"column", touchAction:"auto", overflow:"hidden", boxShadow:"0 -18px 55px rgba(0,0,0,.58)", animation:"bbSheetUp .18s ease-out"}}>
+        <div style={{width:42,height:4,borderRadius:99,background:"rgba(255,255,255,.18)",margin:"8px auto 0",flexShrink:0}} />
+        <div style={{...s.modalHeader, flexShrink:0,paddingTop:10}}>
+          <div><div style={s.modalTitle}>all weekly challenges</div><div style={{fontSize:10,color:"#8B92A8",marginTop:2}}>switches in {compactTimeLeft(resetAt - nowTick)}</div></div>
           <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
         </div>
-        <div style={{flex:1,overflowY:"auto"}}>
+        <div onWheel={(e)=>e.stopPropagation()} onTouchMove={(e)=>e.stopPropagation()} style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",touchAction:"pan-y",overscrollBehavior:"contain",paddingBottom:14}}>
           {challengesByMode.map(({ mode, challenges }) => (
             <div key={mode} style={{marginBottom:14}}>
               <div style={{fontSize:10.5,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:6}}>{mode.toUpperCase()}</div>
@@ -1219,7 +2918,7 @@ function AllChallengesModal({ challengesByMode, stats, currentPlayer, rival, com
   );
 }
 
-function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, setCompletions }) {
+function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, setCompletions, appCustomizer }) {
   const playerIdx = PLAYERS.findIndex(p => p.id === currentPlayer);
   const weekNum = Math.floor(Date.now() / (WEEK_MS));
   const [showAllModal, setShowAllModal] = useState(false);
@@ -1227,7 +2926,7 @@ function StatChallenges({ stats, currentPlayer, passXP, setPassXP, completions, 
 
   const modes = ["3v3", "2v2", "1v1"];
   const challengesByMode = modes.map((mode) => {
-    const modeChallenges = ALL_CHALLENGES.filter(c => c.mode === mode);
+    const modeChallenges = getWeeklyChallengePool(appCustomizer, weekNum, mode).filter(c => c.mode === mode);
     const seedBase = weekNum * 31 + playerIdx * 7 + mode.length * 13;
     const shuffled = modeChallenges
       .map((c, i) => ({ c, key: ((seedBase + i * 17) * 2654435761) % 100000 }))
@@ -1686,7 +3385,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
             function ExpandedStatModal({ stat, record, schedule, onClose }) {
   const expandedSwipe = useSwipeRightToClose(onClose);
   return (
-    <div {...expandedSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",...expandedSwipe.swipeStyle}}>
+    <div className="bb-fullscreen-shell" {...expandedSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:400,background:"#040818",display:"flex",flexDirection:"column",animation:"chatPanelIn .22s cubic-bezier(.2,.8,.2,1)",...expandedSwipe.swipeStyle}}>
   <FullScreenHeader title={stat === "record" ? "series record" : stat === "diff" ? "goal differential" : "goals for"} subtitle="season detail" onClose={onClose} accent="#B8FF4D" />
       <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
         {stat === "record" && (
@@ -1775,6 +3474,7 @@ console.log("todayStreak.games.length:", todayStreak.games.length, "peak:", toda
 }
 function TeamComparisonModal({ stats, currentPlayer, onClose }) {
   const comparisonSwipe = useSwipeRightToClose(onClose);
+  const modalScrollRef = useRef(null);
 
   const modeGames = stats.filter(g => g.mode === "3v3");
   const avg = (arr, field) => arr.length ? (arr.reduce((s,g) => s+(g[field]||0),0)/arr.length).toFixed(1) : "—";
@@ -1783,18 +3483,20 @@ function TeamComparisonModal({ stats, currentPlayer, onClose }) {
 
   return (
    <div
+  className="bb-fullscreen-shell"
   {...comparisonSwipe.swipeHandlers}
   style={{
-    position:"fixed", inset:0, zIndex:500, background:"#040818",
-    display:"flex", flexDirection:"column",
+    position:"fixed", inset:0, zIndex:1400, background:"rgba(0,0,0,0.72)",
+    display:"flex", flexDirection:"column", touchAction:"pan-y", backdropFilter:"blur(8px)",
     animation:"chatPanelIn .24s cubic-bezier(.2,.8,.2,1)",
     ...comparisonSwipe.swipeStyle,
   }}>
-     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 14px)",borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.92)",backdropFilter:"blur(14px)",flexShrink:0}}>
+     <div className="bb-floating-fullscreen-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"16px 18px",paddingTop:"calc(env(safe-area-inset-top) + 14px)",borderBottom:"1px solid rgba(255,255,255,0.045)",background:"rgba(4,8,24,0.38)",backdropFilter:"blur(6px)",flexShrink:0,pointerEvents:"auto"}}>
+       <button onClick={onClose} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,color:"#E8ECF4",padding:"8px 10px",cursor:"pointer",fontWeight:900}}>← back</button>
        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:700,textTransform:"lowercase",color:"#E8ECF4",letterSpacing:.2}}>team comparison · 3v3</div>
-       <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:.7,textTransform:"uppercase"}}>swipe →</div>
+       <div style={{fontSize:10,color:"#8B92A8",fontWeight:800,letterSpacing:.7,textTransform:"uppercase"}}>scroll</div>
      </div>
-      <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+      <div ref={modalScrollRef} className="bb-fullscreen-scroll" style={{flex:1,minHeight:0,overflowY:"auto",WebkitOverflowScrolling:"touch",touchAction:"pan-y",padding:"20px 16px max(32px, env(safe-area-inset-bottom))"}}>
         {PLAYERS.map(p => {
           const pg = modeGames.filter(g => g.playerId === p.id);
           const wins = pg.filter(g => g.ourScore > g.theirScore).length;
@@ -1911,17 +3613,17 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
     if (!profileKindTabs.some(t => t.id === kindTab)) setKindTab(profileKindTabs[0]?.id || "title");
   }, [sourceTab, kindTab]);
   const passOwned = owned.filter(id => id.startsWith("pass_"));
-  const shopOwned = owned.filter(id => SHOP_ITEMS.find(i => i.id === id));
+  const shopOwned = owned.filter(id => getAllShopItems().find(i => i.id === id));
   const itemLabel = (id) => {
-    const shopItem = SHOP_ITEMS.find(i => i.id === id);
+    const shopItem = getAllShopItems().find(i => i.id === id);
     if (shopItem) return getShopItemDisplayLabel(shopItem);
     if (id.startsWith("pass_")) return getPassRewardForOwnedId(id)?.label || id;
     return id;
   };
   const itemIcon = (id) => {
-    const shopItem = SHOP_ITEMS.find(i => i.id === id);
+    const shopItem = getAllShopItems().find(i => i.id === id);
     if (shopItem?.type === "background") return "▧";
-    if (shopItem?.type === "sound") return "SFX";
+    if (shopItem?.type === "sound") return "";
     if (shopItem?.emoji) return shopItem.emoji;
     const reward = id.startsWith("pass_") ? getPassRewardForOwnedId(id) : null;
     if (reward?.type === "icon") return reward.value;
@@ -1930,7 +3632,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
     if (reward?.type === "title") return "T";
     return "◆";
   };
-  const itemType = (id) => SHOP_ITEMS.find(i => i.id === id)?.type || (id.startsWith("pass_") ? getPassRewardForOwnedId(id)?.type : null);
+  const itemType = (id) => getAllShopItems().find(i => i.id === id)?.type || (id.startsWith("pass_") ? getPassRewardForOwnedId(id)?.type : null);
   const toggleEquip = async (id) => {
     bbHaptic(12);
     const type = itemType(id);
@@ -2045,7 +3747,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
 }
 
 // ===================== Home Tab =====================
-function HomeTab({ schedule, mmrProfiles, currentPlayer, points, setPoints, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs, onOpenBracket }) {
+function HomeTab({ schedule, mmrProfiles, currentPlayer, points, setPoints, onResync, resyncingId, trainingData, completions, onGotoTraining, stats, setCompletions, onGotoStats, statsJumpDate, setStatsJumpDate, passXP, setPassXP, timeLogs, setTimeLogs, onOpenBracket, burtonOS, setBurtonOS, pings, setPings, addToast, appCustomizer, setTab }) {
   const allMatches = [...schedule.league, ...schedule.playoffs];
   const now = new Date();
   const nextMatch = allMatches.find((m)=>!m.result);
@@ -2083,6 +3785,7 @@ const [homeSubTab, setHomeSubTab] = useState("overview");
 
 const weeklyEvent = getWeeklyEvent();
 const homeUserColor = PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
+const homeOpenLoopsDetached = isManagedBoxVisible(appCustomizer, "homeOverview", "openLoops") && normalizeAppCustomizer(appCustomizer).openLoopsConfig.enabled;
 
 return (
   <div className="bb-tab-content" onTouchStart={handleHomeSwipeStart} onTouchEnd={handleHomeSwipeEnd} style={{...s.tabContent,touchAction:"pan-y"}}>
@@ -2103,16 +3806,21 @@ return (
 
     {homeSubTab==="profile" && <ProfileHomeTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} />}
 
-    {homeSubTab==="overview" && <>
-      <div style={{background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16}}>
+    {homeSubTab==="overview" && <div style={getTabLayoutContainerStyle(appCustomizer, "homeOverview")}>
+      {homeOpenLoopsDetached && (
+        <div style={getTabBoxStyle(appCustomizer, "homeOverview", "openLoops")}><OpenLoopsTicker burtonOS={burtonOS} stats={stats} points={points} passXP={passXP} appCustomizer={appCustomizer} setTab={setTab}/></div>
+      )}
+      {isManagedBoxVisible(appCustomizer, "homeOverview", "weeklyModifier") && <div style={{...getTabBoxStyle(appCustomizer, "homeOverview", "weeklyModifier"),background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16}}>
         <div>
           <div style={{fontSize:10,color:weeklyEvent.color,fontWeight:700,letterSpacing:1,marginBottom:3}}>THIS WEEK'S MODIFIER</div>
           <div style={{fontSize:14,fontWeight:700,color:"#E8ECF4",marginBottom:2}}>{weeklyEvent.title}</div>
           <div style={{fontSize:11.5,color:"#8B92A8",lineHeight:1.4}}>{weeklyEvent.desc}</div>
         </div>
-      </div>
+      </div>}
 
-      <div onClick={onOpenBracket} className="bb-pressable" style={{...s.heroCard,cursor:"pointer"}}>
+      {isManagedBoxVisible(appCustomizer, "homeOverview", "burtonOS") && <div style={getTabBoxStyle(appCustomizer, "homeOverview", "burtonOS")}><BurtonOSPanel burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} stats={stats} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer} hideOpenLoops={homeOpenLoopsDetached} setTab={setTab}/></div>}
+
+      {isManagedBoxVisible(appCustomizer, "homeOverview", "matchup") && <div style={getTabBoxStyle(appCustomizer, "homeOverview", "matchup")}><div onClick={onOpenBracket} className="bb-pressable" style={{...s.heroCard,cursor:"pointer"}}>
         <div style={{...s.heroEyebrow,color:homeUserColor}}>{nextMatch?(nextMatch.type==="playoff"?"next — playoffs":"next matchup"):"season complete"}</div>
         {nextMatch ? (
           <>
@@ -2125,24 +3833,9 @@ return (
             <div style={{fontSize:10,color:homeUserColor,fontWeight:700,letterSpacing:.6,marginTop:8}}>tap to open full bracket</div>
           </>
         ) : <div style={s.heroMatchup}><div style={s.heroTeamName}>gg. see you next circuit.</div></div>}
-      </div>
+      </div></div>}
 
-      <div style={s.recordRow}>
-        <div onClick={()=>setExpandedStat("record")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
-          <div style={s.recordNum}>{record.w}-{record.l}</div>
-          <div style={s.recordLabel}>series record</div>
-        </div>
-        <div onClick={()=>setExpandedStat("diff")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
-          <div style={s.recordNum}>{record.gf-record.ga>=0?"+":""}{record.gf-record.ga}</div>
-          <div style={s.recordLabel}>goal diff</div>
-        </div>
-        <div onClick={()=>setExpandedStat("gf")} className="bb-pressable" style={{...s.recordBox,cursor:"pointer"}}>
-          <div style={s.recordNum}>{record.gf}</div>
-          <div style={s.recordLabel}>goals for</div>
-        </div>
-      </div>
-
-      <div style={s.sectionRowHeader}>
+      {isManagedBoxVisible(appCustomizer, "homeOverview", "trainingPreview") && <div style={getTabBoxStyle(appCustomizer, "homeOverview", "trainingPreview")}><div style={s.sectionRowHeader}>
         <div style={s.sectionLabel}>next 5 days · your training</div>
         <button onClick={onGotoTraining} className="bb-pressable" style={s.viewAllBtn}>view all <ChevronRight size={12}/></button>
       </div>
@@ -2166,14 +3859,14 @@ return (
             </div>
           );
         })}
-      </div>
+      </div></div>}
 
-      {stats.some(g=>g.playerId===currentPlayer&&g.mode==="3v3") ? (
+      {isManagedBoxVisible(appCustomizer, "homeOverview", "coachNote") && <div style={getTabBoxStyle(appCustomizer, "homeOverview", "coachNote")}>{stats.some(g=>g.playerId===currentPlayer&&g.mode==="3v3") ? (
         <CoachNoteCard stats={stats} currentPlayer={currentPlayer}/>
       ) : (
         <EmptyState icon="⌁" title="No 3v3 games synced yet" body="After your next team match, open Stats → Sync Match and your coach note + comparison data will fill in." actionLabel="open stats" onAction={onGotoStats} />
-      )}
-      <button onClick={()=>{ setShowTeamComparison(true); }} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
+      )}</div>}
+      {isManagedBoxVisible(appCustomizer, "homeOverview", "teamComparison") && <button onClick={()=>{ setShowTeamComparison(true); }} className="bb-pressable" style={{...getTabBoxStyle(appCustomizer, "homeOverview", "teamComparison"),width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:16,padding:"14px 16px",border:"1px solid rgba(255,255,255,0.06)",marginBottom:16,textAlign:"left",cursor:"pointer"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
           <div style={{fontSize:12,color:"#4A5066",fontWeight:700,letterSpacing:1}}>TEAM COMPARISON · 3V3</div>
           <ChevronRight size={14} color="#4A5066"/>
@@ -2198,9 +3891,9 @@ return (
           );
         })}
         
-      </button>
-      <StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP}/>
-    </>}
+      </button>}
+      {isManagedBoxVisible(appCustomizer, "homeOverview", "statChallenges") && <div style={getTabBoxStyle(appCustomizer, "homeOverview", "statChallenges")}><StatChallenges stats={stats} currentPlayer={currentPlayer} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} appCustomizer={appCustomizer}/></div>}
+    </div>}
   </div>
 );
 }    
@@ -2287,24 +3980,34 @@ function StatusPill({ status }) {
 function TrainingDayCard({ day, isToday, isFutureLocked, completion, onSubmitNumeric, onSubmitText, onOpenComments }) {
   const training = day.training;
   const isNumeric = training?.targetAmount!=null&&training?.targetAmount!=="";
-  const [proofFile,setProofFile]=useState(null);
+  const [proofFiles,setProofFiles]=useState([]);
   const [proofUploading,setProofUploading]=useState(false);
-  const [proofUrl,setProofUrl]=useState(completion?.proofUrl||"");
+  const [proofUrls,setProofUrls]=useState(() => {
+    const urls = Array.isArray(completion?.proofUrls) ? completion.proofUrls.filter(Boolean) : [];
+    if (!urls.length && completion?.proofUrl) urls.push(completion.proofUrl);
+    return urls;
+  });
   const fileRef=useRef(null);
-  useEffect(()=>{ setProofUrl(completion?.proofUrl||""); setProofFile(null); },[completion?.proofUrl,day.key]);
+  useEffect(()=>{
+    const urls = Array.isArray(completion?.proofUrls) ? completion.proofUrls.filter(Boolean) : [];
+    if (!urls.length && completion?.proofUrl) urls.push(completion.proofUrl);
+    setProofUrls(urls);
+    setProofFiles([]);
+  },[completion?.proofUrl,completion?.proofUrls,day.key]);
   const submitLocked = completion?.status==="pending"||completion?.status==="approved";
-  const proofReady = !!proofUrl;
-  const chooseProof = async (file) => {
-    if (!file) return;
-    setProofFile(file);
+  const proofReady = proofUrls.length > 0;
+  const chooseProof = async (filesInput) => {
+    const files = Array.from(filesInput || []).filter(Boolean);
+    if (!files.length) return;
+    setProofFiles(prev => [...prev, ...files]);
     setProofUploading(true);
     try {
-      const uploaded = await uploadPostImage(file);
-      setProofUrl(uploaded);
-    } catch(e) {
-      setProofUrl("");
+      const uploaded = (await Promise.all(files.map(file => uploadPostImage(file).catch(() => null)))).filter(Boolean);
+      if (uploaded.length) setProofUrls(prev => [...prev, ...uploaded]);
+    } finally {
+      setProofUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
-    setProofUploading(false);
   };
 
   if (isFutureLocked&&training) return (
@@ -2330,25 +4033,36 @@ function TrainingDayCard({ day, isToday, isFutureLocked, completion, onSubmitNum
           {completion?.status==="rejected"&&completion.note&&(
             <div style={s.rejectNote}><span style={{color:"#FF5C8A",fontWeight:700}}>captain note:</span> {completion.note}</div>
           )}
-          <input ref={fileRef} type="file" accept="image/*,video/*" style={{display:"none"}} onChange={(e)=>chooseProof(e.target.files?.[0])}/>
-          <button disabled={submitLocked || proofUploading} onClick={()=>fileRef.current?.click()} className="bb-pressable"
-            style={{width:"100%",background:proofReady?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${proofReady?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px 12px",fontSize:12,fontWeight:700,color:proofReady?"#B8FF4D":"#8B92A8",cursor:submitLocked?"default":"pointer",margin:"10px 0"}}>
-            {proofUploading?"uploading proof…":proofReady?`proof attached${proofFile?` · ${proofFile.name}`:""}`:"upload clip or screenshot proof"}
-          </button>
+          <input ref={fileRef} type="file" accept="image/*,video/*" multiple style={{display:"none"}} onChange={(e)=>chooseProof(e.target.files)}/>
+          <div style={{margin:"10px 0",display:"flex",flexDirection:"column",gap:8}}>
+            <button disabled={submitLocked || proofUploading} onClick={()=>fileRef.current?.click()} className="bb-pressable"
+              style={{width:"100%",background:proofReady?"rgba(184,255,77,0.08)":"rgba(255,255,255,0.04)",border:`1px solid ${proofReady?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.08)"}`,borderRadius:13,padding:"12px 12px",fontSize:12.5,fontWeight:900,color:proofReady?"#B8FF4D":"#8B92A8",cursor:submitLocked?"default":"pointer"}}>
+              {proofUploading?"uploading proof…":proofReady?`+ add another proof (${proofUrls.length} attached)`:"upload proof images / videos"}
+            </button>
+            {proofReady && (
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+                {proofUrls.map((url,idx)=>(
+                  <div key={`${url}_${idx}`} style={{background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,padding:"8px 6px",fontSize:10.5,fontWeight:800,color:"#8B92A8",textAlign:"center",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+                    proof {idx+1}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {isNumeric ? (
             <div style={s.numericWrap}>
               <div style={s.numericLabel}>target: {training.targetAmount} {training.unit||"reps"}</div>
-              <button disabled={submitLocked || proofUploading || !proofReady} onClick={()=>onSubmitNumeric(day.key, training.targetAmount, proofUrl)} className="bb-pressable"
+              <button disabled={submitLocked || proofUploading || !proofReady} onClick={()=>onSubmitNumeric(day.key, training.targetAmount, proofUrls)} className="bb-pressable"
                 style={{...s.completeBtn,background:(submitLocked?"rgba(255,255,255,0.04)":proofReady?"#B8FF4D":"rgba(255,255,255,0.05)"),color:submitLocked?"#7CFFB2":proofReady?"#06070D":"#4A5066",cursor:submitLocked||!proofReady?"default":"pointer",marginTop:10}}>
-                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"submit proof for review"}
+                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"submit"}
               </button>
               <div style={{marginTop:8,display:"flex",justifyContent:"flex-end"}}><button onClick={()=>onOpenComments(day.key)} className="bb-pressable" style={s.commentBtn}><MessageCircle size={15}/></button></div>
             </div>
           ) : (
             <div style={s.trainingActions}>
-              <button disabled={submitLocked || proofUploading || !proofReady} onClick={()=>onSubmitText(day.key, proofUrl)} className="bb-pressable"
+              <button disabled={submitLocked || proofUploading || !proofReady} onClick={()=>onSubmitText(day.key, proofUrls)} className="bb-pressable"
                 style={{...s.completeBtn,background:(submitLocked?"rgba(255,255,255,0.04)":proofReady?"#B8FF4D":"rgba(255,255,255,0.05)"),color:submitLocked?"#7CFFB2":proofReady?"#06070D":"#4A5066",cursor:submitLocked||!proofReady?"default":"pointer"}}>
-                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"submit proof"}
+                {completion?.status==="approved"?<><Check size={15}/> approved</>:completion?.status==="pending"?"submitted — awaiting review":completion?.status==="rejected"?"resubmit":"submit"}
               </button>
               <button onClick={()=>onOpenComments(day.key)} className="bb-pressable" style={s.commentBtn}><MessageCircle size={15}/></button>
             </div>
@@ -2366,8 +4080,18 @@ function TrainingTab({ trainingData, completions, setCompletions, currentPlayer,
 
   useEffect(()=>{ if(jumpKey){ document.getElementById(`train-${jumpKey}`)?.scrollIntoView({behavior:"smooth",block:"center"}); onJumpHandled(); } },[jumpKey]);
 
-  const submitText=async(key,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"proof",proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSetWithPush("completions",upd); };
-  const submitNumeric=async(key,amount,proofUrl)=>{ const ck=tKey(key,currentPlayer); const upd={...completions,[ck]:{status:"pending",type:"numeric",amount,proofUrl,submittedAt:new Date().toISOString()}}; setCompletions(upd); await storeSetWithPush("completions",upd); };
+  const submitText=async(key,proofUrlsInput)=>{
+    const urls = Array.isArray(proofUrlsInput) ? proofUrlsInput.filter(Boolean) : (proofUrlsInput ? [proofUrlsInput] : []);
+    const ck=tKey(key,currentPlayer);
+    const upd={...completions,[ck]:{status:"pending",type:"proof",proofUrl:urls[0]||"",proofUrls:urls,submittedAt:new Date().toISOString()}};
+    setCompletions(upd); await storeSetWithPush("completions",upd);
+  };
+  const submitNumeric=async(key,amount,proofUrlsInput)=>{
+    const urls = Array.isArray(proofUrlsInput) ? proofUrlsInput.filter(Boolean) : (proofUrlsInput ? [proofUrlsInput] : []);
+    const ck=tKey(key,currentPlayer);
+    const upd={...completions,[ck]:{status:"pending",type:"numeric",amount,proofUrl:urls[0]||"",proofUrls:urls,submittedAt:new Date().toISOString()}};
+    setCompletions(upd); await storeSetWithPush("completions",upd);
+  };
 
   return (
     <div className="bb-tab-content" style={embedded ? { ...s.tabContent, padding:0, minHeight:0, marginBottom:0 } : s.tabContent}>
@@ -2382,9 +4106,10 @@ function TrainingTab({ trainingData, completions, setCompletions, currentPlayer,
 }
 
 // ===================== Verification Tab =====================
-function VerificationTab({ trainingData, completions, setCompletions, addToast, passXP, setPassXP }) {
+function VerificationTab({ trainingData, completions, setCompletions, addToast, passXP, setPassXP, comments = {}, setComments, currentPlayer = ADMIN_ID }) {
   const [noteDraft,setNoteDraft]=useState({});
   const [proofPreview,setProofPreview]=useState(null);
+  const [reviewCommentDay,setReviewCommentDay]=useState(null);
   const pendingByPlayer=PLAYERS.map((p)=>{
     const items=Object.entries(completions).filter(([k,v])=>k.endsWith(`__${p.id}`)&&v.status==="pending").map(([k,v])=>{ const dk=k.split("__")[0]; return {key:k,dayKey:dk,training:trainingData[tKey(dk,p.id)],completion:v}; }).sort((a,b)=>a.dayKey.localeCompare(b.dayKey));
     return {player:p,items};
@@ -2431,6 +4156,7 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
           </div>
         </div>
       )}
+      {reviewCommentDay && <CommentsModal dayKey={reviewCommentDay} comments={comments} setComments={setComments} currentPlayer={currentPlayer} onClose={()=>setReviewCommentDay(null)}/>}      
       <div style={s.adminHeader}><ClipboardCheck size={16} color="#FF5C8A"/><span style={s.adminHeaderText}>verification queue</span></div>
       <div style={s.sectionSubLabel}>{totalPending===0?"nothing waiting":`${totalPending} submission(s) waiting for review`}</div>
       {pendingByPlayer.length===0&&<div style={s.emptyQueue}>all caught up. submissions will show up here.</div>}
@@ -2446,7 +4172,13 @@ function VerificationTab({ trainingData, completions, setCompletions, addToast, 
               <div style={s.verifyCardTop}><div style={s.verifyDate}>{fmtDay(new Date(item.dayKey+"T00:00:00"))}</div><div style={s.verifySubmittedAt}>{fmtRelTime(item.completion.submittedAt)}</div></div>
               <div style={s.verifyTitle}>{item.training?.title||"(deleted)"}</div>
               {item.completion.type==="numeric"&&<div style={s.verifyAmount}>target <span style={{color:"#B8FF4D",fontWeight:700}}>{item.training?.targetAmount}</span> {item.training?.unit||"reps"}</div>}
-              {item.completion.proofUrl&&<button onClick={()=>setProofPreview({url:item.completion.proofUrl,isVideo:/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(item.completion.proofUrl)})} className="bb-pressable" style={{display:"block",background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.25)",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#A78BFA",fontWeight:800,marginBottom:8,cursor:"pointer",width:"100%",textAlign:"center"}}>open proof in app</button>}
+              {(() => {
+                const proofList = Array.isArray(item.completion.proofUrls) && item.completion.proofUrls.length ? item.completion.proofUrls.filter(Boolean) : (item.completion.proofUrl ? [item.completion.proofUrl] : []);
+                return proofList.map((proofUrl, idx) => (
+                  <button key={`${item.key}_proof_${idx}`} onClick={()=>setProofPreview({url:proofUrl,isVideo:/\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(proofUrl)})} className="bb-pressable" style={{display:"block",background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.25)",borderRadius:10,padding:"8px 10px",fontSize:12,color:"#A78BFA",fontWeight:800,marginBottom:8,cursor:"pointer",width:"100%",textAlign:"center"}}>open proof{proofList.length>1?` ${idx+1}`:""} in app</button>
+                ));
+              })()}
+              <button onClick={()=>setReviewCommentDay(item.dayKey)} className="bb-pressable" style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:7,background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"9px 10px",fontSize:12,fontWeight:900,color:"#8B92A8",marginBottom:8,cursor:"pointer"}}><MessageCircle size={15}/> notes {comments?.[item.dayKey]?.length ? `(${comments[item.dayKey].length})` : ""}</button>
               <input value={noteDraft[item.key]||""} onChange={(e)=>setNoteDraft((d)=>({...d,[item.key]:e.target.value}))} placeholder="optional note (shown if rejected)" style={{...s.modalInput,marginTop:10,marginBottom:10}}/>
               <div style={s.verifyActionsRow}>
                 <button onClick={()=>decide(item.key,"rejected")} className="bb-pressable" style={s.rejectBtn}><ThumbsDown size={14}/> needs redo</button>
@@ -2689,7 +4421,20 @@ function SwipeToast({ toast, onDismiss }) {
   );
 }        
           
-function ChatMessage({ msg, isMe, onReact }) {
+function getChatMessageAnimation(style = "slide", isMe = false) {
+  const key = String(style || "slide");
+  const map = {
+    none: "none",
+    slide: isMe ? "chatBubbleInRight .24s cubic-bezier(.16,1,.3,1) both" : "chatBubbleInLeft .24s cubic-bezier(.16,1,.3,1) both",
+    pop: "bbPopCardIn .20s cubic-bezier(.16,1,.3,1) both",
+    float: "bbFloatCardIn .30s cubic-bezier(.16,1,.3,1) both",
+    spring: "bbSpringCardIn .42s cubic-bezier(.16,1,.3,1) both",
+    glow: "chatGlowIn .34s ease both",
+  };
+  return map[key] || map.slide;
+}
+
+function ChatMessage({ msg, isMe, onReact, onReply, onEdit, animationStyle = "slide" }) {
   const player = PLAYERS.find((p) => p.id === msg.playerId);
   const [showPicker, setShowPicker] = useState(false);
   const pressTimer = useRef(null);
@@ -2706,12 +4451,15 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
   const existingReactions = Object.keys(reactionCounts);
   const msgSeed = msg.id ? parseInt(msg.id.slice(-6), 10) || 42 : 42;
   const shuffledEmojis = seededShuffle(REACTION_EMOJIS, msgSeed);
+  const mediaUrl = msg.mediaUrl || msg.media;
+  const mediaType = String(msg.mediaType || "");
+  const mediaIsVideo = mediaType.startsWith("video") || /\.(mp4|mov|webm|m4v)(\?|$)/i.test(String(mediaUrl || ""));
   return (
-    <div style={{ ...s.chatMsgRow, justifyContent: isMe ? "flex-end" : "flex-start", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start" }}>
+    <div style={{ ...s.chatMsgRow, justifyContent: isMe ? "flex-end" : "flex-start", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start", animation:getChatMessageAnimation(animationStyle, isMe), willChange:"transform, opacity" }}>
       {showPicker && (
         <div style={{ display: "flex", gap: 6, background: "#1A1D2E", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 22, padding: "6px 10px", marginBottom: 6, flexWrap: "wrap", maxWidth: 260, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", zIndex: 10 }}>
           {shuffledEmojis.map(emoji => (
-            <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowReactPicker(false); }}
+            <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowPicker(false); }}
               style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", padding: "2px 3px", borderRadius: 8, lineHeight: 1 }}>
               {emoji}
             </button>
@@ -2726,8 +4474,27 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
   onClick={() => { if (showPicker) setShowPicker(false); }}
 >
         {!isMe && <div style={{ ...s.chatAuthor, color: player?.color }}>{player?.name}</div>}
-        <div style={s.chatText}>{msg.text}</div>
-        <div style={{ ...s.chatTime, color: isMe ? "rgba(6,7,13,0.5)" : "#4A5066" }}>{new Date(msg.ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}</div>
+        {msg.replyTo && (
+          <div style={{borderLeft:`3px solid ${PLAYERS.find(p=>p.id===msg.replyTo.playerId)?.color || "#4A5066"}`,padding:"5px 8px",marginBottom:7,background:isMe?"rgba(6,7,13,0.08)":"rgba(255,255,255,0.045)",borderRadius:8,maxWidth:240}}>
+            <div style={{fontSize:10,fontWeight:900,color:isMe?"rgba(6,7,13,0.55)":"#8B92A8"}}>reply to {msg.replyTo.name || PLAYERS.find(p=>p.id===msg.replyTo.playerId)?.name || "player"}</div>
+            <div style={{fontSize:11,color:isMe?"rgba(6,7,13,0.66)":"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{msg.replyTo.text}</div>
+          </div>
+        )}
+        {mediaUrl && (
+          <div style={{marginBottom:msg.text?8:0,borderRadius:12,overflow:"hidden",background:isMe?"rgba(6,7,13,0.10)":"rgba(255,255,255,0.045)",border:`1px solid ${isMe?"rgba(6,7,13,0.10)":"rgba(255,255,255,0.07)"}`}}>
+            {mediaIsVideo
+              ? <video src={mediaUrl} controls playsInline preload="metadata" style={{display:"block",maxWidth:240,width:"100%",maxHeight:260,objectFit:"cover",background:"#000"}}/>
+              : <img src={mediaUrl} alt={msg.mediaName || "chat media"} loading="lazy" decoding="async" style={{display:"block",maxWidth:240,width:"100%",maxHeight:260,objectFit:"cover"}}/>
+            }
+            {msg.mediaName && <div style={{fontSize:9.5,color:isMe?"rgba(6,7,13,0.55)":"#8B92A8",padding:"5px 7px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{msg.mediaName}</div>}
+          </div>
+        )}
+        {msg.text && <div style={s.chatText}>{msg.text}</div>}
+        <div style={{ ...s.chatTime, color: isMe ? "rgba(6,7,13,0.5)" : "#4A5066" }}>{new Date(msg.ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}{msg.editedAt ? " · edited" : ""}</div>
+      </div>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginTop:2}}>
+        <button onClick={()=>onReply?.(msg)} className="bb-pressable" style={{background:"none",border:"none",padding:"4px 2px",fontSize:10,fontWeight:900,color:"#4A5066",cursor:"pointer"}}>reply</button>
+        {isMe && <button onClick={()=>onEdit?.(msg)} className="bb-pressable" style={{background:"none",border:"none",padding:"4px 2px",fontSize:10,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>edit</button>}
       </div>
       {existingReactions.length > 0 && (
         <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
@@ -2902,7 +4669,7 @@ const voicePresenceSessionIdRef = useRef(null);
         return;
       }
       if (window.__bbVoicePresenceHiddenTimer) clearTimeout(window.__bbVoicePresenceHiddenTimer);
-      window.__bbVoicePresenceHiddenTimer = window.setTimeout(markLeftOnClose, 1800);
+      window.__bbVoicePresenceHiddenTimer = window.setTimeout(markLeftOnClose, 1000);
     };
     window.__bbVoicePresencePageHide = markLeftOnClose;
     window.__bbVoicePresenceBeforeUnload = markLeftOnClose;
@@ -3151,7 +4918,9 @@ useEffect(() => {
     const raw = await storeGet(VOICE_PRESENCE_KEY) || {};
     const cleaned = cleanVoicePresenceMap(raw);
     applyVoicePresence(cleaned);
-    if (voicePresenceMapsDiffer(raw, cleaned)) {
+    // Do not rewrite voice presence on every poll. Rewriting this key constantly was burning Supabase resources.
+    // Stale entries are cleaned locally for display; the active caller heartbeat owns the real write.
+    if (false && voicePresenceMapsDiffer(raw, cleaned)) {
       try { await storeSet(VOICE_PRESENCE_KEY, cleaned); } catch (_) {}
     }
   };
@@ -3160,7 +4929,7 @@ useEffect(() => {
   // Do not open a second realtime subscription for voice_presence here.
   // Supabase/Daily can throw if this same channel is already subscribed, so we poll instead.
   const unsub = null;
-  const timer = setInterval(loadVoicePresence, 1000);
+  const timer = setInterval(loadVoicePresence, 15000);
 
   return () => {
     alive = false;
@@ -3422,9 +5191,9 @@ setLoading(false);
   const getVoiceIcon = (pid) => {
     const owned = points?.[pid + "_owned"] || [];
     const equipped = points?.[pid + "_equipped"] || {};
-    const iconId = owned.find(id => equipped[id] && (SHOP_ITEMS.find(i => i.id === id)?.type === "icon" || (id.startsWith("pass_") && getPassRewardForOwnedId(id)?.type === "icon")));
+    const iconId = owned.find(id => equipped[id] && (getAllShopItems().find(i => i.id === id)?.type === "icon" || (id.startsWith("pass_") && getPassRewardForOwnedId(id)?.type === "icon")));
     if (!iconId) return null;
-    return SHOP_ITEMS.find(i => i.id === iconId)?.value || getPassRewardForOwnedId(iconId)?.value || null;
+    return getAllShopItems().find(i => i.id === iconId)?.value || getPassRewardForOwnedId(iconId)?.value || null;
   };
 
   useEffect(() => {
@@ -3850,7 +5619,7 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
           <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:.9}}>3V3 SESSION</div>
           <div style={{fontSize:11,color:"#6F7892",marginTop:2}}>schedule and ping the squad</div>
         </div>
-        <div style={{fontSize:10,color:"#6F7892",fontWeight:800}}>pick a preset</div>
+        <div style={{fontSize:10,color:"#6F7892",fontWeight:800}}></div>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         {[15,30,45,60].map(m => (
@@ -4567,8 +6336,25 @@ function RoomMusicPlayer({ currentPlayer, addToast }) {
   );
 }
 
-function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus, setTypingStatus, setTab, setChatOpen }) {
+function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus, setTypingStatus, setTab, setChatOpen, appCustomizer }) {
+  const cfg = normalizeAppCustomizer(appCustomizer || {});
+  const chatAnimationStyle = cfg.chatAnimationStyle || "slide";
   const [text, setText] = useState("");
+  const [replyTo,setReplyTo]=useState(null);
+  const [mediaFile,setMediaFile]=useState(null);
+  const [mediaPreview,setMediaPreview]=useState(null);
+  const [mediaUploading,setMediaUploading]=useState(false);
+  const mediaInputRef=useRef(null);
+  useEffect(() => () => { if (mediaPreview) URL.revokeObjectURL(mediaPreview); }, [mediaPreview]);
+  const pickChatMedia=(file)=>{
+    if(!file)return;
+    const type=String(file.type||"");
+    if(!type.startsWith("image/")&&!type.startsWith("video/")){ addToast?.("upload an image or video", "⚠️"); return; }
+    if(mediaPreview) URL.revokeObjectURL(mediaPreview);
+    setMediaFile(file);
+    setMediaPreview(URL.createObjectURL(file));
+  };
+  const clearChatMedia=()=>{ if(mediaPreview) URL.revokeObjectURL(mediaPreview); setMediaPreview(null); setMediaFile(null); if(mediaInputRef.current) mediaInputRef.current.value=""; };
 useEffect(() => {
   if (!text.trim()) {
     storeGet("typing").then(current => {
@@ -4622,11 +6408,41 @@ useEffect(() => {
   }, [scrollChatToBottom]);
 
   const send = async () => {
-    if (!text.trim()) return;
-    const msg = { id: Date.now().toString(), playerId: currentPlayer, text: text.trim(), ts: new Date().toISOString(), reactions: [] };
-    const upd = [...messages, msg];
-    setMessages(upd); await storeSetWithPush("chat", upd); setText("");
-    addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name}: ${text.trim()}`, "💬");
+    const cleanText = text.trim();
+    if ((!cleanText && !mediaFile) || !currentPlayer || mediaUploading) return;
+    let mediaUrl = "";
+    let mediaType = "";
+    let mediaName = "";
+    try {
+      if (mediaFile) {
+        setMediaUploading(true);
+        const uploaded = await uploadPostImage(mediaFile);
+        mediaUrl = typeof uploaded === "string" ? uploaded : (uploaded?.url || uploaded?.publicUrl || uploaded?.path || "");
+        if (!mediaUrl) throw new Error("media upload failed");
+        mediaType = mediaFile.type || "";
+        mediaName = mediaFile.name || "attachment";
+      }
+      const msg = { id: `${currentPlayer}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, playerId: currentPlayer, text: cleanText, mediaUrl, mediaType, mediaName, ts: new Date().toISOString(), reactions: [], replyTo: replyTo ? { id: replyTo.id, playerId: replyTo.playerId, name: PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player", text: String(replyTo.text || "").slice(0, 120) } : null };
+      setText("");
+      setReplyTo(null);
+      clearChatMedia();
+      const optimistic = [...(Array.isArray(messages) ? messages : []), msg];
+      setMessages(optimistic);
+      const fresh = await storeGet("chat").catch(() => null);
+      const base = Array.isArray(fresh) && fresh.length >= (Array.isArray(messages) ? messages.length : 0) ? fresh : (Array.isArray(messages) ? messages : []);
+      const merged = [...base.filter(m => m?.id !== msg.id), msg]
+        .filter(Boolean)
+        .slice(-300)
+        .sort((a, b) => new Date(a.ts || 0) - new Date(b.ts || 0));
+      setMessages(merged);
+      await storeSetWithPush("chat", merged);
+      addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name}: ${cleanText || (mediaType.startsWith("video") ? "sent a video" : "sent an image")}`, "💬");
+    } catch (err) {
+      console.error("chat send failed", err);
+      addToast?.("chat send failed — try again", "⚠️");
+    } finally {
+      setMediaUploading(false);
+    }
   };
 
   const onReact = async (msgId, emoji) => {
@@ -4639,12 +6455,23 @@ useEffect(() => {
     setMessages(upd); await storeSetWithPush("chat", upd);
   };
 
+  const onEdit = async (msg) => {
+    if (!msg || msg.playerId !== currentPlayer) return;
+    const nextText = window.prompt("edit message", msg.text || "");
+    if (nextText === null) return;
+    const clean = nextText.trim();
+    if (!clean && !msg.mediaUrl) return;
+    const upd = (messages || []).map(m => m.id === msg.id ? { ...m, text:clean, editedAt:new Date().toISOString() } : m);
+    setMessages(upd);
+    await storeSetWithPush("chat", upd);
+  };
+
 return (
     <div className="bb-tab-content" style={s.chatTabWrap}>
       <div style={{...s.chatHeader, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
         <div>
           <div style={s.sectionLabel}>team chat</div>
-          <div style={s.sectionSubLabel}>long press a message to react</div>
+          <div style={s.sectionSubLabel}>send text, images, videos · long press to react</div>
         </div>
 <button onClick={()=>{ setChatOpen(false); setTab("room"); }} className="bb-pressable"
   style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"7px 12px",fontSize:11,fontWeight:700,color:"#B8FF4D",cursor:"pointer",display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
@@ -4653,7 +6480,7 @@ return (
       </div>
       <div ref={chatScrollBoxRef} style={{...s.chatScroll, paddingBottom: chatKeyboardOpen ? 96 : 18}}>
         {messages.length === 0 && <div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
-        {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} />)}
+        {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} onEdit={onEdit} animationStyle={chatAnimationStyle} onReply={(msg)=>{ setReplyTo(msg); setText(t => t || ""); setTimeout(()=>document.getElementById("bb-team-chat-input")?.focus(), 40); }} />)}
         {(() => {
           const now = Date.now();
           const typers = Object.entries(typingStatus)
@@ -4680,45 +6507,92 @@ return (
         })()}
         <div ref={scrollRef} />
       </div>
-      <div style={s.chatInputRow}>
-        <input value={text} onFocus={() => { setChatKeyboardOpen(true); [60, 220, 420].forEach(ms => setTimeout(() => scrollChatToBottom("smooth"), ms)); }} onBlur={() => setTimeout(() => setChatKeyboardOpen(false), 140)} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="message the team..." style={s.chatInput} />
-        <button onClick={send} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}><Send size={16} /></button>
+      <div style={{display:"flex",flexDirection:"column",background:"rgba(6,7,13,0.96)",borderTop:"1px solid rgba(255,255,255,0.08)",paddingBottom:"max(12px, env(safe-area-inset-bottom))",flexShrink:0,position:"relative",zIndex:5}}>
+        {mediaPreview && (
+          <div style={{margin:"10px 16px 0",background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,padding:8,display:"flex",alignItems:"center",gap:10,animation:"chatFadeIn .16s ease"}}>
+            <div style={{width:54,height:54,borderRadius:11,overflow:"hidden",background:"#000",flexShrink:0}}>
+              {String(mediaFile?.type||"").startsWith("video/") ? <video src={mediaPreview} muted playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <img src={mediaPreview} alt="chat upload" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
+            </div>
+            <div style={{flex:1,minWidth:0}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mediaFile?.name || "attachment"}</div><div style={{fontSize:10,color:"#8B92A8",marginTop:2}}>{String(mediaFile?.type||"").startsWith("video/") ? "video" : "image"} ready to send</div></div>
+            <button onClick={clearChatMedia} className="bb-pressable" style={{background:"none",border:"none",color:"#4A5066",cursor:"pointer",fontWeight:900}}>×</button>
+          </div>
+        )}
+        {replyTo && (
+          <div style={{margin:"10px 16px 0",background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"8px 10px",display:"flex",alignItems:"center",gap:8}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:10,color:PLAYERS.find(p=>p.id===replyTo.playerId)?.color || "#8B92A8",fontWeight:900}}>replying to {PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player"}</div>
+              <div style={{fontSize:11,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{replyTo.text}</div>
+            </div>
+            <button onClick={()=>setReplyTo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#4A5066",cursor:"pointer",fontWeight:900}}>×</button>
+          </div>
+        )}
+        <div style={{...s.chatInputRow,borderTop:"none",paddingBottom:0}}>
+          <input ref={mediaInputRef} type="file" accept={CHAT_MEDIA_ACCEPT} onChange={(e)=>pickChatMedia(e.target.files?.[0])} style={{display:"none"}} />
+          <button onClick={()=>mediaInputRef.current?.click()} className="bb-pressable" style={{width:42,height:42,borderRadius:14,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.05)",color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}} title="attach image or video"><ImageIcon size={17}/></button>
+          <input id="bb-team-chat-input" value={text} onFocus={() => { setChatKeyboardOpen(true); [60, 220, 420].forEach(ms => setTimeout(() => scrollChatToBottom("smooth"), ms)); }} onBlur={() => setTimeout(() => setChatKeyboardOpen(false), 140)} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder={replyTo ? `reply to ${PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player"}...` : "message the team..."} style={s.chatInput} />
+          <button onClick={send} disabled={mediaUploading || (!text.trim() && !mediaFile)} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}>{mediaUploading ? <div style={{width:15,height:15,borderRadius:"50%",border:"2px solid rgba(6,7,13,.25)",borderTopColor:"#06070D",animation:"spin .7s linear infinite"}}/> : <Send size={16} />}</button>
+        </div>
       </div>
     </div>
   );
 }
 // ===================== Social Tab =====================
 function SocialComposer({ currentPlayer, onPost, onClose }) {
-  const [caption,setCaption]=useState(""); const [file,setFile]=useState(null); const [previewUrl,setPreviewUrl]=useState(null); const [uploading,setUploading]=useState(false);
+  const [caption,setCaption]=useState("");
+  const [file,setFile]=useState(null);
+  const [previewUrl,setPreviewUrl]=useState(null);
+  const [uploading,setUploading]=useState(false);
   const fileRef=useRef(null);
-  const pickFile=(e)=>{ const f=e.target.files?.[0]; if(!f)return; setFile(f); setPreviewUrl(URL.createObjectURL(f)); };
-  const submit=async()=>{ if(!file&&!caption.trim())return; setUploading(true); await onPost({caption:caption.trim(),file}); setUploading(false); onClose(); };
-  return (
-    <div style={s.modalOverlay} onClick={onClose}><div style={s.modalBox} onClick={(e)=>e.stopPropagation()}>
-      <div style={s.modalHeader}>
-        <div style={s.modalTitle}>new post</div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <button onClick={submit} disabled={(!file&&!caption.trim())||uploading} className="bb-pressable bb-glow-lime bb-force-dark" style={{background:"#B8FF4D",border:"none",borderRadius:12,padding:"8px 12px",fontSize:11,fontWeight:900,cursor:"pointer",opacity:((!file&&!caption.trim())||uploading)?0.4:1}}>
-            {uploading?"POSTING":"POST"}
-          </button>
-          <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+  const pickFile=(e)=>{
+    const f=e.target.files?.[0];
+    if(!f)return;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setFile(f);
+    setPreviewUrl(URL.createObjectURL(f));
+  };
+  const submit=async()=>{
+    if(uploading || (!file&&!caption.trim()))return;
+    setUploading(true);
+    try {
+      await onPost({caption:caption.trim(),file});
+      onClose();
+    } finally {
+      setUploading(false);
+    }
+  };
+  const modal = (
+    <div
+      style={{...s.modalOverlay,zIndex:5000,alignItems:"flex-start",justifyContent:"center",padding:"calc(env(safe-area-inset-top) + 84px) 16px max(18px, env(safe-area-inset-bottom))",background:"rgba(0,0,0,0.58)",backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",overflowY:"auto"}}
+      onClick={onClose}
+    >
+      <div
+        style={{...s.modalBox,width:"100%",maxWidth:450,borderRadius:24,border:"1px solid rgba(167,139,250,0.26)",borderBottom:"1px solid rgba(167,139,250,0.18)",maxHeight:"calc(100dvh - env(safe-area-inset-top) - 104px)",overflowY:"auto",paddingBottom:"max(22px, env(safe-area-inset-bottom))",boxShadow:"0 24px 80px rgba(0,0,0,0.58), 0 0 0 1px rgba(167,139,250,0.06)",animation:"dropDown .2s cubic-bezier(.2,.8,.2,1)"}}
+        onClick={(e)=>e.stopPropagation()}
+      >
+        <div style={s.modalHeader}>
+          <div style={s.modalTitle}>new post</div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button>
+          </div>
         </div>
+        <input ref={fileRef} type="file" accept="image/*,video/*" onChange={pickFile} style={{display:"none"}}/>
+        <button onClick={()=>fileRef.current?.click()} className="bb-pressable" style={{...s.imagePickBtn,minHeight:190,background:"rgba(255,255,255,0.035)",border:"1px dashed rgba(167,139,250,0.28)"}}>
+          {previewUrl
+            ? file?.type?.startsWith("video/")
+              ? <video src={previewUrl} style={s.imagePreview} controls muted playsInline/>
+              : <img src={previewUrl} alt="preview" style={s.imagePreview}/>
+            : <><ImageIcon size={22} color="#A78BFA"/><span style={{color:"#8B92A8",fontSize:13,marginTop:6}}>tap to add a photo or video</span></>}
+        </button>
+        <div style={s.modalLabel}>caption</div>
+        <textarea value={caption} onChange={(e)=>setCaption(e.target.value)} placeholder="what happened..." style={{...s.modalInput,minHeight:76,resize:"vertical"}}/>
+        <button onClick={submit} disabled={(!file&&!caption.trim())||uploading} className="bb-pressable bb-glow-lime bb-force-dark" style={{...s.primaryBtn,background:"#B8FF4D",color:"#06070D",opacity:((!file&&!caption.trim())||uploading)?0.4:1,marginTop:14}}>
+          {uploading?"uploading...":"post to team"}
+        </button>
       </div>
-      <input ref={fileRef} type="file" accept="image/*,video/*" onChange={pickFile} style={{display:"none"}}/>
-      <button onClick={()=>fileRef.current?.click()} className="bb-pressable" style={s.imagePickBtn}>
-        {previewUrl
-  ? file?.type?.startsWith("video/")
-    ? <video src={previewUrl} style={s.imagePreview} controls muted playsInline/>
-    : <img src={previewUrl} alt="preview" style={s.imagePreview}/>
- : <><ImageIcon size={22} color="#4A5066"/><span style={{color:"#4A5066",fontSize:13,marginTop:6}}>tap to add a photo or video</span></>}
-      </button>
-      <div style={s.modalLabel}>caption</div>
-      <textarea value={caption} onChange={(e)=>setCaption(e.target.value)} placeholder="what happened..." style={{...s.modalInput,minHeight:70,resize:"vertical"}}/>
-      <button onClick={submit} disabled={(!file&&!caption.trim())||uploading} className="bb-pressable bb-glow-lime bb-force-dark" style={{...s.primaryBtn,background:"#B8FF4D",color:"#06070D",opacity:((!file&&!caption.trim())||uploading)?0.4:1,position:"sticky",bottom:0,zIndex:5}}>
-        {uploading?"uploading...":"post to team"}
-      </button>
-    </div></div>
+    </div>
   );
+  return typeof document !== "undefined" ? createPortal(modal, document.body) : modal;
 }
 const POST_IMAGE_CACHE = new Set();
 
@@ -4849,12 +6723,23 @@ function PostFullscreenModal({ post, currentPlayer, onToggleHeart, onClose }) {
   const player = PLAYERS.find((p) => p.id === post.playerId);
   const hearted = (post.hearts || []).includes(currentPlayer);
   const [swipeOffset, setSwipeOffset] = useState(0);
-const [imgLoaded, setImgLoaded] = useState(false);
+const [imgLoaded, setImgLoaded] = useState(() => !post?.image || post?.isVideo || POST_IMAGE_CACHE.has(post?.image));
   const [zoom, setZoom] = useState(1);
   const pinchStartDistance = useRef(0);
   const pinchStartZoom = useRef(1);
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
+
+  useEffect(() => {
+    if (!post?.image || post?.isVideo) { setImgLoaded(true); return; }
+    if (POST_IMAGE_CACHE.has(post.image)) { setImgLoaded(true); return; }
+    setImgLoaded(false);
+    const img = new Image();
+    img.onload = () => { POST_IMAGE_CACHE.add(post.image); setImgLoaded(true); };
+    img.onerror = () => { POST_IMAGE_CACHE.add(post.image); setImgLoaded(true); };
+    img.decoding = "async";
+    img.src = post.image;
+  }, [post?.image, post?.isVideo]);
 
   const getTouchDistance = (touches) => {
     if (!touches || touches.length < 2) return 0;
@@ -4909,7 +6794,7 @@ const [imgLoaded, setImgLoaded] = useState(false);
     setZoom(next);
   };
 
-  return (
+  const modal = (
     <div
       onClick={onClose}
       onTouchStart={handleTouchStart}
@@ -4944,7 +6829,7 @@ const [imgLoaded, setImgLoaded] = useState(false);
   )}
   {post.image && (post.isVideo
     ? <video src={post.image} style={{ maxWidth:"100%", maxHeight:"100%", objectFit:"contain" }} controls muted playsInline loop autoPlay/>
-    : <img src={post.image} alt="post" onLoad={()=>setImgLoaded(true)} onDoubleClick={toggleZoom} style={{ maxWidth:zoom > 1.02 ? "none" : "100%", maxHeight:zoom > 1.02 ? "none" : "100%", width:zoom > 1.02 ? `${100 * zoom}%` : "auto", height:"auto", objectFit:"contain", opacity: imgLoaded ? 1 : 0, transition:"opacity .2s ease, width .16s ease", cursor:zoom > 1.02 ? "zoom-out" : "zoom-in" }}/>
+    : <img src={post.image} alt="post" onLoad={()=>{ POST_IMAGE_CACHE.add(post.image); setImgLoaded(true); }} onError={()=>setImgLoaded(true)} onDoubleClick={toggleZoom} style={{ maxWidth:zoom > 1.02 ? "none" : "100%", maxHeight:zoom > 1.02 ? "none" : "100%", width:zoom > 1.02 ? `${100 * zoom}%` : "auto", height:zoom > 1.02 ? "auto" : "auto", objectFit:"contain", opacity: imgLoaded ? 1 : 0, transition:"opacity .2s ease, width .16s ease", cursor:zoom > 1.02 ? "zoom-out" : "zoom-in", display:"block" }}/>
   )}
 </div>
 {post.caption && (
@@ -4958,22 +6843,39 @@ const [imgLoaded, setImgLoaded] = useState(false);
 )}
   </div>
   );
+  return typeof document !== "undefined" ? createPortal(modal, document.body) : modal;
 }
 
 
 function PostCommentsModal({ post, onAddComment, onHeartComment, currentPlayer, onClose }) {
   const [text,setText]=useState("");
-  const submit=()=>{ if(!text.trim())return; onAddComment(post.id,text.trim()); setText(""); };
-  return (
-    <div style={s.modalOverlay} onClick={onClose}><div style={{...s.modalBox,maxHeight:"75vh",display:"flex",flexDirection:"column"}} onClick={(e)=>e.stopPropagation()}>
-      <div style={s.modalHeader}><div style={s.modalTitle}>comments</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
-      <div style={{flex:1,overflowY:"auto",marginBottom:12}}>
-        {!(post.comments||[]).length&&<div style={s.chatEmpty}>no comments yet.</div>}
-       {(post.comments||[]).map((c)=>{ const p=PLAYERS.find((pl)=>pl.id===c.playerId); const hearted=(c.hearts||[]).includes(currentPlayer); return <div key={c.id} style={{...s.commentItem,justifyContent:"space-between",alignItems:"flex-start"}}><div style={{display:"flex",gap:8,flex:1}}><div style={{width:6,height:6,borderRadius:99,background:p?.color,marginTop:6,flexShrink:0}}/><div><div style={{fontSize:12,fontWeight:700,color:p?.color}}>{p?.name}</div><div style={{fontSize:14,color:"#E8ECF4"}}>{c.text}</div></div></div><button onClick={()=>onHeartComment(post.id,c.id)} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,flexShrink:0,padding:"2px 4px"}}><Heart size={14} color={hearted?"#FF5C8A":"#4A5066"} fill={hearted?"#FF5C8A":"none"}/><span style={{fontSize:11,color:hearted?"#FF5C8A":"#4A5066"}}>{(c.hearts||[]).length||""}</span></button></div>; })}
+  const [replyTo,setReplyTo]=useState(null);
+  const submit=()=>{
+    if(!text.trim())return;
+    onAddComment(post.id,text.trim(),replyTo ? { id: replyTo.id, playerId: replyTo.playerId, name: PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player", text: String(replyTo.text || "").slice(0, 120) } : null);
+    setText("");
+    setReplyTo(null);
+  };
+  const modal = (
+    <div
+      style={{...s.modalOverlay,zIndex:5000,alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.62)",backdropFilter:"blur(10px)",WebkitBackdropFilter:"blur(10px)",padding:"0 12px max(10px, env(safe-area-inset-bottom))"}}
+      onClick={onClose}
+    >
+      <div
+        style={{...s.modalBox,width:"100%",maxWidth:480,maxHeight:"72dvh",display:"flex",flexDirection:"column",paddingBottom:"max(18px, env(safe-area-inset-bottom))",overflow:"hidden",borderRadius:"24px",border:"1px solid rgba(255,255,255,0.10)",borderBottom:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 26px 80px rgba(0,0,0,0.58)",animation:"modalSheetUp .2s cubic-bezier(.2,.8,.2,1)"}}
+        onClick={(e)=>e.stopPropagation()}
+      >
+        <div style={s.modalHeader}><div style={s.modalTitle}>comments</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
+        <div style={{flex:1,overflowY:"auto",marginBottom:12,paddingRight:2}}>
+          {!(post.comments||[]).length&&<div style={s.chatEmpty}>no comments yet.</div>}
+          {(post.comments||[]).map((c)=>{ const p=PLAYERS.find((pl)=>pl.id===c.playerId); const hearted=(c.hearts||[]).includes(currentPlayer); return <div key={c.id} style={{...s.commentItem,justifyContent:"space-between",alignItems:"flex-start"}}><div style={{display:"flex",gap:8,flex:1}}><div style={{width:6,height:6,borderRadius:99,background:p?.color,marginTop:6,flexShrink:0}}/><div style={{flex:1,minWidth:0}}><div style={{fontSize:12,fontWeight:700,color:p?.color}}>{p?.name}</div>{c.replyTo&&<div style={{borderLeft:`3px solid ${PLAYERS.find(pl=>pl.id===c.replyTo.playerId)?.color || "#4A5066"}`,padding:"4px 7px",margin:"3px 0 5px",background:"rgba(255,255,255,0.045)",borderRadius:8}}><div style={{fontSize:10,color:"#8B92A8",fontWeight:900}}>reply to {c.replyTo.name || PLAYERS.find(pl=>pl.id===c.replyTo.playerId)?.name || "player"}</div><div style={{fontSize:11,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.replyTo.text}</div></div>}<div style={{fontSize:14,color:"#E8ECF4"}}>{c.text}</div><button onClick={()=>setReplyTo(c)} className="bb-pressable" style={{background:"none",border:"none",padding:"5px 0 0",fontSize:10,fontWeight:900,color:"#4A5066",cursor:"pointer"}}>reply</button></div></div><button onClick={()=>onHeartComment(post.id,c.id)} style={{background:"none",border:"none",cursor:"pointer",display:"flex",alignItems:"center",gap:4,flexShrink:0,padding:"2px 4px"}}><Heart size={14} color={hearted?"#FF5C8A":"#4A5066"} fill={hearted?"#FF5C8A":"none"}/><span style={{fontSize:11,color:hearted?"#FF5C8A":"#4A5066"}}>{(c.hearts||[]).length||""}</span></button></div>; })}
+        </div>
+        {replyTo&&<div style={{background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"8px 10px",marginBottom:8,display:"flex",alignItems:"center",gap:8}}><div style={{flex:1,minWidth:0}}><div style={{fontSize:10,color:PLAYERS.find(p=>p.id===replyTo.playerId)?.color || "#8B92A8",fontWeight:900}}>replying to {PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player"}</div><div style={{fontSize:11,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{replyTo.text}</div></div><button onClick={()=>setReplyTo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#4A5066",cursor:"pointer",fontWeight:900}}>×</button></div>}
+        <div style={s.chatInputRow}><input value={text} autoFocus onChange={(e)=>setText(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&submit()} placeholder={replyTo?`reply to ${PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player"}...`:"add a comment..."} style={s.chatInput}/><button onClick={submit} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}><Send size={16}/></button></div>
       </div>
-      <div style={s.chatInputRow}><input value={text} onChange={(e)=>setText(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&submit()} placeholder="add a comment..." style={s.chatInput}/><button onClick={submit} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}><Send size={16}/></button></div>
-    </div></div>
+    </div>
   );
+  return typeof document !== "undefined" ? createPortal(modal, document.body) : modal;
 }
 function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats, deepLink, onDeepLinkHandled }) {
   const userColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
@@ -4986,6 +6888,7 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
   const [parlayWager, setParlayWager] = useState(10);
   const [showParlay, setShowParlay] = useState(false);
   const [showAllTeammateBets, setShowAllTeammateBets] = useState(false);
+  const [ownBetModeFilter, setOwnBetModeFilter] = useState("all");
   const [openBetDays, setOpenBetDays] = useState({});
   const [openParlayRows, setOpenParlayRows] = useState({});
   const socialSwipeRef = useRef({ x:0, y:0 });
@@ -5087,8 +6990,8 @@ const reactToPost = async (postId, emoji) => {
   };
 
 
-const addComment = async (postId, text) => {
-    const comment = { id: Date.now().toString(), playerId: currentPlayer, text, ts: new Date().toISOString(), hearts: [] };
+const addComment = async (postId, text, replyTo = null) => {
+    const comment = { id: Date.now().toString(), playerId: currentPlayer, text, ts: new Date().toISOString(), hearts: [], replyTo };
     const upd = posts.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), comment] } : p);
     setPosts(upd);
     await storeSet("posts", upd);
@@ -5134,7 +7037,31 @@ const addComment = async (postId, text) => {
     return Number.isFinite(numericId) ? numericId : 0;
   };
   const sortBetsNewestFirst = (list = []) => [...list].sort((a, b) => getBetTime(b) - getBetTime(a));
-  const teammateBets = (bets || []).filter(b => b.bettorId !== currentPlayer && !clearedTeammateBetIds.includes(b.id));
+  const clearedOwnBetIds = Array.isArray(points?.[currentPlayer + "_clearedOwnBetIds"]) ? points[currentPlayer + "_clearedOwnBetIds"] : [];
+  const getLiveBetStatus = (bet = {}) => {
+    if (!bet || bet.status !== "open") return bet?.status || "open";
+    const res = resolveSingleBet(bet, stats);
+    if (res?.status === "won" || res?.status === "lost") return res.status;
+    if (res?.status === "void") return betHasTargetGame(bet, stats) ? "void" : "open";
+    return "open";
+  };
+  const getBetNumbersText = (bet = {}) => {
+    const status = getLiveBetStatus(bet);
+    const wager = Number(bet?.wager || 0);
+    const wonAmount = status === "open" ? Number(bet?.payout || 0) : status === "won" ? Number(bet?.payout || 0) : status === "void" ? wager : 0;
+    return `${wager} → ${wonAmount}`;
+  };
+  const renderBetNumbers = (bet = {}) => {
+    const status = getLiveBetStatus(bet);
+    const color = status === "won" ? "#7CFFB2" : status === "lost" ? "#FF5C8A" : status === "void" ? "#8B92A8" : "#FFD166";
+    return <div style={{fontSize:10,fontWeight:900,color,background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:99,padding:"4px 8px",flexShrink:0}}>{getBetNumbersText(bet)}</div>;
+  };
+  const renderLegStatusPill = (result = {}) => {
+    const st = result?.status === "won" ? "WIN" : result?.status === "lost" ? "LOSS" : result?.status === "void" ? "VOID" : "OPEN";
+    const color = st === "WIN" ? "#7CFFB2" : st === "LOSS" ? "#FF5C8A" : st === "VOID" ? "#8B92A8" : "#FFD166";
+    return <span style={{fontSize:9,fontWeight:900,color,background:st === "WIN" ? "rgba(124,255,178,0.10)" : st === "LOSS" ? "rgba(255,92,138,0.10)" : st === "VOID" ? "rgba(139,146,168,0.10)" : "rgba(255,209,102,0.10)",borderRadius:99,padding:"3px 7px",flexShrink:0}}>{st}</span>;
+  };
+  const teammateBets = (bets || []).filter(b => b.bettorId !== currentPlayer && !clearedTeammateBetIds.includes(b.id) && getLiveBetStatus(b) === "open");
   const sortedTeammateBets = sortBetsNewestFirst(teammateBets);
   const visibleTeammateBets = showAllTeammateBets ? sortedTeammateBets : sortedTeammateBets.slice(0, 5);
   const hiddenTeammateBetCount = Math.max(sortedTeammateBets.length - visibleTeammateBets.length, 0);
@@ -5146,6 +7073,17 @@ const addComment = async (postId, text) => {
     await storeSet("points", upd);
     setParlayLegs([]);
     addToast?.("teammate bets cleared", "✓");
+  };
+
+  const clearOwnBets = async () => {
+    const ids = (bets || []).filter(b => b.bettorId === currentPlayer).map(b => b.id).filter(Boolean);
+    if (!ids.length) return;
+    const upd = { ...points, [currentPlayer + "_clearedOwnBetIds"]: Array.from(new Set([...clearedOwnBetIds, ...ids])) };
+    setPoints(upd);
+    await storeSet("points", upd);
+    setOpenBetDays({});
+    setOpenParlayRows({});
+    addToast?.("your bets cleared", "✓");
   };
 
   const copyBet = (bet) => {
@@ -5171,12 +7109,18 @@ const addComment = async (postId, text) => {
       odds: copiedBet.odds,
       status: "open",
       placedAt: new Date().toISOString(),
-      settleAt: getBetSettleAt(copiedBet),
+      settleAt: nextTenAmIso(),
       targetMode: copiedBet.targetMode || copiedBet.mode || getBetMode(copiedBet),
       targetText: copiedBet.targetText || "",
       duoIds: copiedBet.duoIds || null,
       duoLabel: copiedBet.duoLabel || "",
       combined: !!copiedBet.combined,
+      statKeysAtPlacement: getBetSeenGameKeysForPlacement(stats, {
+        playerId: copiedBet.playerId,
+        targetMode: copiedBet.targetMode || copiedBet.mode || getBetMode(copiedBet),
+        duoIds: copiedBet.duoIds || null,
+        combined: !!copiedBet.combined,
+      }),
       copiedFrom: copiedBet.bettorId,
     };
     const newPts = myPoints - wager;
@@ -5194,7 +7138,7 @@ const addComment = async (postId, text) => {
   const addParlayLeg = (bet) => {
     if (parlayLegs.find(l => l.id === bet.id)) {
       setParlayLegs(prev => prev.filter(l => l.id !== bet.id));
-    } else if (parlayLegs.length < 4) {
+    } else if (parlayLegs.length < PARLAY_MAX_LEGS) {
       setParlayLegs(prev => [...prev, bet]);
     }
   };
@@ -5205,7 +7149,7 @@ const addComment = async (postId, text) => {
     return mult * oddsDecimal;
   }, 1);
 
-  const parlayPayout = Math.round(parlayWager * parlayMultiplier);
+  const parlayPayout = capParlayPayout(Math.round(parlayWager * parlayMultiplier));
 
   const placeParlay = async () => {
     if (parlayLegs.length < 2) return;
@@ -5215,9 +7159,11 @@ const addComment = async (postId, text) => {
       id: Date.now().toString(),
       bettorId: currentPlayer,
       isParlay: true,
-      legs: parlayLegs.map(l => ({ playerId: l.playerId, playerName: l.playerName, field: l.field, fieldLabel: l.fieldLabel || l.field, line: l.line, side: l.side, odds: l.odds, targetMode: l.targetMode || l.mode || getBetMode(l), targetText: l.targetText || "", duoIds: l.duoIds || null, duoLabel: l.duoLabel || "", combined: !!l.combined })),
+      legs: parlayLegs.map(l => ({ playerId: l.playerId, playerName: l.playerName, field: l.field, fieldLabel: l.fieldLabel || l.field, line: l.line, side: l.side, odds: l.odds, targetMode: l.targetMode || l.mode || getBetMode(l), targetText: l.targetText || "", duoIds: l.duoIds || null, duoLabel: l.duoLabel || "", combined: !!l.combined, statKeysAtPlacement: l.statKeysAtPlacement || getBetSeenGameKeysForPlacement(stats, { playerId: l.playerId, targetMode: l.targetMode || l.mode || getBetMode(l), duoIds: l.duoIds || null, combined: !!l.combined }) })),
       wager: parlayWager,
       payout: parlayPayout,
+      payoutCap: getCurrentParlayMaxPayout(),
+      splitPayoutEnabled: false,
       multiplier: parlayMultiplier.toFixed(2),
       status: "open",
       placedAt: new Date().toISOString(),
@@ -5297,9 +7243,19 @@ const addComment = async (postId, text) => {
 {subTab === "bets" && (
         <>
   <div style={{marginBottom:16}}>
-    <div style={{...s.sectionLabel,marginBottom:10}}>your bets</div>
+    <div style={s.sectionRowHeader}>
+      <div style={s.sectionLabel}>your bets</div>
+      <button onClick={clearOwnBets} className="bb-pressable" style={{...s.newPostBtn,background:"rgba(255,92,138,0.10)",borderColor:"rgba(255,92,138,0.25)",color:"#FF5C8A"}}>clear all</button>
+    </div>
+    <div style={{display:"flex",gap:7,margin:"0 0 10px",flexWrap:"wrap"}}>
+      {["all","1v1","2v2","3v3"].map(mode => (
+        <button key={mode} onClick={()=>setOwnBetModeFilter(mode)} className="bb-pressable" style={{background:ownBetModeFilter===mode?"rgba(255,209,102,0.18)":"rgba(255,255,255,0.045)",border:`1px solid ${ownBetModeFilter===mode?"rgba(255,209,102,0.45)":"rgba(255,255,255,0.07)"}`,borderRadius:99,padding:"6px 10px",fontSize:10,fontWeight:900,color:ownBetModeFilter===mode?"#FFD166":"#8B92A8",cursor:"pointer",textTransform:"uppercase"}}>
+          {mode === "all" ? "all modes" : mode}
+        </button>
+      ))}
+    </div>
     {(() => {
-      const mine = sortBetsNewestFirst((bets || []).filter(b => b.bettorId === currentPlayer));
+      const mine = sortBetsNewestFirst((bets || []).filter(b => b.bettorId === currentPlayer && !clearedOwnBetIds.includes(b.id) && betMatchesModeFilter(b, ownBetModeFilter)));
       if (!mine.length) return <div style={s.emptyQueue}>no bets yet.</div>;
       const grouped = mine.reduce((acc,b)=>{
         const key = dateKey(new Date(getBetTime(b) || Date.now()));
@@ -5312,14 +7268,32 @@ const addComment = async (postId, text) => {
         const dayOpen = openBetDays[dk] ?? idx === 0;
         return (
         <div key={dk} style={{background:"#11131F",borderRadius:16,padding:12,marginBottom:10,border:"1px solid rgba(255,209,102,0.18)"}}>
-          <button onClick={() => setOpenBetDays(prev => ({ ...prev, [dk]: !(prev[dk] ?? idx === 0) }))} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",cursor:"pointer",marginBottom:dayOpen?8:0}}>
-            <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>{fmtDay(new Date(dk+"T00:00:00"))} · {sortedDayBets.length} bet{sortedDayBets.length!==1?"s":""}</div>
-            <ChevronRight size={14} color="#FFD166" style={{transform:dayOpen?"rotate(90deg)":"none",transition:"transform .18s ease"}}/>
-          </button>
+          {(() => {
+            const dayProfit = sortedDayBets.reduce((sum, bet) => {
+              const st = getLiveBetStatus(bet);
+              const wager = Number(bet?.wager || 0);
+              const payout = Number(bet?.payout || 0);
+              if (st === "won") return sum + (payout - wager);
+              if (st === "lost") return sum - wager;
+              return sum;
+            }, 0);
+            const profitColor = dayProfit >= 0 ? "#7CFFB2" : "#FF5C8A";
+            return (
+              <button onClick={() => setOpenBetDays(prev => ({ ...prev, [dk]: !(prev[dk] ?? idx === 0) }))} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,cursor:"pointer",marginBottom:dayOpen?8:0}}>
+                <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",minWidth:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtDay(new Date(dk+"T00:00:00"))} · {sortedDayBets.length} bet{sortedDayBets.length!==1?"s":""}</div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                  <span style={{fontSize:10,fontWeight:900,color:profitColor,background:dayProfit>=0?"rgba(124,255,178,0.10)":"rgba(255,92,138,0.10)",border:`1px solid ${dayProfit>=0?"rgba(124,255,178,0.28)":"rgba(255,92,138,0.28)"}`,borderRadius:99,padding:"4px 8px"}}>{dayProfit>=0?"+":""}{dayProfit}pts</span>
+                  <ChevronRight size={14} color="#FFD166" style={{transform:dayOpen?"rotate(90deg)":"none",transition:"transform .18s ease"}}/>
+                </div>
+              </button>
+            );
+          })()}
           {dayOpen && sortedDayBets.map(b => {
-            const won = b.status === "won";
-            const lost = b.status === "lost";
-            const statusPill = <div style={{fontSize:10,fontWeight:900,color:won?"#7CFFB2":lost?"#FF5C8A":"#FFD166",background:won?"rgba(124,255,178,0.10)":lost?"rgba(255,92,138,0.10)":"rgba(255,209,102,0.10)",borderRadius:99,padding:"4px 8px",flexShrink:0}}>{won?"WIN":lost?"LOSS":"OPEN"}</div>;
+            const displayStatus = getLiveBetStatus(b);
+            const won = displayStatus === "won";
+            const lost = displayStatus === "lost";
+            const voided = displayStatus === "void";
+            const statusPill = <div style={{fontSize:10,fontWeight:900,color:won?"#7CFFB2":lost?"#FF5C8A":voided?"#8B92A8":"#FFD166",background:won?"rgba(124,255,178,0.10)":lost?"rgba(255,92,138,0.10)":voided?"rgba(139,146,168,0.10)":"rgba(255,209,102,0.10)",borderRadius:99,padding:"4px 8px",flexShrink:0}}>{won?"WIN":lost?"LOSS":voided?"VOID":"OPEN"}</div>;
             if (b.isParlay) {
               const legs = Array.isArray(b.legs) ? b.legs : [];
               const rowKey = `${dk}_${b.id}`;
@@ -5329,18 +7303,30 @@ const addComment = async (postId, text) => {
                   <button onClick={() => setOpenParlayRows(prev => ({ ...prev, [rowKey]: !(prev[rowKey] ?? false) }))} className="bb-pressable" style={{width:"100%",background:"rgba(167,139,250,0.055)",border:"1px solid rgba(167,139,250,0.16)",borderRadius:12,padding:"10px 10px",display:"flex",alignItems:"center",gap:8,cursor:"pointer",textAlign:"left"}}>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:12.5,fontWeight:850,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{legs.length || 0}-leg parlay</div>
+                      <div style={{display:"inline-flex",alignItems:"center",marginTop:5,border:"1px solid rgba(255,209,102,0.24)",background:"rgba(255,209,102,0.08)",borderRadius:99,padding:"3px 7px",fontSize:9,fontWeight:1000,color:"#FFD166",textTransform:"uppercase"}}>{formatBetModeLabel(b)} mode</div>
                     </div>
                     <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,flexShrink:0}}>{b.multiplier ? `${b.multiplier}x` : "parlay"}</div>
+                    {renderBetNumbers(b)}
                     {statusPill}
                     <ChevronRight size={14} color="#A78BFA" style={{transform:parlayOpen?"rotate(90deg)":"none",transition:"transform .18s ease",flexShrink:0}}/>
                   </button>
                   {parlayOpen && (
                     <div style={{padding:"8px 2px 0 12px"}}>
-                      {legs.map((leg, i) => (
-                        <div key={`${b.id}_leg_${i}`} style={{fontSize:12.5,fontWeight:800,color:"#E8ECF4",padding:i===0?"0 0 7px":"7px 0",borderTop:i===0?"none":"1px solid rgba(255,255,255,0.045)",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                          {formatSingleBetTitle(leg)}
+                      {legs.map((leg, i) => {
+                        const savedLegResult = Array.isArray(b.legResults) ? b.legResults[i] : null;
+                        const liveComputedLegResult = getParlayLegResult(leg, b, stats);
+                        const liveLegResult = (savedLegResult && savedLegResult.status && savedLegResult.status !== "open") ? savedLegResult : liveComputedLegResult;
+                        const displayLegResult = displayStatus === "open" && liveLegResult?.status === "void" ? { status:"open" } : liveLegResult;
+                        return (
+                        <div key={`${b.id}_leg_${i}`} style={{display:"flex",alignItems:"center",gap:8,padding:i===0?"0 0 7px":"7px 0",borderTop:i===0?"none":"1px solid rgba(255,255,255,0.045)"}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontSize:12.5,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(leg)}</div>
+                            <div style={{fontSize:9,color:"#4A5066",fontWeight:900,marginTop:2,textTransform:"uppercase"}}>{formatBetModeLabel(leg)} mode</div>
+                          </div>
+                          {renderLegStatusPill(displayLegResult)}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -5350,7 +7336,9 @@ const addComment = async (postId, text) => {
               <div key={b.id} style={{display:"flex",alignItems:"center",gap:9,padding:"9px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:12.5,fontWeight:800,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(b)}</div>
+                  <div style={{display:"inline-flex",alignItems:"center",marginTop:5,border:"1px solid rgba(255,209,102,0.24)",background:"rgba(255,209,102,0.08)",borderRadius:99,padding:"3px 7px",fontSize:9,fontWeight:1000,color:"#FFD166",textTransform:"uppercase"}}>{formatBetModeLabel(b)} mode</div>
                 </div>
+                {renderBetNumbers(b)}
                 {statusPill}
               </div>
             );
@@ -5360,141 +7348,7 @@ const addComment = async (postId, text) => {
     })()}
   </div>
 
-          <div style={s.sectionRowHeader}>
-            <div style={s.sectionLabel}>teammate bets</div>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
-              <button onClick={clearTeammateBets} className="bb-pressable" style={{...s.newPostBtn,background:"rgba(255,92,138,0.10)",borderColor:"rgba(255,92,138,0.25)",color:"#FF5C8A"}}>clear all</button>
-              <button onClick={() => setShowParlay(v => !v)} className="bb-pressable bb-glow-violet"
-                style={{ ...s.newPostBtn, background: parlayLegs.length > 0 ? "rgba(255,209,102,0.15)" : `${userColor}18`, borderColor: parlayLegs.length > 0 ? "rgba(255,209,102,0.4)" : `${userColor}55`, color: parlayLegs.length > 0 ? "#FFD166" : userColor }}>
-                🎰 parlay {parlayLegs.length > 0 ? `(${parlayLegs.length} legs)` : ""}
-              </button>
-            </div>
-          </div>
-
-          {/* Parlay builder */}
-          {showParlay && (
-            <div style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 16, border: "1px solid rgba(255,209,102,0.25)" }}>
-              <div style={{ fontSize: 12, color: "#FFD166", fontWeight: 700, letterSpacing: 0.5, marginBottom: 8 }}>PARLAY BUILDER</div>
-              {parlayLegs.length === 0 ? (
-                <div style={{ fontSize: 12, color: "#4A5066", marginBottom: 10 }}>tap + on any bet below to add a leg. up to 4 legs.</div>
-              ) : (
-                <>
-                  {parlayLegs.map((leg, i) => (
-                    <div key={leg.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, background: "rgba(255,255,255,0.03)", borderRadius: 10, padding: "8px 10px" }}>
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 700, color: "#E8ECF4" }}>{formatSingleBetTitle(leg)}</div>
-                        <div style={{ fontSize: 10, color: "#4A5066" }}>{leg.odds}</div>
-                      </div>
-                      <button onClick={() => setParlayLegs(prev => prev.filter((_, idx) => idx !== i))} className="bb-pressable"
-                        style={{ background: "none", border: "none", color: "#FF5C8A", cursor: "pointer" }}><X size={14} /></button>
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10, color: "#4A5066", marginBottom: 4 }}>MULTIPLIER</div>
-                      <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: "#FFD166" }}>{parlayMultiplier.toFixed(2)}x</div>
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10, color: "#4A5066", marginBottom: 4 }}>WAGER</div>
-                      <input type="number" min="1" max="200" inputMode="numeric" value={parlayWager} onChange={e => setParlayWager(clampWager(e.target.value, parlayWager))}
-                        style={{ ...s.modalInput, padding: "8px 10px", fontSize: 14 }} />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 10, color: "#4A5066", marginBottom: 4 }}>TO WIN</div>
-                      <div style={{ fontFamily: "'Oswald',sans-serif", fontSize: 18, fontWeight: 700, color: "#7CFFB2" }}>{parlayPayout}</div>
-                    </div>
-                  </div>
-                  <button onClick={placeParlay} disabled={parlayLegs.length < 2 || (points?.[currentPlayer] || 0) < parlayWager}
-                    className="bb-pressable bb-glow-lime" style={{ ...s.primaryBtn, marginTop: 12, opacity: parlayLegs.length < 2 || (points?.[currentPlayer] || 0) < parlayWager ? 0.4 : 1 }}>
-                    place {parlayLegs.length}-leg parlay — {parlayWager} pts to win {parlayPayout}
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-
-          {sortedTeammateBets.length === 0 && (
-            <div style={s.emptyQueue}>no teammate bets yet — check back after someone visits the boost tab.</div>
-          )}
-
-          {visibleTeammateBets.map(bet => {
-            const bettor = PLAYERS.find(p => p.id === bet.bettorId);
-            const won = bet.status === "won";
-            const lost = bet.status === "lost";
-
-            if (bet.isParlay) {
-              return (
-                <div key={bet.id} style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 10, border: "1px solid rgba(167,139,250,0.2)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                    <div style={{ width: 7, height: 7, borderRadius: 99, background: bettor?.color }} />
-                    <span style={{ fontSize: 12, fontWeight: 700, color: bettor?.color }}>{bettor?.name}</span>
-                    <span style={{ fontSize: 10, color: "#A78BFA", fontWeight: 700, marginLeft: 4 }}>{bet.legs?.length || 0}-leg parlay</span>
-                    <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt || bet.ts)}</span>
-                    {bet.status !== "open" && (
-                      <span style={{ fontSize: 10, fontWeight: 700, color: won ? "#7CFFB2" : "#FF5C8A", background: won ? "rgba(124,255,178,0.1)" : "rgba(255,92,138,0.1)", padding: "2px 7px", borderRadius: 99 }}>
-                        {won ? "WON" : "LOST"}
-                      </span>
-                    )}
-                  </div>
-                  {(bet.legs || []).map((leg, i) => (
-                    <div key={`${bet.id}_leg_${i}`} style={{marginBottom:i===(bet.legs || []).length-1?0:9}}>
-                      <div style={{fontSize:14,fontWeight:850,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{formatSingleBetTitle(leg)}</div>
-                      
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", justifyContent: "space-between", gap:8, marginTop: 12, fontSize: 11, color: "#8B92A8", flexWrap:"wrap" }}>
-                    <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
-                    <span>{bet.multiplier}x multiplier</span>
-                    <span>to win <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{bet.payout} pts</span></span>
-                  </div>
-                </div>
-              );
-            }
-
-            const isInParlay = parlayLegs.find(l => l.id === bet.id);
-            return (
-              <div key={bet.id} style={{ background: "#11131F", borderRadius: 14, padding: 14, marginBottom: 10, border: `1px solid ${bet.status === "open" ? "rgba(255,209,102,0.15)" : won ? "rgba(124,255,178,0.15)" : "rgba(255,92,138,0.1)"}` }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <div style={{ width: 7, height: 7, borderRadius: 99, background: bettor?.color }} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: bettor?.color }}>{bettor?.name}</span>
-                  <span style={{ fontSize: 10, color: "#4A5066", marginLeft: "auto" }}>{fmtRelTime(bet.placedAt || bet.ts)}</span>
-                  {bet.status !== "open" && (
-                    <span style={{ fontSize: 10, fontWeight: 700, color: won ? "#7CFFB2" : "#FF5C8A", background: won ? "rgba(124,255,178,0.1)" : "rgba(255,92,138,0.1)", padding: "2px 7px", borderRadius: 99 }}>
-                      {won ? "WON" : "LOST"}
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#E8ECF4", marginBottom: 6 }}>
-                  {formatBetForDisplay(bet).title}
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8B92A8", marginBottom: 10 }}>
-                  <span>wagered <span style={{ color: "#FFD166", fontWeight: 700 }}>{bet.wager} pts</span></span>
-                  <span>odds <span style={{ color: "#E8ECF4", fontWeight: 700 }}>{bet.odds}</span></span>
-                  <span>to win <span style={{ color: "#7CFFB2", fontWeight: 700 }}>{bet.payout} pts</span></span>
-                </div>
-                {bet.status === "open" && (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={() => copyBet(bet)} className="bb-pressable bb-glow-lime"
-                      style={{ flex: 1, background: "rgba(184,255,77,0.1)", border: "1px solid rgba(184,255,77,0.3)", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, color: "#B8FF4D", cursor: "pointer" }}>
-                      copy bet
-                    </button>
-                    <button onClick={() => addParlayLeg(bet)} className="bb-pressable"
-                      style={{ width: 42, background: isInParlay ? "#FFD166" : "rgba(255,209,102,0.1)", border: `1px solid ${isInParlay ? "#FFD166" : "rgba(255,209,102,0.3)"}`, borderRadius: 10, fontSize: 16, color: isInParlay ? "#06070D" : "#FFD166", cursor: "pointer" }}>
-                      {isInParlay ? "✓" : "+"}
-                    </button>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {sortedTeammateBets.length > 5 && (
-            <button onClick={() => setShowAllTeammateBets(v => !v)} className="bb-pressable bb-glow-violet"
-              style={{ width: "100%", background: "rgba(167,139,250,0.10)", border: "1px solid rgba(167,139,250,0.28)", borderRadius: 12, padding: "10px 12px", marginTop: 2, marginBottom: 12, color: "#A78BFA", fontSize: 12, fontWeight: 900, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-              {showAllTeammateBets ? "show less" : `show ${hiddenTeammateBetCount} older bet${hiddenTeammateBetCount === 1 ? "" : "s"}`}
-              <ChevronRight size={14} style={{ transform: showAllTeammateBets ? "rotate(-90deg)" : "rotate(90deg)", transition: "transform .18s ease" }} />
-            </button>
-          )}
+          {/* teammate bets section removed per request; parlay/bet history stays under your bets only. */}
         </>
       )}
     </div>
@@ -5504,9 +7358,9 @@ const addComment = async (postId, text) => {
 // ===================== Training Comments Modal =====================
 function CommentsModal({ dayKey, comments, setComments, currentPlayer, onClose }) {
   const [text,setText]=useState(""); const dayComments=comments[dayKey]||[];
-  const send=async()=>{ if(!text.trim())return; const comment={id:Date.now().toString(),playerId:currentPlayer,text:text.trim(),ts:new Date().toISOString()}; const upd={...comments,[dayKey]:[...dayComments,comment]}; setComments(upd); await storeSet("comments",upd); setText(""); };
+  const send=async()=>{ if(!text.trim())return; const comment={id:Date.now().toString(),playerId:currentPlayer,text:text.trim(),ts:new Date().toISOString()}; const latest=(await storeGet("comments"))||comments||{}; const latestDay=latest[dayKey]||[]; const upd={...latest,[dayKey]:[...latestDay,comment]}; setComments?.(upd); await storeSetWithPush("comments",upd); setText(""); };
   return (
-    <div style={s.modalOverlay} onClick={onClose}><div style={{...s.modalBox,maxHeight:"75vh",display:"flex",flexDirection:"column"}} onClick={(e)=>e.stopPropagation()}>
+    <div style={{...s.modalOverlay,zIndex:1400,alignItems:"flex-end",background:"rgba(0,0,0,0.62)",backdropFilter:"blur(8px)"}} onClick={onClose}><div style={{...s.modalBox,maxHeight:"68dvh",display:"flex",flexDirection:"column",paddingBottom:"max(18px, env(safe-area-inset-bottom))",overflow:"hidden"}} onClick={(e)=>e.stopPropagation()}>
       <div style={s.modalHeader}><div style={s.modalTitle}>notes & feedback</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
       <div style={{flex:1,overflowY:"auto",marginBottom:12}}>
         {dayComments.length===0&&<div style={s.chatEmpty}>no notes yet.</div>}
@@ -5523,6 +7377,17 @@ function AdminAssignTraining({ dateKeyStr, player, existing, onSave, onClose }) 
   return (
     <div style={s.modalOverlay} onClick={onClose}><div style={s.modalBox} onClick={(e)=>e.stopPropagation()}>
       <div style={s.modalHeader}><div><div style={s.modalTitle}>assign training</div><div style={{fontSize:11.5,color:"#8B92A8",marginTop:2}}>{dateKeyStr} · for <span style={{color:player.color,fontWeight:700}}>{player.name}</span></div></div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+        {[
+          { t:"ranked grind", d:"play a focused ranked block and save one replay from the toughest loss.", n:"games", a:"5" },
+          { t:"freeplay mechanics", d:"15 minutes freeplay: recoveries, fast aerials, half-flips, and clean touches.", n:"minutes", a:"15" },
+          { t:"shooting pack", d:"run the assigned shooting pack and focus on accuracy before power.", n:"shots", a:"30" },
+          { t:"1v1 set", d:"play a 1v1 set and note one kickoff fix plus one shadow defense fix.", n:"games", a:"3" },
+          { t:"replay review", d:"watch one replay and write down two mistakes plus one thing to repeat.", n:"replays", a:"1" },
+          { t:"recovery day", d:"light warmup only: freeplay, casual touches, stretch hands, no tilt queue.", n:"minutes", a:"20" },
+        ].map(tmp => <button key={tmp.t} onClick={()=>{ setTitle(tmp.t); setDescription(tmp.d); setIsNumeric(true); setUnit(tmp.n); setTargetAmount(tmp.a); }} className="bb-pressable" style={{background:"rgba(167,139,250,0.08)",border:"1px solid rgba(167,139,250,0.18)",borderRadius:10,padding:"8px 9px",fontSize:10.5,fontWeight:900,color:"#A78BFA",cursor:"pointer",textAlign:"left"}}>{tmp.t}</button>)}
+      </div>
       <div style={s.modalLabel}>title</div><input value={title} onChange={(e)=>setTitle(e.target.value)} placeholder="e.g. air dribble reps" style={s.modalInput}/>
       <div style={s.modalLabel}>description</div><textarea value={description} onChange={(e)=>setDescription(e.target.value)} placeholder="what to work on..." style={{...s.modalInput,minHeight:80,resize:"vertical"}}/>
       <div style={s.modalLabel}>training pack code (optional)</div><input value={packCode} onChange={(e)=>setPackCode(e.target.value)} placeholder="e.g. A503-26B0-..." style={s.modalInput}/>
@@ -5604,97 +7469,1438 @@ function AdminFutureSetup({ addToast }) {
   );
 }
 
-function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP, parseCredits, setParseCredits, creditRequests, setCreditRequests, navPosition = "top", setNavPosition }) {
-  const [assigning,setAssigning]=useState(null); const [settingMmrFor,setSettingMmrFor]=useState(null); const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
+
+function AdminDailyShopEditor({ adminShopItems, setAdminShopItems, addToast }) {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState("icon");
+  const [bulkPrice, setBulkPrice] = useState("");
+  const tabs = [
+    { id:"icon", label:"icons", types:["icon"] },
+    { id:"color", label:"name", types:["color"] },
+    { id:"title", label:"titles", types:["title"] },
+    { id:"border", label:"borders", types:["border"] },
+    { id:"sound", label:"sounds", types:["sound"] },
+    { id:"background", label:"bgs", types:["background"] },
+  ];
+  const activeTab = tabs.find(t => t.id === tab) || tabs[0];
+  const normalizeShopDraftList = (items) => (Array.isArray(items) ? items : []).map(normalizeAdminShopItem).filter(Boolean);
+  const [shopDraft, setShopDraft] = useState(() => normalizeShopDraftList(adminShopItems));
+  const adminShopRef = useRef(shopDraft);
+  const shopDirtyRef = useRef(false);
+  const shopDirtyClearRef = useRef(null);
+  useEffect(() => {
+    const incoming = normalizeShopDraftList(adminShopItems);
+    if (shopDirtyRef.current) return;
+    adminShopRef.current = incoming;
+    setShopDraft(incoming);
+  }, [adminShopItems]);
+  const currentShop = getDailyShopItems(shopDraft).filter(item => activeTab.types.includes(item.type) && (item.type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(item.id)));
+  const sectionDescHidden = currentShop.length > 0 && currentShop.every(item => !!item.hideDesc);
+  const sectionEmojiHidden = currentShop.length > 0 && currentShop.every(item => !!item.hideEmoji);
+  const hiddenToday = (Array.isArray(shopDraft) ? shopDraft : [])
+    .map(normalizeAdminShopItem)
+    .filter(item => item?.adminDailyHidden && activeTab.types.includes(item.type));
+
+  const persistAdminShopItems = (safeNext) => {
+    try {
+      localStorage.setItem("bb_admin_shop_items_cache", JSON.stringify(safeNext));
+      localStorage.setItem("bb_admin_shop_items_dirty", "1");
+    } catch (_) {}
+    try {
+      window.dispatchEvent(new CustomEvent("bb-admin-shop-updated", { detail: safeNext }));
+      window.dispatchEvent(new StorageEvent("storage", { key:"bb_admin_shop_items_cache", newValue:JSON.stringify(safeNext) }));
+    } catch (_) {}
+    clearTimeout(window.__bbAdminShopSaveTimer);
+    window.__bbAdminShopSaveTimer = setTimeout(() => {
+      storeSet(ADMIN_SHOP_ITEMS_KEY, safeNext)
+        .then(() => storeSet(`${ADMIN_SHOP_ITEMS_KEY}_backup`, safeNext).catch(() => {}))
+        .then(() => { try { localStorage.removeItem("bb_admin_shop_items_dirty"); } catch (_) {} })
+        .catch(() => {});
+    }, 260);
+  };
+
+  const saveAdminItems = async (next, toast = "daily shop updated", icon = "🛍️") => {
+    // Use a ref instead of the last rendered prop. This stops rapid edits/adds from
+    // being based on stale state and deleting boxes you just added.
+    const seen = new Set();
+    const safeNext = (Array.isArray(next) ? next : [])
+      .map(normalizeAdminShopItem)
+      .filter(Boolean)
+      .filter(item => {
+        const id = String(item.id || "");
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .slice(0, 220);
+    adminShopRef.current = safeNext;
+    shopDirtyRef.current = true;
+    if (shopDirtyClearRef.current) clearTimeout(shopDirtyClearRef.current);
+    shopDirtyClearRef.current = setTimeout(() => { shopDirtyRef.current = false; }, 1600);
+    setShopDraft(safeNext);
+    setAdminShopItems?.(safeNext);
+    cacheAdminShopItems(safeNext);
+    persistAdminShopItems(safeNext);
+    if (toast) addToast?.(toast, icon);
+  };
+
+  const upsertAdminOverride = async (item, patch = {}, toast = "item updated", icon = "✏️") => {
+    if (!item?.id) return;
+    const list = Array.isArray(adminShopRef.current) ? adminShopRef.current : [];
+    const existing = list.find(i => i?.id === item.id) || {};
+    const nextItem = normalizeAdminShopItem({
+      ...item,
+      ...existing,
+      ...patch,
+      id:item.id,
+      type:patch.type || existing.type || item.type,
+      emoji:(patch.type || existing.type || item.type) === "icon" ? (patch.value ?? existing.value ?? item.value ?? patch.emoji ?? existing.emoji ?? item.emoji ?? "✨") : "",
+      hideEmoji:(patch.type || existing.type || item.type) === "icon" ? !!(patch.hideEmoji ?? existing.hideEmoji ?? item.hideEmoji) : true,
+      adminEdited:true,
+      updatedAt:new Date().toISOString(),
+    });
+    let replaced = false;
+    const next = list.map(i => {
+      if (i?.id === item.id) { replaced = true; return nextItem; }
+      return i;
+    });
+    if (!replaced) next.unshift(nextItem);
+    await saveAdminItems(next, toast, icon);
+  };
+
+  const updateItemDraft = (item, patch = {}) => {
+    upsertAdminOverride(item, patch, null, "✏️");
+  };
+
+  const moveItem = async (idx, dir) => {
+    const arr = [...currentShop];
+    const nextIdx = idx + dir;
+    if (nextIdx < 0 || nextIdx >= arr.length) return;
+    [arr[idx], arr[nextIdx]] = [arr[nextIdx], arr[idx]];
+    const baseOrder = (tabs.findIndex(t => t.id === tab) + 1) * 1000;
+    const movedIds = new Set(arr.map(i => i.id));
+    const overrides = arr.map((item, order) => normalizeAdminShopItem({
+      ...item,
+      adminDaily:true,
+      adminDailyHidden:false,
+      adminOrder:baseOrder + order,
+      adminEdited:true,
+      updatedAt:new Date().toISOString(),
+    }));
+    const rest = (Array.isArray(adminShopRef.current) ? adminShopRef.current : []).filter(i => !movedIds.has(i?.id));
+    await saveAdminItems([...overrides, ...rest], "daily shop order saved", "↕️");
+  };
+
+  const removeFromToday = async (item) => {
+    await upsertAdminOverride(item, { adminDaily:false, adminDailyHidden:true, adminOrder:99999 }, "removed from today's shop", "➖");
+  };
+
+  const restoreToToday = async (item) => {
+    await upsertAdminOverride(item, { adminDaily:true, adminDailyHidden:false, adminOrder:Date.now() % 100000 }, "restored to daily shop", "➕");
+  };
+
+  const addBlankItemToSection = async () => {
+    const type = activeTab.types?.[0] || "icon";
+    const baseOrder = (tabs.findIndex(t => t.id === tab) + 1) * 1000;
+    const liveSection = getDailyShopItems(adminShopRef.current).filter(item => activeTab.types.includes(item.type) && (item.type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(item.id)));
+    const slotNum = liveSection.length + 1;
+    const id = `admin_${type}_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+    const typeDefaults = {
+      icon: { emoji:"", label:`new icon ${slotNum}`, desc:"", value:"✨", cost:750 },
+      color: { emoji:"", hideEmoji:true, label:`new name color ${slotNum}`, desc:"", value:"#B8FF4D", cost:350 },
+      text_collage: { emoji:"▦", label:`new text collage ${slotNum}`, desc:"3-color letter collage text finish", value:"collage_lime_pink_blue", cost:900, colors:["#B8FF4D","#FF61C1","#4D9EFF"], finish:"glow" },
+      title: { emoji:"", hideEmoji:true, label:`new title ${slotNum}`, desc:"", value:`new title ${slotNum}`, cost:500 },
+      border: { emoji:"", hideEmoji:true, label:`new border ${slotNum}`, desc:"", value:"#B8FF4D", borderColor:"#B8FF4D", cost:1000 },
+      sound: { emoji:"", hideEmoji:true, label:`new sound ${slotNum}`, desc:"", value:`new sound ${slotNum}`, cost:1500 },
+      background: { emoji:"", hideEmoji:true, label:`new background ${slotNum}`, desc:"", value:"void_custom", background:"radial-gradient(circle at 30% 15%, rgba(184,255,77,0.18), transparent 28%), radial-gradient(circle at 70% 80%, rgba(77,158,255,0.14), transparent 32%), linear-gradient(135deg,#05070D,#0B1020)", cost:1600 },
+    };
+    const defaults = typeDefaults[type] || typeDefaults.icon;
+    const newItem = normalizeAdminShopItem({
+      id,
+      type,
+      ...defaults,
+      adminCreated:true,
+      adminEdited:true,
+      adminDaily:true,
+      adminDailyHidden:false,
+      adminOrder:baseOrder + slotNum + (Date.now() % 100) / 1000,
+      updatedAt:new Date().toISOString(),
+    });
+    const next = [newItem, ...(Array.isArray(adminShopRef.current) ? adminShopRef.current : []).filter(i => i?.id !== id)];
+    await saveAdminItems(next, `blank ${activeTab.label} box added`, "➕");
+  };
+
+  const setSectionFieldHidden = async (field, hidden) => {
+    if (!currentShop.length) return;
+    const ids = new Set(currentShop.map(i => i.id));
+    const overrides = currentShop.map((item, order) => normalizeAdminShopItem({
+      ...item,
+      [field]: hidden,
+      adminDaily:true,
+      adminDailyHidden:false,
+      adminOrder: item.adminOrder ?? ((tabs.findIndex(t => t.id === tab) + 1) * 1000 + order),
+      adminEdited:true,
+      updatedAt:new Date().toISOString(),
+    }));
+    const rest = (Array.isArray(adminShopRef.current) ? adminShopRef.current : []).filter(i => !ids.has(i?.id));
+    await saveAdminItems([...overrides, ...rest], `${hidden ? "hidden" : "shown"} ${field === "hideDesc" ? "descriptions" : "emojis"} for ${activeTab.label}`, hidden ? "🙈" : "👁️");
+  };
+
+  const changeCurrentSectionPrice = async () => {
+    const raw = String(bulkPrice || "").replace(/[^0-9.]/g, "");
+    const nextCost = Math.max(0, Math.round(Number(raw) || 0));
+    if (!currentShop.length || !Number.isFinite(nextCost)) return;
+    const ids = new Set(currentShop.map(i => i.id));
+    const baseOrder = (tabs.findIndex(t => t.id === tab) + 1) * 1000;
+    const overrides = currentShop.map((item, order) => normalizeAdminShopItem({
+      ...item,
+      cost: nextCost,
+      adminDaily:true,
+      adminDailyHidden:false,
+      adminOrder: item.adminOrder ?? (baseOrder + order),
+      adminEdited:true,
+      updatedAt:new Date().toISOString(),
+    }));
+    const rest = (Array.isArray(adminShopRef.current) ? adminShopRef.current : []).filter(i => !ids.has(i?.id));
+    await saveAdminItems([...overrides, ...rest], `all ${activeTab.label} prices set to ${nextCost}`, "💰");
+  };
+
+  const cardPreview = (item) => {
+    if (item.type === "background") return <div style={{width:46,height:46,borderRadius:13,background:item.background || getBackgroundPreview(item.value),border:"1px solid rgba(255,255,255,0.12)",boxShadow:"0 10px 24px rgba(0,0,0,0.20)"}}/>;
+    if (item.type === "border") return <div style={{width:46,height:46,borderRadius:13,background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`2px solid ${item.borderColor || item.value || "#B8FF4D"}`,boxShadow:`0 0 14px ${item.borderGlow || item.borderColor || "#B8FF4D"}55`}}/>;
+    if (item.type === "color") return <div style={{width:46,height:46,borderRadius:13,background:item.value || "#B8FF4D",border:"1px solid rgba(255,255,255,0.12)",boxShadow:`0 0 16px ${item.value || "#B8FF4D"}55`}}/>;
+    const fallback = item.type === "icon" ? (item.value || "✨") : item.type === "sound" ? "" : item.type === "title" ? "T" : "";
+    return <div style={{width:46,height:46,borderRadius:13,background:"rgba(255,255,255,0.055)",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:item.type === "sound" ? 12 : item.type === "title" ? 18 : 25,fontWeight:900,color:"#E8ECF4"}}>{fallback}</div>;
+  };
+
+  const inlineInput = (item, field, fallback, extraStyle = {}, labelText = "") => (
+    <input
+      value={fallback ?? ""}
+      title={labelText || field}
+      onChange={(e) => {
+        const nextVal = field === "cost" ? Math.max(0, Number(e.target.value) || 0) : e.target.value;
+        const patch = { [field]:nextVal, adminDaily:true, adminDailyHidden:false };
+        if (field === "value" && item.type === "icon") patch.emoji = nextVal;
+        updateItemDraft(item, patch);
+      }}
+      onKeyDown={(e)=>{ if (e.key === "Enter") e.currentTarget.blur(); }}
+      style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:9,padding:"7px 8px",fontSize:11,fontWeight:800,color:"#E8ECF4",minWidth:0,width:"100%",...extraStyle}}
+    />
+  );
+
+  return (
+    <div style={{background:"linear-gradient(135deg,#101522,#090B14)",border:"1px solid rgba(184,255,77,0.18)",borderRadius:18,padding:13,marginBottom:14,boxShadow:"0 16px 36px rgba(0,0,0,0.22)"}}>
+      <button onClick={()=>setOpen(v=>!v)} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,cursor:"pointer",textAlign:"left"}}>
+        <div>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>live daily shop editor</div>
+          <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900}}>edit today's shop exactly</div>
+        </div>
+        <ChevronRight size={16} color="#B8FF4D" style={{transform:open?"rotate(90deg)":"rotate(0deg)",transition:"transform .18s ease"}}/>
+      </button>
+      {open && (
+        <div style={{marginTop:12}}>
+          <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>This mirrors today's Daily Shop. Tap the item name, description, price, value, or icon value right on the cards to edit them. Use arrows to move, minus to remove, and restore hidden items below.</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:10}}>
+            {tabs.map(t => (
+              <button key={t.id} onClick={()=>setTab(t.id)} className="bb-pressable" style={{background:tab===t.id?"#B8FF4D":"rgba(255,255,255,0.045)",border:`1px solid ${tab===t.id?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:tab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{t.label}</button>
+            ))}
+          </div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:8}}>
+            <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{activeTab.label} · {currentShop.length} showing</div>
+            <div style={{display:"flex",alignItems:"center",gap:7,flexShrink:0}}>
+              <button onClick={addBlankItemToSection} className="bb-pressable bb-glow-lime" style={{background:"rgba(184,255,77,0.14)",border:"1px solid rgba(184,255,77,0.30)",borderRadius:9,padding:"6px 9px",fontSize:12,fontWeight:900,color:"#B8FF4D",cursor:"pointer",lineHeight:1}}>+</button>
+              <button onClick={async()=>{
+                const baseOrder = (tabs.findIndex(t => t.id === tab) + 1) * 1000;
+                const overrides = currentShop.map((item, order) => normalizeAdminShopItem({...item, adminDaily:true, adminDailyHidden:false, adminOrder:baseOrder + order, adminEdited:true, updatedAt:new Date().toISOString()}));
+                const ids = new Set(overrides.map(i=>i.id));
+                await saveAdminItems([...overrides, ...(Array.isArray(adminShopRef.current)?adminShopRef.current:[]).filter(i=>!ids.has(i?.id))], "layout saved live for everyone", "💾");
+              }} className="bb-pressable" style={{background:"rgba(184,255,77,0.10)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:9,padding:"6px 9px",fontSize:9.5,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>save layout</button>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:activeTab.id === "icon" ? "1fr 1fr" : "1fr",gap:7,marginBottom:10}}>
+            <button onClick={()=>setSectionFieldHidden("hideDesc", !sectionDescHidden)} className="bb-pressable" style={{background:sectionDescHidden?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.045)",border:`1px solid ${sectionDescHidden?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:10,padding:"8px",fontSize:10,fontWeight:900,color:sectionDescHidden?"#FF5C8A":"#8B92A8",cursor:"pointer"}}>{sectionDescHidden ? "descriptions: off" : "descriptions: on"}</button>
+            {activeTab.id === "icon" && <button onClick={()=>setSectionFieldHidden("hideEmoji", !sectionEmojiHidden)} className="bb-pressable" style={{background:sectionEmojiHidden?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.045)",border:`1px solid ${sectionEmojiHidden?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:10,padding:"8px",fontSize:10,fontWeight:900,color:sectionEmojiHidden?"#FF5C8A":"#8B92A8",cursor:"pointer"}}>{sectionEmojiHidden ? "icons hidden" : "icons showing"}</button>}
+          </div>
+          <div style={{background:"rgba(255,209,102,0.055)",border:"1px solid rgba(255,209,102,0.18)",borderRadius:13,padding:9,display:"grid",gridTemplateColumns:"96px 1fr",gap:8,alignItems:"center",marginBottom:10}}>
+            <input
+              value={bulkPrice}
+              onChange={(e)=>setBulkPrice(e.target.value.replace(/[^0-9]/g, ""))}
+              inputMode="numeric"
+              placeholder="price"
+              style={{background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,209,102,0.22)",borderRadius:10,padding:"8px 9px",fontSize:11,fontWeight:900,color:"#FFD166",minWidth:0,width:"100%"}}
+            />
+            <button onClick={changeCurrentSectionPrice} disabled={!currentShop.length || !bulkPrice} className="bb-pressable" style={{background:bulkPrice?"linear-gradient(135deg,rgba(255,209,102,0.22),rgba(255,177,66,0.10))":"rgba(255,255,255,0.035)",border:`1px solid ${bulkPrice?"rgba(255,209,102,0.38)":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 9px",fontSize:10,fontWeight:900,color:bulkPrice?"#FFD166":"#4A5066",cursor:bulkPrice?"pointer":"default",textTransform:"lowercase"}}>change price for all {activeTab.label}</button>
+          </div>
+          {currentShop.length === 0 ? (
+            <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:12,fontSize:11,color:"#8B92A8"}}>nothing showing in this shop category.</div>
+          ) : (
+            <div style={{display:"grid",gridTemplateColumns:"1fr",gap:10}}>
+              {currentShop.map((item, idx) => (
+                <div key={item.id} style={{background:"rgba(255,255,255,0.04)",border:`1px solid ${item.adminEdited?"rgba(184,255,77,0.20)":"rgba(255,255,255,0.07)"}`,borderRadius:16,padding:10,boxShadow:"0 10px 26px rgba(0,0,0,0.18)"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"54px 1fr 34px",gap:9,alignItems:"start"}}>
+                    <div>
+                      {cardPreview(item)}
+                    </div>
+                    <div style={{display:"grid",gap:7,minWidth:0}}>
+                      {inlineInput(item, "label", getShopItemDisplayLabel(item), {fontSize:12.5,color:"#FFFFFF"}, "item name")}
+                      {inlineInput(item, "desc", item.desc || "", {fontSize:10.5,fontWeight:700,color:"#8B92A8"}, "description")}
+                      <div style={{display:"grid",gridTemplateColumns:"72px 1fr",gap:7}}>
+                        {inlineInput(item, "cost", item.cost, {color:"#FFD166"}, "price")}
+                        {inlineInput(item, "value", item.value || "", {color:item.type === "color" ? (item.value || "#B8FF4D") : "#E8ECF4"}, item.type === "icon" ? "icon emoji" : item.type === "color" ? "hex color" : item.type === "sound" ? "sound id / label" : "value")}
+                      </div>
+                      {item.type === "sound" && <input type="file" accept={AUDIO_FILE_ACCEPT} onChange={(e)=>{ const f=e.target.files?.[0]; if(!f)return; const reader=new FileReader(); reader.onload=()=>upsertAdminOverride(item,{ dataUrl:String(reader.result||""), file:String(reader.result||""), adminDaily:true, adminDailyHidden:false },"sound file uploaded","🔊"); reader.readAsDataURL(f); }} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:9,padding:"7px 8px",fontSize:10,color:"#8B92A8",width:"100%"}}/>}
+                      {item.type === "background" && inlineInput(item, "background", item.background || getBackgroundPreview(item.value), {fontSize:10,color:"#A78BFA"}, "background CSS")}
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
+                        <button onClick={()=>upsertAdminOverride(item, { hideDesc:!item.hideDesc, desc:item.hideDesc ? (item.desc || "captain custom shop item") : "", adminDaily:true, adminDailyHidden:false }, item.hideDesc ? "description shown" : "description removed", item.hideDesc ? "👁️" : "🚫")} className="bb-pressable" style={{background:item.hideDesc?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.045)",border:`1px solid ${item.hideDesc?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"7px",fontSize:9.5,fontWeight:900,color:item.hideDesc?"#FF5C8A":"#8B92A8",cursor:"pointer"}}>{item.hideDesc ? "description off" : "description on"}</button>
+                        {item.type === "icon" ? <button onClick={()=>upsertAdminOverride(item, { hideEmoji:!item.hideEmoji, adminDaily:true, adminDailyHidden:false }, item.hideEmoji ? "icon shown" : "icon hidden", item.hideEmoji ? "👁️" : "🚫")} className="bb-pressable" style={{background:item.hideEmoji?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.045)",border:`1px solid ${item.hideEmoji?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"7px",fontSize:9.5,fontWeight:900,color:item.hideEmoji?"#FF5C8A":"#8B92A8",cursor:"pointer"}}>{item.hideEmoji ? "icon hidden" : "icon shown"}</button> : <div style={{background:"rgba(255,255,255,0.025)",border:"1px solid rgba(255,255,255,0.045)",borderRadius:9,padding:"7px",fontSize:9.5,fontWeight:900,color:"#4A5066",textAlign:"center"}}>no emoji</div>}
+                        <button onClick={()=>upsertAdminOverride(item, { onSale:!item.onSale, saleLabel:item.saleLabel || "ON SALE", adminDaily:true, adminDailyHidden:false }, item.onSale ? "sale badge removed" : "sale badge added", "🏷️")} className="bb-pressable" style={{background:item.onSale?"linear-gradient(135deg,rgba(255,209,102,0.22),rgba(255,177,66,0.10))":"rgba(255,255,255,0.045)",border:`1px solid ${item.onSale?"rgba(255,209,102,0.42)":"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"7px",fontSize:9.5,fontWeight:900,color:item.onSale?"#FFD166":"#8B92A8",cursor:"pointer"}}>{item.onSale ? "on sale" : "sale off"}</button>
+                      </div>
+                    </div>
+                    <div style={{display:"grid",gap:6}}>
+                      <button onClick={()=>moveItem(idx, -1)} disabled={idx===0} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:9,height:28,color:idx===0?"#34394A":"#E8ECF4",fontSize:13,fontWeight:900,cursor:idx===0?"default":"pointer"}}>↑</button>
+                      <button onClick={()=>moveItem(idx, 1)} disabled={idx===currentShop.length-1} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:9,height:28,color:idx===currentShop.length-1?"#34394A":"#E8ECF4",fontSize:13,fontWeight:900,cursor:idx===currentShop.length-1?"default":"pointer"}}>↓</button>
+                      <button onClick={()=>removeFromToday(item)} className="bb-pressable" style={{background:"rgba(255,92,138,0.12)",border:"1px solid rgba(255,92,138,0.28)",borderRadius:9,height:28,color:"#FF5C8A",fontSize:16,fontWeight:900,cursor:"pointer"}}>−</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!!hiddenToday.length && (
+            <div style={{marginTop:12,borderTop:"1px solid rgba(255,255,255,0.07)",paddingTop:10}}>
+              <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:7}}>hidden from this category</div>
+              {hiddenToday.slice(0, 12).map(item => (
+                <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0"}}>
+                  <div style={{width:24,textAlign:"center",fontSize:16}}>{item.type === "icon" ? (item.value || item.emoji || "✨") : ""}</div>
+                  <div style={{flex:1,minWidth:0,fontSize:11,color:"#8B92A8",fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(item)}</div>
+                  <button onClick={()=>restoreToToday(item)} className="bb-pressable" style={{background:"rgba(184,255,77,0.10)",border:"1px solid rgba(184,255,77,0.25)",borderRadius:8,padding:"6px 8px",fontSize:10,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>restore</button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium, setPassPremium, adminShopItems, setAdminShopItems, addToast }) {
+  const [targetId, setTargetId] = useState(PLAYERS[0]?.id || "p1");
+  const [pointsAmount, setPointsAmount] = useState(100);
+  const [manualPointsValue, setManualPointsValue] = useState(0);
+  const [wheelAmount, setWheelAmount] = useState(2);
+  const [slotAmount, setSlotAmount] = useState(2);
+  const [tierAmount, setTierAmount] = useState(1);
+  const [manualFreeLevel, setManualFreeLevel] = useState(0);
+  const [manualFreeXP, setManualFreeXP] = useState(0);
+  const [manualPremiumLevel, setManualPremiumLevel] = useState(0);
+  const [manualPremiumXP, setManualPremiumXP] = useState(0);
+  const [itemType, setItemType] = useState("icon");
+  const [label, setLabel] = useState("");
+  const [desc, setDesc] = useState("");
+  const [cost, setCost] = useState(750);
+  const [emoji, setEmoji] = useState("✨");
+  const [value, setValue] = useState("✨");
+  const [titleRarity, setTitleRarity] = useState("common");
+  const [textMain, setTextMain] = useState("#E8ECF4");
+  const [textMuted, setTextMuted] = useState("#8B92A8");
+  const [textAccent, setTextAccent] = useState("#B8FF4D");
+  const [borderColor, setBorderColor] = useState("#B8FF4D");
+  const [backgroundCss, setBackgroundCss] = useState("linear-gradient(135deg,#11131F,#B8FF4D)");
+  const [soundDataUrl, setSoundDataUrl] = useState("");
+  const [addToDaily, setAddToDaily] = useState(true);
+  const [grantCreated, setGrantCreated] = useState(false);
+
+  useEffect(() => {
+    if (itemType === "sound") { setCost(1500); setEmoji("🔊"); if (!value || value === "✨") setValue("custom sound"); }
+    if (itemType === "border") { setCost(1000); setEmoji("▣"); }
+    if (itemType === "text_color") { setCost(350); setEmoji("🎨"); }
+    if (itemType === "title") { const m=getTitleRarityMeta(titleRarity); setCost(m.cost); setEmoji(m.emoji); }
+    if (itemType === "icon") { setCost(750); }
+    if (itemType === "background") { setCost(1600); setEmoji("▧"); }
+  }, [itemType]);
+
+  const targetName = playerNameById(targetId);
+  useEffect(() => {
+    setManualPointsValue(Number(points?.[targetId] || 0));
+  }, [targetId, points?.[targetId]]);
+  const getFreshObject = async (key, fallback = {}, timeoutMs = 450) => {
+    try {
+      const fresh = await Promise.race([
+        Promise.resolve(storeGet(key)).catch(() => null),
+        new Promise(resolve => setTimeout(() => resolve(null), timeoutMs)),
+      ]);
+      if (fresh && typeof fresh === "object" && !Array.isArray(fresh)) return fresh;
+    } catch (_) {}
+    return (fallback && typeof fallback === "object" && !Array.isArray(fallback)) ? fallback : {};
+  };
+  const sendAdminLiveSync = async (key, body, type = "admin", snapshot = null, to = targetId) => {
+    const evt = {
+      id:`admin_live_${to}_${key}_${Date.now()}`,
+      to,
+      key,
+      type,
+      body,
+      snapshot,
+      ts:new Date().toISOString(),
+    };
+    await storeSet(ADMIN_LIVE_SYNC_KEY, evt).catch(() => {});
+  };
+  const grantNotify = async (body, type = "admin") => {
+    // Phone push only. Live state sync is sent once by savePoints/savePassXpSafe/savePremiumSafe.
+    await notifyAdminGrantPush(targetId, body, { type }).catch(() => {});
+  };
+  const savePoints = async (upd, body = "admin updated your points", type = "admin_points") => {
+    const safe = upd && typeof upd === "object" && !Array.isArray(upd) ? upd : {};
+    setPoints(safe);
+    await storeSet("points", safe);
+    await sendAdminLiveSync("points", body, type, safe);
+    if (isMeaningfulPointsSnapshot(safe) && !looksLikeWipedPointsSnapshot(safe)) {
+      await storeSet("points_backup", safe).catch(() => {});
+    }
+  };
+  const grantPoints = async () => {
+    const amt = Math.max(0, Number(pointsAmount) || 0);
+    if (!amt) return;
+    const freshPoints = await getFreshObject("points", points);
+    const upd = { ...freshPoints, [targetId]:(Number(freshPoints?.[targetId]) || 0) + amt };
+    await savePoints(upd, `admin gave you ${amt} points`, "admin_points");
+    await grantNotify(`admin gave you ${amt} points`, "admin_points");
+    addToast?.(`gave ${targetName} ${amt} pts`, "✅");
+  };
+  const setPlayerPointsExact = async () => {
+    const amt = Math.max(0, Math.floor(Number(manualPointsValue) || 0));
+    const freshPoints = await getFreshObject("points", points);
+    const upd = { ...freshPoints, [targetId]: amt };
+    await savePoints(upd, `admin set your points to ${amt}`, "admin_points_set");
+    await grantNotify(`admin set your points to ${amt}`, "admin_points_set");
+    addToast?.(`${targetName} points set to ${amt}`, "✅");
+  };
+  const grantBonus = async (field, amount, labelText) => {
+    const amt = Math.max(0, Number(amount) || 0);
+    if (!amt) return;
+    const freshPoints = await getFreshObject("points", points);
+    const key = `${targetId}_${field}`;
+    const upd = { ...freshPoints, [key]:(Number(freshPoints?.[key]) || 0) + amt };
+    await savePoints(upd, `admin gave you ${amt} ${labelText}${amt === 1 ? "" : "s"}`, field);
+    await grantNotify(`admin gave you ${amt} ${labelText}${amt === 1 ? "" : "s"}`, field);
+    addToast?.(`gave ${targetName} ${amt} ${labelText}${amt === 1 ? "" : "s"}`, "🎁");
+  };
+  const savePassXpSafe = async (upd, body = "admin updated your pass XP", type = "admin_pass_xp") => {
+    const safe = upd && typeof upd === "object" && !Array.isArray(upd) ? upd : {};
+    setPassXP(safe);
+    await storeSet("pass_xp", safe);
+    await sendAdminLiveSync("pass_xp", body, type, safe);
+    if (hasAnyStoredKey(safe)) await storeSet("pass_xp_backup", safe).catch(() => {});
+  };
+  const savePremiumSafe = async (upd, body = "admin updated your premium pass", type = "admin_premium") => {
+    const safe = upd && typeof upd === "object" && !Array.isArray(upd) ? upd : {};
+    setPassPremium?.(safe);
+    await storeSet("pass_premium", safe);
+    await sendAdminLiveSync("pass_premium", body, type, safe);
+    if (hasAnyStoredKey(safe)) await storeSet("pass_premium_backup", safe).catch(() => {});
+  };
+  const grantTier = async () => {
+    const amt = Math.max(1, Number(tierAmount) || 1);
+    const freshXP = await getFreshObject("pass_xp", passXP);
+    const currentFree = Number(freshXP?.[`${targetId}_freeXP`] ?? freshXP?.[targetId] ?? 0) || 0;
+    const nextFree = currentFree + amt * XP_PER_TIER;
+    const upd = { ...freshXP, [targetId]:nextFree, [`${targetId}_freeXP`]:nextFree };
+    await savePassXpSafe(upd, `admin granted ${amt} new free tier${amt === 1 ? "" : "s"}`, "admin_tier");
+    await grantNotify(`admin granted ${amt} new free tier${amt === 1 ? "" : "s"}`, "admin_tier");
+    addToast?.(`granted ${targetName} ${amt} tier${amt === 1 ? "" : "s"}`, "⭐");
+  };
+  const setFreePassXP = async () => {
+    const xp = Math.max(0, Math.floor(Number(manualFreeXP) || 0));
+    const freshXP = await getFreshObject("pass_xp", passXP);
+    const upd = { ...freshXP, [targetId]:xp, [`${targetId}_freeXP`]:xp };
+    await savePassXpSafe(upd, `admin set your free pass XP to ${xp}`, "admin_pass_xp");
+    await grantNotify(`admin set your free pass XP to ${xp}`, "admin_pass_xp");
+    addToast?.(`${targetName} free XP set to ${xp}`, "⭐");
+  };
+  const setFreePassLevel = async () => {
+    const level = Math.max(0, Math.min(FREE_TIER_COUNT, Number(manualFreeLevel) || 0));
+    const xp = Math.max(0, Math.floor(level * XP_PER_TIER));
+    const freshXP = await getFreshObject("pass_xp", passXP);
+    const upd = { ...freshXP, [targetId]:xp, [`${targetId}_freeXP`]:xp };
+    await savePassXpSafe(upd, `admin set your free pass to level ${level} (${xp} XP)`, "admin_pass_level");
+    await grantNotify(`admin set your free pass to level ${level}`, "admin_pass_level");
+    addToast?.(`${targetName} free pass lvl ${level}`, "⭐");
+  };
+  const setPremiumPassXP = async () => {
+    const xp = Math.max(0, Math.floor(Number(manualPremiumXP) || 0));
+    const freshXP = await getFreshObject("pass_xp", passXP);
+    const freshPremium = await getFreshObject("pass_premium", passPremium);
+    const updXP = { ...freshXP, [`${targetId}_premiumXP`]:xp };
+    const updPremium = { ...freshPremium, [targetId]:true };
+    await savePassXpSafe(updXP, `admin set your premium pass XP to ${xp}`, "admin_premium_xp");
+    await savePremiumSafe(updPremium, "admin granted premium pass access", "admin_premium");
+    await grantNotify(`admin set your premium pass XP to ${xp}`, "admin_premium_xp");
+    addToast?.(`${targetName} premium XP set to ${xp}`, "👑");
+  };
+  const setPremiumPassLevel = async () => {
+    const level = Math.max(0, Math.min(PREMIUM_TIER_COUNT, Number(manualPremiumLevel) || 0));
+    const xp = Math.max(0, Math.floor(level * XP_PER_TIER));
+    const freshXP = await getFreshObject("pass_xp", passXP);
+    const freshPremium = await getFreshObject("pass_premium", passPremium);
+    const updXP = { ...freshXP, [`${targetId}_premiumXP`]:xp };
+    const updPremium = { ...freshPremium, [targetId]:true };
+    await savePassXpSafe(updXP, `admin set your premium pass to level ${level} (${xp} XP)`, "admin_premium_level");
+    await savePremiumSafe(updPremium, "admin granted premium pass access", "admin_premium");
+    await grantNotify(`admin set your premium pass to level ${level}`, "admin_premium_level");
+    addToast?.(`${targetName} premium pass lvl ${level}`, "👑");
+  };
+  const grantPremium = async () => {
+    const freshPremium = await getFreshObject("pass_premium", passPremium);
+    const upd = { ...freshPremium, [targetId]:true };
+    await savePremiumSafe(upd, "admin granted premium pass access", "admin_premium");
+    await grantNotify("admin granted premium pass access", "admin_premium");
+    addToast?.(`premium pass granted to ${targetName}`, "👑");
+  };
+  const grantItemToTarget = async (item) => {
+    const freshPoints = await getFreshObject("points", points);
+    const ownedKey = `${targetId}_owned`;
+    const owned = Array.isArray(freshPoints?.[ownedKey]) ? freshPoints[ownedKey] : [];
+    if (owned.includes(item.id)) return;
+    const upd = { ...freshPoints, [ownedKey]:[...owned, item.id] };
+    await savePoints(upd, `admin granted new ${String(item.type || "item").replace("_", " ")}: ${getShopItemDisplayLabel(item)}`, "admin_item");
+    await grantNotify(`admin granted new ${String(item.type || "item").replace("_", " ")}: ${getShopItemDisplayLabel(item)}`, "admin_item");
+  };
+  const onSoundFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const fileName = String(file.name || "custom sound");
+    const okAudio = String(file.type || "").startsWith("audio/") || /\.(mp3|mpeg|mpga|m4a|aac|wav|wave|ogg|oga|webm|flac)$/i.test(fileName);
+    if (!okAudio) { addToast?.("choose an mp3, wav, m4a, aac, ogg, webm, or flac file", "⚠️"); return; }
+    const reader = new FileReader();
+    reader.onload = () => setSoundDataUrl(String(reader.result || ""));
+    reader.onerror = () => addToast?.("sound upload failed — try that mp3 again", "⚠️");
+    reader.readAsDataURL(file);
+    if (!label.trim()) setLabel(fileName.replace(/\.[^.]+$/, ""));
+  };
+  const createItem = async () => {
+    const safeLabel = label.trim() || `${itemType.replace("_", " ")} item`;
+    const idBase = safeLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "custom";
+    const id = `admin_${itemType}_${idBase}_${Date.now()}`;
+    const item = normalizeAdminShopItem({
+      id,
+      label:safeLabel,
+      desc:desc.trim(),
+      cost:Math.max(0, Number(cost) || 0),
+      type:itemType,
+      value:itemType === "sound" ? id : itemType === "text_color" ? id : itemType === "title" ? safeLabel : itemType === "background" ? id : value,
+      emoji:itemType === "icon" ? (value || emoji || "✨") : itemType === "title" ? getTitleRarityMeta(titleRarity).emoji : "",
+      hideEmoji:itemType !== "icon",
+      rarity:itemType === "title" ? titleRarity : undefined,
+      unlockSource:itemType === "title" ? "admin/shop" : undefined,
+      file:itemType === "sound" ? (soundDataUrl || `${id}.mp3`) : undefined,
+      dataUrl:itemType === "sound" ? soundDataUrl : undefined,
+      preset:itemType === "text_color" ? { main:textMain, muted:textMuted, accent:textAccent } : undefined,
+      borderColor:itemType === "border" ? borderColor : undefined,
+      borderGlow:itemType === "border" ? textAccent : undefined,
+      background:itemType === "background" ? backgroundCss : undefined,
+      adminDaily:addToDaily,
+      createdAt:new Date().toISOString(),
+    });
+    const next = [item, ...(Array.isArray(adminShopItems) ? adminShopItems : [])].slice(0, 80);
+    setAdminShopItems?.(next);
+    cacheAdminShopItems(next);
+    await storeSet(ADMIN_SHOP_ITEMS_KEY, next);
+    await storeSet(`${ADMIN_SHOP_ITEMS_KEY}_backup`, next).catch(() => {});
+    try { window.dispatchEvent(new CustomEvent("bb-admin-shop-updated", { detail: next })); } catch (_) {}
+    if (grantCreated) await grantItemToTarget(item);
+    addToast?.(`${safeLabel} added${addToDaily ? " to daily shop" : ""}`, "🛍️");
+    setLabel(""); setDesc(""); setSoundDataUrl("");
+  };
+  const removeItem = async (id) => {
+    const next = (Array.isArray(adminShopItems) ? adminShopItems : []).filter(i => i.id !== id);
+    setAdminShopItems?.(next);
+    cacheAdminShopItems(next);
+    await storeSet(ADMIN_SHOP_ITEMS_KEY, next);
+    await storeSet(`${ADMIN_SHOP_ITEMS_KEY}_backup`, next).catch(() => {});
+    try { window.dispatchEvent(new CustomEvent("bb-admin-shop-updated", { detail: next })); } catch (_) {}
+    addToast?.("custom shop item removed", "🗑️");
+  };
+  const setItemDailyStatus = async (item, active) => {
+    if (!item?.id) return;
+    const list = Array.isArray(adminShopItems) ? adminShopItems : [];
+    const nextItem = normalizeAdminShopItem({ ...item, adminDaily:!!active, adminDailyHidden:!active, adminEdited:true, updatedAt:new Date().toISOString() });
+    const next = [nextItem, ...list.filter(i => i?.id !== item.id)];
+    setAdminShopItems?.(next);
+    cacheAdminShopItems(next);
+    await storeSet(ADMIN_SHOP_ITEMS_KEY, next);
+    await storeSet(`${ADMIN_SHOP_ITEMS_KEY}_backup`, next).catch(() => {});
+    try { window.dispatchEvent(new CustomEvent("bb-admin-shop-updated", { detail: next })); } catch (_) {}
+    addToast?.(`${getShopItemDisplayLabel(item)} ${active ? "restored to shop" : "revoked from shop"}`, active ? "➕" : "➖");
+  };
+  const grantItemToPlayer = async (item, pid) => {
+    if (!item?.id || !pid) return;
+    const freshPoints = await getFreshObject("points", points);
+    const ownedKey = `${pid}_owned`;
+    const owned = Array.isArray(freshPoints?.[ownedKey]) ? freshPoints[ownedKey] : [];
+    if (owned.includes(item.id)) return;
+    const upd = { ...freshPoints, [ownedKey]:[...owned, item.id] };
+    await savePoints(upd, `admin granted ${getShopItemDisplayLabel(item)}`, "admin_item");
+    await notifyAdminGrantPush(pid, `admin granted ${getShopItemDisplayLabel(item)}`, { type:"admin_item" }).catch(() => {});
+    await storeSet(ADMIN_LIVE_SYNC_KEY, { id:`admin_live_${pid}_item_${Date.now()}`, to:pid, key:"points", type:"admin_item", body:`admin granted ${getShopItemDisplayLabel(item)}`, snapshot:upd, ts:new Date().toISOString() }).catch(() => {});
+    addToast?.(`granted ${getShopItemDisplayLabel(item)} to ${playerNameById(pid)}`, "🎁");
+  };
+  const grantItemToAll = async (item) => {
+    if (!item?.id) return;
+    let upd = { ...(await getFreshObject("points", points)) };
+    PLAYERS.forEach(p => {
+      const ownedKey = `${p.id}_owned`;
+      const owned = Array.isArray(upd[ownedKey]) ? upd[ownedKey] : [];
+      if (!owned.includes(item.id)) upd[ownedKey] = [...owned, item.id];
+    });
+    await savePoints(upd, `admin granted ${getShopItemDisplayLabel(item)}`, "admin_item");
+    await storeSet(ADMIN_LIVE_SYNC_KEY, { id:`admin_live_all_item_${Date.now()}`, to:"all", key:"points", type:"admin_item", body:`admin granted ${getShopItemDisplayLabel(item)}`, snapshot:upd, ts:new Date().toISOString() }).catch(() => {});
+    addToast?.(`granted ${getShopItemDisplayLabel(item)} to everyone`, "🎁");
+  };
+  const revokeItemFromTarget = async (item) => {
+    if (!item?.id) return;
+    const freshPoints = await getFreshObject("points", points);
+    const ownedKey = `${targetId}_owned`;
+    const equippedKey = `${targetId}_equipped`;
+    const owned = Array.isArray(freshPoints?.[ownedKey]) ? freshPoints[ownedKey] : [];
+    const equipped = freshPoints?.[equippedKey] || {};
+    const nextEquipped = { ...equipped };
+    delete nextEquipped[item.id];
+    const upd = { ...freshPoints, [ownedKey]:owned.filter(id => id !== item.id), [equippedKey]:nextEquipped };
+    await savePoints(upd, `admin revoked ${getShopItemDisplayLabel(item)}`, "admin_item");
+    addToast?.(`revoked ${getShopItemDisplayLabel(item)} from ${targetName}`, "🧹");
+  };
+
+  const adminLibraryItems = (Array.isArray(adminShopItems) ? adminShopItems : [])
+    .map(normalizeAdminShopItem)
+    .filter(item => item && !String(item.id || "").startsWith("__"));
+
+  const inputStyle = { ...s.modalInput, marginBottom:8 };
+  return (
+    <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,92,138,0.18)",borderRadius:18,padding:14,marginBottom:18}}>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+        <Shield size={15} color="#FF5C8A"/>
+        <div>
+          <div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>admin drops</div>
+          <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900}}>shop items · spins · tiers</div>
+        </div>
+      </div>
+      <div style={s.modalLabel}>target player</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
+        {PLAYERS.map(p => <button key={p.id} onClick={()=>setTargetId(p.id)} className="bb-pressable" style={{background:targetId===p.id?p.color:"rgba(255,255,255,0.05)",border:`1px solid ${targetId===p.id?p.color:"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 0",fontSize:11,fontWeight:900,color:targetId===p.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{p.name}</button>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+        <div><div style={s.modalLabel}>give points</div><input type="number" value={pointsAmount} onChange={e=>setPointsAmount(e.target.value)} style={inputStyle}/><button onClick={grantPoints} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,padding:"10px 0"}}>add points</button></div>
+        <div><div style={s.modalLabel}>set exact points</div><input type="number" value={manualPointsValue} onChange={e=>setManualPointsValue(e.target.value)} style={inputStyle}/><button onClick={setPlayerPointsExact} className="bb-pressable" style={{...s.primaryBtn,padding:"10px 0",background:"#FFD166"}}>set points</button></div>
+        <div><div style={s.modalLabel}>new tiers</div><input type="number" value={tierAmount} onChange={e=>setTierAmount(e.target.value)} style={inputStyle}/><button onClick={grantTier} className="bb-pressable bb-glow-violet" style={{...s.primaryBtn,padding:"10px 0",background:"#A78BFA"}}>grant tier</button></div>
+        <div><div style={s.modalLabel}>wheel spins</div><input type="number" value={wheelAmount} onChange={e=>setWheelAmount(e.target.value)} style={inputStyle}/><button onClick={()=>grantBonus("bonusSpins", wheelAmount, "wheel spin")} className="bb-pressable" style={{...s.primaryBtn,padding:"10px 0",background:"#FFD166"}}>give wheels</button></div>
+        <div><div style={s.modalLabel}>slot spins</div><input type="number" value={slotAmount} onChange={e=>setSlotAmount(e.target.value)} style={inputStyle}/><button onClick={()=>grantBonus("bonusSlots", slotAmount, "slot spin")} className="bb-pressable" style={{...s.primaryBtn,padding:"10px 0",background:"#4D9EFF"}}>give slots</button></div>
+      </div>
+      <button onClick={grantPremium} className="bb-pressable" style={{width:"100%",background:"rgba(255,209,102,0.12)",border:"1px solid rgba(255,209,102,0.32)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:900,color:"#FFD166",cursor:"pointer",marginBottom:10}}>grant premium pass access</button>
+      <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:10,marginBottom:14}}>
+        <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>manual pass controls</div>
+        <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>Set the selected player's free track and premium track separately. Premium buttons also unlock premium access.</div>
+        <div style={{background:"rgba(184,255,77,0.05)",border:"1px solid rgba(184,255,77,0.12)",borderRadius:12,padding:9,marginBottom:10}}>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>free track</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <div><div style={s.modalLabel}>free level</div><input type="number" value={manualFreeLevel} onChange={e=>setManualFreeLevel(e.target.value)} style={inputStyle}/></div>
+            <div><div style={s.modalLabel}>free xp</div><input type="number" value={manualFreeXP} onChange={e=>setManualFreeXP(e.target.value)} style={inputStyle}/></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <button onClick={setFreePassLevel} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,padding:"10px 0"}}>set free level</button>
+            <button onClick={setFreePassXP} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,padding:"10px 0"}}>set free xp</button>
+          </div>
+        </div>
+        <div style={{background:"rgba(167,139,250,0.06)",border:"1px solid rgba(167,139,250,0.16)",borderRadius:12,padding:9}}>
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>premium track</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+            <div><div style={s.modalLabel}>premium level</div><input type="number" value={manualPremiumLevel} onChange={e=>setManualPremiumLevel(e.target.value)} style={inputStyle}/></div>
+            <div><div style={s.modalLabel}>premium xp</div><input type="number" value={manualPremiumXP} onChange={e=>setManualPremiumXP(e.target.value)} style={inputStyle}/></div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <button onClick={setPremiumPassLevel} className="bb-pressable bb-glow-violet" style={{...s.primaryBtn,padding:"10px 0",background:"#A78BFA"}}>set premium level</button>
+            <button onClick={setPremiumPassXP} className="bb-pressable bb-glow-violet" style={{...s.primaryBtn,padding:"10px 0",background:"#A78BFA"}}>set premium xp</button>
+          </div>
+        </div>
+      </div>
+      <div style={{height:1,background:"rgba(255,255,255,0.07)",margin:"4px 0 14px"}} />
+      <AdminDailyShopEditor adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} addToast={addToast}/>
+      <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>create new shop item</div><div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>Use this to add new items. The live editor above changes today's actual shop layout and text.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <select value={itemType} onChange={e=>setItemType(e.target.value)} style={inputStyle}>
+          <option value="icon">icon/avatar</option><option value="color">name color</option><option value="text_collage">text collage</option><option value="title">title</option><option value="border">presence border</option><option value="sound">soundboard sound</option><option value="background">background</option>
+        </select>
+        <input type="number" value={cost} onChange={e=>setCost(e.target.value)} placeholder="cost" style={inputStyle}/>
+      </div>
+      <input value={label} onChange={e=>setLabel(e.target.value)} placeholder="title / item name" style={inputStyle}/>
+      <input value={desc} onChange={e=>setDesc(e.target.value)} placeholder="description" style={inputStyle}/>
+      {itemType === "title" && (
+        <select value={titleRarity} onChange={e=>setTitleRarity(e.target.value)} style={inputStyle}>
+          {TITLE_RARITY_ORDER.map(r => { const m=getTitleRarityMeta(r); return <option key={r} value={r}>{m.emoji} {m.label}</option>; })}
+        </select>
+      )}
+      {itemType !== "sound" && itemType !== "text_color" && itemType !== "border" && itemType !== "background" && <input value={value} onChange={e=>setValue(e.target.value)} placeholder="value (emoji, hex, or title)" style={inputStyle}/>}      
+      {itemType === "sound" && <><input type="file" accept={AUDIO_FILE_ACCEPT} onChange={onSoundFile} style={{...inputStyle,color:"#8B92A8"}}/><div style={{fontSize:10,color:soundDataUrl?"#7CFFB2":"#4A5066",marginBottom:8}}>{soundDataUrl ? "audio loaded into item" : "upload mp3 / wav / m4a / aac"}</div></>}
+      {itemType === "text_color" && <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><input type="color" value={textMain} onChange={e=>setTextMain(e.target.value)} style={inputStyle}/><input type="color" value={textMuted} onChange={e=>setTextMuted(e.target.value)} style={inputStyle}/><input type="color" value={textAccent} onChange={e=>setTextAccent(e.target.value)} style={inputStyle}/></div>}
+      {itemType === "border" && <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><input type="color" value={borderColor} onChange={e=>setBorderColor(e.target.value)} style={inputStyle}/><input type="color" value={textAccent} onChange={e=>setTextAccent(e.target.value)} style={inputStyle}/></div>}
+      {itemType === "background" && <textarea value={backgroundCss} onChange={e=>setBackgroundCss(e.target.value)} placeholder="CSS background / gradient" style={{...inputStyle,minHeight:70,resize:"vertical"}}/>}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+        <button onClick={()=>setAddToDaily(v=>!v)} className="bb-pressable" style={{background:addToDaily?"rgba(184,255,77,0.12)":"rgba(255,255,255,0.05)",border:`1px solid ${addToDaily?"rgba(184,255,77,0.35)":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px",fontSize:11,fontWeight:900,color:addToDaily?"#B8FF4D":"#8B92A8",cursor:"pointer"}}>{addToDaily ? "in daily shop" : "not in daily shop"}</button>
+        <button onClick={()=>setGrantCreated(v=>!v)} className="bb-pressable" style={{background:grantCreated?"rgba(167,139,250,0.14)":"rgba(255,255,255,0.05)",border:`1px solid ${grantCreated?"rgba(167,139,250,0.38)":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px",fontSize:11,fontWeight:900,color:grantCreated?"#A78BFA":"#8B92A8",cursor:"pointer"}}>{grantCreated ? `also grant to ${targetName}` : "shop only"}</button>
+      </div>
+      <button onClick={createItem} className="bb-pressable bb-glow-lime" style={s.primaryBtn}>create custom item</button>
+      {!!adminLibraryItems.length && (
+        <div style={{marginTop:14,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:10}}>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>saved item library</div>
+          <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginBottom:8}}>Every item you add stays here. Restore/revoke controls whether it appears in the shop. Grant gives it straight to players.</div>
+          {adminLibraryItems.slice(0,80).map(item => (
+            <div key={item.id} style={{padding:"9px 0",borderTop:"1px solid rgba(255,255,255,0.06)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                <div style={{fontSize:item.type === "icon" ? 18 : 10,width:24,textAlign:"center",fontWeight:900,color:"#8B92A8"}}>{item.type === "icon" ? (item.value || "✨") : item.type.toUpperCase().slice(0,3)}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(item)}</div>
+                  <div style={{fontSize:10,color:"#4A5066"}}>{item.type}{item.type === "title" ? ` · ${getTitleRarityMeta(item).emoji} ${getTitleRarityMeta(item).label}` : ""} · {item.adminDaily && !item.adminDailyHidden ? "in shop" : "hidden"}</div>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:6}}>
+                {PLAYERS.map(p => <button key={p.id} onClick={()=>grantItemToPlayer(item, p.id)} className="bb-pressable" style={{background:"rgba(184,255,77,.08)",border:"1px solid rgba(184,255,77,.20)",borderRadius:8,color:"#B8FF4D",fontSize:9.5,fontWeight:900,padding:"7px 4px",cursor:"pointer"}}>grant {p.name}</button>)}
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                <button onClick={()=>grantItemToAll(item)} className="bb-pressable" style={{background:"rgba(167,139,250,.10)",border:"1px solid rgba(167,139,250,.24)",borderRadius:8,color:"#A78BFA",fontSize:9.5,fontWeight:900,padding:"7px",cursor:"pointer"}}>grant all</button>
+                <button onClick={()=>setItemDailyStatus(item, !(item.adminDaily && !item.adminDailyHidden))} className="bb-pressable" style={{background:item.adminDaily && !item.adminDailyHidden ? "rgba(255,92,138,.10)" : "rgba(184,255,77,.10)",border:`1px solid ${item.adminDaily && !item.adminDailyHidden ? "rgba(255,92,138,.24)" : "rgba(184,255,77,.24)"}`,borderRadius:8,color:item.adminDaily && !item.adminDailyHidden ? "#FF5C8A" : "#B8FF4D",fontSize:9.5,fontWeight:900,padding:"7px",cursor:"pointer"}}>{item.adminDaily && !item.adminDailyHidden ? "revoke shop" : "restore shop"}</button>
+                <button onClick={()=>revokeItemFromTarget(item)} className="bb-pressable" style={{background:"rgba(255,209,102,.08)",border:"1px solid rgba(255,209,102,.20)",borderRadius:8,color:"#FFD166",fontSize:9.5,fontWeight:900,padding:"7px",cursor:"pointer"}}>revoke selected</button>
+              </div>
+              <button onClick={()=>removeItem(item.id)} className="bb-pressable" style={{marginTop:6,width:"100%",background:"rgba(255,92,138,.08)",border:"1px solid rgba(255,92,138,.18)",borderRadius:8,color:"#FF5C8A",fontSize:9.5,fontWeight:900,padding:"7px",cursor:"pointer"}}>delete from library</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const [open, setOpen] = useState(true);
+  const copyFields = [
+    ["homeCommandEyebrow", "home command eyebrow"],
+    ["homeCommandTitle", "home command title"],
+    ["boostBalanceLabel", "boost balance label"],
+    ["boostResetLabel", "boost timer label"],
+    ["socialBetsTitle", "social bets title"],
+    ["teamComparisonTitle", "team comparison title"],
+    ["weeklyChallengeTitle", "weekly challenge title"],
+    ["trainingNextTitle", "training title"],
+    ["burtonOSEyebrow", "Burton OS label"],
+    ["chaosButtonLabel", "chaos button label"],
+    ["chaosEmptyTitle", "chaos idle title"],
+    ["chaosEmptyDesc", "chaos idle description"],
+    ["courtRoomLabel", "court room label"],
+    ["courtRoomTitle", "court room title"],
+    ["courtRoomDesc", "court room description"],
+    ["teamEconomyLabel", "team economy label"],
+    ["economyCrashingLabel", "economy status: crashing"],
+    ["economyUnstableLabel", "economy status: unstable"],
+    ["economyShakyLabel", "economy status: shaky"],
+    ["economyStableLabel", "economy status: stable"],
+    ["economyBoomingLabel", "economy status: booming"],
+    ["limitedEventLabel", "limited event label"],
+    ["secretUnlocksLabel", "secret unlocks label"],
+    ["vaultLabel", "vault label"],
+    ["cursesBlessingsLabel", "curses/blessings label"],
+  ];
+  const save = (patch, message) => saveAppCustomizer({ ...cfg, ...patch }, setAppCustomizer, addToast, message);
+  const saveNested = (key, value, message) => save({ [key]: value }, message);
+  const moveTab = (id, dir) => {
+    const arr = [...cfg.tabOrder];
+    const idx = arr.indexOf(id);
+    const nextIdx = idx + dir;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= arr.length) return;
+    [arr[idx], arr[nextIdx]] = [arr[nextIdx], arr[idx]];
+    saveNested("tabOrder", arr, "tab order updated");
+  };
+  const toggleTab = (id) => {
+    if (id === "home") { addToast?.("home tab stays on", "🏠"); return; }
+    const hiddenTabs = { ...cfg.hiddenTabs, [id]: !cfg.hiddenTabs?.[id] };
+    if (!hiddenTabs[id]) delete hiddenTabs[id];
+    saveNested("hiddenTabs", hiddenTabs, hiddenTabs[id] ? `${id} hidden` : `${id} shown`);
+  };
+  const updateCopy = (key, value) => saveNested("pageCopy", { ...cfg.pageCopy, [key]: value }, "text updated live");
+  const toggleCopy = (key) => {
+    const hiddenCopy = { ...cfg.hiddenCopy, [key]: !cfg.hiddenCopy?.[key] };
+    if (!hiddenCopy[key]) delete hiddenCopy[key];
+    saveNested("hiddenCopy", hiddenCopy, hiddenCopy[key] ? "text block hidden" : "text block shown");
+  };
+  const moveBox = (page, id, dir) => {
+    const arr = [...(cfg.boxOrder?.[page] || [])];
+    const idx = arr.indexOf(id);
+    const nextIdx = idx + dir;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= arr.length) return;
+    [arr[idx], arr[nextIdx]] = [arr[nextIdx], arr[idx]];
+    saveNested("boxOrder", { ...cfg.boxOrder, [page]: arr }, `${page} box order saved`);
+  };
+  return (
+    <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,209,102,0.18)",borderRadius:18,padding:13,marginBottom:16,boxShadow:"0 16px 36px rgba(0,0,0,0.22)"}}>
+      <button onClick={()=>setOpen(v=>!v)} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,cursor:"pointer",textAlign:"left"}}>
+        <div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>app command center</div>
+          <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900}}>customize tabs, text, borders, page boxes</div>
+        </div>
+        <ChevronRight size={16} color="#FFD166" style={{transform:open?"rotate(90deg)":"rotate(0deg)",transition:"transform .18s ease"}}/>
+      </button>
+      {open && (
+        <div style={{marginTop:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
+            {[
+              ["hideBorders", "hide borders"],
+              ["compactCards", "compact cards"],
+              ["hideMutedText", "hide gray helper text"],
+            ].map(([key,label]) => (
+              <button key={key} onClick={()=>save({ [key]: !cfg[key] }, `${label}: ${!cfg[key] ? "on" : "off"}`)} className="bb-pressable" style={{background:cfg[key]?"#FFD166":"rgba(255,255,255,0.05)",border:`1px solid ${cfg[key]?"#FFD166":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:10,fontWeight:900,color:cfg[key]?"#06070D":"#8B92A8",cursor:"pointer"}}>{label}</button>
+            ))}
+          </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>animation depth</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
+            {["low","normal","high"].map(depth => (
+              <button key={depth} onClick={()=>save({ animationDepth:depth }, `motion depth: ${depth}`)} className="bb-pressable" style={{background:cfg.animationDepth===depth?"#FFD166":"rgba(255,255,255,0.05)",border:`1px solid ${cfg.animationDepth===depth?"#FFD166":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:10,fontWeight:900,color:cfg.animationDepth===depth?"#06070D":"#8B92A8",cursor:"pointer"}}>{depth}</button>
+            ))}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:13}}>
+            <button onClick={()=>save({ buttonMotion:cfg.buttonMotion==="bouncy"?"normal":"bouncy" }, cfg.buttonMotion==="bouncy"?"button bounce off":"button bounce on")} className="bb-pressable" style={{background:cfg.buttonMotion==="bouncy"?"#A78BFA":"rgba(255,255,255,0.05)",border:`1px solid ${cfg.buttonMotion==="bouncy"?"#A78BFA":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:10,fontWeight:900,color:cfg.buttonMotion==="bouncy"?"#06070D":"#8B92A8",cursor:"pointer"}}>button bounce</button>
+            <button onClick={()=>save({ ambientFx:!cfg.ambientFx }, !cfg.ambientFx?"ambient fx on":"ambient fx off")} className="bb-pressable" style={{background:cfg.ambientFx?"#B8FF4D":"rgba(255,255,255,0.05)",border:`1px solid ${cfg.ambientFx?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:10,fontWeight:900,color:cfg.ambientFx?"#06070D":"#8B92A8",cursor:"pointer"}}>ambient fx</button>
+          </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>tabs · move / hide</div>
+          <div style={{display:"grid",gap:7,marginBottom:13}}>
+            {cfg.tabOrder.map((id, idx)=>(
+              <div key={id} style={{display:"grid",gridTemplateColumns:"1fr 34px 34px 62px",gap:6,alignItems:"center",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,padding:7}}>
+                <div style={{fontSize:12,color:cfg.hiddenTabs?.[id]?"#4A5066":"#E8ECF4",fontWeight:900}}>{id === "presence" ? "squad" : id}</div>
+                <button onClick={()=>moveTab(id,-1)} disabled={idx===0} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,color:idx===0?"#34394A":"#E8ECF4",height:30}}>↑</button>
+                <button onClick={()=>moveTab(id,1)} disabled={idx===cfg.tabOrder.length-1} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,color:idx===cfg.tabOrder.length-1?"#34394A":"#E8ECF4",height:30}}>↓</button>
+                <button onClick={()=>toggleTab(id)} style={{background:cfg.hiddenTabs?.[id]?"rgba(255,92,138,0.12)":"rgba(184,255,77,0.10)",border:`1px solid ${cfg.hiddenTabs?.[id]?"rgba(255,92,138,0.28)":"rgba(184,255,77,0.25)"}`,borderRadius:8,color:cfg.hiddenTabs?.[id]?"#FF5C8A":"#B8FF4D",height:30,fontSize:10,fontWeight:900}}>{cfg.hiddenTabs?.[id]?"hidden":"shown"}</button>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>page text · edit / remove</div>
+          <div style={{display:"grid",gap:8,marginBottom:13}}>
+            {copyFields.map(([key,label])=>(
+              <div key={key} style={{display:"grid",gridTemplateColumns:"1fr 66px",gap:7,alignItems:"center"}}>
+                <input defaultValue={cfg.pageCopy?.[key] || ""} placeholder={label} onBlur={(e)=>{ if (e.target.value !== (cfg.pageCopy?.[key] || "")) updateCopy(key, e.target.value); }} onKeyDown={(e)=>{ if(e.key==="Enter") e.currentTarget.blur(); }} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,padding:"9px 10px",fontSize:11,fontWeight:800,color:"#E8ECF4",minWidth:0}}/>
+                <button onClick={()=>toggleCopy(key)} style={{background:cfg.hiddenCopy?.[key]?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.05)",border:`1px solid ${cfg.hiddenCopy?.[key]?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:10,color:cfg.hiddenCopy?.[key]?"#FF5C8A":"#8B92A8",height:36,fontSize:10,fontWeight:900}}>{cfg.hiddenCopy?.[key]?"removed":"visible"}</button>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>shop price boxes</div>
+          <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:9,marginBottom:13}}>
+            <div style={{display:"grid",gridTemplateColumns:"72px 1fr",gap:8,alignItems:"center",marginBottom:8}}>
+              <input type="color" value={cfg.shopPriceBoxAccent || "#B8FF4D"} onChange={(e)=>save({ shopPriceBoxAccent:e.target.value }, "price box color saved")} style={{width:"100%",height:36,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:3,cursor:"pointer"}}/>
+              <input value={cfg.shopPriceBoxAccent || "#B8FF4D"} onChange={(e)=>{ const v=e.target.value.trim(); if(/^#[0-9a-f]{6}$/i.test(v)) save({ shopPriceBoxAccent:v }, "price box color saved"); }} placeholder="#B8FF4D" style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,padding:"9px 10px",fontSize:11,fontWeight:900,color:"#E8ECF4",minWidth:0}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:6,marginBottom:8}}>
+              {["#B8FF4D","#A78BFA","#FFD166","#4D9EFF"].map(c => (
+                <button key={c} onClick={()=>save({ shopPriceBoxAccent:c }, "price box color saved")} className="bb-pressable" style={{height:30,background:bbAlpha(c,.16),border:`1px solid ${bbAlpha(c,.38)}`,borderRadius:9,color:c,fontSize:10,fontWeight:900,cursor:"pointer"}}>set</button>
+              ))}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              <button onClick={()=>save({ shopPriceBoxBorderOpacity:.24, shopPriceBoxBgOpacity:.08 }, "price boxes subtle")} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:9,color:"#8B92A8",height:32,fontSize:10,fontWeight:900,cursor:"pointer"}}>subtle border</button>
+              <button onClick={()=>save({ shopPriceBoxBorderOpacity:.48, shopPriceBoxBgOpacity:.14 }, "price boxes stronger")} className="bb-pressable" style={{background:bbAlpha(cfg.shopPriceBoxAccent,.14),border:`1px solid ${bbAlpha(cfg.shopPriceBoxAccent,.48)}`,borderRadius:9,color:cfg.shopPriceBoxAccent,height:32,fontSize:10,fontWeight:900,cursor:"pointer"}}>stronger border</button>
+            </div>
+          </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>box order presets</div>
+          {Object.entries(cfg.boxOrder || {}).map(([page, arr]) => (
+            <div key={page} style={{marginBottom:9,background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:9}}>
+              <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>{page}</div>
+              {(arr || []).map((id, idx)=>(
+                <div key={id} style={{display:"grid",gridTemplateColumns:"1fr 30px 30px",gap:6,alignItems:"center",marginTop:5}}>
+                  <div style={{fontSize:11,color:"#E8ECF4",fontWeight:800}}>{id}</div>
+                  <button onClick={()=>moveBox(page,id,-1)} disabled={idx===0} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,color:idx===0?"#34394A":"#E8ECF4",height:27}}>↑</button>
+                  <button onClick={()=>moveBox(page,id,1)} disabled={idx===(arr||[]).length-1} style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,color:idx===(arr||[]).length-1?"#34394A":"#E8ECF4",height:27}}>↓</button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function AdminBurtonOSControls({ burtonOS, setBurtonOS, appCustomizer, setAppCustomizer, addToast }) {
+  const os = normalizeBurtonOS(burtonOS);
+  const [vaultText, setVaultText] = useState("");
+  const [unlockText, setUnlockText] = useState("");
+  const cfgForOptions = normalizeAppCustomizer(appCustomizer);
+  const optionSource = cfgForOptions;
+  const statePresets = getBurtonStatePresets(optionSource);
+  const limitedEvents = getBurtonLimitedEvents(optionSource);
+  const boxCopyFields = [
+    ["burtonOSEyebrow", "Burton OS label"],
+    ["chaosButtonLabel", "Chaos label"],
+    ["chaosEmptyTitle", "Chaos idle title"],
+    ["chaosEmptyDesc", "Chaos idle body"],
+    ["courtRoomLabel", "Court room label"],
+    ["courtRoomTitle", "Court room title"],
+    ["courtRoomDesc", "Court room body"],
+    ["teamEconomyLabel", "Economy label"],
+    ["limitedEventLabel", "Limited event label"],
+    ["secretUnlocksLabel", "Secret unlocks label"],
+    ["vaultLabel", "Vault label"],
+    ["cursesBlessingsLabel", "Curses/blessings label"],
+  ];
+  const saveOS = async (next, msg = "Burton OS updated", icon = "🛡️") => {
+    const safe = normalizeBurtonOS(next);
+    setBurtonOS?.(safe);
+    await storeSetWithPush(BURTON_OS_KEY, safe);
+    addToast?.(msg, icon);
+  };
+  const setState = (preset) => saveOS({ ...os, state:{ ...preset, reason:"forced from admin god mode", updatedAt:new Date().toISOString(), updatedBy:ADMIN_ID }, history:[{ id:`admin_state_${Date.now()}`, type:"admin_state", emoji:preset.emoji, title:`Admin forced ${preset.label}`, text:"state changed from control center", color:preset.color, ts:new Date().toISOString() }, ...(os.history || [])].slice(0,80) }, `state: ${preset.label}`, preset.emoji);
+  const setEvent = (evt) => saveOS({ ...os, limitedEvent:evt.id === "none" ? null : { ...evt, startedAt:new Date().toISOString(), by:ADMIN_ID }, history:[{ id:`event_${Date.now()}`, type:"limited_event", emoji:evt.emoji, title:evt.id === "none" ? "Limited event cleared" : evt.title, text:evt.desc, color:evt.color, ts:new Date().toISOString() }, ...(os.history || [])].slice(0,80) }, evt.id === "none" ? "limited event cleared" : `${evt.title} active`, evt.emoji);
+  const addVault = () => {
+    const text = vaultText.trim();
+    if (!text) return;
+    setVaultText("");
+    const vd = getBurtonPoolItem(optionSource, "vaultDrops", "admin_vault_drop", BURTON_VAULT_DROP_DEFS[3]);
+    saveOS({ ...os, vault:[{ id:`vault_admin_${Date.now()}`, emoji:vd?.emoji || "🗄️", title:vd?.title || "Admin Vault Drop", text, color:vd?.color || "#4D9EFF", ts:new Date().toISOString() }, ...(os.vault || [])].slice(0,80) }, "vault entry added", vd?.emoji || "🗄️");
+  };
+  const addUnlock = () => {
+    const text = unlockText.trim();
+    if (!text) return;
+    setUnlockText("");
+    const ud = getBurtonPoolItem(optionSource, "secretUnlocks", "admin_secret_unlock", BURTON_SECRET_UNLOCK_DEFS[2]);
+    saveOS({ ...os, unlocks:[{ id:`unlock_admin_${Date.now()}`, emoji:ud?.emoji || "🔓", title:text || ud?.title || "Admin Secret Unlock", text:ud?.text || "secret unlock added from admin god mode", color:ud?.color || "#FFD166", ts:new Date().toISOString() }, ...(os.unlocks || [])].slice(0,80) }, "secret unlock added", ud?.emoji || "🔓");
+  };
+  const toggleBox = async (boxId) => {
+    const cfg = normalizeAppCustomizer(appCustomizer);
+    const enabledBoxes = { ...(cfg.enabledBoxes || {}), [boxId]: !isAppBoxEnabled(cfg, boxId) };
+    const next = normalizeAppCustomizer({ ...cfg, enabledBoxes });
+    await saveAppCustomizer(next, setAppCustomizer, addToast, `${boxId} ${enabledBoxes[boxId] ? "shown" : "hidden"}`);
+  };
+  const updateBoxCopy = async (key, value) => {
+    const cfg = normalizeAppCustomizer(appCustomizer);
+    const next = normalizeAppCustomizer({ ...cfg, pageCopy:{ ...(cfg.pageCopy || {}), [key]:value } });
+    await saveAppCustomizer(next, setAppCustomizer, addToast, "box text updated");
+  };
+  const saveOptionPools = async (nextPools, msg = "Burton option updated") => {
+    const cfg = normalizeAppCustomizer(appCustomizer);
+    const cleanPools = normalizeBurtonOptionPools(nextPools);
+    const nextCfg = normalizeAppCustomizer({ ...cfg, burtonOptionPools:cleanPools });
+    await saveAppCustomizer(nextCfg, setAppCustomizer, addToast, msg);
+    const nextOS = normalizeBurtonOS({ ...os, settings:{ ...os.settings, optionPools:cleanPools } });
+    setBurtonOS?.(nextOS);
+    await storeSetWithPush(BURTON_OS_KEY, nextOS).catch(() => {});
+  };
+  return (
+    <div style={{background:"linear-gradient(135deg,#120F1E,#090B14)",border:"1px solid rgba(255,97,193,0.20)",borderRadius:18,padding:14,marginBottom:16,boxShadow:"0 16px 36px rgba(0,0,0,0.22)"}}>
+      <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>admin god mode · burton os</div>
+      <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.4,marginBottom:12}}>Control chaos, state, limited events, vault drops, secret unlocks, and which private-universe boxes show in the app.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:12}}>
+        <button onClick={()=>saveOS({ ...os, settings:{ ...os.settings, autoState:!os.settings.autoState } }, !os.settings.autoState ? "auto state on" : "auto state off", "⚙️")} className="bb-pressable" style={{background:os.settings.autoState?"rgba(184,255,77,.12)":"rgba(255,92,138,.12)",border:`1px solid ${os.settings.autoState?"rgba(184,255,77,.30)":"rgba(255,92,138,.30)"}`,borderRadius:11,padding:"10px",fontSize:10,fontWeight:900,color:os.settings.autoState?"#B8FF4D":"#FF5C8A",cursor:"pointer"}}>auto state {os.settings.autoState?"on":"off"}</button>
+        <button onClick={()=>saveOS(DEFAULT_BURTON_OS, "Burton OS reset", "↩")} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:11,padding:"10px",fontSize:10,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>reset os</button>
+      </div>
+      <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>force state</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:13}}>
+        {statePresets.map(st => <button key={st.id} onClick={()=>setState(st)} className="bb-pressable" style={{background:os.state.id===st.id?st.color:"rgba(255,255,255,.05)",border:`1px solid ${os.state.id===st.id?st.color:"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"9px 4px",fontSize:10,fontWeight:900,color:os.state.id===st.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{st.emoji} {st.label}</button>)}
+      </div>
+      <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>limited events</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:13}}>
+        {limitedEvents.map(evt => <button key={evt.id} onClick={()=>setEvent(evt)} className="bb-pressable" style={{background:(os.limitedEvent?.id || "none")===evt.id?evt.color:"rgba(255,255,255,.05)",border:`1px solid ${(os.limitedEvent?.id || "none")===evt.id?evt.color:"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"9px 6px",fontSize:10,fontWeight:900,color:(os.limitedEvent?.id || "none")===evt.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{evt.emoji} {evt.title}</button>)}
+      </div>
+      <div style={{fontSize:10,color:"#7CFFB2",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>state theme per player</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:13}}>
+        {PLAYERS.map(p => {
+          const on = os.settings?.stateThemeByPlayer?.[p.id] === true;
+          return <button key={p.id} onClick={()=>saveOS({ ...os, settings:{ ...os.settings, stateThemeByPlayer:{ ...(os.settings?.stateThemeByPlayer || {}), [p.id]:!on } } }, `${p.name} state theme ${!on?"on":"off"}`, "🎨")} className="bb-pressable" style={{background:on?bbAlpha(p.color,.18):"rgba(255,255,255,.05)",border:`1px solid ${on?bbAlpha(p.color,.40):"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"9px 4px",fontSize:10,fontWeight:900,color:on?p.color:"#8B92A8",cursor:"pointer"}}>{p.name} {on?"on":"off"}</button>;
+        })}
+      </div>
+      <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>new boxes · toggle on/off</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:13}}>
+        {Object.keys(DEFAULT_BURTON_BOXES).map(id => <button key={id} onClick={()=>toggleBox(id)} className="bb-pressable" style={{background:isAppBoxEnabled(appCustomizer,id)?"rgba(184,255,77,.12)":"rgba(255,92,138,.10)",border:`1px solid ${isAppBoxEnabled(appCustomizer,id)?"rgba(184,255,77,.30)":"rgba(255,92,138,.25)"}`,borderRadius:10,padding:"9px 6px",fontSize:10,fontWeight:900,color:isAppBoxEnabled(appCustomizer,id)?"#B8FF4D":"#FF5C8A",cursor:"pointer"}}>{id} {isAppBoxEnabled(appCustomizer,id)?"on":"off"}</button>)}
+      </div>
+      <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>edit new box text</div>
+      <div style={{display:"grid",gap:7,marginBottom:13,maxHeight:240,overflowY:"auto",paddingRight:2}}>
+        {boxCopyFields.map(([key,label]) => (
+          <input key={key} defaultValue={normalizeAppCustomizer(appCustomizer).pageCopy?.[key] || ""} placeholder={label} onBlur={(e)=>{ if (e.target.value !== (normalizeAppCustomizer(appCustomizer).pageCopy?.[key] || "")) updateBoxCopy(key, e.target.value); }} onKeyDown={(e)=>{ if(e.key==="Enter") e.currentTarget.blur(); }} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"9px 10px",fontSize:11,color:"#E8ECF4",minWidth:0}}/>
+        ))}
+      </div>
+      <AdminCollapse title="customize option pools" subtitle="rename / emoji / hide chaos events, states, verdicts, unlocks, curses" accent="#A78BFA">
+        <AdminBurtonOptionPoolEditor title="state modes" poolName="states" accent="#A78BFA" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+        <AdminBurtonOptionPoolEditor title="chaos button events" poolName="chaos" accent="#FF61C1" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+        <AdminBurtonOptionPoolEditor title="limited events" poolName="limitedEvents" accent="#FFD166" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+        <AdminBurtonOptionPoolEditor title="court verdict buttons" poolName="courtVerdicts" accent="#FFD166" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+        <AdminCourtPunishmentEditor appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast} />
+        <AdminBurtonOptionPoolEditor title="curse options" poolName="curses" accent="#FF8C42" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+        <AdminBurtonOptionPoolEditor title="blessing options" poolName="blessings" accent="#7CFFB2" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+        <AdminBurtonOptionPoolEditor title="secret unlock options" poolName="secretUnlocks" accent="#FFD166" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+        <AdminBurtonOptionPoolEditor title="vault drop options" poolName="vaultDrops" accent="#4D9EFF" appCustomizer={appCustomizer} onSavePools={saveOptionPools} />
+      </AdminCollapse>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 80px",gap:7,marginBottom:8}}>
+        <input value={vaultText} onChange={e=>setVaultText(e.target.value)} placeholder="add vault note" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"9px 10px",fontSize:11,color:"#E8ECF4",minWidth:0}}/>
+        <button onClick={addVault} className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.26)",borderRadius:10,fontSize:10,fontWeight:900,color:"#4D9EFF",cursor:"pointer"}}>vault</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 80px",gap:7}}>
+        <input value={unlockText} onChange={e=>setUnlockText(e.target.value)} placeholder="add secret unlock" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"9px 10px",fontSize:11,color:"#E8ECF4",minWidth:0}}/>
+        <button onClick={addUnlock} className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.26)",borderRadius:10,fontSize:10,fontWeight:900,color:"#FFD166",cursor:"pointer"}}>unlock</button>
+      </div>
+    </div>
+  );
+}
+
+
+function AdminBurtonOptionPoolEditor({ title, poolName, accent = "#B8FF4D", appCustomizer, onSavePools }) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const pools = normalizeBurtonOptionPools(cfg.burtonOptionPools);
+  const rows = getBurtonOptionPool(cfg, poolName, { includeDisabled:true });
+  const titleKey = ["states","courtVerdicts","curses","blessings"].includes(poolName) ? "label" : "title";
+  const bodyKey = poolName === "curses" || poolName === "blessings" ? "reason" : (poolName === "secretUnlocks" || poolName === "vaultDrops" ? "text" : "desc");
+  const updateItem = async (id, patch) => {
+    const nextPools = normalizeBurtonOptionPools(pools);
+    nextPools[poolName] = { ...(nextPools[poolName] || {}), [id]:{ ...(nextPools[poolName]?.[id] || {}), ...patch, id } };
+    await onSavePools?.(nextPools, `${title} updated`);
+  };
+  return (
+    <div style={{background:"rgba(255,255,255,.025)",border:`1px solid ${bbAlpha(accent,.18)}`,borderRadius:14,padding:10,marginBottom:10}}>
+      <div style={{fontSize:10,color:accent,fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>{title}</div>
+      <div style={{display:"grid",gap:8}}>
+        {rows.map(item => {
+          const canDisable = item.id !== "none" && !(poolName === "states" && item.id === "normal");
+          return (
+            <div key={item.id} style={{background:"rgba(0,0,0,.14)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:9}}>
+              <div style={{display:"grid",gridTemplateColumns:"42px 1fr 54px",gap:7,alignItems:"center",marginBottom:7}}>
+                <input defaultValue={item.emoji || ""} maxLength={4} onBlur={(e)=>updateItem(item.id,{ emoji:e.target.value || item.emoji || "○" })} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"8px 6px",fontSize:15,color:"#E8ECF4",textAlign:"center",minWidth:0}}/>
+                <input defaultValue={item[titleKey] || ""} placeholder="name" onBlur={(e)=>updateItem(item.id,{ [titleKey]:e.target.value || item[titleKey] || item.id })} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"8px 9px",fontSize:11,color:"#E8ECF4",minWidth:0}}/>
+                <button disabled={!canDisable} onClick={()=>updateItem(item.id,{ enabled:item.enabled === false })} className="bb-pressable" style={{background:item.enabled!==false?"rgba(184,255,77,.12)":"rgba(255,92,138,.10)",border:`1px solid ${item.enabled!==false?"rgba(184,255,77,.30)":"rgba(255,92,138,.25)"}`,borderRadius:9,padding:"8px 4px",fontSize:9,fontWeight:900,color:item.enabled!==false?"#B8FF4D":"#FF5C8A",cursor:canDisable?"pointer":"not-allowed"}}>{item.enabled!==false?"on":"off"}</button>
+              </div>
+              {bodyKey && <input defaultValue={item[bodyKey] || ""} placeholder="description / reason" onBlur={(e)=>updateItem(item.id,{ [bodyKey]:e.target.value || item[bodyKey] || "" })} style={{width:"100%",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:9,padding:"8px 9px",fontSize:10.5,color:"#E8ECF4",marginBottom:7}}/>}
+              <div style={{display:"grid",gridTemplateColumns:"82px 1fr",gap:7,alignItems:"center"}}>
+                <input defaultValue={item.color || "#B8FF4D"} placeholder="#B8FF4D" onBlur={(e)=>updateItem(item.id,{ color:cleanBurtonColor(e.target.value, item.color || accent) })} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:9,padding:"7px 8px",fontSize:10,color:item.color || accent,minWidth:0}}/>
+                <div style={{fontSize:9.5,color:"#4A5066",fontWeight:800,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>id: {item.id}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+function AdminTabBoxLayoutManager({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const [dragging, setDragging] = useState(null);
+  const saveLayout = async (nextLayout, msg = "tab box layout saved") => {
+    const next = normalizeAppCustomizer({ ...cfg, tabBoxLayout:nextLayout });
+    await saveAppCustomizer(next, setAppCustomizer, addToast, msg);
+  };
+  const setTabLayout = (tabId, patch, msg) => saveLayout({ ...cfg.tabBoxLayout, [tabId]:{ ...(cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId]), ...patch } }, msg);
+  const moveBox = (tabId, boxId, dir) => {
+    const layout = cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId];
+    const order = [...(layout.order || [])];
+    const idx = order.indexOf(boxId);
+    const nextIdx = idx + dir;
+    if (idx < 0 || nextIdx < 0 || nextIdx >= order.length) return;
+    [order[idx], order[nextIdx]] = [order[nextIdx], order[idx]];
+    setTabLayout(tabId, { order }, `${tabId} order updated`);
+  };
+  const dropBox = (tabId, targetId) => {
+    if (!dragging || dragging.tabId !== tabId || dragging.boxId === targetId) return;
+    const layout = cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId];
+    const order = [...(layout.order || [])].filter(id => id !== dragging.boxId);
+    const targetIdx = order.indexOf(targetId);
+    order.splice(targetIdx < 0 ? order.length : targetIdx, 0, dragging.boxId);
+    setDragging(null);
+    setTabLayout(tabId, { order }, `${tabId} order updated`);
+  };
+  const toggleBox = (tabId, boxId) => {
+    const layout = cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId];
+    const hidden = { ...(layout.hidden || {}) };
+    hidden[boxId] = !hidden[boxId];
+    if (!hidden[boxId]) delete hidden[boxId];
+    setTabLayout(tabId, { hidden }, `${getTabBoxAdminLabel(cfg, tabId, boxId)} ${hidden[boxId] ? "hidden" : "shown"}`);
+  };
+  const renameBox = (tabId, boxId, label) => {
+    const layout = cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId];
+    setTabLayout(tabId, { labels:{ ...(layout.labels || {}), [boxId]:label } }, "box label updated");
+  };
+  const setBoxDesc = (tabId, boxId, desc) => {
+    const layout = cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId];
+    setTabLayout(tabId, { descriptions:{ ...(layout.descriptions || {}), [boxId]:desc } }, "box description updated");
+  };
+  const setBoxSize = (tabId, boxId, size) => {
+    const layout = cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId];
+    setTabLayout(tabId, { sizes:{ ...(layout.sizes || {}), [boxId]:size } }, "box size updated");
+  };
+  const setLayoutOption = (tabId, key, value) => setTabLayout(tabId, { [key]:value }, `${tabId} layout updated`);
+  return (
+    <div style={{display:"grid",gap:12}}>
+      <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4}}>Each tab now has saved layout presets, compact sizing, per-box visibility, drag/drop order, labels, and description text. Home overview + Burton OS update live; the same settings are stored for every tab so the older sections can be progressively wrapped without losing your layout choices.</div>
+      {Object.entries(DEFAULT_TAB_BOX_DEFS).map(([tabId, defs]) => {
+        const layout = cfg.tabBoxLayout?.[tabId] || DEFAULT_TAB_BOX_LAYOUT[tabId];
+        const rows = (layout.order || defs.map(d => d.id)).map(id => defs.find(d => d.id === id)).filter(Boolean);
+        return (
+          <AdminCollapse key={tabId} title={tabId.replace(/([A-Z])/g," $1")} subtitle={`${layout.layoutMode || "stack"} · ${layout.density || "normal"} · ${rows.length} boxes`} accent={tabId === "burtonOS" ? "#FF61C1" : "#4D9EFF"}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:10}}>
+              <div>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:900,textTransform:"uppercase",marginBottom:4}}>layout style</div>
+                <select value={layout.layoutMode || "stack"} onChange={(e)=>setLayoutOption(tabId,"layoutMode",e.target.value)} style={{width:"100%",background:"#11131F",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"9px 8px",fontSize:10.5,color:"#E8ECF4"}}>
+                  {TAB_LAYOUT_MODE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:900,textTransform:"uppercase",marginBottom:4}}>spacing</div>
+                <select value={layout.density || "normal"} onChange={(e)=>setLayoutOption(tabId,"density",e.target.value)} style={{width:"100%",background:"#11131F",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"9px 8px",fontSize:10.5,color:"#E8ECF4"}}>
+                  {TAB_LAYOUT_DENSITY_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
+              <div style={{gridColumn:"1 / -1"}}>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:900,textTransform:"uppercase",marginBottom:4}}>grouping mode</div>
+                <select value={layout.groupMode || "none"} onChange={(e)=>setLayoutOption(tabId,"groupMode",e.target.value)} style={{width:"100%",background:"#11131F",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"9px 8px",fontSize:10.5,color:"#E8ECF4"}}>
+                  {TAB_LAYOUT_GROUP_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{background:"rgba(255,255,255,.025)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:8,marginBottom:10}}>
+              <div style={{fontSize:9,color:"#4A5066",fontWeight:900,textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>layout preview</div>
+              <div style={getTabLayoutContainerStyle(cfg, tabId, { pointerEvents:"none", maxHeight:180, overflow:"hidden" })}>
+                {rows.filter(box => !layout.hidden?.[box.id]).slice(0,8).map(box => (
+                  <div key={box.id} style={{...getTabBoxStyle(cfg, tabId, box.id), background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:9,minHeight:getTabBoxSizeId(cfg, tabId, box.id)==="mini"?38:52}}>
+                    <div style={{fontSize:9.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getTabBoxAdminLabel(cfg, tabId, box.id)}</div>
+                    {getTabBoxDescription(cfg, tabId, box.id) && <div style={{fontSize:8.5,color:"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getTabBoxDescription(cfg, tabId, box.id)}</div>}
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{display:"grid",gap:8}}>
+              {rows.map((box, idx) => {
+                const hidden = !!layout.hidden?.[box.id];
+                const size = getTabBoxSizeId(cfg, tabId, box.id);
+                return (
+                  <div key={box.id} draggable onDragStart={()=>setDragging({ tabId, boxId:box.id })} onDragOver={(e)=>e.preventDefault()} onDrop={()=>dropBox(tabId, box.id)} style={{display:"grid",gridTemplateColumns:"22px 1fr 84px 32px 32px 54px",gap:6,alignItems:"center",background:hidden?"rgba(255,92,138,.055)":"rgba(255,255,255,.04)",border:`1px solid ${hidden?"rgba(255,92,138,.20)":"rgba(255,255,255,.07)"}`,borderRadius:12,padding:7,cursor:"grab"}}>
+                    <div style={{fontSize:13,color:"#4A5066",fontWeight:900,textAlign:"center"}}>☰</div>
+                    <input defaultValue={getTabBoxAdminLabel(cfg, tabId, box.id)} onBlur={(e)=>{ const v=e.target.value.trim(); if (v && v !== getTabBoxAdminLabel(cfg, tabId, box.id)) renameBox(tabId, box.id, v); }} onKeyDown={(e)=>{ if(e.key==="Enter") e.currentTarget.blur(); }} style={{background:"rgba(0,0,0,.15)",border:"1px solid rgba(255,255,255,.07)",borderRadius:9,padding:"8px 9px",fontSize:10.5,fontWeight:900,color:hidden?"#8B92A8":"#E8ECF4",minWidth:0}}/>
+                    <select value={size} onChange={(e)=>setBoxSize(tabId, box.id, e.target.value)} style={{height:30,background:"#11131F",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,color:"#E8ECF4",fontSize:9.5,fontWeight:800,minWidth:0}}>
+                      {TAB_BOX_SIZE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+                    </select>
+                    <button onClick={()=>moveBox(tabId, box.id, -1)} disabled={idx===0} style={{height:30,background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,color:idx===0?"#34394A":"#E8ECF4"}}>↑</button>
+                    <button onClick={()=>moveBox(tabId, box.id, 1)} disabled={idx===rows.length-1} style={{height:30,background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,color:idx===rows.length-1?"#34394A":"#E8ECF4"}}>↓</button>
+                    <button onClick={()=>toggleBox(tabId, box.id)} style={{height:30,background:hidden?"rgba(255,92,138,.12)":"rgba(184,255,77,.10)",border:`1px solid ${hidden?"rgba(255,92,138,.28)":"rgba(184,255,77,.25)"}`,borderRadius:8,color:hidden?"#FF5C8A":"#B8FF4D",fontSize:9.5,fontWeight:900}}>{hidden?"off":"on"}</button>
+                    <input defaultValue={getTabBoxDescription(cfg, tabId, box.id)} placeholder="box description text" onBlur={(e)=>{ const v=e.target.value.trim(); if (v !== getTabBoxDescription(cfg, tabId, box.id)) setBoxDesc(tabId, box.id, v); }} onKeyDown={(e)=>{ if(e.key==="Enter") e.currentTarget.blur(); }} style={{gridColumn:"2 / -1",background:"rgba(255,255,255,.025)",border:"1px solid rgba(255,255,255,.055)",borderRadius:9,padding:"7px 8px",fontSize:10,color:"#8B92A8",minWidth:0}}/>
+                  </div>
+                );
+              })}
+            </div>
+          </AdminCollapse>
+        );
+      })}
+    </div>
+  );
+}
+
+function AdminCourtPunishmentEditor({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const punish = cfg.courtPunishments || DEFAULT_COURT_PUNISHMENTS;
+  const verdicts = getBurtonCourtVerdicts(cfg, { includeDisabled:true });
+  const states = getBurtonStatePresets(cfg);
+  const curses = getBurtonOptionPool(cfg, "curses", { includeDisabled:true });
+  const savePunish = (nextPunish, msg = "court punishments updated") => saveAppCustomizer(normalizeAppCustomizer({ ...cfg, courtPunishments:normalizeCourtPunishments(nextPunish) }), setAppCustomizer, addToast, msg);
+  const updateGlobal = (key, value) => savePunish({ ...punish, [key]:value }, `court ${key} ${value ? "on" : "off"}`);
+  const updateVerdict = (id, patch) => savePunish({ ...punish, [id]:{ ...(punish[id] || DEFAULT_COURT_PUNISHMENTS[id] || {}), ...patch } }, `${id} punishment updated`);
+  return (
+    <div style={{background:"rgba(255,255,255,.025)",border:"1px solid rgba(255,209,102,.18)",borderRadius:14,padding:10,marginBottom:10}}>
+      <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>court room punishments</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:10}}>
+        {[["enabled","punishments"],["archiveToVault","vault"],["pingVerdict","ping verdict"]].map(([key,label]) => <button key={key} onClick={()=>updateGlobal(key, punish[key] === false)} className="bb-pressable" style={{background:punish[key] !== false?"rgba(184,255,77,.12)":"rgba(255,92,138,.10)",border:`1px solid ${punish[key] !== false?"rgba(184,255,77,.30)":"rgba(255,92,138,.25)"}`,borderRadius:10,padding:"9px 4px",fontSize:9.5,fontWeight:900,color:punish[key] !== false?"#B8FF4D":"#FF5C8A"}}>{label} {punish[key] !== false?"on":"off"}</button>)}
+      </div>
+      <div style={{display:"grid",gap:9}}>
+        {verdicts.map(v => {
+          const row = punish[v.id] || DEFAULT_COURT_PUNISHMENTS[v.id] || { enabled:true };
+          return <div key={v.id} style={{background:"rgba(0,0,0,.14)",border:`1px solid ${bbAlpha(v.color || "#FFD166", .18)}`,borderRadius:12,padding:9}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{fontSize:11,color:v.color || "#FFD166",fontWeight:900}}>{v.emoji} {v.label}</div>
+              <button onClick={()=>updateVerdict(v.id,{ enabled:row.enabled === false })} style={{background:row.enabled !== false?"rgba(184,255,77,.12)":"rgba(255,92,138,.10)",border:`1px solid ${row.enabled !== false?"rgba(184,255,77,.30)":"rgba(255,92,138,.25)"}`,borderRadius:9,padding:"7px 8px",fontSize:9,fontWeight:900,color:row.enabled !== false?"#B8FF4D":"#FF5C8A"}}>{row.enabled !== false?"on":"off"}</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"74px 1fr",gap:7,marginBottom:7}}>
+              <button onClick={()=>updateVerdict(v.id,{ fineEnabled:!row.fineEnabled })} style={{background:row.fineEnabled?"rgba(255,92,138,.12)":"rgba(255,255,255,.05)",border:`1px solid ${row.fineEnabled?"rgba(255,92,138,.28)":"rgba(255,255,255,.08)"}`,borderRadius:9,fontSize:9,fontWeight:900,color:row.fineEnabled?"#FF5C8A":"#8B92A8"}}>fine {row.fineEnabled?"on":"off"}</button>
+              <input type="number" defaultValue={row.fineAmount || 0} onBlur={(e)=>updateVerdict(v.id,{ fineAmount:Number(e.target.value) || 0 })} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"8px 9px",fontSize:10.5,color:"#E8ECF4",minWidth:0}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"74px 1fr",gap:7,marginBottom:7}}>
+              <button onClick={()=>updateVerdict(v.id,{ curseEnabled:!row.curseEnabled })} style={{background:row.curseEnabled?"rgba(255,140,66,.12)":"rgba(255,255,255,.05)",border:`1px solid ${row.curseEnabled?"rgba(255,140,66,.28)":"rgba(255,255,255,.08)"}`,borderRadius:9,fontSize:9,fontWeight:900,color:row.curseEnabled?"#FF8C42":"#8B92A8"}}>curse {row.curseEnabled?"on":"off"}</button>
+              <select value={row.curseId || ""} onChange={(e)=>updateVerdict(v.id,{ curseId:e.target.value })} style={{background:"#11131F",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"8px 9px",fontSize:10.5,color:"#E8ECF4",minWidth:0}}>
+                <option value="">none</option>
+                {curses.map(c => <option key={c.id} value={c.id}>{c.emoji} {c.label}</option>)}
+              </select>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"74px 1fr",gap:7,marginBottom:7}}>
+              <button onClick={()=>updateVerdict(v.id,{ titleEnabled:!row.titleEnabled })} style={{background:row.titleEnabled?"rgba(167,139,250,.12)":"rgba(255,255,255,.05)",border:`1px solid ${row.titleEnabled?"rgba(167,139,250,.28)":"rgba(255,255,255,.08)"}`,borderRadius:9,fontSize:9,fontWeight:900,color:row.titleEnabled?"#A78BFA":"#8B92A8"}}>title {row.titleEnabled?"on":"off"}</button>
+              <input defaultValue={row.title || ""} placeholder="temporary title" onBlur={(e)=>updateVerdict(v.id,{ title:e.target.value })} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"8px 9px",fontSize:10.5,color:"#E8ECF4",minWidth:0}}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"74px 1fr",gap:7}}>
+              <button onClick={()=>updateVerdict(v.id,{ stateEnabled:!row.stateEnabled })} style={{background:row.stateEnabled?"rgba(77,158,255,.12)":"rgba(255,255,255,.05)",border:`1px solid ${row.stateEnabled?"rgba(77,158,255,.28)":"rgba(255,255,255,.08)"}`,borderRadius:9,fontSize:9,fontWeight:900,color:row.stateEnabled?"#4D9EFF":"#8B92A8"}}>state {row.stateEnabled?"on":"off"}</button>
+              <select value={row.stateId || "normal"} onChange={(e)=>updateVerdict(v.id,{ stateId:e.target.value })} style={{background:"#11131F",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"8px 9px",fontSize:10.5,color:"#E8ECF4",minWidth:0}}>
+                {states.map(st => <option key={st.id} value={st.id}>{st.emoji} {st.label}</option>)}
+              </select>
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+
+
+function AdminUnderConstructionControls({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const tabs = ["home","jobs","court","room","social","stats","presence","boost","coinflip","garage","stocks"];
+  const save = async (next) => saveAppCustomizer(normalizeAppCustomizer(next), setAppCustomizer, addToast, "construction settings saved");
+  return <AdminCollapse title="page under construction toggles" subtitle="hide pages for non-admin while you work" accent="#FFD166">
+    <div style={{display:"grid",gap:8}}>{tabs.map(id=>{ const row=safeObj(cfg.underConstruction?.[id]); return <div key={id} style={{display:"grid",gridTemplateColumns:"72px 1fr 54px",gap:7,alignItems:"center"}}><div style={{fontSize:10,color:"#E8ECF4",fontWeight:900,textTransform:"uppercase"}}>{id}</div><input defaultValue={row.message || "this page is being worked on right now."} onBlur={e=>save({...cfg,underConstruction:{...cfg.underConstruction,[id]:{...row,message:e.target.value}}})} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px",color:"#E8ECF4",fontSize:10}}/><button onClick={()=>save({...cfg,underConstruction:{...cfg.underConstruction,[id]:{...row,enabled:!row.enabled}}})} style={{background:row.enabled?"rgba(255,209,102,.15)":"rgba(255,255,255,.05)",border:`1px solid ${row.enabled?"rgba(255,209,102,.32)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:row.enabled?"#FFD166":"#8B92A8",fontWeight:900,fontSize:10}}>{row.enabled?"on":"off"}</button></div>})}</div>
+  </AdminCollapse>;
+}
+function AdminWeeklyAndStreams({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg=normalizeAppCustomizer(appCustomizer);
+  const save=(patch,msg)=>saveAppCustomizer(normalizeAppCustomizer({...cfg,...patch}),setAppCustomizer,addToast,msg||"saved");
+  const streamCfg=normalizeStreamDirectoryConfig(cfg.streamDirectory);
+  const updateStream=(idx,patch)=>{ const streams=[...streamCfg.streams]; streams[idx]={...streams[idx],...patch}; save({streamDirectory:{...streamCfg,streams}},"stream directory saved"); };
+  const addStream=()=>save({streamDirectory:{...streamCfg,streams:[...streamCfg.streams,{id:`stream_${Date.now()}`,enabled:true,label:"New Stream",type:"youtube",url:"",info:""}]}},"stream added");
+  const weekNum=String(Math.floor(Date.now()/WEEK_MS));
+  const wk=safeObj(cfg.weeklyAdmin?.weeks?.[weekNum]);
+  const setWeeklyText=(mode,text)=>{ const rows=text.split(/\n/g).map((line,i)=>({id:`wk_${mode}_${i}`,enabled:true,mode,text:line.trim(),type:"cumulative",field:i%2?"saves":"goals",target:5+i,color:mode==="3v3"?"#B8FF4D":mode==="2v2"?"#FF61C1":"#4D9EFF"})).filter(x=>x.text); save({weeklyAdmin:{...cfg.weeklyAdmin,weeks:{...cfg.weeklyAdmin?.weeks,[weekNum]:{...wk,[mode]:rows}}}},"weekly challenges saved"); };
+  return <AdminCollapse title="weekly challenges + rlcs stream directory" subtitle="edit weekly sets, shop library hooks, and live hub streams" accent="#4D9EFF">
+    <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,textTransform:"uppercase",marginBottom:8}}>weekly challenge text for this week</div>
+    {["3v3","2v2","1v1"].map(mode=><textarea key={mode} defaultValue={(Array.isArray(wk[mode])?wk[mode]:[]).map(x=>x.text).join("\n")} onBlur={e=>setWeeklyText(mode,e.target.value)} placeholder={`${mode} weekly challenges, one per line`} style={{width:"100%",minHeight:60,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:"#E8ECF4",fontSize:11,marginBottom:8}}/>)}
+    <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,textTransform:"uppercase",margin:"10px 0 8px"}}>rlcs stream directory</div>
+    <button onClick={()=>save({streamDirectory:{...streamCfg,multiview:!streamCfg.multiview}},streamCfg.multiview?"multiview off":"multiview on")} style={{width:"100%",background:streamCfg.multiview?"rgba(255,97,193,.14)":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:streamCfg.multiview?"#FF61C1":"#8B92A8",fontWeight:900,marginBottom:8}}>multiview {streamCfg.multiview?"on":"off"}</button>
+    {streamCfg.streams.map((st,idx)=><div key={st.id} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:12,padding:9,marginBottom:8}}><div style={{display:"grid",gridTemplateColumns:"54px 1fr",gap:7,marginBottom:7}}><button onClick={()=>updateStream(idx,{enabled:!st.enabled})} style={{background:st.enabled?"rgba(184,255,77,.12)":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,color:st.enabled?"#B8FF4D":"#8B92A8",fontWeight:900}}>{st.enabled?"on":"off"}</button><input defaultValue={st.label} onBlur={e=>updateStream(idx,{label:e.target.value})} placeholder="label" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11}}/></div><input defaultValue={st.url} onBlur={e=>updateStream(idx,{url:e.target.value})} placeholder="twitch or youtube url" style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11,marginBottom:7}}/><textarea defaultValue={st.info} onBlur={e=>updateStream(idx,{info:e.target.value})} placeholder="stream info / directory text" style={{width:"100%",minHeight:48,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11}}/></div>)}
+    <button onClick={addStream} style={{width:"100%",background:"#4D9EFF",border:"none",borderRadius:10,padding:10,color:"#06070D",fontWeight:1000}}>add stream</button>
+  </AdminCollapse>;
+}
+
+
+function AdminHourlyJobRuleTabs({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const jc = normalizeJobsConfig(cfg.jobsConfig);
+  const [templateId,setTemplateId]=useState(jc.templates[0]?.id || "");
+  const [difficulty,setDifficulty]=useState("easy");
+  const [jobMode,setJobMode]=useState("solo");
+  const [slot,setSlot]=useState(jc.slotTimes[0] || "8:00 AM");
+  const activeGameMode = getGameModeForJobMode(jobMode);
+  const tpl = jc.templates.find(t=>t.id===templateId) || jc.templates[0];
+  if (!tpl) return null;
+  const inputStyle={background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px",color:"#E8ECF4",fontSize:10,minWidth:0};
+  const saveTemplate=(nextTpl,msg="hourly job saved")=>{
+    const templates=jc.templates.map(t=>t.id===nextTpl.id?nextTpl:t);
+    saveAppCustomizer(normalizeAppCustomizer({...cfg,jobsConfig:{...jc,templates}}),setAppCustomizer,addToast,msg);
+  };
+  const required=jc[difficulty]?.challenges || 5;
+  const modeSlotKey = getHourlyRuleKey(jobMode, slot);
+  const rules=getHourlyRulesForTemplate(tpl,difficulty,slot,required,tpl.challengeText,jobMode,activeGameMode).slice(0,required);
+  const saveRule=(idx,patch)=>{
+    const nextRules=[...rules];
+    nextRules[idx]=normalizeRulesForJobMode([normalizeJobChallengeRule({...nextRules[idx],...patch},nextRules[idx]?.text,idx)], jobMode, activeGameMode)[0];
+    const hourly=safeObj(tpl.hourlyChallengeRules);
+    const byDiff=safeObj(hourly[difficulty]);
+    const nextTpl={...tpl,hourlyChallengeRules:{...hourly,[difficulty]:{...byDiff,[modeSlotKey]:nextRules}}};
+    saveTemplate(nextTpl);
+  };
+  const autofill=()=>{
+    const hourly={...(tpl.hourlyChallengeRules||{})};
+    ["solo","duo","team"].forEach(mode => {
+      const defaults=getDefaultHourlyJobRules(mode);
+      ["easy","medium","hard"].forEach(d=>{ hourly[d]={...(hourly[d]||{})}; jc.slotTimes.forEach(sl=>{ const key=getHourlyRuleKey(mode, sl); hourly[d][key]=normalizeRulesForJobMode(normalizeJobChallengeRules(defaults[d]?.[sl], defaults[d]?.[sl]?.map(r=>r.text), jc[d]?.challenges || 5, tpl.challengeText), mode, getGameModeForJobMode(mode)); }); });
+    });
+    saveTemplate({...tpl,hourlyChallengeRules:hourly},"mode-locked hourly jobs autofilled");
+  };
+  return <AdminCollapse title="jobs by hour" subtitle="each difficulty/time slot can have different rules" accent="#7CFFB2">
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}><select value={templateId} onChange={e=>setTemplateId(e.target.value)} style={inputStyle}>{jc.templates.map(t=><option key={t.id} value={t.id}>{t.title}</option>)}</select><button onClick={autofill} style={{background:"#7CFFB2",border:"none",borderRadius:10,color:"#06070D",fontWeight:1000}}>autofill all hours</button></div>
+    <div style={{display:"flex",gap:7,overflowX:"auto",marginBottom:8}}>{["easy","medium","hard"].map(d=><button key={d} onClick={()=>setDifficulty(d)} style={{flexShrink:0,background:difficulty===d?"#B8FF4D":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px 10px",color:difficulty===d?"#06070D":"#8B92A8",fontWeight:900,fontSize:10}}>{d}</button>)}</div>
+    <div style={{display:"flex",gap:7,overflowX:"auto",marginBottom:8}}>{[["solo","solo · 1v1"],["duo","duo · 2v2"],["team","3s · 3v3"]].map(([m,label])=><button key={m} onClick={()=>setJobMode(m)} style={{flexShrink:0,background:jobMode===m?"rgba(77,158,255,.18)":"rgba(255,255,255,.05)",border:`1px solid ${jobMode===m?"rgba(77,158,255,.38)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"8px 10px",color:jobMode===m?"#4D9EFF":"#8B92A8",fontWeight:900,fontSize:10}}>{label}</button>)}</div>
+    <div style={{display:"flex",gap:6,overflowX:"auto",marginBottom:10,paddingBottom:4}}>{jc.slotTimes.map(sl=><button key={sl} onClick={()=>setSlot(sl)} style={{flexShrink:0,background:slot===sl?"rgba(77,158,255,.18)":"rgba(255,255,255,.04)",border:`1px solid ${slot===sl?"rgba(77,158,255,.38)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"8px 9px",color:slot===sl?"#4D9EFF":"#8B92A8",fontWeight:900,fontSize:10}}>{sl}</button>)}</div>
+    <div style={{fontSize:10,color:"#4A5066",fontWeight:900,textTransform:"uppercase",marginBottom:7}}>{tpl.title} · {difficulty} · {jobMode}/{activeGameMode} · {slot} · {required} tasks</div>
+    {rules.map((r,i)=><div key={`${slot}_${difficulty}_${i}`} style={{display:"grid",gridTemplateColumns:"1fr 72px 58px",gap:6,marginBottom:6}}><input defaultValue={r.text} onBlur={e=>saveRule(i,{text:e.target.value})} placeholder="challenge text" style={inputStyle}/><select value={r.stat} onChange={e=>saveRule(i,{stat:e.target.value})} style={inputStyle}>{JOB_RULE_STAT_OPTIONS.map(o=><option key={o} value={o}>{o}</option>)}</select><input type="number" defaultValue={r.target} onBlur={e=>saveRule(i,{target:e.target.value})} style={inputStyle}/><select value={r.scope} onChange={e=>saveRule(i,{scope:e.target.value})} style={inputStyle}>{JOB_RULE_SCOPE_OPTIONS.map(o=><option key={o} value={o}>{o}</option>)}</select><select value={activeGameMode} onChange={()=>saveRule(i,{mode:activeGameMode})} style={inputStyle}>{[activeGameMode].map(o=><option key={o} value={o}>{o}</option>)}</select><div style={{fontSize:9,color:"#4A5066",display:"flex",alignItems:"center"}}>target / scope</div></div>)}
+  </AdminCollapse>;
+}
+
+function AdminEngagementSystems({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const save = (patch, msg) => saveAppCustomizer(normalizeAppCustomizer({ ...cfg, ...patch }), setAppCustomizer, addToast, msg || "systems updated");
+  const updateNested = (key, patch, msg) => save({ [key]: { ...(cfg[key] || {}), ...patch } }, msg);
+  const editJobTemplate = (idx, patch) => {
+    const jc = normalizeJobsConfig(cfg.jobsConfig);
+    const templates = [...jc.templates];
+    templates[idx] = { ...templates[idx], ...patch };
+    updateNested("jobsConfig", { templates }, "job options updated");
+  };
+  const inputStyle = { background:"rgba(255,255,255,.04)", border:"1px solid rgba(255,255,255,.08)", borderRadius:10, padding:"9px 10px", color:"#E8ECF4", fontSize:11, minWidth:0 };
+  return <div>
+    <AdminCollapse title="final finish styles" subtitle="one-tap polished deployment looks" accent="#FFD166">
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>{[
+        ["default","Default","original Burton Battlers look"],["neon_pro","Neon Pro","clean dark neon default"],["glass_final","Glass Final","blurred premium panels"],["tournament_broadcast","Tournament Broadcast","sharper esport look"],["minimal_compact","Minimal Compact","fast low-noise layout"],["arcade_luxe","Arcade Luxe","glowy private-server style"],["midnight_terminal","Midnight Terminal","green terminal control room"],["sunset_glass","Sunset Glass","warm orange/pink glass UI"],["ice_blue","Ice Blue","cool competitive blue finish"],["purple_haze","Purple Haze","deep violet private server"],["carbon_lime","Carbon Lime","dark carbon with lime accents"],["whiteout","Whiteout","light polished deployment skin"],["redline","Redline","black and red danger UI"],["ocean","Ocean","teal cyber broadcast look"],["gold_room","Gold Room","premium gold economy style"]
+      ].map(([id,label,desc])=><button key={id} onClick={()=>save({ finishStyle:id }, `${label} style applied`)} className="bb-pressable" style={{background:cfg.finishStyle===id?"#FFD166":"rgba(255,255,255,.05)",border:`1px solid ${cfg.finishStyle===id?"#FFD166":"rgba(255,255,255,.08)"}`,borderRadius:12,padding:10,textAlign:"left",color:cfg.finishStyle===id?"#06070D":"#E8ECF4",fontWeight:900,fontSize:11}}>{label}<div style={{fontSize:9.5,color:cfg.finishStyle===id?"#3C3010":"#8B92A8",fontWeight:700,marginTop:3}}>{desc}</div></button>)}</div>
+    </AdminCollapse>
+    <AdminCollapse title="full app UI test panels" subtitle="swap entire app panel systems below the finish style" accent="#A78BFA">
+      <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,textTransform:"uppercase",marginBottom:8}}>whole app panel mode</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>{[
+        ["default","Default","current panel layout"],
+        ["glass_panels","Glass Panels","blurred glass cards everywhere"],
+        ["floating_bento","Floating Bento","rounded floating dashboard blocks"],
+        ["terminal_blocks","Terminal Blocks","hard terminal/grid control room"],
+        ["broadcast_cards","Broadcast Cards","esports broadcast panels"],
+        ["compact_tiles","Compact Tiles","denser mobile-first panels"]
+      ].map(([id,label,desc])=><button key={id} onClick={()=>save({uiPanelMode:id}, `${label} UI mode applied`)} className="bb-pressable" style={{background:cfg.uiPanelMode===id?"#A78BFA":"rgba(255,255,255,.05)",border:`1px solid ${cfg.uiPanelMode===id?"#A78BFA":"rgba(255,255,255,.08)"}`,borderRadius:12,padding:10,textAlign:"left",color:cfg.uiPanelMode===id?"#06070D":"#E8ECF4",fontWeight:900,fontSize:11}}>{label}<div style={{fontSize:9.5,color:cfg.uiPanelMode===id?"#21173D":"#8B92A8",fontWeight:700,marginTop:3}}>{desc}</div></button>)}</div>
+      <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,textTransform:"uppercase",margin:"10px 0 8px"}}>team chat animation style</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>{[
+        ["none","none"],["slide","slide"],["pop","pop"],["float","float"],["spring","spring"],["glow","glow"]
+      ].map(([id,label])=><button key={id} onClick={()=>save({chatAnimationStyle:id}, `chat animation: ${label}`)} className="bb-pressable" style={{background:cfg.chatAnimationStyle===id?"rgba(255,97,193,.18)":"rgba(255,255,255,.05)",border:`1px solid ${cfg.chatAnimationStyle===id?"rgba(255,97,193,.38)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:9,color:cfg.chatAnimationStyle===id?"#FF61C1":"#8B92A8",fontWeight:900,fontSize:10}}>{label}</button>)}</div>
+    </AdminCollapse>
+    <AdminCollapse title="jobs board" subtitle="difficulty timers, payouts, and job option text" accent="#B8FF4D">
+      <button onClick={()=>updateNested("jobsConfig",{enabled:!cfg.jobsConfig.enabled},cfg.jobsConfig.enabled?"jobs off":"jobs on")} style={{...inputStyle,width:"100%",color:cfg.jobsConfig.enabled?"#B8FF4D":"#8B92A8",fontWeight:900,marginBottom:10}}>jobs {cfg.jobsConfig.enabled?"on":"off"}</button>
+      {["easy","medium","hard"].map(d=><div key={d} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:12,padding:10,marginBottom:8}}><div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,textTransform:"uppercase",marginBottom:7}}>{d}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}><input type="number" defaultValue={cfg.jobsConfig[d].challenges} onBlur={e=>updateNested("jobsConfig",{[d]:{...cfg.jobsConfig[d],challenges:e.target.value}},"job difficulty saved")} placeholder="challenges" style={inputStyle}/><input type="number" defaultValue={cfg.jobsConfig[d].minutes} onBlur={e=>updateNested("jobsConfig",{[d]:{...cfg.jobsConfig[d],minutes:e.target.value}},"job difficulty saved")} placeholder="minutes" style={inputStyle}/><input type="number" defaultValue={cfg.jobsConfig[d].payout} onBlur={e=>updateNested("jobsConfig",{[d]:{...cfg.jobsConfig[d],payout:e.target.value}},"job difficulty saved")} placeholder="payout" style={inputStyle}/></div></div>)}
+      <button onClick={()=>updateNested("jobsConfig",{groupShifts:!cfg.jobsConfig.groupShifts},cfg.jobsConfig.groupShifts?"job board single list":"job board grouped by shifts")} style={{...inputStyle,width:"100%",color:cfg.jobsConfig.groupShifts?"#FFD166":"#B8FF4D",fontWeight:900,marginBottom:8}}>job board view: {cfg.jobsConfig.groupShifts?"grouped shift boxes":"single list"}</button><div style={{background:"rgba(255,255,255,.025)",border:"1px solid rgba(255,255,255,.06)",borderRadius:12,padding:10,marginBottom:8}}><div style={{fontSize:10,color:"#4A5066",fontWeight:900,textTransform:"uppercase",marginBottom:7}}>shift blocks</div>{normalizeJobShiftGroups(cfg.jobsConfig.shiftGroups).map((g,idx)=><div key={g.id} style={{display:"grid",gridTemplateColumns:"58px 1fr",gap:7,marginBottom:7}}><input defaultValue={g.label} onBlur={e=>{ const groups=[...normalizeJobShiftGroups(cfg.jobsConfig.shiftGroups)]; groups[idx]={...groups[idx],label:e.target.value}; updateNested("jobsConfig",{shiftGroups:groups},"job shifts saved"); }} style={inputStyle}/><input defaultValue={(g.slots||[]).join(", ")} onBlur={e=>{ const groups=[...normalizeJobShiftGroups(cfg.jobsConfig.shiftGroups)]; groups[idx]={...groups[idx],slots:e.target.value.split(/,|\n/g).map(v=>v.trim()).filter(Boolean)}; updateNested("jobsConfig",{shiftGroups:groups},"job shift slots saved"); }} placeholder="7:00 AM, 8:00 AM..." style={inputStyle}/></div>)}</div>
+      {cfg.jobsConfig.templates.map((t,idx)=>{
+        const editRule = (difficulty, ruleIdx, patch) => {
+          const rules = normalizeJobChallengeRules(t.challengeRules?.[difficulty], t.challenges?.[difficulty] || t.challengeText, cfg.jobsConfig[difficulty].challenges, t.challengeText);
+          rules[ruleIdx] = normalizeJobChallengeRule({ ...rules[ruleIdx], ...patch }, rules[ruleIdx]?.text, ruleIdx);
+          editJobTemplate(idx,{challengeRules:{...(t.challengeRules||{}),[difficulty]:rules}});
+        };
+        const allowedModes = Array.isArray(t.allowedJobModes) && t.allowedJobModes.length ? t.allowedJobModes : ["solo","duo","team"];
+        return <div key={t.id} style={{background:"rgba(184,255,77,.04)",border:"1px solid rgba(184,255,77,.10)",borderRadius:12,padding:10,marginBottom:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"54px 1fr",gap:7,marginBottom:7}}><button onClick={()=>editJobTemplate(idx,{enabled:!t.enabled})} style={{...inputStyle,color:t.enabled?"#B8FF4D":"#8B92A8",fontWeight:900}}>{t.enabled?"on":"off"}</button><input defaultValue={t.title} onBlur={e=>editJobTemplate(idx,{title:e.target.value})} style={inputStyle}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"54px 1fr",gap:7,marginBottom:7}}><input defaultValue={t.emoji} onBlur={e=>editJobTemplate(idx,{emoji:e.target.value})} style={inputStyle}/><input defaultValue={t.desc} onBlur={e=>editJobTemplate(idx,{desc:e.target.value})} placeholder="description" style={inputStyle}/></div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:7}}>{["solo","duo","team"].map(mode=><button key={mode} onClick={()=>{ const next=allowedModes.includes(mode)?allowedModes.filter(x=>x!==mode):[...allowedModes,mode]; editJobTemplate(idx,{allowedJobModes:next.length?next:[mode]}); }} style={{background:allowedModes.includes(mode)?"rgba(184,255,77,.12)":"rgba(255,255,255,.04)",border:`1px solid ${allowedModes.includes(mode)?"rgba(184,255,77,.3)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:allowedModes.includes(mode)?"#B8FF4D":"#8B92A8",fontSize:10,fontWeight:900}}>{mode}</button>)}</div>
+          <input defaultValue={t.challengeText} onBlur={e=>editJobTemplate(idx,{challengeText:e.target.value})} placeholder="fallback challenge text" style={{...inputStyle,width:"100%",marginBottom:7}}/>
+          {["easy","medium","hard"].map(d=><div key={d} style={{background:"rgba(255,255,255,.025)",border:"1px solid rgba(255,255,255,.055)",borderRadius:12,padding:8,marginBottom:8}}>
+            <textarea defaultValue={(t.challenges?.[d]||[]).join("\n")} onBlur={e=>editJobTemplate(idx,{challenges:{...(t.challenges||{}),[d]:e.target.value.split(/\n/g).map(v=>v.trim()).filter(Boolean)}})} placeholder={`${d} display text, one per line`} style={{...inputStyle,width:"100%",minHeight:54,resize:"vertical",marginBottom:6}} />
+            <div style={{fontSize:9.5,color:"#B8FF4D",fontWeight:900,textTransform:"uppercase",margin:"4px 0 6px"}}>{d} stat rules</div>
+            {normalizeJobChallengeRules(t.challengeRules?.[d], t.challenges?.[d] || t.challengeText, cfg.jobsConfig[d].challenges, t.challengeText).map((r,ri)=><div key={`${d}_${ri}`} style={{display:"grid",gridTemplateColumns:"1fr 78px 58px",gap:6,marginBottom:6}}>
+              <input defaultValue={r.text} onBlur={e=>editRule(d,ri,{text:e.target.value})} placeholder="visible challenge text" style={inputStyle}/>
+              <select defaultValue={r.stat} onChange={e=>editRule(d,ri,{stat:e.target.value})} style={inputStyle}>{JOB_RULE_STAT_OPTIONS.map(opt=><option key={opt} value={opt}>{opt}</option>)}</select>
+              <input type="number" defaultValue={r.target} onBlur={e=>editRule(d,ri,{target:e.target.value})} style={inputStyle}/>
+              <select defaultValue={r.scope} onChange={e=>editRule(d,ri,{scope:e.target.value})} style={inputStyle}>{JOB_RULE_SCOPE_OPTIONS.map(opt=><option key={opt} value={opt}>{opt}</option>)}</select>
+              <select defaultValue={r.mode} onChange={e=>editRule(d,ri,{mode:e.target.value})} style={inputStyle}>{["any","1v1","2v2","3v3"].map(opt=><option key={opt} value={opt}>{opt}</option>)}</select>
+              <div style={{fontSize:9,color:"#4A5066",display:"flex",alignItems:"center"}}>{getJobRuleScopeLabel(r.scope)}</div>
+            </div>)}
+          </div>)}
+        </div>;
+      })}
+    </AdminCollapse>
+    <AdminHourlyJobRuleTabs appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+    <AdminCollapse title="auto court + appeals" subtitle="auto cases and appeal costs" accent="#FF61C1">
+      <button onClick={()=>updateNested("autoCourtConfig",{enabled:!cfg.autoCourtConfig.enabled},cfg.autoCourtConfig.enabled?"auto court off":"auto court on")} style={{...inputStyle,width:"100%",color:cfg.autoCourtConfig.enabled?"#FF61C1":"#8B92A8",fontWeight:900,marginBottom:8}}>auto court {cfg.autoCourtConfig.enabled?"on":"off"}</button>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}><input type="number" defaultValue={cfg.autoCourtConfig.lowScoreThreshold} onBlur={e=>updateNested("autoCourtConfig",{lowScoreThreshold:e.target.value},"auto court saved")} placeholder="score threshold" style={inputStyle}/><input type="number" defaultValue={cfg.autoCourtConfig.maxPerDay} onBlur={e=>updateNested("autoCourtConfig",{maxPerDay:e.target.value},"auto court saved")} placeholder="max/day" style={inputStyle}/></div>
+      <input defaultValue={cfg.autoCourtConfig.charge} onBlur={e=>updateNested("autoCourtConfig",{charge:e.target.value},"auto charge saved")} placeholder="auto charge" style={{...inputStyle,width:"100%",marginBottom:8}}/><input defaultValue={cfg.autoCourtConfig.evidence} onBlur={e=>updateNested("autoCourtConfig",{evidence:e.target.value},"auto evidence saved")} placeholder="auto evidence" style={{...inputStyle,width:"100%",marginBottom:8}}/>
+      <button onClick={()=>updateNested("appealConfig",{enabled:!cfg.appealConfig.enabled},cfg.appealConfig.enabled?"appeals off":"appeals on")} style={{...inputStyle,width:"100%",color:cfg.appealConfig.enabled?"#A78BFA":"#8B92A8",fontWeight:900,marginBottom:8}}>appeals {cfg.appealConfig.enabled?"on":"off"}</button>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}><input type="number" defaultValue={cfg.appealConfig.cost} onBlur={e=>updateNested("appealConfig",{cost:e.target.value},"appeal saved")} placeholder="appeal cost" style={inputStyle}/><input type="number" defaultValue={cfg.appealConfig.votesNeeded} onBlur={e=>updateNested("appealConfig",{votesNeeded:e.target.value},"appeal saved")} placeholder="votes needed" style={inputStyle}/></div>
+    </AdminCollapse>
+    <AdminCollapse title="stocks + economy events" subtitle="market movement and economy thresholds" accent="#FFD166">
+      <button onClick={()=>updateNested("stockMarketConfig",{enabled:!cfg.stockMarketConfig.enabled},cfg.stockMarketConfig.enabled?"stocks off":"stocks on")} style={{...inputStyle,width:"100%",color:cfg.stockMarketConfig.enabled?"#FFD166":"#8B92A8",fontWeight:900,marginBottom:8}}>stocks {cfg.stockMarketConfig.enabled?"on":"off"}</button>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:8}}>{["basePrice","winBoost","xpBoost"].map(k=><input key={k} type="number" defaultValue={cfg.stockMarketConfig[k]} onBlur={e=>updateNested("stockMarketConfig",{[k]:e.target.value},"stock settings saved")} placeholder={k} style={inputStyle}/>)}</div>
+      <button onClick={()=>updateNested("economyEventConfig",{enabled:!cfg.economyEventConfig.enabled},cfg.economyEventConfig.enabled?"economy events off":"economy events on")} style={{...inputStyle,width:"100%",color:cfg.economyEventConfig.enabled?"#FFD166":"#8B92A8",fontWeight:900,marginBottom:8}}>economy events {cfg.economyEventConfig.enabled?"on":"off"}</button>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:7}}>{["inflationThreshold","crashThreshold","stimulusLoginBonus","eventDurationHours"].map(k=><input key={k} type="number" defaultValue={cfg.economyEventConfig[k]} onBlur={e=>updateNested("economyEventConfig",{[k]:e.target.value},"economy settings saved")} placeholder={k} style={inputStyle}/>)}</div>
+    </AdminCollapse>
+    <AdminCollapse title="schedule + open loops" subtitle="availability pings and home ticker" accent="#4D9EFF">
+      <button onClick={()=>updateNested("scheduleConfig",{enabled:!cfg.scheduleConfig.enabled},cfg.scheduleConfig.enabled?"schedule off":"schedule on")} style={{...inputStyle,width:"100%",color:cfg.scheduleConfig.enabled?"#4D9EFF":"#8B92A8",fontWeight:900,marginBottom:8}}>schedule {cfg.scheduleConfig.enabled?"on":"off"}</button>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:8}}><input defaultValue={cfg.scheduleConfig.defaultSessionTitle} onBlur={e=>updateNested("scheduleConfig",{defaultSessionTitle:e.target.value},"schedule saved")} placeholder="default session title" style={inputStyle}/><input type="number" defaultValue={cfg.scheduleConfig.reminderMinutes} onBlur={e=>updateNested("scheduleConfig",{reminderMinutes:e.target.value},"schedule saved")} placeholder="reminder minutes" style={inputStyle}/></div>
+      <button onClick={()=>updateNested("openLoopsConfig",{enabled:!cfg.openLoopsConfig.enabled},cfg.openLoopsConfig.enabled?"open loops off":"open loops on")} style={{...inputStyle,width:"100%",color:cfg.openLoopsConfig.enabled?"#B8FF4D":"#8B92A8",fontWeight:900,marginBottom:8}}>open loops {cfg.openLoopsConfig.enabled?"on":"off"}</button>
+      <input type="number" defaultValue={cfg.openLoopsConfig.rotationSeconds} onBlur={e=>updateNested("openLoopsConfig",{rotationSeconds:e.target.value},"open loops saved")} placeholder="ticker seconds" style={{...inputStyle,width:"100%",marginBottom:8}}/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>{["showNews","showRareShop","showCourt","showJobs","showSchedule","showEconomy"].map(k=><button key={k} onClick={()=>updateNested("openLoopsConfig",{[k]:!cfg.openLoopsConfig[k]},"open loop filters saved")} style={{background:cfg.openLoopsConfig[k]?"rgba(184,255,77,.12)":"rgba(255,255,255,.05)",border:`1px solid ${cfg.openLoopsConfig[k]?"rgba(184,255,77,.28)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:cfg.openLoopsConfig[k]?"#B8FF4D":"#8B92A8",fontSize:9,fontWeight:900}}>{k.replace("show","")}</button>)}</div>
+    </AdminCollapse>
+  </div>;
+}
+
+function AdminCollapse({ title, subtitle, accent = "#B8FF4D", children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${bbAlpha(accent,.22)}`,borderRadius:18,padding:12,marginBottom:14,boxShadow:"0 14px 32px rgba(0,0,0,.18)"}}>
+      <button onClick={()=>setOpen(v=>!v)} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,textAlign:"left",cursor:"pointer"}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:10,color:accent,fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>{title}</div>
+          {subtitle && <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{subtitle}</div>}
+        </div>
+        <ChevronRight size={16} color={accent} style={{transform:open?"rotate(90deg)":"rotate(0deg)",transition:"transform .18s ease",flexShrink:0}}/>
+      </button>
+      {open && <div style={{marginTop:12}}>{children}</div>}
+    </div>
+  );
+}
+
+function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP, passPremium, setPassPremium, parseCredits, setParseCredits, creditRequests, setCreditRequests, points, setPoints, adminShopItems, setAdminShopItems, navPosition = "top", setNavPosition, tabAnimationStyle = "float", setTabAnimationStyle, fullScreenFloatMode = true, setFullScreenFloatMode, appCustomizer, setAppCustomizer, comments = {}, setComments, currentPlayer = ADMIN_ID, burtonOS, setBurtonOS }) {
+  const [assigning,setAssigning]=useState(null);
+  const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
   const today=todayAtMidnight();
   const totalDays=Math.ceil((PLAYOFF_END-TRAINING_START)/DAY_MS);
   const startIdx=Math.max(0,Math.floor((today-TRAINING_START)/DAY_MS)-1);
   const days=Array.from({length:Math.min(totalDays-startIdx,21)},(_,i)=>{ const date=new Date(TRAINING_START.getTime()+(startIdx+i)*DAY_MS); return {key:dateKey(date),date}; });
-  const saveTraining=async(dk,pid,data)=>{ const upd={...trainingData,[tKey(dk,pid)]:data}; setTrainingData(upd); await storeSet("training",upd);
-addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️");
-  };
- const saveMmr=async(pid,profile)=>{ const upd={...mmrProfiles,[pid]:profile}; setMmrProfiles(upd); await setMMR(pid,profile); };
-  const activePlayer=PLAYERS.find((p)=>p.id===activePlayerTab);
+  const saveTraining=async(dk,pid,data)=>{ const upd={...trainingData,[tKey(dk,pid)]:data}; setTrainingData(upd); await storeSet("training",upd); addToast?.(`training assigned to ${PLAYERS.find(p=>p.id===pid)?.name}`, "🏋️"); };
+  const activePlayer=PLAYERS.find((p)=>p.id===activePlayerTab) || PLAYERS[0];
+  const pendingCreditRequests=(creditRequests||[]).filter(r=>r.status==="pending");
+  const animationOptions=["off","float","soft","spring","pop","slide","swoop","cascade","floaty","flip","zoom","drift","glitch","stack","wipe"];
   return (
     <div className="bb-tab-content" style={s.tabContent}>
-      {assigning&&<AdminAssignTraining dateKeyStr={assigning.dateKeyStr} player={PLAYERS.find((p)=>p.id===assigning.playerId)} existing={trainingData[tKey(assigning.dateKeyStr,assigning.playerId)]} onSave={(data)=>saveTraining(assigning.dateKeyStr,assigning.playerId,data)} onClose={()=>setAssigning(null)}/>}
-  <VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP}/>
+      {assigning&&<AdminAssignTraining dateKeyStr={assigning.dateKeyStr} player={PLAYERS.find((p)=>p.id===assigning.playerId)} existing={trainingData[tKey(assigning.dateKeyStr,assigning.playerId)]} onSave={(data)=>saveTraining(assigning.dateKeyStr,assigning.playerId,data)} onClose={()=>setAssigning(null)}/>} 
 
-  <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:16,padding:14,marginBottom:16}}>
-    <div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>nav position test</div>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-      {["top","bottom"].map(pos => (
-        <button key={pos} onClick={async()=>{ setNavPosition?.(pos); await storeSet("nav_position", pos); addToast?.(`nav moved to ${pos}`, pos === "top" ? "⬆️" : "⬇️"); }} className="bb-pressable" style={{background:navPosition===pos?"#FF5C8A":"rgba(255,255,255,0.05)",border:`1px solid ${navPosition===pos?"#FF5C8A":"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:900,color:navPosition===pos?"#06070D":"#8B92A8",cursor:"pointer"}}>
-          {pos}
-        </button>
-      ))}
-    </div>
-  </div>
+      <AdminCollapse title="verification" subtitle="approve training submissions and comments" accent="#FF5C8A">
+        <VerificationTab trainingData={trainingData} completions={completions} setCompletions={setCompletions} addToast={addToast} passXP={passXP} setPassXP={setPassXP} comments={comments} setComments={setComments} currentPlayer={currentPlayer}/>
+      </AdminCollapse>
 
-{/* Credit Requests */}
-{(creditRequests||[]).filter(r=>r.status==="pending").length > 0 && (
-  <div style={{marginBottom:24}}>
-    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-      <span style={{fontSize:13,fontWeight:700,color:"#4D9EFF"}}>⚡ parse credit requests</span>
-      <span style={{fontSize:11,color:"#4A5066"}}>{(creditRequests||[]).filter(r=>r.status==="pending").length} pending</span>
-    </div>
-    <div style={{fontSize:11,color:"#4A5066",marginBottom:10}}>
-      reserve: <span style={{color:"#4D9EFF",fontWeight:700}}>{parseCredits?.reserve ?? PARSE_RESERVE_DEFAULT}</span> credits remaining
-    </div>
-    {(creditRequests||[]).filter(r=>r.status==="pending").map(req=>(
-      <div key={req.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(77,158,255,0.25)"}}>
-        <div style={{marginBottom:10}}>
-          <div style={{fontSize:13,fontWeight:700,color:"#4D9EFF"}}>{req.playerName}</div>
-          <div style={{fontSize:11,color:"#4A5066",marginTop:2}}>
-            current balance: <span style={{color:"#E8ECF4",fontWeight:700}}>{parseCredits?.[req.playerId] ?? PARSE_CREDITS_DEFAULT}</span> credits · requested {fmtRelTime(req.requestedAt)}
+      <AdminCollapse title="app command center" subtitle="tabs, text, borders, motion, box order" accent="#FFD166">
+        <AdminAppCommandCenter appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+      </AdminCollapse>
+
+      <AdminCollapse title="tab box layout manager" subtitle="drag, reorder, rename, and hide boxes per tab" accent="#4D9EFF">
+        <AdminTabBoxLayoutManager appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+      </AdminCollapse>
+      <AdminUnderConstructionControls appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+      <AdminWeeklyAndStreams appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+
+      <AdminCollapse title="engagement systems" subtitle="jobs, stocks, economy, schedule, loops, final styles" accent="#B8FF4D">
+        <AdminEngagementSystems appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+      </AdminCollapse>
+
+      <AdminCollapse title="admin god mode · burton os" subtitle="state, chaos, courtroom, events, vault, unlocks" accent="#FF61C1">
+        <AdminBurtonOSControls burtonOS={burtonOS} setBurtonOS={setBurtonOS} appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+      </AdminCollapse>
+
+      <AdminCollapse title="rewards + shop drops" subtitle="points, pass tiers, shop grants, custom items" accent="#B8FF4D">
+        <AdminGrantControls points={points} setPoints={setPoints} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} addToast={addToast}/>
+      </AdminCollapse>
+
+      <AdminCollapse title="layout + animations" subtitle="nav, fullscreen, swoop/cascade tab motion" accent="#A78BFA">
+        <div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>nav position</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+          {["top","bottom"].map(pos => <button key={pos} onClick={async()=>{ setNavPosition?.(pos); await storeSet("nav_position", pos); addToast?.(`nav moved to ${pos}`, pos === "top" ? "⬆️" : "⬇️"); }} className="bb-pressable" style={{background:navPosition===pos?"#FF5C8A":"rgba(255,255,255,0.05)",border:`1px solid ${navPosition===pos?"#FF5C8A":"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:900,color:navPosition===pos?"#06070D":"#8B92A8",cursor:"pointer"}}>{pos}</button>)}
+        </div>
+        <button onClick={async()=>{ const next=normalizeAppCustomizer({...appCustomizer, hideTopNavBox:!appCustomizer?.hideTopNavBox}); await saveAppCustomizer(next, setAppCustomizer, addToast, next.hideTopNavBox ? "nav border removed" : "nav border restored"); }} className="bb-pressable" style={{width:"100%",marginBottom:14,background:appCustomizer?.hideTopNavBox?"rgba(184,255,77,0.12)":"rgba(255,255,255,0.05)",border:`1px solid ${appCustomizer?.hideTopNavBox?"rgba(184,255,77,0.30)":"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:900,color:appCustomizer?.hideTopNavBox?"#B8FF4D":"#8B92A8",cursor:"pointer"}}>{appCustomizer?.hideTopNavBox ? "nav border off" : "nav border on"}</button>
+        <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>tab / box entrance animation</div>
+        <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>These affect the cards when a tab opens. Try swoop, cascade, or floaty for the strongest motion.</div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:14}}>
+          {animationOptions.map(style => <button key={style} onClick={async()=>{ setTabAnimationStyle?.(style); await storeSet("tab_animation_style", style); addToast?.(`tab animation: ${style}`, "✨"); }} className="bb-pressable" style={{background:(tabAnimationStyle||"float")===style?"#A78BFA":"rgba(255,255,255,0.05)",border:`1px solid ${(tabAnimationStyle||"float")===style?"#A78BFA":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 0",fontSize:10.5,fontWeight:900,color:(tabAnimationStyle||"float")===style?"#06070D":"#8B92A8",cursor:"pointer"}}>{style}</button>)}
+        </div>
+        <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>full screen style</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <button onClick={async()=>{ setFullScreenFloatMode?.(true); await storeSet("full_screen_float_mode", "float"); addToast?.("full screens: pop-up blur", "✨"); }} className="bb-pressable" style={{background:fullScreenFloatMode?"#B8FF4D":"rgba(255,255,255,0.05)",border:`1px solid ${fullScreenFloatMode?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px 0",fontSize:11,fontWeight:900,color:fullScreenFloatMode?"#06070D":"#8B92A8",cursor:"pointer"}}>pop-up blur</button>
+          <button onClick={async()=>{ setFullScreenFloatMode?.(false); await storeSet("full_screen_float_mode", "sheet"); addToast?.("full screens: dark sheet", "🌑"); }} className="bb-pressable" style={{background:!fullScreenFloatMode?"#B8FF4D":"rgba(255,255,255,0.05)",border:`1px solid ${!fullScreenFloatMode?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px 0",fontSize:11,fontWeight:900,color:!fullScreenFloatMode?"#06070D":"#8B92A8",cursor:"pointer"}}>dark sheet</button>
+        </div>
+      </AdminCollapse>
+
+      {pendingCreditRequests.length > 0 && <AdminCollapse title="parse credit requests" subtitle={`${pendingCreditRequests.length} pending`} accent="#4D9EFF">
+        <div style={{fontSize:11,color:"#4A5066",marginBottom:10}}>reserve: <span style={{color:"#4D9EFF",fontWeight:700}}>{parseCredits?.reserve ?? PARSE_RESERVE_DEFAULT}</span> credits remaining</div>
+        {pendingCreditRequests.map(req=><div key={req.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:"1px solid rgba(77,158,255,0.25)"}}>
+          <div style={{marginBottom:10}}><div style={{fontSize:13,fontWeight:700,color:"#4D9EFF"}}>{req.playerName}</div><div style={{fontSize:11,color:"#4A5066",marginTop:2}}>current balance: <span style={{color:"#E8ECF4",fontWeight:700}}>{parseCredits?.[req.playerId] ?? PARSE_CREDITS_DEFAULT}</span> credits · requested {fmtRelTime(req.requestedAt)}</div></div>
+          <div style={{display:"flex",gap:8}}>
+            {[10,25,50].map(amt=><button key={amt} onClick={async()=>{ const reserve=parseCredits?.reserve ?? PARSE_RESERVE_DEFAULT; if(reserve < amt){ addToast?.("not enough in reserve","❌"); return; } const current=parseCredits?.[req.playerId] ?? PARSE_CREDITS_DEFAULT; const upd={...parseCredits,[req.playerId]:current+amt,reserve:reserve-amt}; setParseCredits(upd); await storeSet("parse_credits",upd); const updReqs=(creditRequests||[]).map(r=>r.id===req.id?{...r,status:"approved",approvedAt:new Date().toISOString(),amount:amt}:r); setCreditRequests(updReqs); await storeSetWithPush("credit_requests",updReqs); addToast?.(`+${amt} credits sent to ${req.playerName}`,"✅"); }} className="bb-pressable bb-glow-lime" style={{flex:1,background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>+{amt}</button>)}
+            <button onClick={async()=>{ const updReqs=(creditRequests||[]).map(r=>r.id===req.id?{...r,status:"denied",deniedAt:new Date().toISOString()}:r); setCreditRequests(updReqs); await storeSetWithPush("credit_requests",updReqs); addToast?.(`denied ${req.playerName}'s credit request`,"❌"); }} className="bb-pressable" style={{flex:1,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>deny</button>
           </div>
-        </div>
-        <div style={{display:"flex",gap:8}}>
-          {[10,25,50].map(amt=>(
-            <button key={amt} onClick={async()=>{
-              const reserve = parseCredits?.reserve ?? PARSE_RESERVE_DEFAULT;
-              if(reserve < amt){ addToast?.("not enough in reserve","❌"); return; }
-              const current = parseCredits?.[req.playerId] ?? PARSE_CREDITS_DEFAULT;
-              const upd = {...parseCredits,[req.playerId]:current+amt,reserve:reserve-amt};
-              setParseCredits(upd);
-              await storeSet("parse_credits",upd);
-              const updReqs = (creditRequests||[]).map(r=>r.id===req.id?{...r,status:"approved",approvedAt:new Date().toISOString(),amount:amt}:r);
-              setCreditRequests(updReqs);
-              await storeSetWithPush("credit_requests",updReqs);
-              addToast?.(`+${amt} credits sent to ${req.playerName}`,"✅");
-            }} className="bb-pressable bb-glow-lime"
-              style={{flex:1,background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#B8FF4D",cursor:"pointer"}}>
-              +{amt}
-            </button>
-          ))}
-          <button onClick={async()=>{
-            const updReqs=(creditRequests||[]).map(r=>r.id===req.id?{...r,status:"denied",deniedAt:new Date().toISOString()}:r);
-            setCreditRequests(updReqs);
-            await storeSetWithPush("credit_requests",updReqs);
-            addToast?.(`denied ${req.playerName}'s credit request`,"❌");
-          }} className="bb-pressable"
-            style={{flex:1,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
-            deny
-          </button>
-        </div>
-      </div>
-    ))}
-  </div>
-)}
+        </div>)}
+      </AdminCollapse>}
 
-
-      <div style={s.adminHeader}><Shield size={16} color="#FF5C8A"/><span style={s.adminHeaderText}>captain controls</span></div>
-      <AdminFutureSetup addToast={addToast}/>
-      <div style={s.sectionLabel}>assign training</div>
-      <div style={s.sectionSubLabel}>pick a teammate, tap a day</div>
-      <div style={s.playerTabRow}>
-        {PLAYERS.map((p)=>(<button key={p.id} onClick={()=>setActivePlayerTab(p.id)} className="bb-pressable" style={{...s.playerTabBtn,background:activePlayerTab===p.id?p.color:"rgba(255,255,255,0.05)",color:activePlayerTab===p.id?"#06070D":"#8B92A8"}}>{p.name}</button>))}
-      </div>
-      {days.map((day)=>{
-        const existing=trainingData[tKey(day.key,activePlayer.id)];
-        const isToday=day.key===dateKey(today);
-        return <button key={day.key} onClick={()=>setAssigning({dateKeyStr:day.key,playerId:activePlayer.id})} className="bb-pressable bb-glow-pink" style={s.adminDayRow}><div><div style={s.adminDayDate}>{fmtDay(day.date)}{isToday&&<span style={{color:"#FF5C8A"}}> · today</span>}</div><div style={s.adminDayTitle}>{existing?existing.title:<span style={{color:"#4A5066"}}>not assigned</span>}</div>{existing?.targetAmount?<div style={s.adminDayMeta}>target: {existing.targetAmount} {existing.unit}</div>:null}</div><Edit3 size={14} color="#8B92A8"/></button>;
-      })}
+      <AdminCollapse title="captain controls" subtitle="future setup and training assignment" accent="#FF5C8A">
+        <div style={s.adminHeader}><Shield size={16} color="#FF5C8A"/><span style={s.adminHeaderText}>captain controls</span></div>
+        <AdminFutureSetup addToast={addToast}/>
+        <div style={s.sectionLabel}>assign training</div>
+        <div style={s.sectionSubLabel}>pick a teammate, tap a day</div>
+        <div style={s.playerTabRow}>{PLAYERS.map((p)=><button key={p.id} onClick={()=>setActivePlayerTab(p.id)} className="bb-pressable" style={{...s.playerTabBtn,background:activePlayerTab===p.id?p.color:"rgba(255,255,255,0.05)",color:activePlayerTab===p.id?"#06070D":"#8B92A8"}}>{p.name}</button>)}</div>
+        {days.map((day)=>{ const existing=trainingData[tKey(day.key,activePlayer.id)]; const isToday=day.key===dateKey(today); return <button key={day.key} onClick={()=>setAssigning({dateKeyStr:day.key,playerId:activePlayer.id})} className="bb-pressable bb-glow-pink" style={s.adminDayRow}><div><div style={s.adminDayDate}>{fmtDay(day.date)}{isToday&&<span style={{color:"#FF5C8A"}}> · today</span>}</div><div style={s.adminDayTitle}>{existing?existing.title:<span style={{color:"#4A5066"}}>not assigned</span>}</div>{existing?.targetAmount?<div style={s.adminDayMeta}>target: {existing.targetAmount} {existing.unit}</div>:null}</div><Edit3 size={14} color="#8B92A8"/></button>; })}
+      </AdminCollapse>
     </div>
   );
 }
@@ -5856,11 +9062,12 @@ const FIELDS = ["goals","assists","saves","shots"];
 
   return (
 <div
+  className="bb-fullscreen-shell"
   onTouchStart={handleTouchStart}
   onTouchMove={handleTouchMove}
   onTouchEnd={handleTouchEnd}
  style={{position:"fixed",inset:0,zIndex:500,background:"#040818",display:"flex",flexDirection:"column",animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",transform:`translateX(${swipeOffset}px)`,transition:swipeOffset===0?"transform .25s ease":"none"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+      <div className="bb-floating-fullscreen-header" style={{display:"flex",alignItems:"center",gap:12,padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
         <button onClick={onClose} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
           <ChevronLeft size={18}/>
         </button>
@@ -6082,10 +9289,10 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
   );
 }
 
-function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
+function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null, modeFilter = "3v3" }) {
  const safeStats = sanitizeStatsForRender(stats);
  const safeGameDateKey = (game) => dateKey(game?.ts || game?.date || Date.now());
- const roomGames = safeStats.filter(g => g && (g.roomId || g.sessionCode));
+ const roomGames = safeStats.filter(g => g && normalizeGameMode(g.mode) === modeFilter && (modeFilter === "3v3" ? (g.roomId || g.sessionCode) : true));
   const dayMap = {};
   roomGames.forEach(g => {
     const dk = safeGameDateKey(g);
@@ -6314,17 +9521,140 @@ function getNextAutoGameSessionCode(stats) {
   return `game ${next}`;
 }
 
+function bbSleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeParsePlaylistName(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+function parsePlaylistLooksLikeMode(value, playlist) {
+  const raw = normalizeParsePlaylistName(value);
+  const target = normalizeParsePlaylistName(playlist);
+  if (!raw) return false;
+  if (raw === target || raw.includes(target) || target.includes(raw)) return true;
+  if (target.includes("duel") || target.includes("1v1")) return raw.includes("duel") || raw.includes("1v1");
+  if (target.includes("double") || target.includes("2v2")) return raw.includes("double") || raw.includes("2v2");
+  if (target.includes("standard") || target.includes("3v3")) return raw.includes("standard") || raw.includes("3v3") || raw.includes("trio");
+  return false;
+}
+function parseMatchMatchesPlaylist(match, playlist) {
+  const metadata = match?.metadata || {};
+  const candidates = [
+    metadata?.playlist,
+    metadata?.playlistName,
+    metadata?.playlist_name,
+    metadata?.mode,
+    metadata?.modeName,
+    metadata?.queue,
+    metadata?.queueName,
+    match?.playlist,
+    match?.playlistName,
+    match?.mode,
+    match?.queue,
+  ];
+  return candidates.some(v => parsePlaylistLooksLikeMode(v, playlist));
+}
+function getParseDateMs(match) {
+  const metadata = match?.metadata || {};
+  const candidates = [metadata?.dateCollected, metadata?.dateStarted, metadata?.startedAt, metadata?.datePlayed, match?.dateCollected, match?.ts, match?.startedAt];
+  for (const v of candidates) {
+    if (!v) continue;
+    const t = new Date(v).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  return 0;
+}
+function getParseSessionsFromJson(json) {
+  const data = json?.data || {};
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.sessions)) return data.sessions;
+  if (Array.isArray(data?.games)) return data.games;
+  if (Array.isArray(json?.items)) return json.items;
+  if (Array.isArray(json?.sessions)) return json.sessions;
+  return [];
+}
+function getParseMatchesFromJson(json) {
+  const data = json?.data || {};
+  const direct = [data?.matches, data?.items?.matches, json?.matches].filter(Array.isArray).flat();
+  const sessions = getParseSessionsFromJson(json);
+  const fromSessions = sessions.flatMap(s => {
+    if (Array.isArray(s?.matches)) return s.matches;
+    if (Array.isArray(s?.games)) return s.games;
+    if (Array.isArray(s?.items)) return s.items;
+    return [];
+  });
+  return [...direct, ...fromSessions].filter(Boolean);
+}
+async function fetchParseBotJson(endpoint, params = {}, attempts = 3) {
+  let lastErr = null;
+  const qs = new URLSearchParams(params).toString();
+  const url = `https://api.parse.bot/scraper/${PARSE_SCRAPER_ID}/${endpoint}${qs ? `?${qs}` : ""}`;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { "X-API-Key": PARSE_API_KEY } });
+      const text = await res.text();
+      let json = null;
+      try { json = text ? JSON.parse(text) : null; } catch (_) {}
+      if (!res.ok) {
+        const msg = json?.message || json?.error || text?.slice?.(0, 120) || `${endpoint} ${res.status}`;
+        throw new Error(`${endpoint} ${res.status}: ${msg}`);
+      }
+      if (json?.status && !["success", "ok", true].includes(json.status)) {
+        throw new Error(json?.message || json?.error || `${endpoint} api status failed`);
+      }
+      return json || {};
+    } catch (e) {
+      lastErr = e;
+      if (attempt < attempts - 1) await bbSleep(750 + attempt * 850);
+    }
+  }
+  throw lastErr || new Error(`${endpoint} unavailable`);
+}
+
 async function fetchLatestParseMatchForPlayer(player, playlist) {
-  const res = await fetch(
-    `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${player.platform}&username=${player.name}`,
-    { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
-  );
-  const json = await res.json();
-  const sessions = json?.data?.items || [];
-  const matches = sessions.flatMap(s => s.matches || []);
-  return matches
-    .filter(match => match?.metadata?.playlist === playlist && match?.metadata?.isGrouped === false)
-    .sort((a,b)=>new Date(b.metadata.dateCollected)-new Date(a.metadata.dateCollected))[0];
+  const mode = playlist === "Ranked Duel 1v1" ? "1v1" : playlist === "Ranked Doubles 2v2" ? "2v2" : "3v3";
+  const handles = [player?.handle, player?.trackerName, player?.name]
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+  const platforms = [player?.platform, "epic", "psn", "xbl", "steam"]
+    .filter(Boolean)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+  let bestFallback = null;
+  let bestNoStatFallback = null;
+  let lastErr = null;
+
+  for (const platform of platforms) {
+    for (const handle of handles) {
+      try {
+        const json = await fetchParseBotJson("get_player_sessions", { platform, username: handle }, 3);
+        const matches = getParseMatchesFromJson(json);
+        const candidates = matches
+          .filter(match => parseMatchMatchesPlaylist(match, playlist))
+          .sort((a,b)=>getParseDateMs(b)-getParseDateMs(a));
+
+        // Best path: latest matching game with real player box-score stats.
+        const usable = candidates.find(match => hasUsableParseStatPayload(match, mode));
+        if (usable) return usable;
+
+        // Keep a fallback from this exact playlist so UI can say stats are still loading, not hard-fail.
+        if (!bestNoStatFallback && candidates[0]) bestNoStatFallback = candidates[0];
+
+        // Last-ditch: if Parse labels the playlist differently, use any latest match that clearly has the correct stat payload.
+        const anyUsable = matches
+          .filter(match => hasUsableParseStatPayload(match, mode))
+          .sort((a,b)=>getParseDateMs(b)-getParseDateMs(a))[0];
+        if (!bestFallback && anyUsable) bestFallback = anyUsable;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+  }
+
+  if (bestNoStatFallback) return bestNoStatFallback;
+  if (bestFallback) return bestFallback;
+  console.warn("Parse sessions unavailable", { player: player?.name, playlist, error: lastErr?.message || lastErr });
+  return null;
 }
 
 
@@ -6412,17 +9742,48 @@ function findDeepNumberByKey(obj, keyRegex, maxDepth = 5, seen = new Set()) {
 }
 
 const PARSE_STAT_ALIASES = {
-  goals: ["goals", "goal"],
-  assists: ["assists", "assist"],
-  saves: ["saves", "save"],
-  shots: ["shots", "shot"],
-  demos: ["demos", "demolitions", "demolition"],
+  goals: ["goals", "goal", "goalsScored", "goalCount", "totalGoals", "playerGoals"],
+  assists: ["assists", "assist", "assistCount", "totalAssists", "playerAssists"],
+  saves: ["saves", "save", "saveCount", "totalSaves", "playerSaves"],
+  shots: ["shots", "shot", "shotsTaken", "shotsOnGoal", "shotCount", "totalShots", "playerShots"],
+  demos: ["demos", "demo", "demolitions", "demolition", "demoCount", "totalDemos", "bumps", "demoed"],
+  score: ["score", "points", "playerScore", "coreScore", "totalScore", "corePoints"],
 };
 function normalizeParseStatName(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 function getParseStatAliasSet(field) {
   return new Set((PARSE_STAT_ALIASES[field] || [field]).map(normalizeParseStatName));
+}
+function parseStatLabelIsBlocked(normalized, field) {
+  if (!normalized) return true;
+  // These are team/opponent fields, not the player's box-score stat. Counting them made some syncs show 0s or wrong values.
+  if (/(against|allowed|conceded|opponent|enemy|their|otherteam|teamtotal|teamstat|season|career|average|avg|pergame|rank|percentile|streak)/i.test(normalized)) return true;
+  if (field !== "score" && /(rating|mmr|ranked|tier|division)/i.test(normalized)) return true;
+  return false;
+}
+function parseStatLabelMatchesField(label, field) {
+  const normalized = normalizeParseStatName(label);
+  if (parseStatLabelIsBlocked(normalized, field)) return false;
+  const aliases = getParseStatAliasSet(field);
+  if (aliases.has(normalized)) return true;
+  for (const alias of aliases) {
+    if (!alias) continue;
+    if (normalized === `total${alias}` || normalized === `${alias}total` || normalized === `player${alias}` || normalized === `${alias}count`) return true;
+    // Tracker/Parse sometimes returns labels like "core.goals" or "statsGoals" after scraping.
+    // Allow contained aliases, but keep the blacklist above so goalsAgainst/opponentGoals never count.
+    if (alias.length >= 4 && normalized.includes(alias)) return true;
+  }
+  return false;
+}
+function getDeepStatKeyRegex(field) {
+  if (field === "goals") return /^(goals?|goalCount|goalsScored|totalGoals|playerGoals)$/i;
+  if (field === "assists") return /^(assists?|assistCount|totalAssists|playerAssists)$/i;
+  if (field === "saves") return /^(saves?|saveCount|totalSaves|playerSaves)$/i;
+  if (field === "shots") return /^(shots?|shotsTaken|shotsOnGoal|shotCount|totalShots|playerShots)$/i;
+  if (field === "demos") return /^(demos?|demolitions?|demoCount|totalDemos|playerDemos|bumps)$/i;
+  if (field === "score") return /^(score|points|playerScore|player_score|coreScore|totalScore|corePoints)$/i;
+  return new RegExp(`^${field}$`, "i");
 }
 function readParseStatObjectValue(value) {
   if (!value || typeof value !== "object") return parseNumberish(value);
@@ -6446,9 +9807,8 @@ function readParseStatObjectValue(value) {
 function collectParseStatValuesByAlias(obj, field, maxDepth = 7, seen = new Set(), found = []) {
   if (!obj || typeof obj !== "object" || maxDepth < 0 || seen.has(obj)) return found;
   seen.add(obj);
-  const aliases = getParseStatAliasSet(field);
-  const labelCandidates = [obj.name, obj.label, obj.displayName, obj.displayCategory, obj.key, obj.slug, obj.stat, obj.statName, obj.metadata?.name, obj.metadata?.label, obj.metadata?.displayName];
-  if (labelCandidates.some(v => aliases.has(normalizeParseStatName(v)))) {
+  const labelCandidates = [obj.name, obj.label, obj.displayName, obj.displayCategory, obj.key, obj.slug, obj.stat, obj.statName, obj.metadata?.name, obj.metadata?.label, obj.metadata?.displayName, obj.metadata?.key];
+  if (labelCandidates.some(v => parseStatLabelMatchesField(v, field))) {
     const n = readParseStatObjectValue(obj);
     if (Number.isFinite(n)) found.push(n);
   }
@@ -6457,7 +9817,7 @@ function collectParseStatValuesByAlias(obj, field, maxDepth = 7, seen = new Set(
     return found;
   }
   for (const [key, value] of Object.entries(obj)) {
-    if (aliases.has(normalizeParseStatName(key))) {
+    if (parseStatLabelMatchesField(key, field)) {
       const n = readParseStatObjectValue(value);
       if (Number.isFinite(n)) found.push(n);
     }
@@ -6465,31 +9825,40 @@ function collectParseStatValuesByAlias(obj, field, maxDepth = 7, seen = new Set(
   }
   return found;
 }
+function chooseBestParseStatNumber(values, field) {
+  const nums = (values || []).map(Number).filter(Number.isFinite);
+  if (!nums.length) return null;
+  // For a single game, these stat values should be small non-negative integers except score.
+  // Prefer positive values because the scraped object often contains zero placeholders before the real stat row.
+  const saneMax = field === "score" ? 3000 : field === "shots" ? 25 : field === "demos" ? 20 : 15;
+  const sane = nums.filter(n => n >= 0 && n <= saneMax);
+  const pool = sane.length ? sane : nums;
+  const positives = pool.filter(n => n > 0);
+  if (positives.length) return Math.max(...positives);
+  return pool[0];
+}
 function getBestParseStatValue(match, field) {
   const values = collectParseStatValuesByAlias(match, field).filter(Number.isFinite);
-  if (!values.length) return null;
-  if (field === "score") {
-    const positives = values.filter(v => v > 0);
-    return positives.length ? Math.max(...positives) : values[0];
-  }
-  return values[0];
+  return chooseBestParseStatNumber(values, field);
 }
-
-function getMatchStatValue(match, field) {
+function getMatchStatReadout(match, field) {
   const stats = match?.stats || {};
-  const stat = stats?.[field];
-  const direct = firstNumberish(
+  const stat = stats?.[field] || stats?.[field?.toUpperCase?.()] || stats?.[field?.replace(/^./, c => c.toUpperCase())];
+  const directValues = [
     stat?.value,
     stat?.displayValue,
     stat?.metadata?.value,
     stat?.metadata?.displayValue,
+    stat?.metadata?.amount,
+    stat?.metadata?.score,
+    stat?.stats?.value,
+    stat?.stats?.score,
     match?.[field],
     match?.metadata?.[field]
-  );
-  const aliasValue = getBestParseStatValue(match, field);
+  ].map(parseNumberish).filter(Number.isFinite);
 
   if (field === "score") {
-    const explicitScore = firstNumberish(
+    directValues.push(...[
       stats?.score,
       stats?.Score,
       stats?.playerScore,
@@ -6498,24 +9867,40 @@ function getMatchStatValue(match, field) {
       stats?.totalScore,
       stats?.points,
       stats?.core?.score,
-      stats?.coreScore,
       stats?.corePoints,
       stats?.rating?.metadata?.score,
       match?.score,
       match?.playerScore,
       match?.metadata?.playerScore
-    );
-    const candidates = [direct, explicitScore, aliasValue]
-      .map(Number)
-      .filter(n => Number.isFinite(n) && n > 0);
-    if (candidates.length) return Math.max(...candidates);
-    const deep = findDeepNumberByKey(match, /^(playerScore|player_score|coreScore|totalScore|points)$/i, 6);
-    return Number.isFinite(deep) ? deep : 0;
+    ].map(parseNumberish).filter(Number.isFinite));
   }
 
-  if (Number.isFinite(direct)) return direct;
-  if (Number.isFinite(aliasValue)) return aliasValue;
-  return findDeepNumberByKey(stats, new RegExp(`^${field}$`, "i"), 4) ?? 0;
+  const aliasValues = collectParseStatValuesByAlias(match, field).filter(Number.isFinite);
+  const deep = findDeepNumberByKey(match, getDeepStatKeyRegex(field), 8);
+  const values = [...directValues, ...aliasValues, ...(Number.isFinite(deep) ? [deep] : [])];
+  return {
+    value: chooseBestParseStatNumber(values, field) ?? 0,
+    found: values.length > 0,
+    values,
+  };
+}
+function getMatchStatValue(match, field) {
+  return getMatchStatReadout(match, field).value;
+}
+function getParseStatFieldsForMode(mode) {
+  return normalizeGameMode(mode) === "1v1" ? ["goals", "assists", "saves", "shots", "demos"] : ["goals", "assists", "saves", "shots"];
+}
+function hasUsableParseStatPayload(match, mode = "3v3") {
+  if (!match || typeof match !== "object") return false;
+  const fields = getParseStatFieldsForMode(mode);
+  return fields.some(field => getMatchStatReadout(match, field).found);
+}
+function getParseStatDebugSummary(match, mode = "3v3") {
+  const fields = getParseStatFieldsForMode(mode);
+  return Object.fromEntries(fields.map(field => {
+    const info = getMatchStatReadout(match, field);
+    return [field, { found: info.found, value: info.value, candidates: info.values?.slice?.(0, 6) || [] }];
+  }));
 }
 
 function getMatchTeamScoreInfo(match, player = null) {
@@ -6645,11 +10030,18 @@ function propBetWasPlacedBeforeGameStarted(bet, game) {
 }
 
 function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
-  const goals = getMatchStatValue(match, "goals");
-  const assists = getMatchStatValue(match, "assists");
-  const saves = getMatchStatValue(match, "saves");
-  const shots = getMatchStatValue(match, "shots");
-  const demos = normalizeGameMode(mode) === "1v1" ? (getMatchStatValue(match, "demos") || 0) : 0;
+  const goalsInfo = getMatchStatReadout(match, "goals");
+  const assistsInfo = getMatchStatReadout(match, "assists");
+  const savesInfo = getMatchStatReadout(match, "saves");
+  const shotsInfo = getMatchStatReadout(match, "shots");
+  const demosInfo = normalizeGameMode(mode) === "1v1" ? getMatchStatReadout(match, "demos") : { value:0, found:false, values:[] };
+  const goals = goalsInfo.value;
+  const assists = assistsInfo.value;
+  const saves = savesInfo.value;
+  const shots = shotsInfo.value;
+  const demos = normalizeGameMode(mode) === "1v1" ? (demosInfo.value || 0) : 0;
+  const parseStatSummary = { goals:goalsInfo, assists:assistsInfo, saves:savesInfo, shots:shotsInfo, ...(normalizeGameMode(mode) === "1v1" ? { demos:demosInfo } : {}) };
+  const parseStatsFound = Object.values(parseStatSummary).some(info => info?.found);
   const teamScore = getMatchTeamScoreInfo(match, player);
   const matchStart = getMatchStartInfo(match);
   const detectedOurScore = Number.isFinite(teamScore.ourScore) ? teamScore.ourScore : null;
@@ -6681,6 +10073,9 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     rating: match.stats?.rating?.value || null,
     ratingDelta: getMatchRatingDelta(match),
     source: "parse_sessions",
+    parseStatsFound,
+    parseStatsIncomplete: !parseStatsFound,
+    parseStatDebug: Object.fromEntries(Object.entries(parseStatSummary).map(([k, v]) => [k, { found: !!v?.found, value: v?.value ?? 0, candidates: v?.values?.slice?.(0, 6) || [] }])),
     syncedAt: new Date().toISOString(),
   };
 }
@@ -6720,30 +10115,7 @@ const openRoom = async () => {
 
                 
 const fetchLatest3v3ForPlayer = async (player, roomOpenedAt) => {
-  const platform = player.platform;
-
-  const res = await fetch(
-    `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${platform}&username=${player.name}`,
-    { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
-  );
-
-  const json = await res.json();
-  const sessions = json?.data?.items || [];
-const matches = sessions.flatMap(s => s.matches || []);
-
-  
-return matches
-  .filter(match =>
-    match?.metadata?.playlist === teamRoom.playlist &&
-    match?.metadata?.isGrouped === false
-  )
-  .sort(
-    (a, b) =>
-      new Date(b.metadata.dateCollected) -
-      new Date(a.metadata.dateCollected)
-  )[0];
-  
-  
+  return fetchLatestParseMatchForPlayer(player, teamRoom.playlist);
 };
 
 const syncRoomFromParse = async () => {
@@ -6774,6 +10146,14 @@ console.log(pulled);
 
     if (pulled.some(x => !x.match)) {
       setRoomSyncMsg("waiting for all 3 matches to show on tracker…");
+      setRoomSyncing(false);
+      return;
+    }
+
+    const missingStatPayload = pulled.filter(x => !hasUsableParseStatPayload(x.match, teamRoom.mode));
+    if (missingStatPayload.length) {
+      console.warn("Parse found matches without box-score stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, teamRoom.mode) })));
+      setRoomSyncMsg("match found, but tracker stats are still loading — try again in a minute");
       setRoomSyncing(false);
       return;
     }
@@ -7030,7 +10410,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
 }
 
 
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit, points, setPoints, chemistry, setChemistry }) {
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit, points, setPoints, bets, setBets, chemistry, setChemistry }) {
   stats = sanitizeStatsForRender(stats);
   const [mode,setMode]=useState("2v2");
   const [logging,setLogging]=useState(false);
@@ -7238,6 +10618,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         return;
       }
 
+      const missingStatPayload = pulled.filter(x => !hasUsableParseStatPayload(x.match, requestedMode));
+      if (missingStatPayload.length) {
+        console.warn("Parse found matches without box-score stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, requestedMode) })));
+        addToast?.("match found, but live stats are still loading — try sync again in a minute", "⏳");
+        setMatchSyncing(false);
+        return;
+      }
+
       if (playersToSync.length > 1) {
         const times = pulled.map(x => new Date(x.match.metadata.dateCollected).getTime());
         if (Math.max(...times) - Math.min(...times) > 10 * 60 * 1000) {
@@ -7283,13 +10671,24 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         if (refreshed) {
           setStats(updStats);
           await storeSet("stats", updStats);
+          const freshBetsForRefresh = await storeGet("bets").catch(() => []);
+          const freshPointsForRefresh = await storeGet("points").catch(() => points) || points;
           await settleDueBetsNow({
-            bets: await storeGet("bets").catch(() => []),
+            bets: freshBetsForRefresh,
             stats: updStats,
-            points: await storeGet("points").catch(() => points) || points,
+            points: freshPointsForRefresh,
+            setBets,
             setPoints,
           }).catch(e => console.warn("post-refresh bet settle failed", e));
-          addToast?.("that synced game was refreshed with latest stats", "✅");
+          await regradeLostBetsForGames({
+            bets: await storeGet("bets").catch(() => freshBetsForRefresh),
+            stats: updStats,
+            points: await storeGet("points").catch(() => freshPointsForRefresh) || freshPointsForRefresh,
+            setBets,
+            setPoints,
+            games: refreshedGames,
+          }).catch(e => console.warn("post-refresh bet regrade failed", e));
+          addToast?.("that synced game was refreshed with latest live stats", "✅");
           setTimeout(() => setShowSyncMatchModal(false), 350);
         } else {
           addToast?.("that match was already synced", "✅");
@@ -7309,17 +10708,18 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       setStats(updStats);
       await storeSet("stats", updStats);
       // APP56: settle any matching prop immediately after the next synced game is written.
-      settleDueBetsNow({
+      await settleDueBetsNow({
         bets: await storeGet("bets").catch(() => []),
         stats: updStats,
         points: await storeGet("points").catch(() => points) || points,
+        setBets,
         setPoints,
       }).catch(e => console.warn("post-sync bet settle failed", e));
       addToast?.(`${sessionCode} ${requestedMode} synced from tracker`, "✅");
       setTimeout(() => setShowSyncMatchModal(false), 350);
     } catch(e) {
       console.error(e);
-      addToast?.("sync match failed", "❌");
+      addToast?.("tracker had a sync hiccup — try again", "❌");
     }
 
     setMatchSyncing(false);
@@ -7355,7 +10755,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           try {
             const res = await fetch(
               `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_profile?platform=${encodeURIComponent(c.platform)}&username=${encodeURIComponent(c.handle)}`,
-              { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
+              { headers: { "X-API-Key": PARSE_API_KEY } }
             );
             if (!res.ok) throw new Error(`${res.status}`);
             const candidateJson = await res.json();
@@ -7421,7 +10821,7 @@ return (
             </button>
           </div>
 
-          <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:18,padding:14,marginBottom:14}}>
+          <div style={{display:"none",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:18,padding:14,marginBottom:14}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:1,marginBottom:10}}>MODE</div>
             <div style={{display:"grid",gridTemplateColumns:`repeat(${visibleSyncModes.length},1fr)`,gap:8}}>
               {visibleSyncModes.map(m => (
@@ -7510,14 +10910,22 @@ return (
         </div>
       )}
 
-      <button onClick={()=>{ if (currentPlayer !== ADMIN_ID && syncMode === "3v3") setSyncMode("2v2"); setShowSyncMatchModal(true); }} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${playerColor}33`,borderRadius:18,padding:"16px",marginBottom:14,textAlign:"left",cursor:"pointer",boxShadow:"0 12px 26px rgba(0,0,0,0.18)"}}>
+      <button onClick={()=>{ if (currentPlayer !== ADMIN_ID && syncMode === "3v3") setSyncMode("2v2"); setShowSyncMatchModal(true); }} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${playerColor}33`,borderRadius:18,padding:"16px",marginBottom:8,textAlign:"left",cursor:"pointer",boxShadow:"0 12px 26px rgba(0,0,0,0.18)"}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
           <div>
             <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:4}}>SYNC MATCH</div>
+            <div style={{fontSize:11,color:"#8B92A8",fontWeight:800}}>selected: {syncMode}</div>
           </div>
           <ChevronRight size={18} color={playerColor} style={{flexShrink:0}}/>
         </div>
       </button>
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${visibleSyncModes.length},1fr)`,gap:8,marginBottom:14}}>
+        {visibleSyncModes.map(m => (
+          <button key={m} onClick={()=>setSyncMode(m)} className="bb-pressable" style={{background:syncMode===m?playerColor:"rgba(255,255,255,0.05)",border:syncMode===m?"none":"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"9px 0",fontSize:11,fontWeight:900,color:syncMode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
+            {m}
+          </button>
+        ))}
+      </div>
 
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"stats"},{id:"teamlink",label:"team link"},{id:"chem",label:"chem"},{id:"mmr",label:"mmr"}].map(sub=>(
@@ -7530,10 +10938,7 @@ return (
 {statsSubTab==="mmr" ? (
   <LiveMMRFeed mmrProfiles={mmrProfiles} />
 ) : statsSubTab==="teamlink" ? (
-  <div>
-    <div style={{...s.sectionLabel,marginBottom:10}}>team link</div>
-    <TeamLinkGames stats={stats} onUpdateOpponentScore={updateOpponentScore} jumpDate={(jumpDate && typeof jumpDate === "object") ? jumpDate.date : jumpDate} jumpGameId={(jumpDate && typeof jumpDate === "object") ? jumpDate.gameId : null} />
-  </div>
+  <TeamLinkTab stats={stats} onUpdateOpponentScore={updateOpponentScore} />
 ) : statsSubTab==="chem" ? (
   <TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>
 ) : (
@@ -7685,8 +11090,14 @@ function getDailyShopSeed() {
   return noon.getTime();
 }
 
-function getDailyShopItems() {
+function getDailyShopItems(adminShopItems = null) {
   const seed = getDailyShopSeed();
+  const rawAdmin = Array.isArray(adminShopItems) ? adminShopItems.map(normalizeAdminShopItem).filter(Boolean) : getAdminShopItemsSync();
+  const touchedTypes = new Set(rawAdmin.filter(i => i.adminEdited || i.adminDaily || i.adminDailyHidden || i.inDailyShop).map(i => i.type));
+  const allShopItems = getAllShopItems(rawAdmin).filter(i => !i.adminDailyHidden && !i.adminHidden && !String(i.id || "").startsWith("__"));
+  const manualDaily = allShopItems
+    .filter(i => (i.adminDaily || i.inDailyShop) && !String(i.id || "").startsWith("__"))
+    .sort((a,b) => (Number(a.adminOrder ?? 999999) - Number(b.adminOrder ?? 999999)) || String(getShopItemDisplayLabel(a)).localeCompare(String(getShopItemDisplayLabel(b))));
   const seeded = (items, salt = 0) => {
     let h = seed + salt;
     return [...items].map((item, i) => {
@@ -7694,14 +11105,19 @@ function getDailyShopItems() {
       return { item, sort: Math.abs(h) };
     }).sort((a, b) => a.sort - b.sort).map(x => x.item);
   };
-  const byType = (type, salt) => seeded(
-    SHOP_ITEMS.filter(i => i.type === type && (type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(i.id))),
-    salt
-  ).slice(0, 10);
+  const byType = (type, salt) => {
+    // Once the admin has touched a section, trust the saved admin layout for that section exactly.
+    // This stops the default seeded store from randomly filling back in after logout/reopen.
+    if (touchedTypes.has(type)) return [];
+    return seeded(
+      allShopItems.filter(i => i.type === type && !manualDaily.some(m => m.id === i.id) && !i.adminDailyHidden && !i.adminHidden && (type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(i.id))),
+      salt
+    ).slice(0, 10);
+  };
   return [
+    ...manualDaily,
     ...byType("icon", 1101),
     ...byType("color", 1202),
-    ...byType("text_color", 1303),
     ...byType("title", 1404),
     ...byType("border", 1505),
     ...byType("sound", 1606),
@@ -7747,7 +11163,7 @@ function stripLeadingEmojiText(value) {
 }
 
 function getShopItemDisplayLabel(itemOrId) {
-  const item = typeof itemOrId === "string" ? SHOP_ITEMS.find(i => i.id === itemOrId) : itemOrId;
+  const item = typeof itemOrId === "string" ? getAllShopItems().find(i => i.id === itemOrId) : itemOrId;
   if (!item) return String(itemOrId || "item");
   const raw = item.label || item.value || item.id;
   if (item.type === "sound") return stripLeadingEmojiText(raw) || String(item.id || "sound").replace(/^sb_/, "").replace(/_/g, " ");
@@ -7755,11 +11171,284 @@ function getShopItemDisplayLabel(itemOrId) {
 }
 
 function getShopItemRevealIcon(item) {
-  if (item?.type === "background") return "▧";
-  if (item?.type === "sound") return "SFX";
-  return item?.emoji || (item?.type === "text_color" ? "Aa" : item?.type === "title" ? "T" : "✨");
+  if (!item) return "";
+  if (item.type === "icon") return item.hideEmoji ? "" : (item.value || item.emoji || "✨");
+  if (item.type === "background") return "▧";
+  if (item.type === "sound") return "";
+  if (item.type === "color") return "";
+  if (item.type === "text_color") return "Aa";
+  if (item.type === "title") return getTitleRarityMeta(item).emoji || "T";
+  return "";
 }
 
+const TITLE_RARITIES = {
+  common: { id:"common", label:"Common", emoji:"⚪", color:"#D7DCE8", cost:500 },
+  uncommon: { id:"uncommon", label:"Uncommon", emoji:"🟢", color:"#7CFFB2", cost:650 },
+  rare: { id:"rare", label:"Rare", emoji:"🔵", color:"#4D9EFF", cost:850 },
+  epic: { id:"epic", label:"Epic", emoji:"🟣", color:"#A78BFA", cost:1100 },
+  legendary: { id:"legendary", label:"Legendary", emoji:"🟠", color:"#FF8C42", cost:1500 },
+  mythic: { id:"mythic", label:"Mythic", emoji:"🔴", color:"#FF5C8A", cost:2200 },
+  limited: { id:"limited", label:"Limited Event", emoji:"🌈", color:"#FFD166", cost:3000 },
+};
+const TITLE_RARITY_ORDER = ["common","uncommon","rare","epic","legendary","mythic","limited"];
+function getTitleRarityMeta(itemOrRarity) {
+  const raw = typeof itemOrRarity === "string" ? itemOrRarity : (itemOrRarity?.rarity || itemOrRarity?.titleRarity || "common");
+  return TITLE_RARITIES[String(raw || "common").toLowerCase()] || TITLE_RARITIES.common;
+}
+function makeTitleItem(id, value, rarity = "common", source = "shop") {
+  const meta = getTitleRarityMeta(rarity);
+  return { id:`title_${id}`, label:value, value, desc:`${meta.emoji} ${meta.label} title · ${source}`, cost:meta.cost, type:"title", rarity:meta.id, unlockSource:source, emoji:meta.emoji };
+}
+const TITLE_COLLECTION_ITEMS = [
+  makeTitleItem("warmup_warrior", "warmup warrior", "common", "collection"),
+  makeTitleItem("corner_gremlin", "corner gremlin", "common", "collection"),
+  makeTitleItem("boost_goblin", "boost goblin", "common", "collection"),
+  makeTitleItem("back_post_believer", "back post believer", "common", "collection"),
+  makeTitleItem("open_net_witness", "open net witness", "common", "collection"),
+  makeTitleItem("ranked_resident", "ranked resident", "common", "collection"),
+  makeTitleItem("queue_survivor", "queue survivor", "common", "collection"),
+  makeTitleItem("demo_magnet", "demo magnet", "common", "collection"),
+  makeTitleItem("quick_chat_scholar", "quick chat scholar", "common", "collection"),
+  makeTitleItem("first_game_fraud", "first game fraud", "common", "collection"),
+  makeTitleItem("freeplay_merchant", "freeplay merchant", "common", "collection"),
+  makeTitleItem("ball_cam_loyalist", "ball cam loyalist", "common", "collection"),
+  makeTitleItem("zero_boost_menace", "zero boost menace", "common", "collection"),
+  makeTitleItem("side_wall_specialist", "side wall specialist", "common", "collection"),
+  makeTitleItem("overtime_tax_payer", "overtime tax payer", "common", "collection"),
+  makeTitleItem("fake_kickoff_enjoyer", "fake kickoff enjoyer", "common", "collection"),
+  makeTitleItem("kickoff_merchant", "kickoff merchant", "common", "collection"),
+  makeTitleItem("low_boost_legend", "low boost legend", "common", "collection"),
+  makeTitleItem("third_man_intern", "third man intern", "common", "collection"),
+  makeTitleItem("shot_counter", "shot counter", "common", "collection"),
+  makeTitleItem("boost_pad_bandit", "boost pad bandit", "common", "collection"),
+  makeTitleItem("recoveries_enjoyer", "recoveries enjoyer", "common", "collection"),
+  makeTitleItem("post_hit_prophet", "post hit prophet", "common", "collection"),
+  makeTitleItem("goal_line_camper", "goal line camper", "common", "collection"),
+  makeTitleItem("training_pack_tourist", "training pack tourist", "common", "collection"),
+  makeTitleItem("small_pad_demon", "small pad demon", "common", "collection"),
+  makeTitleItem("flip_reset_dreamer", "flip reset dreamer", "common", "collection"),
+  makeTitleItem("ceiling_fan", "ceiling fan", "common", "collection"),
+  makeTitleItem("shadow_defense", "shadow defense", "common", "collection"),
+  makeTitleItem("panic_flipper", "panic flipper", "common", "collection"),
+  makeTitleItem("corner_climber", "corner climber", "common", "collection"),
+  makeTitleItem("soft_touch_saint", "soft touch saint", "common", "collection"),
+  makeTitleItem("hard_clear_hero", "hard clear hero", "common", "collection"),
+  makeTitleItem("fake_challenge_fan", "fake challenge fan", "common", "collection"),
+  makeTitleItem("night_grinder", "night grinder", "uncommon", "collection"),
+  makeTitleItem("duo_intern", "duo intern", "uncommon", "collection"),
+  makeTitleItem("team_link_trainee", "team link trainee", "uncommon", "collection"),
+  makeTitleItem("save_stacker", "save stacker", "uncommon", "collection"),
+  makeTitleItem("assist_addict", "assist addict", "uncommon", "collection"),
+  makeTitleItem("shot_farmer", "shot farmer", "uncommon", "collection"),
+  makeTitleItem("ranked_shift_worker", "ranked shift worker", "uncommon", "jobs"),
+  makeTitleItem("graveyard_rookie", "graveyard rookie", "uncommon", "collection"),
+  makeTitleItem("court_watcher", "court watcher", "uncommon", "collection"),
+  makeTitleItem("chaos_candidate", "chaos candidate", "uncommon", "collection"),
+  makeTitleItem("vault_visitor", "vault visitor", "uncommon", "collection"),
+  makeTitleItem("shop_regular", "shop regular", "uncommon", "collection"),
+  makeTitleItem("economy_helper", "economy helper", "uncommon", "collection"),
+  makeTitleItem("stock_rookie", "stock rookie", "uncommon", "collection"),
+  makeTitleItem("pass_climber", "pass climber", "uncommon", "collection"),
+  makeTitleItem("schedule_keeper", "schedule keeper", "uncommon", "collection"),
+  makeTitleItem("ping_responder", "ping responder", "uncommon", "collection"),
+  makeTitleItem("squad_helper", "squad helper", "uncommon", "collection"),
+  makeTitleItem("boost_collector", "boost collector", "uncommon", "collection"),
+  makeTitleItem("comeback_witness", "comeback witness", "uncommon", "collection"),
+  makeTitleItem("tilt_controller", "tilt controller", "uncommon", "collection"),
+  makeTitleItem("jobs_apprentice", "jobs apprentice", "uncommon", "jobs"),
+  makeTitleItem("team_pulse", "team pulse", "uncommon", "collection"),
+  makeTitleItem("clean_rotation", "clean rotation", "uncommon", "collection"),
+  makeTitleItem("late_queue_local", "late queue local", "uncommon", "collection"),
+  makeTitleItem("assist_clerk", "assist clerk", "uncommon", "collection"),
+  makeTitleItem("defense_desk", "defense desk", "uncommon", "collection"),
+  makeTitleItem("midfield_worker", "midfield worker", "rare", "collection"),
+  makeTitleItem("duo_demon", "duo demon", "rare", "collection"),
+  makeTitleItem("team_chemist", "team chemist", "rare", "collection"),
+  makeTitleItem("graveyard_grinder", "graveyard grinder", "rare", "collection"),
+  makeTitleItem("court_certified", "court certified", "rare", "collection"),
+  makeTitleItem("vault_regular", "vault regular", "rare", "collection"),
+  makeTitleItem("chaos_survivor", "chaos survivor", "rare", "collection"),
+  makeTitleItem("stock_trader", "stock trader", "rare", "collection"),
+  makeTitleItem("market_watcher", "market watcher", "rare", "collection"),
+  makeTitleItem("economy_saver", "economy saver", "rare", "collection"),
+  makeTitleItem("schedule_captain", "schedule captain", "rare", "collection"),
+  makeTitleItem("jobs_specialist", "jobs specialist", "rare", "jobs"),
+  makeTitleItem("clean_sweep", "clean sweep", "rare", "collection"),
+  makeTitleItem("overtime_merchant", "overtime merchant", "rare", "collection"),
+  makeTitleItem("clutch_caller", "clutch caller", "rare", "collection"),
+  makeTitleItem("save_merchant", "save merchant", "rare", "collection"),
+  makeTitleItem("bump_artist", "bump artist", "rare", "collection"),
+  makeTitleItem("backboard_bully", "backboard bully", "rare", "collection"),
+  makeTitleItem("rotation_police", "rotation police", "rare", "collection"),
+  makeTitleItem("boost_accountant", "boost accountant", "rare", "collection"),
+  makeTitleItem("ranked_regular", "ranked regular", "rare", "collection"),
+  makeTitleItem("team_glue", "team glue", "rare", "collection"),
+  makeTitleItem("night_shift_lead", "night shift lead", "epic", "jobs"),
+  makeTitleItem("epic_comeback", "epic comeback", "epic", "collection"),
+  makeTitleItem("chaos_handler", "chaos handler", "epic", "collection"),
+  makeTitleItem("court_veteran", "court veteran", "epic", "collection"),
+  makeTitleItem("vault_historian", "vault historian", "epic", "collection"),
+  makeTitleItem("market_maker", "market maker", "epic", "collection"),
+  makeTitleItem("shift_captain", "shift captain", "epic", "jobs"),
+  makeTitleItem("duo_commander", "duo commander", "epic", "collection"),
+  makeTitleItem("team_captain", "team captain", "epic", "collection"),
+  makeTitleItem("overtime_hero", "overtime hero", "epic", "collection"),
+  makeTitleItem("defense_minister", "defense minister", "epic", "collection"),
+  makeTitleItem("offense_engine", "offense engine", "epic", "collection"),
+  makeTitleItem("graveyard_boss", "graveyard boss", "epic", "collection"),
+  makeTitleItem("streak_protector", "streak protector", "epic", "collection"),
+  makeTitleItem("economy_stabilizer", "economy stabilizer", "epic", "collection"),
+  makeTitleItem("burton_operator", "burton operator", "epic", "collection"),
+  makeTitleItem("third_man_general", "third man general", "epic", "collection"),
+  makeTitleItem("queue_controller", "queue controller", "legendary", "collection"),
+  makeTitleItem("legend_of_lag", "legend of lag", "legendary", "collection"),
+  makeTitleItem("midnight_king", "midnight king", "legendary", "collection"),
+  makeTitleItem("chaos_king", "chaos king", "legendary", "collection"),
+  makeTitleItem("vault_lord", "vault lord", "legendary", "collection"),
+  makeTitleItem("ranked_demon", "ranked demon", "legendary", "collection"),
+  makeTitleItem("team_architect", "team architect", "legendary", "collection"),
+  makeTitleItem("court_judge", "court judge", "legendary", "collection"),
+  makeTitleItem("market_shark", "market shark", "legendary", "collection"),
+  makeTitleItem("jobs_foreman", "jobs foreman", "legendary", "jobs"),
+  makeTitleItem("burton_veteran", "burton veteran", "mythic", "collection"),
+  makeTitleItem("mythic_grinder", "mythic grinder", "mythic", "collection"),
+  makeTitleItem("redline_demon", "redline demon", "mythic", "collection"),
+  makeTitleItem("unreal_shift", "unreal shift", "mythic", "jobs"),
+  makeTitleItem("eternal_overtime", "eternal overtime", "mythic", "collection"),
+  makeTitleItem("black_market_caller", "black market caller", "mythic", "collection"),
+  makeTitleItem("final_boss", "final boss", "limited", "limited event"),
+  makeTitleItem("founder_title", "founder title", "limited", "limited event"),
+  makeTitleItem("burton_cup_2026", "burton cup 2026", "limited", "limited event"),
+  makeTitleItem("summer_circuit", "summer circuit", "limited", "limited event"),
+  makeTitleItem("halloween_haunt", "halloween haunt", "limited", "limited event"),
+  makeTitleItem("winter_grind", "winter grind", "limited", "limited event"),
+  makeTitleItem("midnight_event", "midnight event", "limited", "limited event"),
+  makeTitleItem("chaos_limited", "chaos limited", "limited", "limited event"),
+  makeTitleItem("day_one_relic", "day one relic", "common", "collection"),
+];
+
+// ===================== Achievement + Limited Title Unlocks =====================
+// These titles are not just shop filler. They can be auto-unlocked by app actions.
+// Unlocks are event-based and only append to owned inventory, never remove/reset anything.
+const ACHIEVEMENT_TITLE_ITEMS = [
+  makeTitleItem("first_win_stamp", "first win stamp", "uncommon", "achievement"),
+  makeTitleItem("ten_win_worker", "ten win worker", "rare", "achievement"),
+  makeTitleItem("twenty_five_win_file", "25 win file", "epic", "achievement"),
+  makeTitleItem("hundred_win_badge", "hundred win badge", "legendary", "achievement"),
+  makeTitleItem("assist_office", "assist office", "rare", "achievement"),
+  makeTitleItem("save_department", "save department", "rare", "achievement"),
+  makeTitleItem("shot_factory", "shot factory", "rare", "achievement"),
+  makeTitleItem("job_claimant", "job claimant", "uncommon", "jobs"),
+  makeTitleItem("shift_finisher", "shift finisher", "rare", "jobs"),
+  makeTitleItem("graveyard_certified", "graveyard certified", "epic", "jobs"),
+  makeTitleItem("union_regular", "union regular", "legendary", "jobs"),
+  makeTitleItem("court_filer", "court filer", "uncommon", "court"),
+  makeTitleItem("court_guilty_file", "guilty file", "rare", "court"),
+  makeTitleItem("appeal_survivor", "appeal survivor", "epic", "court"),
+  makeTitleItem("chaos_pressed", "chaos pressed", "uncommon", "chaos"),
+  makeTitleItem("chaos_survived", "chaos survived", "rare", "chaos"),
+  makeTitleItem("night_wars_file", "night wars file", "epic", "chaos"),
+  makeTitleItem("market_entry", "market entry", "uncommon", "stocks"),
+  makeTitleItem("diamond_hands", "diamond hands", "epic", "stocks"),
+  makeTitleItem("paper_hands", "paper hands", "rare", "stocks"),
+  makeTitleItem("economy_stabilizer", "economy stabilizer", "epic", "economy"),
+  makeTitleItem("vault_archivist", "vault archivist", "rare", "vault"),
+  makeTitleItem("schedule_regular", "schedule regular", "rare", "schedule"),
+  makeTitleItem("firework_filer", "4th of july", "limited", "limited event"),
+  makeTitleItem("summer_spark", "summer spark", "limited", "limited event"),
+  makeTitleItem("turkey_queue", "thanksgiving queue", "limited", "limited event"),
+  makeTitleItem("snow_day_shift", "christmas shift", "limited", "limited event"),
+  makeTitleItem("egg_hunt_queue", "easter egg hunter", "limited", "limited event"),
+  makeTitleItem("birthday_buff", "birthday buff", "limited", "limited event"),
+];
+
+function getTitleItemByIdSafe(id) {
+  return getAllShopItems().find(i => i?.id === id && i?.type === "title");
+}
+
+function isDateInMonthDayWindow(date, monthIndex, startDay, endDay) {
+  const d = safeDateObj(date);
+  const m = d.getMonth();
+  const day = d.getDate();
+  return m === monthIndex && day >= startDay && day <= endDay;
+}
+
+function getActiveLimitedTitleWindows(date = new Date()) {
+  const d = safeDateObj(date);
+  const month = d.getMonth();
+  const day = d.getDate();
+  const easterish = month === 3 && day >= 1 && day <= 14; // simple rotating spring window
+  return {
+    july4: isDateInMonthDayWindow(d, 6, 1, 7),
+    summer: month === 6 || month === 7,
+    thanksgiving: isDateInMonthDayWindow(d, 10, 20, 30),
+    christmas: isDateInMonthDayWindow(d, 11, 15, 31),
+    easter: easterish,
+    birthday: false, // admin can still grant this manually; kept out of random auto-unlocks without birthday data.
+  };
+}
+
+function getPlayerStatTotalsForTitleUnlocks(stats = [], playerId) {
+  const mine = (Array.isArray(stats) ? stats : []).filter(g => g?.playerId === playerId);
+  const wins = mine.filter(gameIsWin).length;
+  return {
+    games: mine.length,
+    wins,
+    assists: mine.reduce((s,g)=>s+(Number(g?.assists)||0),0),
+    saves: mine.reduce((s,g)=>s+(Number(g?.saves)||0),0),
+    shots: mine.reduce((s,g)=>s+(Number(g?.shots)||0),0),
+    goals: mine.reduce((s,g)=>s+(Number(g?.goals)||0),0),
+    lateGames: mine.filter(g => safeDateObj(g?.ts).getHours() >= 23 || safeDateObj(g?.ts).getHours() <= 3).length,
+    recentGames: mine.filter(g => Date.now() - safeDateObj(g?.ts).getTime() < 8 * DAY_MS).length,
+  };
+}
+
+function getEarnedAchievementTitleIds({ playerId, stats, burtonOS, points, passXP }) {
+  const os = normalizeBurtonOS(burtonOS);
+  const t = getPlayerStatTotalsForTitleUnlocks(stats, playerId);
+  const jobs = Array.isArray(os.jobs) ? os.jobs : [];
+  const myJobs = jobs.filter(j => getJobParticipantIds(j).includes(playerId));
+  const completedJobs = myJobs.filter(j => ["completed","paid","settled"].includes(String(j?.status || "").toLowerCase()));
+  const graveyardJobs = myJobs.filter(j => /graveyard|12:00|2:00|3:00|am/i.test(`${j?.shift || ""} ${j?.time || ""} ${j?.slot || ""}`));
+  const cases = Array.isArray(os.courtCases) ? os.courtCases : [];
+  const appeals = Array.isArray(os.appeals) ? os.appeals : [];
+  const vault = Array.isArray(os.vault) ? os.vault : [];
+  const history = Array.isArray(os.history) ? os.history : [];
+  const holdings = points?.[`${playerId}_stockPortfolio`] || points?.[`${playerId}_stocks`] || points?.stockPortfolios?.[playerId] || {};
+  const stockShareCount = Object.values(holdings || {}).reduce((sum,v)=>sum + (Number(v?.shares ?? v) || 0), 0);
+  const earned = new Set();
+  if (t.wins >= 1) earned.add("title_first_win_stamp");
+  if (t.wins >= 10) earned.add("title_ten_win_worker");
+  if (t.wins >= 25) earned.add("title_twenty_five_win_file");
+  if (t.wins >= 100) earned.add("title_hundred_win_badge");
+  if (t.assists >= 50) earned.add("title_assist_office");
+  if (t.saves >= 50) earned.add("title_save_department");
+  if (t.shots >= 100) earned.add("title_shot_factory");
+  if (myJobs.length >= 1) earned.add("title_job_claimant");
+  if (completedJobs.length >= 1) earned.add("title_shift_finisher");
+  if (graveyardJobs.length >= 1 && completedJobs.length >= 1) earned.add("title_graveyard_certified");
+  if (completedJobs.length >= 10) earned.add("title_union_regular");
+  if (cases.some(c => c?.accuserId === playerId || c?.createdBy === playerId)) earned.add("title_court_filer");
+  if (cases.some(c => c?.defendantId === playerId && c?.verdict === "guilty")) earned.add("title_court_guilty_file");
+  if (appeals.some(a => a?.playerId === playerId && a?.status === "approved")) earned.add("title_appeal_survivor");
+  if (history.some(h => /chaos/i.test(`${h?.type || ""} ${h?.title || ""} ${h?.text || ""}`))) earned.add("title_chaos_pressed");
+  if ((os.chaos?.createdBy === playerId || os.chaos?.playerId === playerId) && os.chaos?.expiresAt) earned.add("title_chaos_survived");
+  if (/night|graveyard|demon/i.test(`${os.chaos?.title || ""} ${os.chaos?.label || ""} ${os.chaos?.text || ""}`)) earned.add("title_night_wars_file");
+  if (stockShareCount >= 1) earned.add("title_market_entry");
+  if (stockShareCount >= 10) earned.add("title_diamond_hands");
+  if ((points?.[`${playerId}_stockSales`] || []).length >= 1) earned.add("title_paper_hands");
+  if ((Number(points?.[playerId]) || 0) >= 2500 && (Number(passXP?.[playerId]) || 0) >= 500) earned.add("title_economy_stabilizer");
+  if (vault.some(v => v?.playerId === playerId || /vault/i.test(`${v?.title || ""} ${v?.text || ""}`))) earned.add("title_vault_archivist");
+  if (os.schedule?.availability && Object.values(os.schedule.availability || {}).some(day => day?.[playerId] === "in")) earned.add("title_schedule_regular");
+  const limited = getActiveLimitedTitleWindows(new Date());
+  // Limited titles are harder than normal, but still realistic: do one meaningful app/game action during the seasonal window.
+  if (limited.july4 && (t.recentGames >= 1 || completedJobs.length >= 1 || history.some(h => Date.now() - safeDateObj(h?.ts || h?.createdAt).getTime() < 8 * DAY_MS))) earned.add("title_firework_filer");
+  if (limited.summer && completedJobs.length >= 3) earned.add("title_summer_spark");
+  if (limited.thanksgiving && t.wins >= 3) earned.add("title_turkey_queue");
+  if (limited.christmas && (t.lateGames >= 2 || completedJobs.length >= 1)) earned.add("title_snow_day_shift");
+  if (limited.easter && t.wins >= 1) earned.add("title_egg_hunt_queue");
+  return Array.from(earned).filter(id => !!getTitleItemByIdSafe(id));
+}
 
 const SHOP_ITEMS_RAW = [
   // colors
@@ -7804,7 +11493,9 @@ const SHOP_ITEMS_RAW = [
   { id:"title_powershot",  cost:75,  type:"title", value:"powershot pimp"      },
   { id:"title_saved",      cost:65,  type:"title", value:"saved the day"       },
   { id:"title_rule69",     cost:69,  type:"title", value:"rule 69"             },
-  { id:"title_buffalo",    cost:200, type:"title", value:"buffalo burton"      },
+  { id:"title_buffalo",    cost:200, type:"title", value:"buffalo burton", rarity:"legendary", emoji:"🟠", desc:"🟠 Legendary title"      },
+  ...TITLE_COLLECTION_ITEMS,
+  ...ACHIEVEMENT_TITLE_ITEMS,
 
 
   // soundboard sounds
@@ -7861,22 +11552,6 @@ const SHOP_ITEMS_RAW = [
   { id:"ice_name", label:"ice", desc:"icy blue name glow", cost:75, type:"color", value:"#75D7FF", emoji:"🧊" },
   { id:"lavender_name", label:"lavender", desc:"soft purple name glow", cost:75, type:"color", value:"#C4A7FF", emoji:"🪻" },
   { id:"laser_name", label:"laser red", desc:"bright red name glow", cost:75, type:"color", value:"#FF2D55", emoji:"🔴" },
-  { id:"cream_text", label:"cream text kit", desc:"warmer app text colors", cost:100, type:"text_color", value:"cream", emoji:"🎨" },
-  { id:"ice_text", label:"ice text kit", desc:"cool blue app text colors", cost:100, type:"text_color", value:"ice", emoji:"🎨" },
-  { id:"arcade_text", label:"arcade text kit", desc:"bright retro app text colors", cost:100, type:"text_color", value:"arcade", emoji:"🎨" },
-  { id:"shadow_text", label:"shadow text kit", desc:"dark muted app text colors", cost:100, type:"text_color", value:"shadow", emoji:"🎨" },
-  { id:"sunset_text", label:"sunset text kit", desc:"warm orange pink app text colors", cost:100, type:"text_color", value:"sunset", emoji:"🎨" },
-  { id:"spring_text", label:"spring text kit", desc:"fresh blossom green app text colors", cost:100, type:"text_color", value:"spring", emoji:"🎨" },
-  { id:"summer_text", label:"summer text kit", desc:"bright beach blue gold app text colors", cost:100, type:"text_color", value:"summer", emoji:"🎨" },
-  { id:"fall_text", label:"fall text kit", desc:"orange yellow red app text colors with slow leaves", cost:100, type:"text_color", value:"fall", emoji:"🎨" },
-  { id:"winter_text", label:"winter text kit", desc:"icy gradient app text colors with snow", cost:100, type:"text_color", value:"winter", emoji:"🎨" },
-  { id:"space_text", label:"space text kit", desc:"deep blue cosmic app text colors", cost:100, type:"text_color", value:"space", emoji:"🎨" },
-  { id:"wizard_text", label:"wizard text kit", desc:"purple magic app text colors", cost:100, type:"text_color", value:"wizard", emoji:"🎨" },
-  { id:"slime_text", label:"slime text kit", desc:"toxic green app text colors", cost:100, type:"text_color", value:"slime", emoji:"🎨" },
-  { id:"gold_text", label:"gold text kit", desc:"gold accent app text colors", cost:100, type:"text_color", value:"gold", emoji:"🎨" },
-  { id:"bubblegum_text", label:"bubblegum text kit", desc:"pink blue app text colors", cost:100, type:"text_color", value:"bubblegum", emoji:"🎨" },
-  { id:"terminal_text", label:"terminal text kit", desc:"green terminal app text colors", cost:100, type:"text_color", value:"terminal", emoji:"🎨" },
-  { id:"ghost_text", label:"ghost text kit", desc:"pale ghost app text colors", cost:100, type:"text_color", value:"ghost", emoji:"🎨" },
   { id:"icon_ufo", label:"ufo", cost:90, type:"icon", value:"🛸", emoji:"🛸" },
   { id:"icon_moon", label:"moon", cost:70, type:"icon", value:"🌙", emoji:"🌙" },
   { id:"icon_clover", label:"clover", cost:70, type:"icon", value:"🍀", emoji:"🍀" },
@@ -7898,8 +11573,666 @@ const SHOP_ITEMS_RAW = [
   { id:"sb_demo_call", label:"demo call", desc:"demo reaction", type:"sound", value:"sb_demo_call", file:"demo-call.mp3", emoji:"💥" },
   { id:"sb_goal_horn2", label:"goal horn 2", desc:"alternate goal blast", type:"sound", value:"sb_goal_horn2", file:"goal-horn-2.mp3", emoji:"📣" },
 
+  // smoother ambient backgrounds — continuous blur style instead of split-screen nebula blocks
+  { id:"bg_deep_blur", label:"Deep Blur", emoji:"🌑", desc:"soft dark ambient blur", cost:260, type:"background", value:"deep_blur" },
+  { id:"bg_emerald_haze", label:"Emerald Haze", emoji:"🟢", desc:"dark green ambient glow", cost:260, type:"background", value:"emerald_haze" },
+  { id:"bg_violet_fog", label:"Violet Fog", emoji:"🟣", desc:"purple smoke blur", cost:260, type:"background", value:"violet_fog" },
+  { id:"bg_blue_dusk", label:"Blue Dusk", emoji:"🔵", desc:"blue midnight blur", cost:260, type:"background", value:"blue_dusk" },
+  { id:"bg_warm_shadow", label:"Warm Shadow", emoji:"🟠", desc:"soft gold shadow glow", cost:260, type:"background", value:"warm_shadow" },
+
 ];
 const SHOP_ITEMS = SHOP_ITEMS_RAW.map(withNormalizedShopPrice);
+const ADMIN_SHOP_ITEMS_KEY = "admin_shop_items";
+const APP_CUSTOMIZER_KEY = "app_customizer";
+const DEFAULT_APP_TAB_ORDER = ["home", "jobs", "court", "room", "social", "stats", "presence", "games", "stocks", "boost", "coinflip", "garage"];
+const DEFAULT_TAB_BOX_DEFS = {
+  homeOverview: [
+    { id:"openLoops", label:"Open loops", desc:"rotating things that need attention", size:"full" },
+    { id:"weeklyModifier", label:"Weekly modifier" },
+    { id:"burtonOS", label:"Burton OS" },
+    { id:"matchup", label:"Next matchup" },
+    { id:"trainingPreview", label:"Training preview" },
+    { id:"coachNote", label:"Coach note" },
+    { id:"teamComparison", label:"Team comparison" },
+    { id:"statChallenges", label:"Stat challenges" },
+  ],
+  burtonOS: [
+    { id:"openLoops", label:"Open loops", desc:"rotating things that need attention", size:"full" },
+    { id:"burtonState", label:"Burton OS state" },
+    { id:"chaos", label:"Chaos button" },
+    { id:"activeChaosRule", label:"Active chaos rule", desc:"current locked chaos state", size:"full" },
+    { id:"courtRoom", label:"Court Room", hidden:true },
+    { id:"autoCourt", label:"Auto court", desc:"bad synced games can file cases" },
+    { id:"teamJobs", label:"Jobs board", desc:"timed challenge bundles with payouts", size:"wide", hidden:true },
+    { id:"playerStocks", label:"Player stock market", desc:"wins + XP market", size:"wide" },
+    { id:"economyEvents", label:"Economy events", desc:"inflation, crashes, stimulus, luxury tax", size:"wide" },
+    { id:"teamSchedule", label:"Team schedule", desc:"availability and sessions linked to pings", size:"wide" },
+    { id:"courtAppeals", label:"Court appeals", desc:"appeal guilty verdicts for points", size:"wide" },
+    { id:"teamEconomy", label:"Shared economy" },
+    { id:"limitedEvents", label:"Limited event" },
+    { id:"secretUnlocks", label:"Secret unlocks" },
+    { id:"cursesBlessings", label:"Curses + blessings" },
+    { id:"vault", label:"Vault" },
+  ],
+  homeProfile: [
+    { id:"profileCard", label:"Profile card" },
+    { id:"cosmetics", label:"Cosmetics" },
+    { id:"wallet", label:"Wallet" },
+  ],
+  jobs: [
+    { id:"jobsBoard", label:"Jobs board", desc:"claim solo, duo, or team shifts", size:"full" },
+  ],
+  court: [
+    { id:"courtRoom", label:"Court room", desc:"file cases and vote verdicts", size:"full" },
+    { id:"courtAppeals", label:"Appeals", desc:"appeal guilty verdicts", size:"full" },
+  ],
+  room: [
+    { id:"chatFeed", label:"Chat feed" },
+    { id:"messageComposer", label:"Message composer" },
+  ],
+  social: [
+    { id:"postComposer", label:"Post composer" },
+    { id:"socialFeed", label:"Social feed" },
+    { id:"bets", label:"Bets section" },
+  ],
+  stats: [
+    { id:"syncControls", label:"Sync controls" },
+    { id:"statSummary", label:"Stat summary" },
+    { id:"gamesList", label:"Games list" },
+    { id:"teamLink", label:"Team link" },
+    { id:"chemistry", label:"Chemistry" },
+  ],
+  presence: [
+    { id:"squadStatus", label:"Squad status" },
+    { id:"voicePresence", label:"Voice presence" },
+    { id:"flowers", label:"Flowers" },
+    { id:"duos", label:"Duos" },
+  ],
+  boost: [
+    { id:"balance", label:"Balance" },
+    { id:"bets", label:"Bets" },
+    { id:"props", label:"Props" },
+    { id:"race", label:"Race" },
+    { id:"stockMarket", label:"Stock market" },
+  ],
+  coinflip: [
+    { id:"challenge", label:"Challenge" },
+    { id:"activeFlips", label:"Active flips" },
+    { id:"history", label:"Flip history" },
+  ],
+  garage: [
+    { id:"passProgress", label:"Pass progress" },
+    { id:"rewards", label:"Rewards" },
+    { id:"loadout", label:"Loadout" },
+  ],
+};
+const TAB_LAYOUT_MODE_OPTIONS = [
+  { id:"stack", label:"Vertical stack", desc:"classic one-box-after-another layout" },
+  { id:"twoColumn", label:"2 column grid", desc:"two boxes per row, sized for phone screens" },
+  { id:"compactGrid", label:"Compact grid", desc:"tight two-column cards that still fit on mobile" },
+  { id:"featureGrid", label:"Feature + grid", desc:"one hero box up top, smaller cards under it" },
+  { id:"rail", label:"Swipe rail", desc:"side-scroll cards that do not overflow vertically" },
+];
+const TAB_LAYOUT_DENSITY_OPTIONS = [
+  { id:"tight", label:"Tight" },
+  { id:"normal", label:"Normal" },
+  { id:"roomy", label:"Roomy" },
+];
+const TAB_LAYOUT_GROUP_OPTIONS = [
+  { id:"none", label:"No grouping" },
+  { id:"category", label:"Category grouped" },
+  { id:"compact", label:"Compact category" },
+];
+const TAB_BOX_SIZE_OPTIONS = [
+  { id:"compact", label:"Compact", span:1 },
+  { id:"default", label:"Default", span:1 },
+  { id:"wide", label:"Wide", span:2 },
+  { id:"full", label:"Full width", span:"full" },
+  { id:"hero", label:"Hero", span:"full" },
+];
+function makeDefaultTabBoxLayout(defs = []) {
+  return {
+    order:defs.map(d => d.id),
+    hidden:Object.fromEntries(defs.filter(d => d.hidden).map(d => [d.id, true])),
+    labels:Object.fromEntries(defs.map(d => [d.id, d.label])),
+    descriptions:Object.fromEntries(defs.map(d => [d.id, d.desc || ""])),
+    sizes:Object.fromEntries(defs.map(d => [d.id, d.size || "default"])),
+    layoutMode:"stack",
+    density:"normal",
+    groupMode:"none",
+  };
+}
+const DEFAULT_TAB_BOX_LAYOUT = Object.fromEntries(Object.entries(DEFAULT_TAB_BOX_DEFS).map(([tabId, defs]) => [tabId, makeDefaultTabBoxLayout(defs)]));
+const DEFAULT_COURT_PUNISHMENTS = {
+  enabled:true,
+  archiveToVault:true,
+  pingVerdict:true,
+  guilty:{ enabled:true, fineEnabled:true, fineAmount:100, curseEnabled:true, curseId:"sell_watch", titleEnabled:true, title:"Court Certified Seller", stateEnabled:false, stateId:"tilt" },
+  not_guilty:{ enabled:true, fineEnabled:false, fineAmount:0, curseEnabled:false, curseId:"", titleEnabled:false, title:"", stateEnabled:false, stateId:"normal" },
+  team_sold:{ enabled:true, fineEnabled:false, fineAmount:0, curseEnabled:false, curseId:"", titleEnabled:false, title:"", stateEnabled:true, stateId:"revenge" },
+  lying:{ enabled:true, fineEnabled:true, fineAmount:100, curseEnabled:true, curseId:"false_accuser", titleEnabled:true, title:"False Accuser", stateEnabled:false, stateId:"tilt" },
+};
+const DEFAULT_APP_CUSTOMIZER = {
+  hiddenTabs: {},
+  tabOrder: DEFAULT_APP_TAB_ORDER,
+  hideBorders: false,
+  compactCards: false,
+  hideMutedText: false,
+  hideTopNavBox: false,
+  safeStartupLoading: true,
+  smoothSocialLoading: true,
+  shopPriceBoxAccent: "#B8FF4D",
+  shopPriceBoxBorderOpacity: 0.34,
+  shopPriceBoxBgOpacity: 0.10,
+  animationDepth: "normal",
+  buttonMotion: "normal",
+  ambientFx: true,
+  enabledBoxes: DEFAULT_BURTON_BOXES,
+  tabBoxLayout: DEFAULT_TAB_BOX_LAYOUT,
+  courtPunishments: DEFAULT_COURT_PUNISHMENTS,
+  burtonOptionPools: DEFAULT_BURTON_OPTION_POOLS,
+  jobsConfig: { enabled:true, groupShifts:false, easy:{ challenges:5, minutes:60, payout:150 }, medium:{ challenges:7, minutes:45, payout:300 }, hard:{ challenges:10, minutes:30, payout:600 }, shiftGroups:getDefaultJobShiftGroups(), slotTimes:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"], templates:[
+    { id:"job_ranked_shift", enabled:true, emoji:"📋", title:"Ranked Shift", desc:"clock in for synced ranked games", challengeText:"sync/log one game per challenge" },
+    { id:"job_cleanup", enabled:true, emoji:"🧹", title:"Cleanup Crew", desc:"recover from rough games", challengeText:"log games after losses or low-score games" },
+    { id:"job_demon", enabled:true, emoji:"🌑", title:"Demon Shift", desc:"late-night high pressure work", challengeText:"log games during the shift window" },
+  ] },
+  autoCourtConfig: { enabled:true, lowScoreThreshold:160, lossOnly:true, maxPerDay:3, charge:"auto-filed: low score synced loss", evidence:"Burton OS opened this case from live stats." },
+  stockMarketConfig: { enabled:true, basePrice:100, winBoost:8, xpBoost:4 },
+  economyEventConfig: { enabled:true, inflationThreshold:82, crashThreshold:28, luxuryTaxThreshold:0.62, stimulusLoginBonus:250, eventDurationHours:24 },
+  scheduleConfig: { enabled:true, pingRespectAvailability:true, reminderMinutes:15, defaultSessionTitle:"Burton session" },
+  appealConfig: { enabled:true, cost:250, refundOnWin:true, doublePunishOnFail:true, votesNeeded:2 },
+  openLoopsConfig: { enabled:true, rotationSeconds:5, showNews:true, showRareShop:true, showCourt:true, showJobs:true, showSchedule:true, showEconomy:true },
+  finishStyle:"neon_pro",
+  uiPanelMode:"default",
+  chatAnimationStyle:"slide",
+  underConstruction:{},
+  weeklyAdmin:{ library:[], weeks:{} },
+  streamDirectory:{ multiview:true, streams:[{ id:"rlcs_main", enabled:true, label:"RLCS Main", type:"youtube", url:"https://www.youtube.com/watch?v=hzs2x4irAD0", info:"main Rocket League live hub" }] },
+  pageCopy: {
+    homeCommandEyebrow: "today's command center",
+    homeCommandTitle: "what matters now",
+    boostBalanceLabel: "YOUR BALANCE",
+    boostResetLabel: "spins and slots reset",
+    socialBetsTitle: "your bets",
+    teamComparisonTitle: "team comparison",
+    weeklyChallengeTitle: "weekly challenges",
+    trainingNextTitle: "next 5 days · your training",
+    burtonOSEyebrow: "burton os",
+    chaosButtonLabel: "chaos button · pings everyone",
+    chaosEmptyTitle: "press anytime",
+    chaosEmptyDesc: "launch a temporary team rule/state and notify the other two instantly.",
+    openLoopsLabel: "open loops",
+    openLoopsDesc: "live ticker for unresolved stuff, rare drops, jobs, court, and sessions",
+    courtRoomLabel: "court room",
+    courtRoomTitle: "accuse someone of selling",
+    courtRoomDesc: "open a case, ping the team, vote on the verdict, then archive it in the vault.",
+    teamEconomyLabel: "shared economy health",
+    economyCrashingLabel: "crashing",
+    economyUnstableLabel: "unstable",
+    economyShakyLabel: "shaky",
+    economyStableLabel: "stable",
+    economyBoomingLabel: "booming",
+    limitedEventLabel: "limited event active",
+    secretUnlocksLabel: "secret unlocks",
+    vaultLabel: "vault",
+    cursesBlessingsLabel: "curses + blessings",
+    jobsBoardLabel: "jobs board",
+    jobsBoardDesc: "take timed team jobs with easy, medium, or hard windows",
+    playerStocksLabel: "player stocks",
+    playerStocksDesc: "wins + XP market",
+    economyEventsLabel: "economy events",
+    economyEventsDesc: "market-wide effects tied to the shared economy",
+    scheduleLabel: "team schedule",
+    scheduleDesc: "availability, sessions, and pings linked together",
+    appealsLabel: "court appeals",
+    appealsDesc: "pay to challenge guilty verdicts before they become permanent lore",
+    autoCourtLabel: "auto court",
+    autoCourtDesc: "Burton OS can auto-file cases from synced bad games",
+  },
+  hiddenCopy: {},
+  boxOrder: {
+    home: ["matchup", "training", "comparison", "activity"],
+    boost: ["balance", "tabs", "games"],
+    social: ["feed", "bets", "teammateBets"],
+    stats: ["overview", "teamLink", "chemistry"],
+  },
+};
+
+function normalizeTabBoxLayout(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const out = {};
+  Object.entries(DEFAULT_TAB_BOX_DEFS).forEach(([tabId, defs]) => {
+    const saved = src[tabId] && typeof src[tabId] === "object" && !Array.isArray(src[tabId]) ? src[tabId] : {};
+    const defaults = DEFAULT_TAB_BOX_LAYOUT[tabId] || makeDefaultTabBoxLayout(defs);
+    const validIds = defs.map(d => d.id);
+    const savedOrder = Array.isArray(saved.order) ? saved.order.filter(id => validIds.includes(id)) : [];
+    const order = [...savedOrder, ...validIds.filter(id => !savedOrder.includes(id))];
+    const hiddenRaw = saved.hidden && typeof saved.hidden === "object" && !Array.isArray(saved.hidden) ? saved.hidden : {};
+    const labelsRaw = saved.labels && typeof saved.labels === "object" && !Array.isArray(saved.labels) ? saved.labels : {};
+    const descRaw = saved.descriptions && typeof saved.descriptions === "object" && !Array.isArray(saved.descriptions) ? saved.descriptions : {};
+    const sizesRaw = saved.sizes && typeof saved.sizes === "object" && !Array.isArray(saved.sizes) ? saved.sizes : {};
+    out[tabId] = {
+      order,
+      hidden:Object.fromEntries(validIds.map(id => [id, hiddenRaw[id] === true || (hiddenRaw[id] !== false && defaults.hidden?.[id] === true)]).filter(([_,v]) => v)),
+      labels:Object.fromEntries(defs.map(d => [d.id, String(labelsRaw[d.id] || d.label || d.id).slice(0, 64)])),
+      descriptions:Object.fromEntries(defs.map(d => [d.id, String(descRaw[d.id] ?? d.desc ?? "").slice(0, 180)])),
+      sizes:Object.fromEntries(defs.map(d => {
+        const size = String(sizesRaw[d.id] || defaults.sizes?.[d.id] || d.size || "default");
+        return [d.id, TAB_BOX_SIZE_OPTIONS.some(o => o.id === size) ? size : "default"];
+      })),
+      layoutMode:TAB_LAYOUT_MODE_OPTIONS.some(o => o.id === saved.layoutMode) ? saved.layoutMode : (defaults.layoutMode || "stack"),
+      density:TAB_LAYOUT_DENSITY_OPTIONS.some(o => o.id === saved.density) ? saved.density : (defaults.density || "normal"),
+      groupMode:TAB_LAYOUT_GROUP_OPTIONS.some(o => o.id === saved.groupMode) ? saved.groupMode : (defaults.groupMode || "none"),
+    };
+  });
+  return out;
+}
+function normalizeCourtPunishments(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const out = { ...DEFAULT_COURT_PUNISHMENTS, ...src, enabled:src.enabled !== false, archiveToVault:src.archiveToVault !== false, pingVerdict:src.pingVerdict !== false };
+  ["guilty","not_guilty","team_sold","lying"].forEach(key => {
+    const base = DEFAULT_COURT_PUNISHMENTS[key] || {};
+    const row = src[key] && typeof src[key] === "object" && !Array.isArray(src[key]) ? src[key] : {};
+    out[key] = {
+      ...base,
+      ...row,
+      enabled:row.enabled !== false,
+      fineEnabled:row.fineEnabled !== undefined ? !!row.fineEnabled : !!base.fineEnabled,
+      fineAmount:Math.max(0, Math.min(5000, Math.round(Number(row.fineAmount ?? base.fineAmount) || 0))),
+      curseEnabled:row.curseEnabled !== undefined ? !!row.curseEnabled : !!base.curseEnabled,
+      curseId:String(row.curseId ?? base.curseId ?? ""),
+      titleEnabled:row.titleEnabled !== undefined ? !!row.titleEnabled : !!base.titleEnabled,
+      title:String(row.title ?? base.title ?? "").slice(0, 42),
+      stateEnabled:row.stateEnabled !== undefined ? !!row.stateEnabled : !!base.stateEnabled,
+      stateId:String(row.stateId ?? base.stateId ?? "normal"),
+    };
+  });
+  return out;
+}
+
+
+function safeObj(v) { return v && typeof v === "object" && !Array.isArray(v) ? v : {}; }
+
+const JOB_RULE_STAT_OPTIONS = ["game","win","goals","assists","saves","shots","demos","score"];
+const JOB_RULE_SCOPE_OPTIONS = ["player","group","any"];
+const JOB_MODE_TO_GAME_MODE = { solo:"1v1", duo:"2v2", team:"3v3" };
+function getGameModeForJobMode(jobMode, requestedMode = null) {
+  const locked = JOB_MODE_TO_GAME_MODE[String(jobMode || "solo")] || null;
+  return locked || (requestedMode && ["1v1","2v2","3v3"].includes(String(requestedMode)) ? String(requestedMode) : "any");
+}
+function getHourlyRuleKey(jobMode, slotLabel) {
+  return `${String(jobMode || "solo")}::${String(slotLabel || "")}`;
+}
+function cleanJobRuleTextForMode(text, gameMode) {
+  const mode = ["1v1","2v2","3v3"].includes(String(gameMode)) ? String(gameMode) : "1v1";
+  return String(text || "sync/log one game").replace(/(?:1v1|2v2|3v3)/gi, mode).replace(/3s/gi, mode === "3v3" ? "3s" : mode);
+}
+function normalizeRulesForJobMode(rules = [], jobMode = "solo", gameMode = null) {
+  const lockedMode = getGameModeForJobMode(jobMode, gameMode);
+  return (Array.isArray(rules) ? rules : []).map((rule, idx) => {
+    const base = normalizeJobChallengeRule(rule, rule?.text, idx);
+    return {
+      ...base,
+      mode: lockedMode,
+      scope: jobMode === "solo" ? "player" : base.scope,
+      text: cleanJobRuleTextForMode(base.text, lockedMode),
+    };
+  });
+}
+function normalizeJobChallengeRule(input = {}, fallbackText = "sync/log one game", fallbackIndex = 0) {
+  const src = safeObj(input);
+  const stat = JOB_RULE_STAT_OPTIONS.includes(String(src.stat || src.type || "")) ? String(src.stat || src.type) : "game";
+  const scope = JOB_RULE_SCOPE_OPTIONS.includes(String(src.scope || "")) ? String(src.scope) : "player";
+  const modeRaw = String(src.mode || "any");
+  const mode = ["any","1v1","2v2","3v3"].includes(modeRaw) ? modeRaw : "any";
+  const target = Math.max(1, Math.min(9999, Math.round(Number(src.target ?? (stat === "game" || stat === "win" ? 1 : 1)) || 1)));
+  return {
+    id:String(src.id || `rule_${fallbackIndex}_${stableHashString(fallbackText)}`).slice(0,48),
+    text:String(src.text || fallbackText || "sync/log one game").slice(0,140),
+    stat,
+    target,
+    scope,
+    mode,
+    operator:">=",
+  };
+}
+function normalizeJobChallengeRules(rawRules, rawLines, required, fallbackText = "sync/log one game") {
+  const lines = normalizeJobChallengeLines(rawLines || fallbackText, required, fallbackText);
+  const arr = Array.isArray(rawRules) ? rawRules : [];
+  return Array.from({ length:Math.max(1, required) }, (_, i) => normalizeJobChallengeRule(arr[i], lines[i] || fallbackText, i));
+}
+function getJobRuleStatLabel(stat) {
+  return ({ game:"games logged", win:"wins", goals:"goals", assists:"assists", saves:"saves", shots:"shots", demos:"demos", score:"score" })[stat] || stat;
+}
+function getJobRuleScopeLabel(scope) {
+  return ({ player:"your stats", group:"group total", any:"any selected player" })[scope] || scope;
+}
+function getJobParticipantIds(job) {
+  const ids = Array.isArray(job?.playerIds) && job.playerIds.length ? job.playerIds : [job?.playerId].filter(Boolean);
+  return [...new Set(ids.filter(Boolean))];
+}
+function jobIncludesPlayer(job, playerId) {
+  const pid = String(playerId || "");
+  return getJobParticipantIds(job).map(String).includes(pid);
+}
+function isSameJobSlotFilled(job, slotKey) {
+  return job?.slotKey === slotKey && ["reserved","active"].includes(job?.status);
+}
+function playerStatFromGame(g, stat) {
+  if (stat === "game") return 1;
+  if (stat === "win") return gameIsWin(g) ? 1 : 0;
+  if (stat === "score") return Number(g?.score || g?.playerScore || 0) || 0;
+  return Number(g?.[stat] || 0) || 0;
+}
+function evaluateJobChallengeRule(rule, job, stats = []) {
+  const ids = getJobParticipantIds(job);
+  const target = Math.max(1, Number(rule.target) || 1);
+  const rawStartedAt = job?.startedAt || job?.progressStartedAt || null;
+  const start = rawStartedAt ? safeDateObj(rawStartedAt, null) : null;
+
+  // Jobs must start fresh. A newly claimed/reserved job should not inherit old synced
+  // stats from earlier in the day, the chosen slot time, or the claim time. Progress
+  // only begins after the user presses Start and the job gets a real startedAt value.
+  if (!start || !Number.isFinite(start.getTime())) {
+    return { current:0, target, done:false, games:[], pendingStart:true };
+  }
+
+  const end = safeDateObj(job?.expiresAt || Date.now() + DAY_MS);
+  const mode = rule.mode && rule.mode !== "any" ? normalizeGameMode(rule.mode) : "any";
+  const games = (Array.isArray(stats) ? stats : []).filter(g => {
+    const ts = safeDateObj(g?.ts || g?.date || 0).getTime();
+    if (!Number.isFinite(ts) || ts < start.getTime() || ts > end.getTime()) return false;
+    if (mode !== "any" && normalizeGameMode(g?.mode) !== mode) return false;
+    return ids.includes(g?.playerId);
+  });
+  let current = 0;
+  if (rule.scope === "any") {
+    current = ids.reduce((best, pid) => Math.max(best, games.filter(g=>g.playerId===pid).reduce((sum,g)=>sum+playerStatFromGame(g, rule.stat),0)), 0);
+  } else if (rule.scope === "group") {
+    current = games.reduce((sum,g)=>sum+playerStatFromGame(g, rule.stat),0);
+  } else {
+    const owner = job.playerId;
+    current = games.filter(g=>g.playerId===owner).reduce((sum,g)=>sum+playerStatFromGame(g, rule.stat),0);
+  }
+  return { current, target, done:current >= target, games };
+}
+function buildJobRulesFromJob(job) {
+  if (Array.isArray(job?.challengeRules) && job.challengeRules.length) return job.challengeRules.map((r,i)=>normalizeJobChallengeRule(r, r.text, i));
+  const required = Math.max(1, Number(job?.required) || 1);
+  return normalizeJobChallengeRules([], job?.challengeList || job?.challengeText, required, job?.challengeText || "sync/log one game");
+}
+
+function normalizeJobsConfig(input = {}) {
+  const base = DEFAULT_APP_CUSTOMIZER.jobsConfig || {};
+  const src = safeObj(input);
+  const normDiff = (key) => {
+    const b = base[key] || {};
+    const row = safeObj(src[key]);
+    return { challenges:Math.max(1, Math.min(30, Math.round(Number(row.challenges ?? b.challenges) || b.challenges || 5))), minutes:Math.max(5, Math.min(240, Math.round(Number(row.minutes ?? b.minutes) || b.minutes || 60))), payout:Math.max(0, Math.min(10000, Math.round(Number(row.payout ?? b.payout) || b.payout || 100))) };
+  };
+  const easy = normDiff("easy"), medium = normDiff("medium"), hard = normDiff("hard");
+  const shiftGroups = normalizeJobShiftGroups(src.shiftGroups || src.slotGroups || base.shiftGroups || base.slotGroups);
+  const rawSlots = shiftGroups.flatMap(g => g.slots || []);
+  const slotTimes = rawSlots.map(v => String(v || "").trim()).filter(Boolean).slice(0, 48);
+  const templates = Array.isArray(src.templates) ? src.templates : base.templates;
+  const normalizeTemplate = (t,i) => {
+    const fallbackText = String(t.challengeText || "sync/log one game during the job window").slice(0,160);
+    const rawChallenges = safeObj(t.challenges);
+    return {
+      id:String(t.id || `job_${i}`),
+      enabled:t.enabled !== false,
+      emoji:String(t.emoji || "📋").slice(0,4),
+      title:String(t.title || "Job").slice(0,42),
+      desc:String(t.desc || "").slice(0,160),
+      challengeText:fallbackText,
+      allowedJobModes:Array.isArray(t.allowedJobModes) && t.allowedJobModes.length ? t.allowedJobModes.filter(v=>["solo","duo","team"].includes(v)) : ["solo","duo","team"],
+      challenges:{
+        easy:normalizeJobChallengeLines(rawChallenges.easy || t.easyChallenges || fallbackText, easy.challenges, fallbackText),
+        medium:normalizeJobChallengeLines(rawChallenges.medium || t.mediumChallenges || fallbackText, medium.challenges, fallbackText),
+        hard:normalizeJobChallengeLines(rawChallenges.hard || t.hardChallenges || fallbackText, hard.challenges, fallbackText),
+      },
+      challengeRules:{
+        easy:normalizeJobChallengeRules(safeObj(t.challengeRules).easy, rawChallenges.easy || t.easyChallenges || fallbackText, easy.challenges, fallbackText),
+        medium:normalizeJobChallengeRules(safeObj(t.challengeRules).medium, rawChallenges.medium || t.mediumChallenges || fallbackText, medium.challenges, fallbackText),
+        hard:normalizeJobChallengeRules(safeObj(t.challengeRules).hard, rawChallenges.hard || t.hardChallenges || fallbackText, hard.challenges, fallbackText),
+      },
+      hourlyChallengeRules:safeObj(t.hourlyChallengeRules)
+    };
+  };
+  return { enabled:src.enabled !== false, groupShifts:src.groupShifts !== false, easy, medium, hard, shiftGroups, slotTimes:slotTimes.length?slotTimes:["7:00 AM","8:00 AM","10:00 AM","11:00 AM","1:00 PM","3:00 PM","4:00 PM","6:00 PM","8:00 PM","10:00 PM","12:00 AM","2:00 AM","3:00 AM"], templates:(Array.isArray(templates) ? templates : []).map(normalizeTemplate).slice(0,24) };
+}
+function normalizeAutoCourtConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.autoCourtConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, lowScoreThreshold:Math.max(0,Math.min(800,Math.round(Number(s.lowScoreThreshold ?? b.lowScoreThreshold)||160))), lossOnly:s.lossOnly !== false, maxPerDay:Math.max(1,Math.min(20,Math.round(Number(s.maxPerDay ?? b.maxPerDay)||3))), charge:String(s.charge || b.charge || "auto-filed case").slice(0,80), evidence:String(s.evidence || b.evidence || "Burton OS opened this from live stats.").slice(0,180) }; }
+function normalizeStockMarketConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.stockMarketConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, basePrice:Math.max(1,Math.min(1000,Math.round(Number(s.basePrice ?? b.basePrice)||100))), winBoost:Math.max(0,Math.min(100,Math.round(Number(s.winBoost ?? b.winBoost)||8))), xpBoost:Math.max(0,Math.min(100,Math.round(Number(s.xpBoost ?? b.xpBoost)||4))) }; }
+function normalizeEconomyEventConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.economyEventConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, inflationThreshold:Math.max(1,Math.min(100,Math.round(Number(s.inflationThreshold ?? b.inflationThreshold)||82))), crashThreshold:Math.max(0,Math.min(99,Math.round(Number(s.crashThreshold ?? b.crashThreshold)||28))), luxuryTaxThreshold:Math.max(.1,Math.min(.95,Number(s.luxuryTaxThreshold ?? b.luxuryTaxThreshold)||.62)), stimulusLoginBonus:Math.max(0,Math.min(10000,Math.round(Number(s.stimulusLoginBonus ?? b.stimulusLoginBonus)||250))), eventDurationHours:Math.max(1,Math.min(168,Math.round(Number(s.eventDurationHours ?? b.eventDurationHours)||24))) }; }
+function normalizeScheduleConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.scheduleConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, pingRespectAvailability:s.pingRespectAvailability !== false, reminderMinutes:Math.max(0,Math.min(1440,Math.round(Number(s.reminderMinutes ?? b.reminderMinutes)||30))), defaultSessionTitle:String(s.defaultSessionTitle || b.defaultSessionTitle || "Burton session").slice(0,64) }; }
+function normalizeAppealConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.appealConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, cost:Math.max(0,Math.min(10000,Math.round(Number(s.cost ?? b.cost)||250))), refundOnWin:s.refundOnWin !== false, doublePunishOnFail:s.doublePunishOnFail !== false, votesNeeded:Math.max(1,Math.min(3,Math.round(Number(s.votesNeeded ?? b.votesNeeded)||2))) }; }
+function normalizeOpenLoopsConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.openLoopsConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, rotationSeconds:Math.max(2,Math.min(30,Math.round(Number(s.rotationSeconds ?? b.rotationSeconds)||5))), showNews:s.showNews !== false, showRareShop:s.showRareShop !== false, showCourt:s.showCourt !== false, showJobs:s.showJobs !== false, showSchedule:s.showSchedule !== false, showEconomy:s.showEconomy !== false }; }
+
+
+function normalizeWeeklyAdminConfig(input = {}) {
+  const src = safeObj(input);
+  const lib = Array.isArray(src.library) ? src.library : [];
+  const weeks = safeObj(src.weeks);
+  return {
+    library: lib.map((x,i)=>({ id:String(x.id||`wk_lib_${i}`), mode:["1v1","2v2","3v3"].includes(x.mode)?x.mode:"3v3", text:String(x.text||"custom weekly challenge").slice(0,140), type:String(x.type||"cumulative"), field:String(x.field||"goals"), target:Math.max(1,Number(x.target)||5), color:String(x.color||"#B8FF4D") })).slice(0,80),
+    weeks
+  };
+}
+function normalizeStreamDirectoryConfig(input = {}) {
+  const src = safeObj(input);
+  const streams = Array.isArray(src.streams) && src.streams.length ? src.streams : [{ id:"rlcs_main", enabled:true, label:"RLCS Main", type:"youtube", url:"https://www.youtube.com/watch?v=hzs2x4irAD0", info:"main Rocket League live hub" }];
+  return { multiview:src.multiview !== false, streams:streams.map((st,i)=>({ id:String(st.id||`stream_${i}_${stableHashString(st.url||st.label||i)}`), enabled:st.enabled !== false, label:String(st.label||`Stream ${i+1}`).slice(0,50), type:String(st.type||"youtube"), url:String(st.url||"").trim(), info:String(st.info||"").slice(0,220) })).slice(0,12) };
+}
+function getWeeklyChallengePool(appCustomizer, weekNum, mode) {
+  const cfg = normalizeWeeklyAdminConfig(appCustomizer?.weeklyAdmin);
+  const wk = safeObj(cfg.weeks?.[String(weekNum)]);
+  const custom = Array.isArray(wk[mode]) ? wk[mode] : [];
+  const mapCustom = custom.filter(x=>x && x.enabled !== false).map((x,i)=>({ mode:x.mode||mode, type:x.type||"cumulative", field:x.field||"goals", target:Math.max(1,Number(x.target)||5), desc:()=>String(x.text||`complete ${x.target||5} ${x.field||"goals"}`), color:x.color|| (mode==="3v3"?"#B8FF4D":mode==="2v2"?"#FF61C1":"#4D9EFF") }));
+  return mapCustom.length ? mapCustom : ALL_CHALLENGES;
+}
+function getDefaultHourlyJobRules(jobMode = "solo") {
+  const gameMode = getGameModeForJobMode(jobMode);
+  const groupScope = jobMode === "solo" ? "player" : "group";
+  const anyScope = jobMode === "solo" ? "player" : "any";
+  const label = jobMode === "solo" ? "1v1" : jobMode === "duo" ? "2v2 duo" : "3v3 team";
+  const make = (stat, target, scope=groupScope, text=null) => ({ id:`rule_${jobMode}_${stat}_${target}_${stableHashString(`${jobMode}${stat}${target}${scope}${gameMode}`)}`, text:text || `${label}: get ${target} ${stat}`, stat, target, scope, mode:gameMode, operator:">=" });
+  const slots = ["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","1:00 PM","3:00 PM","4:00 PM","6:00 PM","8:00 PM","10:00 PM","12:00 AM","2:00 AM","3:00 AM"];
+  const out = { easy:{}, medium:{}, hard:{} };
+  slots.forEach((slot, i) => {
+    if (jobMode === "solo") {
+      out.easy[slot] = [make("shots",6+i%3,"player"), make("goals",Math.max(2,4+i%4),"player"), make("game",2+i%2,"player",`log ${2+i%2} 1v1 games`), make("saves",4+i%3,"player"), make("demos",1+i%2,"player")];
+      out.medium[slot] = [make("shots",10+i%4,"player"), make("goals",6+i%5,"player"), make("game",4+i%2,"player",`log ${4+i%2} 1v1 games`), make("saves",7+i%4,"player"), make("assists",5+i%4,"player"), make("win",2+i%2,"player",`win ${2+i%2} 1v1 games`), make("demos",3+i%3,"player")];
+      out.hard[slot] = [make("shots",15+i%6,"player"), make("goals",10+i%6,"player"), make("game",6+i%3,"player",`log ${6+i%3} 1v1 games`), make("saves",10+i%5,"player"), make("assists",8+i%5,"player"), make("win",4+i%3,"player",`win ${4+i%3} 1v1 games`), make("demos",5+i%4,"player"), make("score",1800+i*120,"player",`reach ${1800+i*120} score in 1v1`), make("shots",20+i%5,"player"), make("goals",12+i%6,"player")];
+    } else if (jobMode === "duo") {
+      out.easy[slot] = [make("shots",8+i%3,"group"), make("goals",5+i%4,"group"), make("game",2+i%2,"group",`log ${2+i%2} 2v2 games together`), make("assists",4+i%3,"group"), make("saves",5+i%3,"group")];
+      out.medium[slot] = [make("shots",14+i%4,"group"), make("goals",8+i%5,"group"), make("game",4+i%2,"group",`log ${4+i%2} 2v2 games together`), make("saves",8+i%4,"group"), make("assists",7+i%4,"group"), make("win",2+i%2,"group",`win ${2+i%2} 2v2 games`), make("demos",2+i%3,"group")];
+      out.hard[slot] = [make("shots",22+i%6,"group"), make("goals",13+i%6,"group"), make("game",6+i%3,"group",`log ${6+i%3} 2v2 games together`), make("saves",12+i%5,"group"), make("assists",11+i%5,"group"), make("win",4+i%3,"group",`win ${4+i%3} 2v2 games`), make("demos",5+i%4,"group"), make("score",2600+i*150,"group",`reach ${2600+i*150} duo score`), make("shots",26+i%5,"group",`2v2 group shots ${26+i%5}`), make("goals",16+i%6,"group",`2v2 group goals ${16+i%6}`)];
+    } else {
+      out.easy[slot] = [make("shots",10+i%3,"group"), make("goals",6+i%4,"group"), make("game",2+i%2,"group",`log ${2+i%2} 3v3 games as a team`), make("assists",5+i%3,"group"), make("saves",6+i%3,"group")];
+      out.medium[slot] = [make("shots",18+i%4,"group"), make("goals",10+i%5,"group"), make("game",4+i%2,"group",`log ${4+i%2} 3v3 games as a team`), make("saves",10+i%4,"group"), make("assists",9+i%4,"group"), make("win",2+i%2,"group",`win ${2+i%2} 3v3 games`), make("demos",3+i%3,"group")];
+      out.hard[slot] = [make("shots",28+i%6,"group"), make("goals",16+i%6,"group"), make("game",6+i%3,"group",`log ${6+i%3} 3v3 games as a team`), make("saves",16+i%5,"group"), make("assists",14+i%5,"group"), make("win",4+i%3,"group",`win ${4+i%3} 3v3 games`), make("demos",6+i%4,"group"), make("score",3600+i*180,"group",`reach ${3600+i*180} team score`), make("shots",34+i%5,"group",`3v3 group shots ${34+i%5}`), make("goals",20+i%6,"group",`3v3 group goals ${20+i%6}`)];
+    }
+  });
+  return out;
+}
+function getHourlyRulesForTemplate(template, difficulty, slotLabel, required, fallbackText, jobMode = "solo", gameMode = null) {
+  const lockedMode = getGameModeForJobMode(jobMode, gameMode);
+  const hourly = safeObj(template.hourlyChallengeRules)?.[difficulty] || {};
+  const modeKey = getHourlyRuleKey(jobMode, slotLabel);
+  const rules = Array.isArray(hourly[modeKey]) && hourly[modeKey].length ? hourly[modeKey] : (Array.isArray(hourly[slotLabel]) && hourly[slotLabel].length ? hourly[slotLabel] : null);
+  if (rules) return normalizeRulesForJobMode(normalizeJobChallengeRules(rules, rules.map(r=>r.text), required, fallbackText), jobMode, lockedMode);
+  const defaults = getDefaultHourlyJobRules(jobMode)[difficulty]?.[slotLabel];
+  if (defaults) return normalizeRulesForJobMode(normalizeJobChallengeRules(defaults, defaults.map(r=>r.text), required, fallbackText), jobMode, lockedMode);
+  return normalizeRulesForJobMode(normalizeJobChallengeRules(template.challengeRules?.[difficulty], template.challenges?.[difficulty] || fallbackText, required, fallbackText), jobMode, lockedMode);
+}
+function getStreamEmbedSrc(url) {
+  const raw = String(url||"").trim();
+  const yt = raw.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([A-Za-z0-9_-]+)/i);
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}?autoplay=0&controls=1&modestbranding=1&rel=0&playsinline=1`;
+  const tw = raw.match(/twitch\.tv\/([A-Za-z0-9_]+)/i) || raw.match(/^@?([A-Za-z0-9_]{3,25})$/);
+  if (tw) return `https://player.twitch.tv/?channel=${tw[1]}&parent=${typeof window!=="undefined"?window.location.hostname:"localhost"}&muted=false`;
+  return raw;
+}
+
+function normalizeAppCustomizer(cfg = {}) {
+  const src = cfg && typeof cfg === "object" ? cfg : {};
+  const hiddenTabs = src.hiddenTabs && typeof src.hiddenTabs === "object" ? src.hiddenTabs : {};
+  const hiddenCopy = src.hiddenCopy && typeof src.hiddenCopy === "object" ? src.hiddenCopy : {};
+  const pageCopy = { ...DEFAULT_APP_CUSTOMIZER.pageCopy, ...(src.pageCopy && typeof src.pageCopy === "object" ? src.pageCopy : {}) };
+  const enabledBoxes = { ...DEFAULT_BURTON_BOXES, ...(src.enabledBoxes && typeof src.enabledBoxes === "object" ? src.enabledBoxes : {}) };
+  const tabBoxLayout = normalizeTabBoxLayout(src.tabBoxLayout || src.boxLayout || {});
+  const courtPunishments = normalizeCourtPunishments(src.courtPunishments || {});
+  const burtonOptionPools = normalizeBurtonOptionPools(src.burtonOptionPools || src.optionPools || {});
+  const orderRaw = Array.isArray(src.tabOrder) ? src.tabOrder : DEFAULT_APP_TAB_ORDER;
+  const seen = new Set();
+  const tabOrder = [...orderRaw, ...DEFAULT_APP_TAB_ORDER].filter(id => {
+    if (!DEFAULT_APP_TAB_ORDER.includes(id) || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  const boxOrderSrc = src.boxOrder && typeof src.boxOrder === "object" ? src.boxOrder : {};
+  return {
+    ...DEFAULT_APP_CUSTOMIZER,
+    ...src,
+    hiddenTabs,
+    hiddenCopy,
+    pageCopy,
+    enabledBoxes,
+    tabBoxLayout,
+    courtPunishments,
+    burtonOptionPools,
+    tabOrder,
+    boxOrder: { ...DEFAULT_APP_CUSTOMIZER.boxOrder, ...boxOrderSrc },
+    hideBorders: !!src.hideBorders,
+    compactCards: !!src.compactCards,
+    hideMutedText: !!src.hideMutedText,
+    hideTopNavBox: !!src.hideTopNavBox,
+    safeStartupLoading: src.safeStartupLoading !== false,
+    smoothSocialLoading: src.smoothSocialLoading !== false,
+    shopPriceBoxAccent: /^#[0-9a-f]{6}$/i.test(String(src.shopPriceBoxAccent || "")) ? String(src.shopPriceBoxAccent) : DEFAULT_APP_CUSTOMIZER.shopPriceBoxAccent,
+    shopPriceBoxBorderOpacity: Math.max(0.14, Math.min(0.72, Number(src.shopPriceBoxBorderOpacity ?? DEFAULT_APP_CUSTOMIZER.shopPriceBoxBorderOpacity) || DEFAULT_APP_CUSTOMIZER.shopPriceBoxBorderOpacity)),
+    shopPriceBoxBgOpacity: Math.max(0.04, Math.min(0.24, Number(src.shopPriceBoxBgOpacity ?? DEFAULT_APP_CUSTOMIZER.shopPriceBoxBgOpacity) || DEFAULT_APP_CUSTOMIZER.shopPriceBoxBgOpacity)),
+    animationDepth: ["low","normal","high"].includes(src.animationDepth) ? src.animationDepth : DEFAULT_APP_CUSTOMIZER.animationDepth,
+    buttonMotion: ["normal","bouncy"].includes(src.buttonMotion) ? src.buttonMotion : DEFAULT_APP_CUSTOMIZER.buttonMotion,
+    ambientFx: src.ambientFx !== false,
+    jobsConfig: normalizeJobsConfig(src.jobsConfig),
+    autoCourtConfig: normalizeAutoCourtConfig(src.autoCourtConfig),
+    stockMarketConfig: normalizeStockMarketConfig(src.stockMarketConfig),
+    economyEventConfig: normalizeEconomyEventConfig(src.economyEventConfig),
+    scheduleConfig: normalizeScheduleConfig(src.scheduleConfig),
+    appealConfig: normalizeAppealConfig(src.appealConfig),
+    openLoopsConfig: normalizeOpenLoopsConfig(src.openLoopsConfig),
+    finishStyle: ["default","neon_pro","glass_final","tournament_broadcast","minimal_compact","arcade_luxe","midnight_terminal","sunset_glass","ice_blue","purple_haze","carbon_lime","whiteout","redline","ocean","gold_room"].includes(src.finishStyle) ? src.finishStyle : DEFAULT_APP_CUSTOMIZER.finishStyle,
+    uiPanelMode: ["default","glass_panels","floating_bento","terminal_blocks","broadcast_cards","compact_tiles"].includes(src.uiPanelMode) ? src.uiPanelMode : DEFAULT_APP_CUSTOMIZER.uiPanelMode,
+    chatAnimationStyle: ["none","slide","pop","float","spring","glow"].includes(src.chatAnimationStyle) ? src.chatAnimationStyle : DEFAULT_APP_CUSTOMIZER.chatAnimationStyle,
+    underConstruction: safeObj(src.underConstruction),
+    weeklyAdmin: normalizeWeeklyAdminConfig(src.weeklyAdmin),
+    streamDirectory: normalizeStreamDirectoryConfig(src.streamDirectory),
+  };
+}
+
+function bbAlpha(color, opacity = 0.16) {
+  const raw = String(color || "").trim();
+  const hex = raw.match(/^#?([0-9a-f]{6})$/i)?.[1];
+  if (!hex) return `rgba(255,255,255,${Math.max(0, Math.min(1, opacity))})`;
+  const r = parseInt(hex.slice(0,2), 16);
+  const g = parseInt(hex.slice(2,4), 16);
+  const b = parseInt(hex.slice(4,6), 16);
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, opacity))})`;
+}
+
+function getShopPriceBoxVisual(item, canAfford, fallbackAccent = "#B8FF4D", appCustomizer = {}) {
+  const cfg = normalizeAppCustomizer(appCustomizer);
+  const rawAccent = cfg.shopPriceBoxAccent || fallbackAccent || "#B8FF4D";
+  const accent = /^#[0-9a-f]{6}$/i.test(String(rawAccent)) ? rawAccent : (/^#[0-9a-f]{6}$/i.test(String(fallbackAccent)) ? fallbackAccent : "#B8FF4D");
+  return {
+    background: canAfford ? bbAlpha(accent, cfg.shopPriceBoxBgOpacity) : "rgba(255,255,255,0.035)",
+    border: `1px solid ${canAfford ? bbAlpha(accent, cfg.shopPriceBoxBorderOpacity) : "rgba(255,255,255,0.07)"}`,
+    color: canAfford ? accent : "#4A5066",
+    boxShadow: canAfford ? `0 0 18px ${bbAlpha(accent, 0.07)}` : "none",
+  };
+}
+
+function getAppCopy(customizer, key, fallback = "") {
+  const cfg = normalizeAppCustomizer(customizer);
+  if (cfg.hiddenCopy?.[key]) return "";
+  return cfg.pageCopy?.[key] ?? fallback;
+}
+
+async function saveAppCustomizer(nextCustomizer, setAppCustomizer, addToast, message = "app command saved") {
+  const safe = normalizeAppCustomizer(nextCustomizer);
+  setAppCustomizer?.(safe);
+  await storeSet(APP_CUSTOMIZER_KEY, safe);
+  try { window.dispatchEvent(new CustomEvent("bb-app-customizer-updated", { detail: safe })); } catch (_) {}
+  addToast?.(message, "🎛️");
+  return safe;
+}
+
+function normalizeAdminShopItem(item, idx = 0) {
+  if (!item || typeof item !== "object") return null;
+  const type = item.type || "icon";
+  const id = item.id || `admin_item_${Date.now()}_${idx}`;
+  const label = String(item.label || item.value || id).trim() || "custom item";
+  const cost = Math.max(0, Number(item.cost ?? getNormalizedShopCost({ type, value:item.value }, idx)) || 0);
+  const hasDesc = Object.prototype.hasOwnProperty.call(item, "desc") || Object.prototype.hasOwnProperty.call(item, "description");
+  const hasEmoji = Object.prototype.hasOwnProperty.call(item, "emoji");
+  const rawDesc = hasDesc ? String(item.desc ?? item.description ?? "") : "";
+  const rawEmoji = type === "icon" ? (hasEmoji ? String(item.emoji ?? "") : String(item.value || "✨")) : "";
+  const normalizedValue = item.value || (type === "sound" ? id : type === "title" ? label : type === "icon" ? (rawEmoji || "✨") : label);
+  return {
+    ...item,
+    id,
+    label,
+    desc: item.hideDesc ? "" : rawDesc,
+    cost,
+    type,
+    value: normalizedValue,
+    emoji: type === "icon" && !item.hideEmoji ? (rawEmoji || normalizedValue || "✨") : "",
+    hideDesc: !!item.hideDesc,
+    hideEmoji: type === "icon" ? !!item.hideEmoji : true,
+    onSale: !!item.onSale,
+    saleLabel: String(item.saleLabel || "ON SALE").trim() || "ON SALE",
+    rarity: type === "title" ? getTitleRarityMeta(item.rarity || item.titleRarity || "common").id : item.rarity,
+    unlockSource: type === "title" ? String(item.unlockSource || "admin") : item.unlockSource,
+    custom:true,
+    adminCreated: item.adminCreated !== false,
+    adminEdited: !!item.adminEdited || !!item.adminDaily || !!item.adminDailyHidden,
+  };
+}
+
+function cacheAdminShopItems(items) {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const safe = Array.isArray(items) ? items : [];
+      localStorage.setItem("bb_admin_shop_items_cache", JSON.stringify(safe));
+      localStorage.setItem("bb_admin_shop_items_cache_ts", String(Date.now()));
+    }
+  } catch (_) {}
+}
+
+function getAdminShopItemsSync() {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const raw = localStorage.getItem("bb_admin_shop_items_cache");
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.map(normalizeAdminShopItem).filter(Boolean) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function getAllShopItems(extraItems = null) {
+  const adminItems = Array.isArray(extraItems) ? extraItems : getAdminShopItemsSync();
+  const normalizedAdmin = adminItems.map(normalizeAdminShopItem).filter(Boolean);
+  const byId = new Map();
+  SHOP_ITEMS.forEach(item => { if (item?.id) byId.set(item.id, item); });
+  normalizedAdmin.forEach(item => {
+    if (!item?.id) return;
+    const base = byId.get(item.id);
+    byId.set(item.id, base ? { ...base, ...item, cost:Number(item.cost ?? base.cost) || 0, adminEdited:!!item.adminEdited, adminCreated:base.adminCreated || item.adminCreated, custom:base.custom || item.custom } : item);
+  });
+  return Array.from(byId.values()).filter(item => item?.id && !String(item.id).startsWith("__") && !item.adminHidden);
+}
 
 const TEXT_KIT_PRESETS = {
   cream: { main:"#FFF4DC", muted:"#BFAF91", accent:"#FFD166" },
@@ -7920,8 +12253,8 @@ const TEXT_KIT_PRESETS = {
   ghost: { main:"#F2F5FF", muted:"#AAB4CB", accent:"#C4A7FF" },
 };
 function getTextKitMeta(id) {
-  const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "text_color");
-  if (shop) return { source:"shop", value:shop.value, label:getShopItemDisplayLabel(shop), preset:TEXT_KIT_PRESETS[shop.value] || null, custom:false };
+  const shop = getAllShopItems().find(i => i.id === id && i.type === "text_color");
+  if (shop) return { source:"shop", value:shop.value, label:getShopItemDisplayLabel(shop), preset:shop.preset || TEXT_KIT_PRESETS[shop.value] || null, custom:!!shop.custom && !shop.preset };
   const reward = id?.startsWith?.("pass_") ? getPassRewardForOwnedId(id) : null;
   if (reward?.type === "text_color") return { source:"pass", value:reward.value, label:reward.label || "custom app text kit", preset:TEXT_KIT_PRESETS[reward.value] || null, custom:reward.value === "app_text_colors" };
   return null;
@@ -7932,22 +12265,23 @@ function getEquippedTextKitId(points, playerId) {
   return own.find(id => eq[id] && getTextKitMeta(id));
 }
 function getAppliedTextColors(points, playerId, theme, userColor) {
+  const bgReadable = getReadableTextForBackground(points, playerId, theme, userColor);
   const textKitId = getEquippedTextKitId(points, playerId);
   const meta = getTextKitMeta(textKitId);
-  if (!meta) return {};
-  if (meta.preset) return meta.preset;
+  if (!meta) return bgReadable;
+  if (meta.preset) return { ...bgReadable, ...meta.preset };
   if (meta.custom) {
     const saved = points?.[playerId + "_textColors"] || {};
     return {
-      main: saved.main || theme?.text || "#E8ECF4",
-      muted: saved.muted || "#8B92A8",
-      accent: saved.accent || userColor || "#B8FF4D",
+      main: saved.main || bgReadable.main || theme?.text || "#E8ECF4",
+      muted: saved.muted || bgReadable.muted || "#8B92A8",
+      accent: saved.accent || bgReadable.accent || userColor || "#B8FF4D",
     };
   }
-  return {};
+  return bgReadable;
 }
 
-const BACKGROUND_ITEM_IDS = SHOP_ITEMS.filter(i => i.type === "background").map(i => i.id);
+const BACKGROUND_ITEM_IDS = getAllShopItems().filter(i => i.type === "background").map(i => i.id);
 function getBackgroundPreview(value) {
   const map = {
     carbon:"repeating-linear-gradient(45deg,#1a1a1a 0px,#1a1a1a 2px,#2a2a2a 2px,#2a2a2a 4px)",
@@ -7957,9 +12291,9 @@ function getBackgroundPreview(value) {
     morse:"repeating-linear-gradient(90deg,#B8FF4D 0 8px,#020806 8px 14px,#B8FF4D 14px 17px,#020806 17px 28px)",
     turf:"repeating-linear-gradient(115deg,#15360F 0 3px,#1F4B17 3px 6px,#10280C 6px 9px)", moss:"radial-gradient(circle,#315D25,#081307)",
     goalnet:"linear-gradient(90deg,rgba(255,255,255,.55) 1px,transparent 1px),linear-gradient(rgba(255,255,255,.55) 1px,transparent 1px),#101625",
-    nebula:"radial-gradient(circle at 25% 30%,#FF61C1,transparent 28%),radial-gradient(circle at 70% 55%,#4D9EFF,transparent 28%),linear-gradient(135deg,#12051D,#030511)",
+    nebula:"radial-gradient(circle at 26% 24%,rgba(255,97,193,.24),transparent 38%),radial-gradient(circle at 78% 72%,rgba(77,158,255,.20),transparent 42%),linear-gradient(135deg,#070411,#100720 52%,#020308)",
     crt:"repeating-linear-gradient(0deg,rgba(255,255,255,.18) 0 1px,transparent 1px 4px),linear-gradient(135deg,#101020,#05060A)",
-    vapor:"linear-gradient(180deg,#35134D 0%,#FF61C1 45%,#11131F 46%),repeating-linear-gradient(90deg,transparent 0 10px,rgba(255,255,255,.25) 10px 11px)",
+    vapor:"radial-gradient(circle at 50% 18%,rgba(255,97,193,.24),transparent 38%),radial-gradient(circle at 22% 84%,rgba(77,158,255,.16),transparent 34%),linear-gradient(135deg,#15091F,#0B0C18 58%,#04040A)",
     lava:"radial-gradient(circle at 30% 20%,#FF5C8A,transparent 26%),radial-gradient(circle at 70% 70%,#FFD166,transparent 26%),linear-gradient(135deg,#260507,#080308)",
     ocean:"radial-gradient(circle at 50% 0%,#4D9EFF,transparent 35%),linear-gradient(135deg,#01162A,#020612)",
     thunder:"linear-gradient(135deg,#0A0C16,#242846),linear-gradient(45deg,transparent 40%,#FFD166 41%,transparent 43%)",
@@ -7971,14 +12305,20 @@ function getBackgroundPreview(value) {
     ice:"linear-gradient(135deg,#E6FCFF,#75D7FF,#0A1A2B)", city:"repeating-linear-gradient(90deg,#06070D 0 12px,#FFD166 12px 14px,#06070D 14px 22px,#4D9EFF 22px 24px),linear-gradient(135deg,#02040A,#101B35)",
     comet:"radial-gradient(circle at 75% 25%,#FFFFFF 0 3px,transparent 4px),linear-gradient(115deg,transparent 0 35%,#4D9EFF 36%,transparent 50%),linear-gradient(135deg,#030511,#101433)",
     custom:"linear-gradient(135deg,#A78BFA,#FFD166)",
+    deep_blur:"radial-gradient(circle at 24% 22%,rgba(184,255,77,.22),transparent 34%),radial-gradient(circle at 76% 70%,rgba(167,139,250,.18),transparent 38%),linear-gradient(135deg,#03050B,#0A1020 58%,#020304)",
+    emerald_haze:"radial-gradient(circle at 50% 18%,rgba(184,255,77,.22),transparent 36%),radial-gradient(circle at 12% 80%,rgba(77,158,255,.10),transparent 34%),linear-gradient(135deg,#020805,#07190F 55%,#010403)",
+    violet_fog:"radial-gradient(circle at 20% 20%,rgba(255,97,193,.18),transparent 36%),radial-gradient(circle at 78% 72%,rgba(167,139,250,.24),transparent 40%),linear-gradient(135deg,#080411,#12091F 52%,#030206)",
+    blue_dusk:"radial-gradient(circle at 70% 18%,rgba(77,158,255,.23),transparent 36%),radial-gradient(circle at 18% 78%,rgba(117,215,255,.12),transparent 34%),linear-gradient(135deg,#02050D,#07182D 54%,#020306)",
+    warm_shadow:"radial-gradient(circle at 28% 22%,rgba(255,209,102,.22),transparent 34%),radial-gradient(circle at 75% 70%,rgba(255,92,138,.12),transparent 38%),linear-gradient(135deg,#0D0702,#1A1205 54%,#030201)",
   };
-  return map[value] || map.custom;
+  const customBg = getAllShopItems().find(i => i.type === "background" && i.value === value && i.background);
+  return customBg?.background || map[value] || map.custom;
 }
 function getBackgroundVisualStyle(bgId, customUrl, theme) {
-  const item = SHOP_ITEMS.find(i => i.id === bgId);
+  const item = getAllShopItems().find(i => i.id === bgId);
   if (item?.value === "custom" && customUrl) return { background:theme.bg, backgroundImage:`url(${customUrl})`, backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat" };
   if (!item) return { background:theme.bg, backgroundImage:"none", backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat", color:theme.text };
-  const bg = getBackgroundPreview(item.value);
+  const bg = item.background || getBackgroundPreview(item.value);
   const base = { background:theme.bg, backgroundImage:bg, backgroundSize:"cover", backgroundPosition:"center", backgroundRepeat:"no-repeat", color:theme.text };
   if (item.value === "goalnet") base.backgroundSize = "34px 34px,34px 34px,cover";
   if (item.value === "whiteout" || item.value === "snow" || item.value === "holo" || item.value === "ice") base.color = "#11131F";
@@ -8204,7 +12544,7 @@ function getPassRewardValue(ownedId) {
 }
 const colorItem = owned.find(id => {
   if (equipped[id]) {
-    const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "color");
+    const shop = getAllShopItems().find(i => i.id === id && i.type === "color");
     if (shop) return true;
     if (id.startsWith("pass_")) { const r = getPassRewardValue(id); return r?.type === "color"; }
   }
@@ -8212,7 +12552,7 @@ const colorItem = owned.find(id => {
 });
 const iconItem = owned.find(id => {
   if (equipped[id]) {
-    const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "icon");
+    const shop = getAllShopItems().find(i => i.id === id && i.type === "icon");
     if (shop) return true;
     if (id.startsWith("pass_")) { const r = getPassRewardValue(id); return r?.type === "icon"; }
   }
@@ -8220,15 +12560,15 @@ const iconItem = owned.find(id => {
 });
 const titleItem = owned.find(id => {
   if (equipped[id]) {
-    const shop = SHOP_ITEMS.find(i => i.id === id && i.type === "title");
+    const shop = getAllShopItems().find(i => i.id === id && i.type === "title");
     if (shop) return true;
     if (id.startsWith("pass_")) { const r = getPassRewardValue(id); return r?.type === "title"; }
   }
   return false;
 });
-const color = colorItem ? (SHOP_ITEMS.find(i => i.id === colorItem)?.value || (colorItem.startsWith("pass_") ? getPassRewardValue(colorItem)?.value : null) || player.color) : player.color;
-const icon = iconItem ? (SHOP_ITEMS.find(i => i.id === iconItem)?.value || (iconItem.startsWith("pass_") ? getPassRewardValue(iconItem)?.value : null)) : null;
-const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (titleItem.startsWith("pass_") ? getPassRewardValue(titleItem)?.value : null)) : null;
+const color = colorItem ? (getAllShopItems().find(i => i.id === colorItem)?.value || (colorItem.startsWith("pass_") ? getPassRewardValue(colorItem)?.value : null) || player.color) : player.color;
+const icon = iconItem ? (getAllShopItems().find(i => i.id === iconItem)?.value || (iconItem.startsWith("pass_") ? getPassRewardValue(iconItem)?.value : null)) : null;
+const title = titleItem ? (getAllShopItems().find(i => i.id === titleItem)?.value || (titleItem.startsWith("pass_") ? getPassRewardValue(titleItem)?.value : null)) : null;
   return (
     <div style={{display:"flex",flexDirection:"column",gap:1}}>
       <span style={{ color, fontWeight: 700 }}>{icon && <span style={{ marginRight: 4 }}>{icon}</span>}{player.name}</span>
@@ -8244,12 +12584,15 @@ const title = titleItem ? (SHOP_ITEMS.find(i => i.id === titleItem)?.value || (t
 function getEquippedShopItemByType(points, playerId, type) {
   const owned = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
   const equipped = points?.[playerId + "_equipped"] || {};
-  return owned.map(id => SHOP_ITEMS.find(i => i.id === id)).find(item => item?.type === type && equipped[item.id]) || null;
+  return owned.map(id => getAllShopItems().find(i => i.id === id)).find(item => item?.type === type && equipped[item.id]) || null;
 }
 
 function getPresenceBorderVisualStyle(points, playerId, online = false) {
   const item = getEquippedShopItemByType(points, playerId, "border");
   if (!item) return { border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}` };
+  if (item?.custom && item.borderColor) {
+    return { border:`1px solid ${item.borderColor}`, boxShadow:`0 0 0 1px ${item.borderColor}22, 0 0 24px ${item.borderGlow || item.borderColor}26` };
+  }
   const map = {
     lime:   { border:"1px solid rgba(184,255,77,0.62)", boxShadow:"0 0 0 1px rgba(184,255,77,0.12), 0 0 22px rgba(184,255,77,0.13)" },
     gold:   { border:"1px solid rgba(255,209,102,0.70)", boxShadow:"0 0 0 1px rgba(255,209,102,0.15), 0 0 24px rgba(255,209,102,0.12)" },
@@ -8291,11 +12634,20 @@ const SOUNDBOARD_SOUNDS = [
   { id:"sb_goal_horn2", label:"goal horn 2", desc:"alternate goal blast", cost:1500, type:"sound", value:"sb_goal_horn2", file:"goal-horn-2.mp3", emoji:"📣" },
 ];
 const DEFAULT_SOUNDBOARD_IDS = ["sb_laugh","sb_buzzer","sb_goal"];
+function getAllSoundboardSounds() {
+  const customSounds = getAllShopItems().filter(i => i.type === "sound").map(i => ({ ...i, file:i.file || i.dataUrl || `${i.id}.mp3` }));
+  const seen = new Set();
+  return [...SOUNDBOARD_SOUNDS, ...customSounds].filter(sound => {
+    if (!sound?.id || seen.has(sound.id)) return false;
+    seen.add(sound.id);
+    return true;
+  });
+}
 function getSoundboardSound(id) {
-  return SOUNDBOARD_SOUNDS.find(s => s.id === id) || SOUNDBOARD_SOUNDS[0];
+  return getAllSoundboardSounds().find(s => s.id === id) || getAllSoundboardSounds()[0];
 }
 function isSoundboardSoundId(id) {
-  return SOUNDBOARD_SOUNDS.some(s => s.id === id);
+  return getAllSoundboardSounds().some(s => s.id === id);
 }
 function getEquippedSoundboardIds(points, playerId) {
   const owned = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
@@ -8306,6 +12658,7 @@ function getEquippedSoundboardIds(points, playerId) {
 }
 function getSoundboardAudioSrcs(soundId) {
   const sound = getSoundboardSound(soundId);
+  if (sound?.dataUrl || String(sound?.file || "").startsWith("data:")) return [sound.dataUrl || sound.file];
   const baseFile = sound?.file || `${soundId}.mp3`;
   const fallbackById = {
     sb_wizard: [
@@ -8617,7 +12970,7 @@ function SquadTabFallback({ currentPlayer, presence, voicePresence, points, setT
   );
 }
 
-function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed, parseCredits, creditRequests, setCreditRequests, streamProfiles, setStreamProfiles }) {
+function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, points, setPoints, completions, stats, passXP, setPassXP, passPremium, setPassPremium, passTokens, setPassTokens, setTab, flowers, setFlowers, addToast, activityFeed, setActivityFeed, parseCredits, creditRequests, setCreditRequests, streamProfiles, setStreamProfiles, adminShopItems, appCustomizer }) {
   const safePresence = presence && typeof presence === "object" ? presence : {};
   const safePoints = points && typeof points === "object" ? points : {};
   const safeCompletions = completions && typeof completions === "object" ? completions : {};
@@ -8630,10 +12983,12 @@ function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, po
   const [showNotifs, setShowNotifs] = useState(false);
   const [showShop, setShowShop] = useState(false);
   const [shopTab, setShopTab] = useState("icon");
+  const [shopTitleRarity, setShopTitleRarity] = useState("all");
   const [showRecap, setShowRecap] = useState(false);
   const [showFlowers, setShowFlowers] = useState(false);
   const [shopCountdown, setShopCountdown] = useState(getTimeUntilNextShop());
-  const dailyShopItems = getDailyShopItems();
+  const dailyShopItems = getDailyShopItems(adminShopItems);
+  const allShopItems = getAllShopItems(adminShopItems);
   const [flowerTarget, setFlowerTarget] = useState(null);
   const [selectedFlower, setSelectedFlower] = useState(null);
   const [showPass, setShowPass] = useState(false);
@@ -8646,9 +13001,33 @@ useEffect(() => {
   const iv = setInterval(() => setShopCountdown(getTimeUntilNextShop()), 1000);
   return () => clearInterval(iv);
 }, []);
+const myModeLocalUntilRef = useRef(0);
 useEffect(() => {
-  setMyMode(safePresence?.[currentPlayer + "_mode"] || null);
-}, [currentPlayer, presence]);
+  const key = currentPlayer + "_mode";
+  if (Date.now() < myModeLocalUntilRef.current) return;
+  if (Object.prototype.hasOwnProperty.call(safePresence, key)) {
+    setMyMode(safePresence?.[key] || null);
+  }
+}, [currentPlayer, safePresence?.[currentPlayer + "_mode"]]);
+
+const saveMyPresenceMode = async (mode) => {
+  myModeLocalUntilRef.current = Date.now() + 6000;
+  const key = currentPlayer + "_mode";
+  const nowIso = new Date().toISOString();
+  setMyMode(mode);
+  const optimistic = { ...safePresence, [key]: mode, [currentPlayer]: nowIso };
+  setPresence(optimistic);
+  try {
+    const fresh = await Promise.race([
+      Promise.resolve(storeGet("presence")).catch(() => null),
+      new Promise(resolve => setTimeout(() => resolve(null), 450)),
+    ]);
+    const base = fresh && typeof fresh === "object" && !Array.isArray(fresh) ? fresh : safePresence;
+    await storeSet("presence", { ...base, [key]: mode, [currentPlayer]: nowIso });
+  } catch (_) {
+    await storeSet("presence", optimistic).catch(() => {});
+  }
+};
 
 useEffect(() => {
   let alive = true;
@@ -8659,7 +13038,9 @@ useEffect(() => {
     const raw = await storeGet(VOICE_PRESENCE_KEY) || {};
     const cleaned = cleanVoicePresenceMap(raw);
     applyVoicePresence(cleaned);
-    if (voicePresenceMapsDiffer(raw, cleaned)) {
+    // Do not rewrite voice presence on every poll. Rewriting this key constantly was burning Supabase resources.
+    // Stale entries are cleaned locally for display; the active caller heartbeat owns the real write.
+    if (false && voicePresenceMapsDiffer(raw, cleaned)) {
       try { await storeSet(VOICE_PRESENCE_KEY, cleaned); } catch (_) {}
     }
   };
@@ -8667,7 +13048,7 @@ useEffect(() => {
   // Do not open a second realtime subscription for voice_presence here.
   // Supabase/Daily can throw if this same channel is already subscribed, so we poll instead.
   const unsub = null;
-  const timer = setInterval(loadVoicePresence, 1000);
+  const timer = setInterval(loadVoicePresence, 15000);
   return () => { alive = false; clearInterval(timer); unsub?.(); };
 }, []);
 
@@ -8702,26 +13083,26 @@ const upd = [...myUpd, ...others];
     if (owned.includes(item.id)) return;
     const upd = { ...safePoints, [currentPlayer]: myPoints - item.cost, [currentPlayer + "_owned"]: [...owned, item.id] };
     setPoints(upd); await storeSet("points", upd);
-    setPurchaseReveal({ item, opened:false });
+    addToast?.(`${getShopItemDisplayLabel(item)} added`, item.emoji || "🛒");
   };
 
 const toggleEquip = async (itemId) => {
   bbHaptic(10);
-  const item = SHOP_ITEMS.find(i => i.id === itemId);
+  const item = allShopItems.find(i => i.id === itemId);
   const newEquipped = { ...equipped };
   if (item?.type === "background") {
     // only one background can be equipped at a time
-    SHOP_ITEMS.filter(i => i.type === "background").forEach(i => { delete newEquipped[i.id]; });
+    allShopItems.filter(i => i.type === "background").forEach(i => { delete newEquipped[i.id]; });
   } else if (item?.type === "sound") {
     const currentlyOn = !!newEquipped[itemId];
     if (currentlyOn) delete newEquipped[itemId];
     else {
-      const equippedSounds = SHOP_ITEMS.filter(i => i.type === "sound" && newEquipped[i.id] && !DEFAULT_SOUNDBOARD_IDS.includes(i.id)).map(i => i.id);
+      const equippedSounds = allShopItems.filter(i => i.type === "sound" && newEquipped[i.id] && !DEFAULT_SOUNDBOARD_IDS.includes(i.id)).map(i => i.id);
       if (equippedSounds.length >= 6) delete newEquipped[equippedSounds[0]];
       newEquipped[itemId] = true;
     }
   } else if (item) {
-    SHOP_ITEMS.filter(i => i.type === item.type).forEach(i => { delete newEquipped[i.id]; });
+    allShopItems.filter(i => i.type === item.type).forEach(i => { delete newEquipped[i.id]; });
   } else {
     // fallback for older saved background ids
     ["bg_carbon","bg_spring","bg_aurora","bg_midnight","bg_matrix","bg_whiteout","bg_pinkboost","bg_morse","bg_turf","bg_moss","bg_goalnet","bg_custom"].forEach(id => { delete newEquipped[id]; });
@@ -8733,22 +13114,41 @@ const toggleEquip = async (itemId) => {
 
   const shopTabDefs = [
     { id:"icon", label:"icons", types:["icon"] },
-    { id:"color", label:"name/text", types:["color", "text_color"] },
+    { id:"color", label:"name color", types:["color"] },
     { id:"title", label:"titles", types:["title"] },
     { id:"border", label:"borders", types:["border"] },
     { id:"sound", label:"sounds", types:["sound"] },
     { id:"background", label:"backgrounds", types:["background"] },
+    { id:"text_collage", label:"text collage", types:["text_collage"] },
   ];
   const currentShopTab = shopTabDefs.find(t => t.id === shopTab) || shopTabDefs[0];
-  const shopDisplayItems = dailyShopItems.filter(item => currentShopTab.types.includes(item.type) && (item.type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(item.id)));
+  const rawShopDisplayItems = dailyShopItems.filter(item => currentShopTab.types.includes(item.type) && (item.type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(item.id)));
+  const shopDisplayItems = shopTab === "title" && shopTitleRarity !== "all"
+    ? rawShopDisplayItems.filter(item => getTitleRarityMeta(item).id === shopTitleRarity)
+    : rawShopDisplayItems;
+  const allTitleItems = allShopItems.filter(item => item.type === "title");
+  const ownedTitleIds = new Set(owned.filter(id => allTitleItems.some(item => item.id === id)));
+  const titleCollectionCount = ownedTitleIds.size;
+  const titleCollectionTotal = allTitleItems.length;
+  const titleRarityStats = TITLE_RARITY_ORDER.map(r => {
+    const items = allTitleItems.filter(item => getTitleRarityMeta(item).id === r);
+    const ownedCount = items.filter(item => ownedTitleIds.has(item.id)).length;
+    return { ...getTitleRarityMeta(r), ownedCount, total:items.length };
+  });
   const renderShopItemCard = (item) => {
     const isOwned = owned.includes(item.id);
     const isEquipped = !!equipped[item.id];
     const canAfford = myPoints >= item.cost;
-    const accent = item.type === "background" ? "#A78BFA" : item.type === "sound" ? playerColor : item.type === "border" ? playerColor : item.value || playerColor;
+    const titleRarity = item.type === "title" ? getTitleRarityMeta(item) : null;
+    const accent = item.type === "background" ? "#A78BFA"
+      : item.type === "title" ? titleRarity.color
+      : item.type === "color" && /^#[0-9a-f]{6}$/i.test(String(item.value || "")) ? item.value
+      : item.type === "text_color" && TEXT_KIT_PRESETS[item.value]?.accent ? TEXT_KIT_PRESETS[item.value].accent
+      : playerColor;
+    const priceBoxVisual = getShopPriceBoxVisual(item, canAfford, accent, appCustomizer);
     const isCustomBg = item.type === "background" && item.value === "custom";
     const preview = item.type === "background"
-      ? <div style={{width:42,height:42,borderRadius:10,flexShrink:0,background:getBackgroundPreview(item.value),border:"1px solid rgba(255,255,255,0.08)"}} />
+      ? <div style={{width:42,height:42,borderRadius:10,flexShrink:0,background:item.background || getBackgroundPreview(item.value),border:"1px solid rgba(255,255,255,0.08)"}} />
       : item.type === "border"
         ? <div style={{height:36,borderRadius:10,marginBottom:8,background:"linear-gradient(135deg,#11131F,#0C0E18)",...getPresenceBorderVisualStyle({ [currentPlayer + "_owned"]:[item.id], [currentPlayer + "_equipped"]:{ [item.id]:true } }, currentPlayer, true)}} />
         : <div style={{fontSize:item.type === "icon" ? 28 : item.type === "sound" ? 13 : 22,marginBottom:6,color:accent,fontWeight:900}}>{getShopItemRevealIcon(item)}</div>;
@@ -8756,8 +13156,26 @@ const toggleEquip = async (itemId) => {
       <div key={item.id} style={{background:isEquipped?`${accent}14`:"rgba(255,255,255,0.03)",borderRadius:14,padding:item.type === "background" ? "12px 14px" : "12px",border:`1px solid ${isEquipped?`${accent}55`:isOwned?"rgba(255,255,255,0.12)":"rgba(255,255,255,0.06)"}`,display:item.type === "background"?"flex":"block",alignItems:"center",gap:12,textAlign:item.type === "background"?"left":"center"}}>
         {preview}
         <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:12,fontWeight:900,color:isOwned?accent:"#E8ECF4",lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(item)}</div>
-          <div style={{fontSize:9.5,color:"#4A5066",marginTop:3,marginBottom:8,lineHeight:1.25}}>{item.desc || item.value || (item.type === "text_color" ? "custom app text colors" : "shop item")}</div>
+          {(() => {
+            const descText = item.type === "icon" ? (item.desc || "") : (item.desc || (item.type === "text_color" ? "custom app text colors" : "shop item"));
+            const labelColor = item.type === "color" ? (item.value || accent) : (isOwned ? accent : "#E8ECF4");
+            return (
+              <>
+                <div style={{fontSize:12,fontWeight:900,color:labelColor,lineHeight:1.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(item)}</div>
+                {item.type === "title" && (
+                  <div style={{display:"inline-flex",alignItems:"center",gap:5,background:bbAlpha(titleRarity.color,.12),border:`1px solid ${bbAlpha(titleRarity.color,.28)}`,borderRadius:8,padding:"3px 7px",fontSize:9,fontWeight:1000,color:titleRarity.color,marginTop:5,marginBottom:6,textTransform:"uppercase",letterSpacing:.55}}>
+                    {titleRarity.emoji} {titleRarity.label}
+                  </div>
+                )}
+                {!item.hideDesc && descText && <div style={{fontSize:9.5,color:"#4A5066",marginTop:item.type === "title" ? 0 : 3,marginBottom:8,lineHeight:1.25}}>{descText}</div>}
+                {item.onSale && (
+                  <div style={{display:"inline-flex",alignItems:"center",justifyContent:"center",gap:5,background:"linear-gradient(135deg,rgba(255,209,102,0.22),rgba(255,177,66,0.12))",border:"1px solid rgba(255,209,102,0.48)",borderRadius:9,padding:"4px 8px",fontSize:9.5,fontWeight:1000,color:"#FFD166",letterSpacing:.7,textTransform:"uppercase",boxShadow:"0 0 14px rgba(255,209,102,0.10)",marginBottom:8}}>
+                    ✦ {item.saleLabel || "ON SALE"}
+                  </div>
+                )}
+              </>
+            );
+          })()}
           {item.type === "text_color" && TEXT_KIT_PRESETS[item.value] && (
             <div style={{display:"flex",gap:5,justifyContent:"center",marginBottom:8}}>
               {["main","muted","accent"].map(part => (
@@ -8779,7 +13197,7 @@ const toggleEquip = async (itemId) => {
                 </>
               )}
               {item.type === "text_color" ? (
-                <div style={{width:"100%",background:"rgba(255,255,255,0.06)",borderRadius:8,padding:"6px 0",fontSize:10.5,fontWeight:900,color:"#8B92A8"}}>owned</div>
+                <div style={{width:"100%",...getShopPriceBoxVisual(item, true, accent, appCustomizer),borderRadius:8,padding:"6px 0",fontSize:10.5,fontWeight:900}}>owned</div>
               ) : (
                 <button onClick={()=>toggleEquip(item.id)} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",background:isEquipped?accent:"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,color:isEquipped?"#06070D":"#8B92A8",cursor:"pointer"}}>
                   {isEquipped ? (item.type === "sound" ? "✓ on board" : "✓ equipped") : (item.type === "sound" ? "add" : "equip")}
@@ -8787,7 +13205,7 @@ const toggleEquip = async (itemId) => {
               )}
             </div>
           ) : (
-            <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",background:canAfford?`${accent}18`:"rgba(255,255,255,0.03)",border:`1px solid ${canAfford?`${accent}55`:"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,color:canAfford?accent:"#4A5066",cursor:canAfford?"pointer":"default"}}>
+            <button onClick={()=>buyItem(item)} disabled={!canAfford} className="bb-pressable" style={{width:item.type === "background"?"auto":"100%",...priceBoxVisual,borderRadius:8,padding:item.type === "background"?"6px 11px":"6px 0",fontSize:10.5,fontWeight:900,cursor:canAfford?"pointer":"default"}}>
               {item.cost} pts
             </button>
           )}
@@ -8837,13 +13255,9 @@ const activityNotifs = safeActivityFeed.filter(e => e.to === currentPlayer).map(
     .slice(0, 30);
   return (
     <div className="bb-tab-content" style={s.tabContent}>
-      {/* Points bar */}
-      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${playerColor}33`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div>
-          <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR POINTS</div>
-         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:playerColor}}>{myPoints}</div>
-        </div>
-<div style={{display:"flex",gap:8,overflowX:"scroll",WebkitOverflowScrolling:"touch",paddingBottom:4,paddingTop:8,paddingRight:8,scrollbarWidth:"none",msOverflowStyle:"none"}}>
+      {/* Quick buttons */}
+      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${playerColor}33`,borderRadius:16,padding:"12px 12px",marginBottom:16}}>
+<div style={{display:"flex",gap:8,overflowX:"scroll",WebkitOverflowScrolling:"touch",paddingBottom:4,paddingTop:4,paddingRight:8,scrollbarWidth:"none",msOverflowStyle:"none",justifyContent:"space-between"}}>
           <button onClick={()=>setShowShop(v=>!v)} className="bb-pressable" style={{background:"rgba(184,255,77,0.1)",border:"1px solid rgba(184,255,77,0.3)",borderRadius:10,padding:"8px 12px",color:"#B8FF4D",fontSize:12,fontWeight:700,cursor:"pointer"}}>🛍 shop</button>
 <button onClick={()=>{ if(passPremium?.[currentPlayer]) setTab("garage"); else setShowPass(v=>!v); }} className="bb-pressable" style={{background:"rgba(167,139,250,0.1)",border:"1px solid rgba(167,139,250,0.3)",borderRadius:10,padding:"8px 12px",color:"#A78BFA",fontSize:12,fontWeight:700,cursor:"pointer"}}>🎫 pass</button>
           <button onClick={()=>setShowRecap(v=>!v)} className="bb-pressable" style={{background:"rgba(255,209,102,0.1)",border:"1px solid rgba(255,209,102,0.3)",borderRadius:10,padding:"8px 12px",color:"#FFD166",fontSize:12,fontWeight:700,cursor:"pointer"}}>📊 recap</button>
@@ -9052,6 +13466,26 @@ await storeSetWithPush("pings", pingUpd2);
               </button>
             ))}
           </div>
+          {shopTab === "title" && (
+            <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:12,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
+                <div>
+                  <div style={{fontSize:10,color:"#FFD166",fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>title collection</div>
+                  <div style={{fontSize:16,color:"#E8ECF4",fontWeight:1000}}>{titleCollectionCount} / {titleCollectionTotal}</div>
+                </div>
+                <div style={{fontSize:10,color:"#8B92A8",fontWeight:800,textAlign:"right"}}>collect titles from shop, jobs, court, chaos, stocks, economy, and events</div>
+              </div>
+              <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden",marginBottom:10}}>
+                <div style={{height:"100%",width:`${titleCollectionTotal ? Math.min(100,(titleCollectionCount/titleCollectionTotal)*100) : 0}%`,background:"linear-gradient(90deg,#D7DCE8,#7CFFB2,#4D9EFF,#A78BFA,#FF8C42,#FF5C8A,#FFD166)",borderRadius:99}}/>
+              </div>
+              <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+                <button onClick={()=>setShopTitleRarity("all")} className="bb-pressable" style={{background:shopTitleRarity==="all"?"#B8FF4D":"rgba(255,255,255,0.05)",border:`1px solid ${shopTitleRarity==="all"?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"6px 9px",fontSize:9.5,fontWeight:1000,color:shopTitleRarity==="all"?"#06070D":"#8B92A8",whiteSpace:"nowrap"}}>all</button>
+                {titleRarityStats.map(r => (
+                  <button key={r.id} onClick={()=>setShopTitleRarity(r.id)} className="bb-pressable" style={{background:shopTitleRarity===r.id?bbAlpha(r.color,.20):"rgba(255,255,255,0.05)",border:`1px solid ${shopTitleRarity===r.id?bbAlpha(r.color,.50):"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"6px 9px",fontSize:9.5,fontWeight:1000,color:r.color,whiteSpace:"nowrap"}}>{r.emoji} {r.ownedCount}/{r.total}</button>
+                ))}
+              </div>
+            </div>
+          )}
           <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>{currentShopTab.label} · {shopDisplayItems.length}/10 today</div>
           {shopDisplayItems.length === 0 ? (
             <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:14,fontSize:12,color:"#8B92A8"}}>nothing in this shop category today.</div>
@@ -9062,32 +13496,33 @@ await storeSetWithPush("pings", pingUpd2);
           )}
         </div>
       )}
-      {purchaseReveal && (
-        <div style={{position:"fixed",inset:0,zIndex:900,background:"rgba(4,8,24,0.88)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,animation:"chatFadeIn .18s ease"}}>
-          <div style={{width:"100%",maxWidth:320,textAlign:"center",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,209,102,0.35)",borderRadius:24,padding:22,boxShadow:"0 24px 70px rgba(0,0,0,0.45)",animation:"dropDown .32s cubic-bezier(.2,.8,.2,1)"}}>
+      {purchaseReveal && typeof document !== "undefined" && createPortal((
+        <div
+          onTouchMove={(e)=>{ if (e.cancelable) e.preventDefault(); }}
+          onWheel={(e)=>e.preventDefault()}
+          style={{position:"fixed",inset:0,zIndex:9999,padding:"calc(env(safe-area-inset-top) + 118px) 16px 0",display:"flex",alignItems:"flex-start",justifyContent:"center",pointerEvents:"auto",touchAction:"none",overscrollBehavior:"none",background:"linear-gradient(180deg,rgba(0,0,0,0.28),rgba(0,0,0,0.10) 46%,rgba(0,0,0,0.02))",backdropFilter:"blur(2px)",WebkitBackdropFilter:"blur(2px)",animation:"dropDown .18s cubic-bezier(.2,.8,.2,1)"}}
+        >
+          <div style={{width:"100%",maxWidth:340,textAlign:"center",background:"linear-gradient(135deg,rgba(17,19,31,0.98),rgba(8,10,18,0.98))",border:"1px solid rgba(255,209,102,0.40)",borderRadius:24,padding:16,boxShadow:"0 22px 62px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,209,102,0.06)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",pointerEvents:"auto",touchAction:"manipulation",overflow:"hidden"}}>
             {!purchaseReveal.opened ? (
-              <button onClick={()=>setPurchaseReveal(r=>({...r,opened:true}))} className="bb-pressable" style={{background:"none",border:"none",cursor:"pointer",width:"100%"}}>
-                <div style={{fontSize:68,filter:"drop-shadow(0 14px 24px rgba(255,209,102,0.22))"}}>🎁</div>
-                <div style={{fontSize:11,color:"#FFD166",fontWeight:900,letterSpacing:1,marginTop:8}}>TAP TO OPEN</div>
+              <button onClick={()=>setPurchaseReveal(r=>({...r,opened:true}))} className="bb-pressable" style={{background:"none",border:"none",cursor:"pointer",width:"100%",padding:0}}>
+                <div style={{fontSize:48,filter:"drop-shadow(0 12px 24px rgba(255,209,102,0.25))"}}>🎁</div>
+                <div style={{fontSize:10,color:"#FFD166",fontWeight:1000,letterSpacing:1.1,marginTop:5,textTransform:"uppercase"}}>tap to claim</div>
+                <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(purchaseReveal.item)}</div>
               </button>
             ) : (
               <div>
-                <div style={{fontSize:purchaseReveal.item.type === "sound" ? 28 : 54,animation:"scaleFadeIn .2s ease",fontWeight:900}}>{getShopItemRevealIcon(purchaseReveal.item)}</div>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,color:"#E8ECF4",marginTop:8}}>{getShopItemDisplayLabel(purchaseReveal.item)}</div>
-                <div style={{fontSize:12,color:"#8B92A8",marginTop:4}}>{purchaseReveal.item.desc || "added to your collection"}</div>
-                <button onClick={()=>setPurchaseReveal(null)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:18}}>claim {getShopItemDisplayLabel(purchaseReveal.item)}</button>
+                <div style={{fontSize:purchaseReveal.item.type === "sound" ? 24 : 42,animation:"scaleFadeIn .2s ease",fontWeight:900,filter:"drop-shadow(0 10px 20px rgba(255,255,255,0.08))"}}>{getShopItemRevealIcon(purchaseReveal.item)}</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,color:"#E8ECF4",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getShopItemDisplayLabel(purchaseReveal.item)}</div>
+                <div style={{fontSize:11.5,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{purchaseReveal.item.desc || "added to your collection"}</div>
+                <button onClick={()=>setPurchaseReveal(null)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:14,padding:"12px 14px",fontSize:12.5,fontWeight:1000,color:"#06070D",cursor:"pointer",marginTop:12,boxShadow:"0 12px 30px rgba(184,255,77,0.12)"}}>claim</button>
               </div>
             )}
           </div>
         </div>
-      )}
+      ), document.body)}
 <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
   {["1v1","2v2","3v3","free play",null].map(m=>(
-    <button key={m??"off"} onClick={async()=>{
-      setMyMode(m);
-      const upd={...safePresence,[currentPlayer+"_mode"]:m,[currentPlayer]:new Date().toISOString()};
-      setPresence(upd); await storeSet("presence",upd);
-    }} className="bb-pressable"
+    <button key={m??"off"} onClick={()=>saveMyPresenceMode(m)} className="bb-pressable"
     style={{background:myMode===m?playerColor:"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"6px 12px",fontSize:11,fontWeight:700,color:myMode===m?"#06070D":"#8B92A8",cursor:"pointer",boxShadow:myMode===m?`0 0 0 1px ${playerColor}55`:"none"}}>
       {m??"off"}
     </button>
@@ -9171,7 +13606,7 @@ function getPassRewardForOwnedId(ownedId) {   // ← NEW LOCATION
   return rewards[tier] || null;
 }
 // ===================== Pass Tab =====================
-function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed, passActiveBoosts }) {
+function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed, passActiveBoosts, addToast }) {
   const [track, setTrack] = useState("free");
   const [claimResult, setClaimResult] = useState(null);
   const [selectedToken, setSelectedToken] = useState(null);
@@ -9181,12 +13616,12 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
   const [trackSwipeOffset, setTrackSwipeOffset] = useState(0);
   const passActiveBoostsLocal = passActiveBoosts;
 
-  const myXP = passXP?.[currentPlayer] || 0;
   const isPremium = !!passPremium?.[currentPlayer];
+  const myXP = getFreePassXPForPlayer(passXP, currentPlayer);
+  const premiumXP = getPremiumPassXPForPlayer(passXP, currentPlayer, isPremium);
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
 
   const freeProgress = tierFromXP(myXP, FREE_TIER_COUNT);
-  const premiumXP = isPremium ? myXP + (PASS_PREMIUM_HEAD_START * XP_PER_TIER) : 0;
   const premiumProgress = tierFromXP(premiumXP, PREMIUM_TIER_COUNT);
 
   const currentProgress = track === "free" ? freeProgress : premiumProgress;
@@ -9256,7 +13691,7 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
       }
     }
 
-    setClaimResult({ tier, reward, opened:false });
+    addToast?.(`tier ${tier} claimed`, reward.type === "coins" ? "🪙" : reward.type === "title" ? "📝" : reward.type === "icon" ? (reward.value || "✨") : "🎁");
   };
 
 const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ tier: Number(tier), reward })).sort((a, b) => a.tier - b.tier);
@@ -9280,7 +13715,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
                 <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:1,marginTop:6}}>TIER {claimResult.tier} UNLOCKED</div>
                 <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,color:"#E8ECF4",marginTop:8}}>{claimResult.reward.label || claimResult.reward.value}</div>
                 <div style={{fontSize:12,color:"#8B92A8",marginTop:4}}>added to your pass rewards</div>
-                <button onClick={()=>setClaimResult(null)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:18}}>claim</button>
+                <button onClick={()=>setClaimResult(null)} className="bb-pressable bb-glow-lime" style={{...s.primaryBtn,marginTop:18}}>done</button>
               </div>
             )}
           </div>
@@ -9556,7 +13991,15 @@ function SeasonalTextKitFx({ kitValue }) {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests", "push_subscriptions", "soundboard_events"];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests", "push_subscriptions", "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", ADMIN_LIVE_SYNC_KEY];
+// Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
+// for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
+const RT_KEYS_LIVE = [
+  "chat", "posts", "comments", "completions", "training", "schedule", "stats", "presence", "pings",
+  "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts",
+  "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests",
+  "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", ADMIN_LIVE_SYNC_KEY
+];
 
 // ===================== One-time manual restore =====================
 const MANUAL_RESTORE_PATCH_ID = "manual_restore_20260630_points_pass_v1";
@@ -9586,7 +14029,10 @@ function buildManualRestoreState(existing = {}) {
     ...passOwnedRewardIdsFor("premium", 14),
   ]));
 
-  const restoredPoints = { ...currentPoints, ...MANUAL_RESTORE_POINTS };
+  const restoredPoints = { ...currentPoints };
+  Object.entries(MANUAL_RESTORE_POINTS).forEach(([pid, amount]) => {
+    restoredPoints[pid] = Math.max(Number(currentPoints[pid]) || 0, Number(amount) || 0);
+  });
   const restoredPassXP = { ...currentXP };
   const restoredPassPremium = { ...currentPremium };
   const restoredPassClaimed = { ...currentClaimed };
@@ -9633,7 +14079,7 @@ const PLAYER_RESTORE_EQUIPS = {
   p3: { icon:"frog", title:"title_lonely" },
 };
 function getRestoreItemType(id) {
-  const shop = SHOP_ITEMS.find(i => i.id === id);
+  const shop = getAllShopItems().find(i => i.id === id);
   if (shop) return shop.type;
   if (String(id || "").startsWith("pass_")) return getPassRewardForOwnedId(id)?.type || null;
   return null;
@@ -9703,6 +14149,8 @@ function readNotificationDeepLink() {
       commentId: read("commentId"),
       subTab: read("subTab"),
       openComments: read("openComments") === "1",
+      open: read("open"),
+      game: read("game"),
     };
   } catch (_) {
     return null;
@@ -9847,6 +14295,9 @@ function pingToPush(ping) {
   if (ping.type === "flower") return { icon:"🌸", body:`${fromName} sent you ${ping.emoji || "🌸"} (+${ping.xp || 0} pts)` };
   if (ping.type === "session") return { icon:"⏱️", body:`${fromName} started a ${ping.mode || "3v3"} session ${ping.minutesUntil ? `in ${ping.minutesUntil} min` : "soon"}` };
   if (ping.type === "coinflip") return { icon:"🪙", body:`${fromName} challenged you to a coin flip` };
+  if (ping.type === "chaos") return { icon:"🌀", body:`${fromName} launched ${ping.mode || "chaos"}${ping.text ? ` — ${String(ping.text).slice(0, 90)}` : ""}` };
+  if (ping.type === "court") return { icon:"⚖️", body:`${fromName} opened a court case${ping.text ? ` — ${String(ping.text).slice(0, 90)}` : ""}` };
+  if (ping.type === "job_shift") return { icon:"⏰", body:String(ping.text || "your scheduled shift starts soon").slice(0, 140) };
   return { icon:"🎮", body:`${fromName} wants to run 2s` };
 }
 
@@ -9908,6 +14359,17 @@ async function notifyActivityPush(entry) {
   );
 }
 
+async function notifyAdminGrantPush(playerId, body, data = {}) {
+  if (!playerId || !body) return;
+  return sendPushToPlayersOnce(
+    `admin_grant:${playerId}:${body}:${Date.now()}`,
+    [playerId],
+    "🛡️ Admin update",
+    body,
+    { url:makeNotificationUrl("garage", { type:data.type || "admin_grant" }), type:data.type || "admin_grant" }
+  );
+}
+
 async function notifyNewPostPush(post) {
   if (!post?.id || !post?.playerId) return;
   const poster = playerNameById(post.playerId);
@@ -9943,6 +14405,9 @@ async function notifyVoiceJoinPush(playerId) {
 }
 
 async function dispatchPushForStoreChange(key, before, after) {
+  if (key === ADMIN_SHOP_ITEMS_KEY || key === "admin_shop_items") {
+    return sendPushToPlayersOnce(`admin_shop:${Date.now()}`, [ADMIN_ID], "🛍️ Shop admin saved", "daily shop layout updated", { url:makeNotificationUrl("admin", { type:"shop" }), type:"admin_shop" });
+  }
   const listBefore = Array.isArray(before) ? before : [];
   const listAfter = Array.isArray(after) ? after : [];
   const oldIds = new Set(listBefore.map(x => x?.id || x?.ts || JSON.stringify(x)));
@@ -9964,14 +14429,38 @@ async function dispatchPushForStoreChange(key, before, after) {
     await Promise.allSettled(newItems.map(m => {
       const sender = playerNameById(m.playerId);
       const targets = PLAYERS.map(p => p.id).filter(pid => pid !== m.playerId);
+      const bodyText = String(m.text || "").trim() || (String(m.mediaType || "").startsWith("video") ? "sent a video" : m.mediaUrl ? "sent an image" : "sent a message");
       return sendPushToPlayersOnce(
         `chat:${m.id || m.ts || JSON.stringify(m)}`,
         targets,
         "💬 Team chat",
-        `${sender}: ${String(m.text || "").slice(0, 120)}`,
+        `${sender}: ${bodyText.slice(0, 120)}`,
         { url:makeNotificationUrl("chat", { id:m.id }), type:"chat", id:m.id }
       );
     }));
+  }
+
+  if (key === "stocks" && after && typeof after === "object" && !Array.isArray(after)) {
+    const beforeObj = before && typeof before === "object" && !Array.isArray(before) ? before : {};
+    const jobs = Object.entries(after).map(([holdingKey, nextVal]) => {
+      const m = String(holdingKey).match(/^(p\d+)_(p\d+)$/);
+      if (!m) return null;
+      const [, buyerId, targetId] = m;
+      if (!buyerId || !targetId || buyerId === targetId) return null;
+      const prevVal = beforeObj[holdingKey];
+      const prevShares = typeof prevVal === "number" ? prevVal : Number(prevVal?.shares || 0);
+      const nextShares = typeof nextVal === "number" ? nextVal : Number(nextVal?.shares || 0);
+      if (!Number.isFinite(nextShares) || nextShares <= prevShares) return null;
+      const bought = Math.max(0, nextShares - (Number.isFinite(prevShares) ? prevShares : 0));
+      return sendPushToPlayersOnce(
+        `stock_buy:${holdingKey}:${nextShares.toFixed(4)}`,
+        [targetId],
+        "📈 Someone bought your stock",
+        `${playerNameById(buyerId)} bought ${bought.toFixed(2)} share${bought === 1 ? "" : "s"} of you`,
+        { url:makeNotificationUrl("stocks", { type:"stock_buy", buyer:buyerId, id:targetId }), type:"stock_buy", buyer:buyerId, id:targetId }
+      );
+    }).filter(Boolean);
+    await Promise.allSettled(jobs);
   }
 
   if (key === "completions" && after && typeof after === "object") {
@@ -9994,7 +14483,7 @@ async function dispatchPushForStoreChange(key, before, after) {
     if (newRaceId && newRaceId !== oldRaceId) {
       const obj = typeof RACE_OBJECTIVES !== "undefined" ? RACE_OBJECTIVES.find(o => o.id === newRaceId) : null;
       const targets = PLAYERS.map(p => p.id).filter(pid => pid !== after.startedBy);
-      await sendPushToPlayersOnce(`race:${newRaceId}`, targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — ${obj?.label || "new objective"}${after?.entryFee ? ` · jar ${after.entryFee} pts to join` : ""}`, { url:makeNotificationUrl("boost", { type:"race", id:newRaceId }), type:"race", id:newRaceId });
+      await sendPushToPlayersOnce(`race:${newRaceId}:${after?.startedAt || Date.now()}`, targets, `${obj?.emoji || "🏁"} Race started`, `${playerNameById(after.startedBy)} started a race — join now${obj?.label ? ` · ${obj.label}` : ""}${after?.entryFee ? ` · ${after.entryFee} pts jar` : ""}`, { url:makeNotificationUrl("boost", { type:"race", id:newRaceId, open:"race" }), type:"race", id:newRaceId, open:"race" });
     }
   }
 
@@ -10060,7 +14549,9 @@ function calcOdds(pct) {
 }
 
 function calcPayout(wager, decimalOdds) {
-  return Math.round(wager * Math.min(parseFloat(decimalOdds), 5));
+  const dec = parseFloat(decimalOdds);
+  if (!Number.isFinite(dec) || dec <= 0) return Math.round(Number(wager) || 0);
+  return Math.round((Number(wager) || 0) * dec);
 }
 
 function clampWager(value, fallback = 1) {
@@ -10074,6 +14565,71 @@ function nextTenAmIso(from = new Date()) {
   d.setDate(d.getDate() + 1);
   d.setHours(10, 0, 0, 0);
   return d.toISOString();
+}
+
+function nextNoonEasternIso(from = new Date()) {
+  try {
+    const now = from instanceof Date ? from : new Date(from);
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone:"America/New_York", year:"numeric", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit", hour12:false }).formatToParts(now);
+    const get = (t) => parts.find(p => p.type === t)?.value;
+    const y = Number(get("year"));
+    const m = Number(get("month"));
+    const d = Number(get("day"));
+    const h = Number(get("hour"));
+    const min = Number(get("minute"));
+    const targetEtDate = new Date(Date.UTC(y, m - 1, d + ((h > 12 || (h === 12 && min >= 0)) ? 1 : 0), 17, 0, 0)); // noon ET is 17:00 UTC during EDT
+    return targetEtDate.toISOString();
+  } catch (_) {
+    const d = new Date(from);
+    d.setDate(d.getDate() + 1);
+    d.setHours(12, 0, 0, 0);
+    return d.toISOString();
+  }
+}
+function compactTimeLeft(ms) {
+  const total = Math.max(0, Math.floor(Number(ms) || 0));
+  const hrs = Math.floor(total / 3600000);
+  const mins = Math.floor((total % 3600000) / 60000);
+  if (hrs >= 24) return `${Math.floor(hrs / 24)}d ${hrs % 24}h`;
+  if (hrs > 0) return `${hrs}h ${mins}m`;
+  return `${mins}m`;
+}
+function nextWeeklyChallengeResetIso(from = new Date()) {
+  const d = new Date(from);
+  d.setHours(0,0,0,0);
+  const daysUntilSunday = (7 - d.getDay()) % 7 || 7;
+  d.setDate(d.getDate() + daysUntilSunday);
+  return d.toISOString();
+}
+function getBoostUseResetAt(points, playerId, type) {
+  const raw = points?.[`${playerId}_${type}ResetAt`];
+  const t = raw ? safeDateObj(raw, null).getTime() : NaN;
+  return Number.isFinite(t) ? t : null;
+}
+function withBoostResetStamp(nextPoints, playerId, type, leftAfterUse) {
+  const key = `${playerId}_${type}ResetAt`;
+  const cur = nextPoints?.[key];
+  if (leftAfterUse <= 0 && !cur) return { ...nextPoints, [key]: new Date(Date.now() + DAY_MS).toISOString() };
+  if (leftAfterUse > 0 && cur) {
+    const clean = { ...nextPoints };
+    delete clean[key];
+    return clean;
+  }
+  return nextPoints;
+}
+function isLightBackgroundValue(value) {
+  return ["whiteout", "spring", "snow", "ice", "holo", "gold"].includes(String(value || "").toLowerCase());
+}
+function getReadableTextForBackground(points, playerId, theme = {}, userColor = "#B8FF4D") {
+  const owned = Array.isArray(points?.[playerId + "_owned"]) ? points[playerId + "_owned"] : [];
+  const eq = points?.[playerId + "_equipped"] || {};
+  const bgId = owned.find(id => eq[id] && getAllShopItems().find(i => i.id === id && i.type === "background"));
+  const bgItem = bgId ? getAllShopItems().find(i => i.id === bgId) : null;
+  if (bgItem && isLightBackgroundValue(bgItem.value)) {
+    return { main:"#05070E", muted:"#202638", accent:"#11131F" };
+  }
+  if (bgItem) return { main:"#F7F8FF", muted:"#C9D0E4", accent:userColor || "#B8FF4D" };
+  return {};
 }
 
 function getBetSettleAt(bet) {
@@ -10100,7 +14656,39 @@ function getBetMode(bet) {
   return ["1v1", "2v2", "3v3"].includes(mode) ? mode : "3v3";
 }
 
+function formatBetModeLabel(bet = {}) {
+  if (bet?.isParlay && Array.isArray(bet.legs)) {
+    const modes = Array.from(new Set(bet.legs.map(getBetMode).filter(Boolean)));
+    return modes.length ? modes.join("/") : "3v3";
+  }
+  return getBetMode(bet);
+}
+
+function betMatchesModeFilter(bet = {}, mode = "all") {
+  if (!mode || mode === "all") return true;
+  return formatBetModeLabel(bet).split("/").includes(mode);
+}
+
+function getBetAwardAmount(bet = {}, status = "", result = {}) {
+  const wager = Math.max(0, Math.round(Number(bet?.wager || 0)));
+  if (status === "void") return wager;
+  if (status !== "won") return 0;
+  const resultAward = Number(result?.splitAward);
+  if (bet?.isParlay && bet?.splitPayoutEnabled && Number.isFinite(resultAward)) {
+    return capParlayPayout(resultAward);
+  }
+  const payout = Math.max(0, Math.round(Number(bet?.payout || 0)));
+  // The saved payout is the final return for the bet/parlay. Never multiply it again during settlement.
+  return bet?.isParlay ? capParlayPayout(payout) : payout;
+}
+
 function formatSingleBetTitle(bet = {}) {
+  if (bet?.type === "rivalry") {
+    const pick = bet.pickPlayerName || playerNameById(bet.pickPlayerId) || "player";
+    const opp = bet.opponentPlayerName || playerNameById(bet.opponentPlayerId) || "opponent";
+    const field = bet.fieldLabel || bet.field || "stat";
+    return `${pick} beats ${opp} in ${field}`;
+  }
   const field = bet.fieldLabel || bet.marketLabel || bet.field || bet.market || "prop";
   const rawQuestion = String(bet.question || "").trim();
   if (rawQuestion && !/^bet$/i.test(rawQuestion)) return rawQuestion;
@@ -10114,8 +14702,8 @@ function formatBetForDisplay(bet = {}) {
   if (bet?.isParlay) {
     const legs = Array.isArray(bet.legs) ? bet.legs : [];
     return {
-      title: `${legs.length || 0}-leg parlay`,
-      sub: "",
+      title: `${legs.length || 0}-leg${bet.splitPayoutEnabled ? " split" : ""} parlay`,
+      sub: bet.splitPayoutEnabled ? "partial legs pay at reduced payout" : "",
       legs: legs.map(leg => formatSingleBetTitle(leg)),
     };
   }
@@ -10131,6 +14719,9 @@ async function notifyPropBetPlacedPush(bet) {
       if (leg?.combined && Array.isArray(leg.duoIds)) leg.duoIds.forEach(id => targetIds.add(id));
       else if (leg?.playerId) targetIds.add(leg.playerId);
     });
+  } else if (bet.type === "rivalry") {
+    if (bet.pickPlayerId) targetIds.add(bet.pickPlayerId);
+    if (bet.opponentPlayerId) targetIds.add(bet.opponentPlayerId);
   } else if (bet.combined && Array.isArray(bet.duoIds)) {
     bet.duoIds.forEach(id => targetIds.add(id));
   } else if (bet.playerId) {
@@ -10187,40 +14778,95 @@ function getBetSeenGameKeysForPlacement(stats = [], bet = null) {
     .filter(Boolean);
 }
 
+const BET_PLACEMENT_GRACE_MS = 2000;
+
+function betTimeValue(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === "") continue;
+    const t = value instanceof Date ? value.getTime() : new Date(value).getTime();
+    if (Number.isFinite(t) && t > 0) return t;
+  }
+  return 0;
+}
+
 function betCandidateSortTime(game) {
-  return safeDateObj(game?.syncedAt || game?.importedAt || game?.createdAt || game?.ts || Date.now()).getTime();
+  return betTimeValue(
+    game?.syncedAt,
+    game?.importedAt,
+    game?.createdAt,
+    game?.matchStartAt,
+    game?.ts,
+    game?.date
+  );
+}
+
+function betGameIsAfterPlacement(game, placedAtMs) {
+  if (!Number.isFinite(placedAtMs) || placedAtMs <= 0) return true;
+
+  const newestGameTime = Math.max(
+    betTimeValue(game?.syncedAt),
+    betTimeValue(game?.importedAt),
+    betTimeValue(game?.createdAt),
+    betTimeValue(game?.matchStartAt),
+    betTimeValue(game?.ts),
+    betTimeValue(game?.date)
+  );
+
+  return newestGameTime >= placedAtMs - BET_PLACEMENT_GRACE_MS;
 }
 
 function findBetTargetGame(bet, stats = [], options = {}) {
-  const placedAt = new Date(bet?.placedAt || bet?.ts || 0).getTime();
-  const settleAt = new Date(getBetSettleAt(bet)).getTime();
+  const placedAt = safeDateObj(bet?.placedAt || bet?.ts || 0, 0).getTime();
   const mode = getBetMode(bet);
   const enforcePreMatchLock = options.enforcePreMatchLock !== false;
-  const seenKeys = new Set(Array.isArray(bet?.statKeysAtPlacement) ? bet.statKeysAtPlacement : []);
+  const seenKeys = new Set(Array.isArray(bet?.statKeysAtPlacement) ? bet.statKeysAtPlacement.map(String) : []);
+
   const allGames = sanitizeStatsForRender(stats)
     .filter(g => {
       if (!g || normalizeGameMode(g.mode) !== mode) return false;
-      if (enforcePreMatchLock && !propBetWasPlacedBeforeGameStarted(bet, g)) return false;
+
       const key = getBetGameKey(g);
-      if (seenKeys.size) return key && !seenKeys.has(key);
-      const ts = safeDateObj(g?.matchStartAt || g?.ts || 0).getTime();
-      if (!enforcePreMatchLock) return betCandidateSortTime(g) >= placedAt && ts <= settleAt;
-      return ts >= placedAt && ts <= settleAt;
+      if (seenKeys.size && (!key || seenKeys.has(String(key)))) return false;
+
+      // Critical: bets are for the next synced/logged match after placement.
+      // An old stat row with a new/unseen key cannot settle a new bet unless
+      // it was actually synced/imported/created after the bet was placed.
+      if (!betGameIsAfterPlacement(g, placedAt)) return false;
+
+      if (enforcePreMatchLock && !propBetWasPlacedBeforeGameStarted(bet, g)) return false;
+
+      return true;
     })
     .sort((a, b) => betCandidateSortTime(a) - betCandidateSortTime(b));
 
   if (bet?.combined && Array.isArray(bet?.duoIds) && bet.duoIds.length >= 2) {
     const wanted = new Set(bet.duoIds);
     const groups = {};
+
     allGames
       .filter(g => wanted.has(g.playerId) && duoMatchesGame(g, bet.duoIds))
       .forEach(g => {
-        const ts = safeDateObj(g.ts);
-        const key = g.sessionCode || g.matchId || `${dateKey(ts)}_${mode}_${Math.floor(ts.getTime() / 60000)}`;
-        if (!groups[key]) groups[key] = { key, ts:g.ts, syncedAt:g.syncedAt || g.ts, games:[] };
+        const ts = safeDateObj(g.ts || g.matchStartAt || g.syncedAt || g.importedAt || g.createdAt);
+        const key = g.sessionCode || g.roomId || g.matchId || g.parseMatchId || `${dateKey(ts)}_${mode}_${Math.floor(ts.getTime() / 60000)}`;
+
+        if (!groups[key]) {
+          groups[key] = {
+            key,
+            ts: g.ts || g.matchStartAt || g.syncedAt || g.importedAt || g.createdAt,
+            syncedAt: g.syncedAt || g.importedAt || g.createdAt || g.ts || g.matchStartAt,
+            games: [],
+          };
+        }
+
         groups[key].games.push(g);
-        if (betCandidateSortTime(g) > safeDateObj(groups[key].syncedAt || groups[key].ts).getTime()) groups[key].syncedAt = g.syncedAt || g.ts;
-        if (safeDateObj(g.ts).getTime() > safeDateObj(groups[key].ts).getTime()) groups[key].ts = g.ts;
+
+        if (betCandidateSortTime(g) > safeDateObj(groups[key].syncedAt || groups[key].ts).getTime()) {
+          groups[key].syncedAt = g.syncedAt || g.importedAt || g.createdAt || g.ts || g.matchStartAt;
+        }
+
+        if (safeDateObj(g.ts || g.matchStartAt || 0).getTime() > safeDateObj(groups[key].ts || 0).getTime()) {
+          groups[key].ts = g.ts || g.matchStartAt;
+        }
       });
 
     const group = Object.values(groups)
@@ -10231,8 +14877,10 @@ function findBetTargetGame(bet, stats = [], options = {}) {
       .sort((a, b) => safeDateObj(a.syncedAt || a.ts).getTime() - safeDateObj(b.syncedAt || b.ts).getTime())[0];
 
     if (!group) return null;
+
     const field = bet.field || "goals";
     const value = group.games.reduce((sum, g) => sum + (Number(g[field]) || 0), 0);
+
     return {
       ...(group.games[0] || {}),
       id: `duo_prop_${group.key}`,
@@ -10248,7 +14896,58 @@ function findBetTargetGame(bet, stats = [], options = {}) {
     .filter(g =>
       g.playerId === bet.playerId &&
       duoMatchesGame(g, bet.duoIds)
-    )[0];
+    )[0] || null;
+}
+
+function findRivalryTargetGames(bet, stats = [], options = {}) {
+  if (!bet || bet.type !== "rivalry") return null;
+  const pickId = bet.pickPlayerId || bet.playerId;
+  const opponentId = bet.opponentPlayerId;
+  if (!pickId || !opponentId || pickId === opponentId) return null;
+  const base = {
+    ...bet,
+    combined:false,
+    duoIds:null,
+    line:0,
+    side:"over",
+    targetMode: bet.targetMode || bet.mode || "3v3",
+  };
+  const pickGame = findBetTargetGame({ ...base, playerId: pickId }, stats, options);
+  const opponentGame = findBetTargetGame({ ...base, playerId: opponentId }, stats, options);
+  if (!pickGame || !opponentGame) return null;
+  return { pickGame, opponentGame };
+}
+
+function getRivalryBetResult(bet, stats = []) {
+  const games = findRivalryTargetGames(bet, stats);
+  if (!games) return { status:"pending", note:"waiting for both rivalry stats" };
+  const field = bet.field || "goals";
+  if (field === "match_winner") {
+    const won = gameIsWin(games.pickGame);
+    return { status:won ? "won" : "lost", note:`${bet.pickPlayerName || playerNameById(bet.pickPlayerId)} ${won ? "won" : "lost"} ${bet.targetMode || "game"}`, targetGameId:games.pickGame?.id, opponentTargetGameId:games.opponentGame?.id };
+  }
+  const pickValue = Number(games.pickGame?.[field]);
+  const oppValue = Number(games.opponentGame?.[field]);
+  if (!Number.isFinite(pickValue) || !Number.isFinite(oppValue)) return { status:"void", note:"missing rivalry stat data" };
+  if (pickValue === oppValue) {
+    return {
+      status:"void",
+      note:`rivalry pushed: both had ${pickValue} ${bet.fieldLabel || field}`,
+      actual:pickValue,
+      opponentActual:oppValue,
+      targetGameId:games.pickGame?.id,
+      opponentTargetGameId:games.opponentGame?.id,
+    };
+  }
+  const won = pickValue > oppValue;
+  return {
+    status:won ? "won" : "lost",
+    note:`${bet.pickPlayerName || playerNameById(bet.pickPlayerId)} ${pickValue} vs ${bet.opponentPlayerName || playerNameById(bet.opponentPlayerId)} ${oppValue} ${bet.fieldLabel || field}`,
+    actual:pickValue,
+    opponentActual:oppValue,
+    targetGameId:games.pickGame?.id,
+    opponentTargetGameId:games.opponentGame?.id,
+  };
 }
 
 function findBetLateLockedGame(bet, stats = []) {
@@ -10257,7 +14956,20 @@ function findBetLateLockedGame(bet, stats = []) {
   return propBetWasPlacedBeforeGameStarted(bet, game) ? null : game;
 }
 
+function getMergedParlayLeg(leg, bet) {
+  return {
+    ...leg,
+    placedAt: leg?.placedAt || bet?.placedAt,
+    ts: leg?.ts || bet?.ts,
+    settleAt: leg?.settleAt || getBetSettleAt(bet),
+    statKeysAtPlacement: Array.isArray(leg?.statKeysAtPlacement) ? leg.statKeysAtPlacement : (bet?.statKeysAtPlacement || []),
+  };
+}
+
 function betHasLateLockedGame(bet, stats = []) {
+  if (bet?.isParlay) {
+    return (Array.isArray(bet.legs) ? bet.legs : []).some(leg => !!findBetLateLockedGame(getMergedParlayLeg(leg, bet), stats));
+  }
   return !!findBetLateLockedGame(bet, stats);
 }
 
@@ -10272,25 +14984,53 @@ function betLateLockedResult(bet, game) {
   };
 }
 
+function getParlayLegResult(leg, bet, stats = []) {
+  const merged = getMergedParlayLeg(leg, bet);
+  const lateGame = findBetLateLockedGame(merged, stats);
+  if (lateGame) return { ...betLateLockedResult(merged, lateGame), leg: merged, resolved:true };
+  const game = findBetTargetGame(merged, stats);
+  const result = getBetResultFromGame(merged, game);
+  return { ...result, leg: merged, resolved: result.status !== "void" };
+}
+
+function parlayHasResolvedLegs(bet, stats = []) {
+  const legs = Array.isArray(bet?.legs) ? bet.legs : [];
+  if (!legs.length) return false;
+  return legs.every(leg => getParlayLegResult(leg, bet, stats).resolved);
+}
+
 function betHasTargetGame(bet, stats = []) {
+  if (bet?.type === "rivalry") return !!findRivalryTargetGames(bet, stats);
+  if (bet?.isParlay) return parlayHasResolvedLegs(bet, stats);
   return !!findBetTargetGame(bet, stats);
 }
 
 function resolveSingleBet(bet, stats = []) {
+  if (bet?.type === "rivalry") return getRivalryBetResult(bet, stats);
   if (bet?.isParlay) {
-    const legResults = (bet.legs || []).map(leg => {
-      const merged = { ...leg, placedAt: bet.placedAt, settleAt: getBetSettleAt(bet) };
-      const lateGame = findBetLateLockedGame(merged, stats);
-      if (lateGame) return { ...betLateLockedResult(merged, lateGame), leg };
-      const game = findBetTargetGame(merged, stats);
-      return { ...getBetResultFromGame(merged, game), leg };
-    });
+    const legResults = (bet.legs || []).map(leg => getParlayLegResult(leg, bet, stats));
     if (!legResults.length || legResults.some(r => r.status === "void")) {
-      return { status:"void", note:"one or more legs had no settled stat" };
+      return { status:"pending", note:"waiting for every parlay leg to get a synced stat", legResults };
     }
-    if (legResults.some(r => r.lateLocked)) return { status:"lost", note:"one or more legs were placed after match start", lateLocked:true };
-    if (legResults.every(r => r.status === "won")) return { status:"won", note:"all parlay legs hit" };
-    return { status:"lost", note:"one or more parlay legs missed" };
+    if (legResults.some(r => r.lateLocked)) return { status:"lost", note:"one or more legs were placed after match start", lateLocked:true, legResults };
+    const wonLegs = legResults.filter(r => r.status === "won").length;
+    const totalLegs = legResults.length;
+    if (bet?.splitPayoutEnabled) {
+      if (wonLegs > 0) {
+        const splitAward = calcSplitParlayAwardFromPayout(bet.fullPayoutBeforeSplit || bet.payout, wonLegs, totalLegs);
+        return {
+          status:"won",
+          note: wonLegs === totalLegs ? `split parlay hit all ${totalLegs} legs` : `split parlay paid ${wonLegs}/${totalLegs} legs`,
+          legResults,
+          splitAward,
+          splitWonLegs: wonLegs,
+          splitTotalLegs: totalLegs,
+        };
+      }
+      return { status:"lost", note:"split parlay missed every leg", legResults, splitWonLegs:0, splitTotalLegs:totalLegs };
+    }
+    if (wonLegs === totalLegs) return { status:"won", note:"all parlay legs hit", legResults };
+    return { status:"lost", note:"one or more parlay legs missed", legResults };
   }
 
   if (!bet?.playerId || !bet?.field || !bet?.side) return { status:"void", note:"unsupported bet type" };
@@ -10300,62 +15040,151 @@ function resolveSingleBet(bet, stats = []) {
 }
 
 function settledBetPushBody(bet) {
+  if (bet?.type === "rivalry") {
+    const subject = formatSingleBetTitle(bet);
+    if (bet.status === "won") return `${subject} - +${bet.wonAmount ?? bet.payout ?? 0}pts`;
+    if (bet.status === "void") return `${subject} - pushed +${bet.wager || 0}pts`;
+    return `${subject} - lost`;
+  }
   if (bet?.isParlay) {
     const subject = `${bet.legs?.length || 0}-leg parlay`;
-    if (bet.status === "won") return `${subject} - +${bet.payout || 0}pts`;
+    if (bet.status === "won") return `${subject} - +${bet.wonAmount ?? bet.splitAward ?? bet.payout ?? 0}pts`;
     if (bet.status === "void") return `${subject} - voided +${bet.wager || 0}pts`;
     return `${subject} - lost`;
   }
   const side = String(bet.side || "").toLowerCase() === "under" ? "Under" : "Over";
   const subject = `${bet.playerName || "your prop"} ${side} ${bet.line ?? ""} ${bet.fieldLabel || bet.field || ""}`.replace(/\s+/g, " ").trim();
-  if (bet.status === "won") return `${subject} - +${bet.payout || 0}pts`;
+  if (bet.status === "won") return `${subject} - +${bet.wonAmount ?? bet.splitAward ?? bet.payout ?? 0}pts`;
   if (bet.status === "void") return `${subject} - voided +${bet.wager || 0}pts`;
   return `${subject} - lost${bet.lateLocked ? " (late bet)" : ""}`;
 }
 
+function betTouchesAnyGameId(bet, gameIds) {
+  if (!bet || !gameIds?.size) return false;
+  if (bet.targetGameId && gameIds.has(String(bet.targetGameId))) return true;
+  return (Array.isArray(bet.legResults) ? bet.legResults : []).some(r => r?.targetGameId && gameIds.has(String(r.targetGameId)));
+}
+async function regradeLostBetsForGames({ bets, stats, points, setBets, setPoints, games }) {
+  const gameIds = new Set((games || []).map(g => String(g?.id || "")).filter(Boolean));
+  if (!gameIds.size) return false;
+  const list = Array.isArray(bets) ? bets : [];
+  const affected = list.filter(b => b?.status === "lost" && betTouchesAnyGameId(b, gameIds));
+  if (!affected.length) return false;
+  const affectedIds = new Set(affected.map(b => b.id));
+  const freshPoints = await storeGet("points").catch(() => points) || points || {};
+  const nextPoints = { ...freshPoints };
+  const paidBetIds = new Set(Array.isArray(nextPoints.__paidBetIds) ? nextPoints.__paidBetIds.map(String) : []);
+  let changed = false;
+  const nextBets = list.map(b => {
+    if (!affectedIds.has(b.id)) return b;
+    const result = resolveSingleBet({ ...b, status:"open" }, stats);
+    if (!['won', 'void'].includes(result.status)) return b;
+    changed = true;
+    const payKey = String(b.id || "");
+    const shouldPay = !!payKey && !paidBetIds.has(payKey);
+    const award = shouldPay ? getBetAwardAmount(b, result.status, result) : 0;
+    if (shouldPay && award > 0) {
+      nextPoints[b.bettorId] = (Number(nextPoints[b.bettorId]) || 0) + award;
+      paidBetIds.add(payKey);
+    }
+    return {
+      ...b,
+      status: result.status,
+      regradedAt: new Date().toISOString(),
+      settlementNote: `regraded after live stats refreshed — ${result.note}`,
+      actual: result.actual,
+      opponentActual: result.opponentActual,
+      targetGameId: result.targetGameId,
+      opponentTargetGameId: result.opponentTargetGameId,
+      lateLocked: !!result.lateLocked,
+      splitAward: result.splitAward,
+      splitWonLegs: result.splitWonLegs,
+      splitTotalLegs: result.splitTotalLegs,
+      legResults: Array.isArray(result.legResults) ? result.legResults.map(r => ({ status:r.status, note:r.note, actual:r.actual, targetGameId:r.targetGameId, lateLocked:!!r.lateLocked })) : b.legResults,
+      wonAmount: award,
+    };
+  });
+  if (!changed) return false;
+  nextPoints.__paidBetIds = Array.from(paidBetIds).slice(-600);
+  setPoints?.(nextPoints);
+  setBets?.(nextBets);
+  await storeSet("points", nextPoints);
+  await storeSet("bets", nextBets);
+  return true;
+}
+
 async function settleDueBetsNow({ bets, stats, points, setBets, setPoints }) {
   const list = Array.isArray(bets) ? bets : [];
-  const now = Date.now();
   const due = list.filter(b => {
     if (b?.status !== "open") return false;
-    const settleAt = new Date(getBetSettleAt(b)).getTime();
-    return betHasTargetGame(b, stats) || betHasLateLockedGame(b, stats) || settleAt <= now;
+    // Props are for the next logged/synced game, so never auto-void just because the old timer passed.
+    // Only settle once an actual matching stat exists, which keeps notifications as WIN/LOSS after sync.
+    return betHasTargetGame(b, stats) || betHasLateLockedGame(b, stats);
   });
   if (!due.length) return false;
 
   const freshPoints = await storeGet("points").catch(() => points) || points || {};
   const nextPoints = { ...freshPoints };
+  const paidBetIds = new Set(Array.isArray(nextPoints.__paidBetIds) ? nextPoints.__paidBetIds.map(String) : []);
   const dueIds = new Set(due.map(d => d.id));
   const nextBets = list.map(b => {
     if (!dueIds.has(b.id)) return b;
     const result = resolveSingleBet(b, stats);
-    if (result.status === "won") nextPoints[b.bettorId] = (Number(nextPoints[b.bettorId]) || 0) + (Number(b.payout) || 0);
-    if (result.status === "void") nextPoints[b.bettorId] = (Number(nextPoints[b.bettorId]) || 0) + (Number(b.wager) || 0);
+    if (!["won", "lost", "void"].includes(result.status)) return b;
+    const payKey = String(b.id || "");
+    const shouldPay = (result.status === "won" || result.status === "void") && !!payKey && !paidBetIds.has(payKey);
+    const award = shouldPay ? getBetAwardAmount(b, result.status, result) : 0;
+    if (shouldPay && award > 0) {
+      nextPoints[b.bettorId] = (Number(nextPoints[b.bettorId]) || 0) + award;
+      paidBetIds.add(payKey);
+    }
     return {
       ...b,
       status: result.status,
       settledAt: new Date().toISOString(),
       settlementNote: result.note,
       actual: result.actual,
+      opponentActual: result.opponentActual,
       targetGameId: result.targetGameId,
+      opponentTargetGameId: result.opponentTargetGameId,
       lateLocked: !!result.lateLocked,
+      splitAward: result.splitAward,
+      splitWonLegs: result.splitWonLegs,
+      splitTotalLegs: result.splitTotalLegs,
+      legResults: Array.isArray(result.legResults) ? result.legResults.map(r => ({ status:r.status, note:r.note, actual:r.actual, targetGameId:r.targetGameId, lateLocked:!!r.lateLocked })) : b.legResults,
+      wonAmount: getBetAwardAmount(b, result.status, result),
     };
   });
 
+  nextPoints.__paidBetIds = Array.from(paidBetIds).slice(-600);
   setPoints?.(nextPoints);
   setBets?.(nextBets);
   await storeSet("points", nextPoints);
   await storeSet("bets", nextBets);
 
-  await Promise.allSettled(due.map(async b => {
-    const settled = nextBets.find(nb => nb.id === b.id);
-    if (!settled?.bettorId) return;
+  const settledNow = nextBets.filter(nb => dueIds.has(nb.id) && nb.status && nb.status !== "open");
+  const byBettor = settledNow.reduce((acc, b) => { if (!b?.bettorId) return acc; (acc[b.bettorId] ||= []).push(b); return acc; }, {});
+  await Promise.allSettled(Object.entries(byBettor).map(async ([bettorId, settledList]) => {
+    if (settledList.length === 1) {
+      const settled = settledList[0];
+      return sendPushToPlayersOnce(
+        `bet-settled:${settled.id}:${settled.status}`,
+        [bettorId],
+        settled.status === "won" ? "✅ Prop won" : settled.status === "lost" ? "❌ Prop lost" : "↩️ Prop voided",
+        settledBetPushBody(settled),
+        { url:makeNotificationUrl("social", { subTab:"bets", id:settled.id }), type:"bet_settled", id:settled.id }
+      );
+    }
+    const won = settledList.filter(b => b.status === "won").length;
+    const lost = settledList.filter(b => b.status === "lost").length;
+    const voided = settledList.filter(b => b.status === "void").length;
+    const gained = settledList.reduce((sum,b)=>sum + (b.status === "won" ? Number((b.wonAmount ?? b.splitAward ?? b.payout) || 0) : b.status === "void" ? Number(b.wager||0) : 0), 0);
     return sendPushToPlayersOnce(
-      `bet-settled:${settled.id}:${settled.status}`,
-      [settled.bettorId],
-      "Prop settled",
-      settledBetPushBody(settled),
-      { url:makeNotificationUrl("social", { subTab:"bets", id:settled.id }), type:"bet_settled", id:settled.id }
+      `bet-settled-batch:${bettorId}:${settledList.map(b=>b.id).join("_")}`,
+      [bettorId],
+      "🎰 Your bets settled",
+      `${settledList.length} bets settled · ${won}W ${lost}L${voided ? ` ${voided}V` : ""} · ${gained} pts returned`,
+      { url:makeNotificationUrl("social", { subTab:"bets" }), type:"bet_settled_batch" }
     );
   }));
 
@@ -10436,194 +15265,68 @@ function StockTrendLine({ priceHistory, color, width = 260, height = 70 }) {
   );
 }
 
-function StockMarketTab({ stats, currentPlayer, points, setPoints, stocks, setStocks }) {
-  const myPoints = points?.[currentPlayer] || 0;
-  const [investAmount, setInvestAmount] = useState(10);
-  const [result, setResult] = useState(null);
 
-  const getStockPrice = (playerId) => {
-    const pg = stats.filter(g => g.playerId === playerId && g.mode === "3v3");
-    if (!pg.length) return STOCK_BASE_PRICE;
-    const weekStart = getWeekStart();
-    const weekGames = pg.filter(g => new Date(g.ts) >= weekStart);
-    const allAvgGoals = pg.length ? pg.reduce((s,g) => s+(g.goals||0),0)/pg.length : 1;
-    const weekAvgGoals = weekGames.length ? weekGames.reduce((s,g) => s+(g.goals||0),0)/weekGames.length : allAvgGoals;
-    const wins = pg.filter(g => g.result === "victory").length;
-    const winRate = pg.length ? wins/pg.length : 0.5;
-    const weekWins = weekGames.filter(g => g.ourScore > g.theirScore).length;
-    const weekWinRate = weekGames.length ? weekWins/weekGames.length : winRate;
-    const price = Math.round(STOCK_BASE_PRICE * (1 + (weekWinRate - 0.5) * 1.5 + (weekAvgGoals - allAvgGoals) * 0.2));
-    return Math.max(10, Math.min(500, price));
+function StockMarketTab({ stats, currentPlayer, points, setPoints, stocks, setStocks, passXP }) {
+  const [selectedId,setSelectedId]=useState(PLAYERS.find(p=>p.id!==currentPlayer)?.id || PLAYERS[0].id);
+  const [amount,setAmount]=useState(100);
+  const [range,setRange]=useState("7d");
+  const myPoints = Number(points?.[currentPlayer] || 0);
+  const getPlayerXP = (playerId) => getFreePassXPForPlayer(passXP || {}, playerId) + getPremiumPassXPForPlayer(passXP || {}, playerId, !!points?.[`${playerId}_premium`]);
+  const getPrice = (playerId, untilTs = Date.now()) => {
+    const pg = (stats||[]).filter(g => g.playerId === playerId && safeDateObj(g.ts||g.date).getTime() <= untilTs);
+    const wins = pg.filter(gameIsWin).length;
+    const xp = getPlayerXP(playerId);
+    return Math.max(10, Math.round(STOCK_BASE_PRICE + wins * 8 + Math.floor(xp/100) * 4));
   };
-
-const getStockPriceHistory = (playerId) => {
-    const pg = stats
-      .filter(g => g.playerId === playerId && g.mode === "3v3")
-      .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-    if (pg.length < 2) return null; // not enough points for a real chart
-
-    const allAvgGoalsRunning = [];
-    const history = pg.map((g, i) => {
-      const upToHere = pg.slice(0, i + 1);
-      const weekStart = getWeekStart();
-      const weekGames = upToHere.filter(gg => new Date(gg.ts) >= weekStart);
-      const allAvgGoals = upToHere.reduce((s, gg) => s + (gg.goals || 0), 0) / upToHere.length;
-      const weekAvgGoals = weekGames.length
-        ? weekGames.reduce((s, gg) => s + (gg.goals || 0), 0) / weekGames.length
-        : allAvgGoals;
-      const wins = upToHere.filter(gg => gg.ourScore > gg.theirScore).length;
-      const winRate = wins / upToHere.length;
-      const weekWins = weekGames.filter(gg => gg.ourScore > gg.theirScore).length;
-      const weekWinRate = weekGames.length ? weekWins / weekGames.length : winRate;
-      const price = Math.round(STOCK_BASE_PRICE * (1 + (weekWinRate - 0.5) * 1.5 + (weekAvgGoals - allAvgGoals) * 0.2));
-      return Math.max(10, Math.min(500, price));
-    });
-    return history;
+  const getHistory = (playerId) => {
+    const now = Date.now();
+    const days = range === "1d" ? 1 : range === "14d" ? 14 : range === "28d" ? 28 : 7;
+    const span = days * DAY_MS;
+    const start = now - span;
+    const games = (stats||[]).filter(g=>g.playerId===playerId && safeDateObj(g.ts||g.date).getTime()>=start).sort((a,b)=>safeDateObj(a.ts||a.date)-safeDateObj(b.ts||b.date));
+    const pts = [{ts:new Date(start).toISOString(), price:getPrice(playerId,start)}];
+    games.forEach(g=>pts.push({ts:g.ts||g.date, price:getPrice(playerId,safeDateObj(g.ts||g.date).getTime())}));
+    pts.push({ts:new Date().toISOString(), price:getPrice(playerId)});
+    return pts;
   };
-  const getPriceChange = (playerId) => {
-    const current = getStockPrice(playerId);
-    const prev = stocks?.[playerId+"_prevPrice"] || STOCK_BASE_PRICE;
-    return { change: current - prev, pct: (((current - prev) / prev) * 100).toFixed(1) };
+  const holdingFor = (pid) => {
+    const raw = stocks?.[`${currentPlayer}_${pid}`];
+    if (typeof raw === "number") return { shares:raw, invested:raw * getPrice(pid), avg:raw ? getPrice(pid) : 0 };
+    if (raw && typeof raw === "object") return { shares:Number(raw.shares)||0, invested:Number(raw.invested)||0, avg:Number(raw.avg)||((Number(raw.invested)||0)/Math.max(Number(raw.shares)||0,1)) };
+    return { shares:0, invested:0, avg:0 };
   };
-
-  const invest = async (targetId) => {
-    if (myPoints < investAmount) return;
-    const price = getStockPrice(targetId);
-    const shares = investAmount / price;
-    const existing = stocks?.[currentPlayer+"_"+targetId] || { shares: 0, invested: 0 };
-    const upd = {
-      ...stocks,
-      [currentPlayer+"_"+targetId]: { shares: existing.shares + shares, invested: existing.invested + investAmount },
-      [targetId+"_prevPrice"]: price,
-    };
-    setStocks(upd); await storeSet("stocks", upd);
-    const updPts = { ...points, [currentPlayer]: myPoints - investAmount };
-    setPoints(updPts); await storeSet("points", updPts);
-    setResult({ action: "bought", amount: investAmount, player: PLAYERS.find(p=>p.id===targetId)?.name });
-    setTimeout(() => setResult(null), 3000);
+  const buy = async(pid) => {
+    const price = getPrice(pid); const shares = Math.max(0, Number(amount)||0) / price;
+    if (!shares || myPoints < amount) return;
+    const h=holdingFor(pid); const nextH={ shares:h.shares+shares, invested:h.invested+Number(amount), avg:(h.invested+Number(amount))/(h.shares+shares) };
+    const upd={...(stocks||{}), [`${currentPlayer}_${pid}`]:nextH, [`${pid}_prevPrice`]:price};
+    const pts={...(points||{}), [currentPlayer]:myPoints-Number(amount)};
+    setStocks(upd); setPoints(pts); await storeSetWithPush("stocks",upd); await storeSetWithPush("points",pts);
   };
-
-  const cashOut = async (targetId) => {
-    const holding = stocks?.[currentPlayer+"_"+targetId];
-    if (!holding || holding.shares <= 0) return;
-    const currentPrice = getStockPrice(targetId);
-    const value = Math.round(holding.shares * currentPrice);
-    const profit = value - holding.invested;
-    const upd = { ...stocks, [currentPlayer+"_"+targetId]: { shares: 0, invested: 0 }, [targetId+"_prevPrice"]: currentPrice };
-    setStocks(upd); await storeSet("stocks", upd);
-    const updPts = { ...points, [currentPlayer]: myPoints + value };
-    setPoints(updPts); await storeSet("points", updPts);
-    setResult({ action: "sold", value, profit, player: PLAYERS.find(p=>p.id===targetId)?.name });
-    setTimeout(() => setResult(null), 3000);
+  const sell = async(pid, fraction=1) => {
+    const h=holdingFor(pid); if(!h.shares) return;
+    const sellShares=h.shares*fraction; const price=getPrice(pid); const value=Math.round(sellShares*price); const remainingShares=h.shares-sellShares; const remainingInvested=h.invested*(remainingShares/Math.max(h.shares,1));
+    const nextH={ shares:remainingShares, invested:remainingInvested, avg:remainingShares?remainingInvested/remainingShares:0 };
+    const upd={...(stocks||{}), [`${currentPlayer}_${pid}`]:nextH, [`${pid}_prevPrice`]:price};
+    const pts={...(points||{}), [currentPlayer]:myPoints+value};
+    setStocks(upd); setPoints(pts); await storeSetWithPush("stocks",upd); await storeSetWithPush("points",pts);
   };
-
-  return (
-    <div className="bb-tab-content" style={s.tabContent}>
-      <div style={{fontSize:11,color:"#4A5066",marginBottom:16,lineHeight:1.5}}>invest points into teammates before matches. if they pop off this week their stock rises and you profit. if they choke you lose.</div>
-
-      {result && (
-        <div style={{background:result.profit>=0||result.action==="bought"?"rgba(124,255,178,0.08)":"rgba(255,92,138,0.08)",border:`1px solid ${result.profit>=0||result.action==="bought"?"rgba(124,255,178,0.3)":"rgba(255,92,138,0.3)"}`,borderRadius:14,padding:14,marginBottom:16,textAlign:"center"}}>
-          {result.action==="bought" ? (
-            <div style={{fontSize:13,fontWeight:700,color:"#7CFFB2"}}>invested {result.amount} pts in {result.player} 📈</div>
-          ) : (
-            <>
-              <div style={{fontSize:13,fontWeight:700,color:result.profit>=0?"#7CFFB2":"#FF5C8A"}}>cashed out {result.player} for {result.value} pts</div>
-              <div style={{fontSize:12,color:"#8B92A8",marginTop:4}}>{result.profit>=0?"+":""}{result.profit} pts profit</div>
-            </>
-          )}
-        </div>
-      )}
-
-      <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:16,border:"1px solid rgba(255,255,255,0.05)"}}>
-        <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:10}}>INVEST AMOUNT</div>
-        <div style={{display:"flex",gap:8}}>
-          {[10,25,50,100].map(amt=>(
-            <button key={amt} onClick={()=>setInvestAmount(amt)} className="bb-pressable"
-              style={{flex:1,background:investAmount===amt?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:8,padding:"8px 0",fontSize:11,fontWeight:700,color:investAmount===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>
-              {amt}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {PLAYERS.filter(p => p.id !== currentPlayer).map(player => {
-        const price = getStockPrice(player.id);
-        const { change, pct } = getPriceChange(player.id);
-        const holding = stocks?.[currentPlayer+"_"+player.id];
-        const hasShares = holding?.shares > 0;
-        const currentValue = hasShares ? Math.round(holding.shares * price) : 0;
-        const profit = hasShares ? currentValue - holding.invested : 0;
-        const pg = stats.filter(g => g.playerId === player.id && g.mode === "3v3");
-        const weekStart = getWeekStart();
-        const weekGames = pg.filter(g => new Date(g.ts) >= weekStart);
-
-        return (
-          <div key={player.id} style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"16px",marginBottom:14,border:`1px solid ${player.color}22`}}>
-           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:10,height:10,borderRadius:99,background:player.color,boxShadow:`0 0 8px ${player.color}99`}}/>
-                <span style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:player.color}}>{player.name}</span>
-              </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"#E8ECF4"}}>{price}<span style={{fontSize:11,color:"#4A5066",marginLeft:2}}>pts</span></div>
-                <div style={{fontSize:11,fontWeight:700,color:change>=0?"#7CFFB2":"#FF5C8A"}}>{change>=0?"▲":"▼"} {Math.abs(change)} ({pct}%)</div>
-              </div>
-            </div>
-
-            <div style={{marginBottom:12, background:"rgba(255,255,255,0.02)", borderRadius:10, padding:"8px 4px"}}>
-              <StockTrendLine priceHistory={getStockPriceHistory(player.id)} color={change>=0?"#7CFFB2":"#FF5C8A"} width={280} height={70}/>
-            </div>
-
-            <div style={{display:"flex",gap:8,marginBottom:12}}>
-              <div style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px",textAlign:"center"}}>
-                <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2}}>THIS WEEK</div>
-                <div style={{fontSize:13,fontWeight:700,color:player.color}}>{weekGames.length}g</div>
-              </div>
-              <div style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px",textAlign:"center"}}>
-                <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2}}>WIN RATE</div>
-                <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4"}}>{weekGames.length?Math.round(weekGames.filter(g=>g.ourScore>g.theirScore).length/weekGames.length*100):0}%</div>
-              </div>
-              <div style={{flex:1,background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px",textAlign:"center"}}>
-                <div style={{fontSize:9,color:"#4A5066",fontWeight:700,marginBottom:2}}>AVG GOALS</div>
-                <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4"}}>{weekGames.length?(weekGames.reduce((s,g)=>s+(g.goals||0),0)/weekGames.length).toFixed(1):0}</div>
-              </div>
-            </div>
-
-            {hasShares && (
-              <div style={{background:profit>=0?"rgba(124,255,178,0.06)":"rgba(255,92,138,0.06)",border:`1px solid ${profit>=0?"rgba(124,255,178,0.15)":"rgba(255,92,138,0.1)"}`,borderRadius:10,padding:"10px 12px",marginBottom:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <div>
-                    <div style={{fontSize:10,color:"#4A5066",marginBottom:2}}>YOUR POSITION</div>
-                    <div style={{fontSize:13,fontWeight:700,color:"#E8ECF4"}}>{holding.shares.toFixed(3)} shares · invested {holding.invested} pts</div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:13,fontWeight:700,color:profit>=0?"#7CFFB2":"#FF5C8A"}}>{currentValue} pts</div>
-                    <div style={{fontSize:11,color:profit>=0?"#7CFFB2":"#FF5C8A"}}>{profit>=0?"+":""}{profit} profit</div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div style={{display:"flex",gap:8}}>
-              <button onClick={()=>invest(player.id)} disabled={myPoints<investAmount} className="bb-pressable bb-glow-lime"
-                style={{flex:1,background:myPoints>=investAmount?"rgba(184,255,77,0.1)":"rgba(255,255,255,0.03)",border:`1px solid ${myPoints>=investAmount?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:myPoints>=investAmount?"#B8FF4D":"#4A5066",cursor:myPoints>=investAmount?"pointer":"default"}}>
-                📈 buy {investAmount} pts
-              </button>
-              {hasShares && (
-                <button onClick={()=>cashOut(player.id)} className="bb-pressable"
-                  style={{flex:1,background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.3)",borderRadius:10,padding:"10px 0",fontSize:12,fontWeight:700,color:"#FF5C8A",cursor:"pointer"}}>
-                  💰 cash out {currentValue} pts
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
+  const selected = PLAYERS.find(p=>p.id===selectedId) || PLAYERS[0];
+  const price = getPrice(selected.id); const hist=getHistory(selected.id); const h=holdingFor(selected.id); const value=Math.round(h.shares*price); const pnl=value-h.invested;
+  return <div className="bb-tab-content" style={s.tabContent}>
+    <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>portfolio</div>
+    <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginBottom:12}}>buy into player performance. prices move from wins and pass XP only.</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:12}}>{PLAYERS.map(p=>{ const hp=holdingFor(p.id); const val=Math.round(hp.shares*getPrice(p.id)); return <button key={p.id} onClick={()=>setSelectedId(p.id)} className="bb-pressable" style={{background:selectedId===p.id?bbAlpha(p.color,.14):"rgba(255,255,255,.04)",border:`1px solid ${selectedId===p.id?bbAlpha(p.color,.32):"rgba(255,255,255,.08)"}`,borderRadius:14,padding:10,textAlign:"left",color:"#E8ECF4"}}><div style={{fontSize:10,color:p.color,fontWeight:900}}>{p.name}</div><div style={{fontSize:16,fontWeight:900,marginTop:3}}>{val}</div><div style={{fontSize:9,color:"#8B92A8"}}>{hp.shares.toFixed(2)} shares</div></button>})}</div>
+    <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:`1px solid ${bbAlpha(selected.color,.24)}`,borderRadius:20,padding:14,marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}><div><div style={{fontSize:10,color:selected.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>stock detail</div><div style={{fontSize:20,color:"#E8ECF4",fontWeight:900}}>{selected.name}</div></div><div style={{textAlign:"right"}}><div style={{fontSize:22,color:"#E8ECF4",fontWeight:900}}>{price}</div><div style={{fontSize:10,color:"#8B92A8"}}>pts/share</div></div></div>
+      <div style={{display:"flex",gap:7,marginBottom:10}}>{[["1d","1 day"],["7d","7 day"],["14d","14 day"],["28d","28 day"]].map(([r,label])=><button key={r} onClick={()=>setRange(r)} style={{flex:1,background:range===r?selected.color:"rgba(255,255,255,.05)",border:"none",borderRadius:10,padding:8,color:range===r?"#06070D":"#8B92A8",fontSize:10,fontWeight:900}}>{label}</button>)}</div>
+      <MiniTrendGraph points={hist} color={selected.color} height={132} showLabels/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>SHARES</div><div style={{fontSize:15,color:"#E8ECF4",fontWeight:900}}>{h.shares.toFixed(2)}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>VALUE</div><div style={{fontSize:15,color:"#E8ECF4",fontWeight:900}}>{value}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>P/L</div><div style={{fontSize:15,color:pnl>=0?"#7CFFB2":"#FF5C8A",fontWeight:900}}>{pnl>=0?"+":""}{Math.round(pnl)}</div></div></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:12}}><input type="number" value={amount} onChange={e=>setAmount(e.target.value)} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:"10px",color:"#E8ECF4",fontSize:12}}/><button onClick={()=>buy(selected.id)} className="bb-pressable" style={{background:"#B8FF4D",border:"none",borderRadius:12,color:"#06070D",fontWeight:1000}}>buy</button><button onClick={()=>sell(selected.id,.5)} disabled={!h.shares} className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.28)",borderRadius:12,color:h.shares?"#FFD166":"#4A5066",fontWeight:900,padding:10}}>sell half</button><button onClick={()=>sell(selected.id,1)} disabled={!h.shares} className="bb-pressable" style={{background:"rgba(255,92,138,.12)",border:"1px solid rgba(255,92,138,.28)",borderRadius:12,color:h.shares?"#FF5C8A":"#4A5066",fontWeight:900,padding:10}}>sell all</button></div>
     </div>
-  );
+  </div>;
 }
 
-          
 // ===================== RLCS Trivia =====================
 const RLCS_QUESTIONS = [
   { q:"Which team won the RLCS 2022 World Championship?", options:["Team BDS","Moist Esports","G2 Esports","NRG"], answer:0 },
@@ -11119,11 +15822,17 @@ function WeeklyRecapTrivia({ stats, currentPlayer, points, setPoints }) {
 }          
           
           
-function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets, streamProfiles = {} }) {
+function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets, streamProfiles = {}, activeRace, setActiveRace, raceStart, setRaceStart, appCustomizer }) {
 const [section, setSection] = useState("wheel");
+useEffect(() => {
+  // Games now has its own top nav tab, so Boost no longer opens the old embedded Games panel.
+  try { localStorage.removeItem("bb_open_games_active"); } catch (_) {}
+}, []);
 const [parlayLegs, setParlayLegs] = useState([]);
 const [parlayWager, setParlayWager] = useState(50);
 const [showParlay, setShowParlay] = useState(false);
+const [useWeeklyMultiplier, setUseWeeklyMultiplier] = useState(false);
+const [useSplitParlay, setUseSplitParlay] = useState(false);
 const [slotSpinning, setSlotSpinning] = useState(false);
 const [slotReels, setSlotReels] = useState(["🚀","🚀","🚀"]);
 const [slotResult, setSlotResult] = useState(null);
@@ -11132,10 +15841,16 @@ const [slotDisplayReels, setSlotDisplayReels] = useState(["🚀","🚀","🚀"])
 const todayKey = dateKey(todayAtMidnight());
 const spinCountKey = `spins_${currentPlayer}_${todayKey}`;
 const slotCountKey = `slots_${currentPlayer}_${todayKey}`;
-const spinsUsed = points?.[spinCountKey] || 0;
-const slotsUsed = points?.[slotCountKey] || 0;
+const wheelResetAtMs = getBoostUseResetAt(points, currentPlayer, "wheel");
+const slotResetAtMs = getBoostUseResetAt(points, currentPlayer, "slot");
+const nowMs = Date.now();
+const spinsUsed = wheelResetAtMs && wheelResetAtMs <= nowMs ? 0 : (points?.[spinCountKey] || 0);
+const slotsUsed = slotResetAtMs && slotResetAtMs <= nowMs ? 0 : (points?.[slotCountKey] || 0);
 const spinsLeft = Math.max(0, DAILY_SPINS_MAX + (points?.[currentPlayer+"_bonusSpins"] || 0) - spinsUsed);
 const slotsLeft = Math.max(0, DAILY_SLOTS_MAX + (points?.[currentPlayer+"_bonusSlots"] || 0) - slotsUsed);
+const wheelResetLabel = spinsLeft <= 0 && wheelResetAtMs ? compactTimeLeft(wheelResetAtMs - nowMs) : "";
+const slotResetLabel = slotsLeft <= 0 && slotResetAtMs ? compactTimeLeft(slotResetAtMs - nowMs) : "";
+const shopResetLabel = compactTimeLeft(safeDateObj(nextNoonEasternIso()).getTime() - nowMs);
   const [wager, setWager] = useState(10);
   const [spinning, setSpinning] = useState(false);
   const [spinResult, setSpinResult] = useState(null);
@@ -11151,6 +15866,15 @@ const [propDuoFilter, setPropDuoFilter] = useState("");
 const [showPropStream, setShowPropStream] = useState(false);
 const [propStreamMode, setPropStreamMode] = useState("single");
 const [propOneVOneCoStreamPlayerId, setPropOneVOneCoStreamPlayerId] = useState(() => PLAYERS.find(p => p.id !== currentPlayer)?.id || "p1");
+const [propMatchLocked, setPropMatchLocked] = useState(false);
+const [showCustomPropBuilder, setShowCustomPropBuilder] = useState(false);
+const [customPropField, setCustomPropField] = useState("goals");
+const [customPropLine, setCustomPropLine] = useState(1.5);
+const [rivalryMode, setRivalryMode] = useState("3v3");
+const [rivalryField, setRivalryField] = useState("match_winner");
+const [rivalryPickId, setRivalryPickId] = useState(PLAYERS[0]?.id || "p1");
+const [rivalryOpponentId, setRivalryOpponentId] = useState(PLAYERS[1]?.id || "p2");
+const [rivalryWager, setRivalryWager] = useState(50);
   const [lineIndexByProp, setLineIndexByProp] = useState({}); // { [propId]: index into lineOptions }
 const [predWager, setPredWager] = useState(10);
 const [selectedPred, setSelectedPred] = useState(null);
@@ -11158,6 +15882,7 @@ const [predSide, setPredSide] = useState(null);
 
   const myPoints = points?.[currentPlayer] || 0;
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
+  const customProps = Array.isArray(points?.__customProps) ? points.__customProps : [];
   const PROPS_PARLAY_WAGER_PRESETS = [50, 100, 250, 500];
   useEffect(() => { if (section === "predict" || section === "parlay") setSection("props"); }, [section]);
 
@@ -11198,7 +15923,7 @@ const [predSide, setPredSide] = useState(null);
     .map(p => ({ player: p, handle: getPropTwitchHandle(p.id) }))
     .filter(x => x.handle);
   const canWatchPropStream = activePropStreamHandles.length > 0;
-  useEffect(() => { setShowPropStream(false); }, [activePropPlayer?.id, propModeFilter, activePropDuo?.id, propStreamMode, propOneVOneCoStreamPlayerId]);
+  useEffect(() => { setShowPropStream(false); setPropMatchLocked(false); }, [activePropPlayer?.id, propModeFilter, activePropDuo?.id, propStreamMode, propOneVOneCoStreamPlayerId]);
 
   const getPropHistory = (playerId, mode, duo = null) => sanitizeStatsForRender(stats).filter(g => {
     if (!g || g.playerId !== playerId) return false;
@@ -11240,14 +15965,37 @@ const [predSide, setPredSide] = useState(null);
       }));
   };
 
+  const getPlayerAdjustedPropLines = (historyValues, fallbackLines = []) => {
+    const values = historyValues.map(Number).filter(Number.isFinite);
+    if (!values.length) return fallbackLines.slice(0, 6);
+    const avg = values.reduce((s, v) => s + v, 0) / values.length;
+    const max = Math.max(...values, avg);
+    const center = Math.max(0, Math.floor(avg));
+    const low = Math.max(0, center - 2);
+    const high = Math.max(low + 4, Math.ceil(avg) + 3, Math.min(Math.ceil(max) + 1, center + 5));
+    const lines = [];
+    for (let n = low; n <= high; n++) lines.push(n + 0.5);
+    const trimmed = lines
+      .sort((a,b) => Math.abs(a - avg) - Math.abs(b - avg))
+      .slice(0, 7)
+      .sort((a,b) => a - b);
+    return trimmed.length ? trimmed : fallbackLines.slice(0, 6);
+  };
+
   const makeLineOptions = (historyValues, lineVals) => {
-    const count = historyValues.length || 1;
-    return lineVals.map(line => {
-      const overCount = historyValues.filter(v => Number(v) > line).length;
-      const overPct = historyValues.length > 0 ? overCount / count : 0.5;
-      const underPct = 1 - overPct;
-      const overOdds = calcOdds(Math.max(0.08, Math.min(0.92, overPct)));
-      const underOdds = calcOdds(Math.max(0.08, Math.min(0.92, underPct)));
+    const values = historyValues.map(Number).filter(Number.isFinite);
+    const count = Math.max(values.length, 1);
+    const avg = values.length ? values.reduce((s,v)=>s+v,0) / values.length : 1;
+    return lineVals.map((line) => {
+      const overCount = values.filter(v => v > line).length;
+      const rawPct = values.length > 0 ? overCount / count : Math.max(0.08, Math.min(0.92, 1 / (1 + Math.exp((line - avg) * 1.15))));
+      // Smooth tiny samples so the odds follow this player's real history without swinging insanely on 1 game.
+      const priorPct = Math.max(0.06, Math.min(0.94, 1 / (1 + Math.exp((line - avg) * 1.25))));
+      const weight = Math.min(values.length / 10, 0.82);
+      const overPct = Math.max(0.04, Math.min(0.96, rawPct * weight + priorPct * (1 - weight)));
+      const underPct = Math.max(0.04, Math.min(0.96, 1 - overPct));
+      const overOdds = calcOdds(overPct);
+      const underOdds = calcOdds(underPct);
       return { line, overPct, underPct, overOdds, underOdds };
     });
   };
@@ -11261,6 +16009,7 @@ const [predSide, setPredSide] = useState(null);
 
     const history = getPropHistory(player.id, mode, mode === "2v2" ? activePropDuo : null);
     Object.entries(PROP_FIELD_CONFIG).forEach(([field, cfg]) => {
+      if (mode === "1v1" && field === "assists") return;
       if (field === "demos" && mode !== "1v1") return;
       const values = history.map(g => Number(g[field]) || 0);
       const avg = values.length ? values.reduce((s, v) => s + v, 0) / values.length : 0;
@@ -11277,7 +16026,7 @@ const [predSide, setPredSide] = useState(null);
         avg: avg.toFixed(1),
         gamesPlayed: history.length,
         targetText: mode === "2v2" && activePropDuo ? `next logged 2v2 game with ${activePropDuo.label}` : `next logged ${mode} game`,
-        lineOptions: makeLineOptions(values, cfg.lines),
+        lineOptions: makeLineOptions(values, getPlayerAdjustedPropLines(values, cfg.lines)),
       });
     });
 
@@ -11302,14 +16051,132 @@ const [predSide, setPredSide] = useState(null);
           avg: avg.toFixed(1),
           gamesPlayed: values.length,
           targetText: `next logged 2v2 game with ${activePropDuo.label}`,
-          lineOptions: makeLineOptions(values, cfg.lines.map(v => v + 1)),
+          lineOptions: makeLineOptions(values, getPlayerAdjustedPropLines(values, cfg.lines.map(v => v + 1))),
         });
       });
     }
 
+    customProps
+      .filter(cp => cp && cp.playerId === player.id && normalizeGameMode(cp.mode) === mode)
+      .slice(0, CUSTOM_PROP_LIMIT)
+      .forEach(cp => {
+        const cfg = PROP_FIELD_CONFIG[cp.field] || RIVALRY_FIELDS.find(f => f.id === cp.field) || { label: cp.field || "stat", lines:[0.5,1.5,2.5] };
+        const values = history.map(g => Number(g[cp.field]) || 0);
+        const line = Number(cp.line);
+        if (!Number.isFinite(line)) return;
+        const avg = values.length ? values.reduce((sum, v) => sum + v, 0) / values.length : 0;
+        cards.unshift({
+          id: `custom_${cp.id}`,
+          customProp:true,
+          customPropOwnerId: cp.createdBy || "",
+          playerId: player.id,
+          playerName: player.name,
+          playerColor: player.color,
+          mode,
+          duoIds: null,
+          duoLabel: "",
+          field: cp.field,
+          fieldLabel: cfg.label || cp.field,
+          avg: avg.toFixed(1),
+          gamesPlayed: history.length,
+          targetText: `custom prop · next logged ${mode} game`,
+          lineOptions: makeLineOptions(values, [line]),
+        });
+      });
+
     return cards;
   };
   const props = buildProps();
+
+const todayBoostCandidates = props.flatMap(card => [`${card.id}_over`, `${card.id}_under`]);
+const boostedBetKey = todayBoostCandidates.length ? todayBoostCandidates[stableHashString(`${dateKey(new Date())}_boosted_odds`) % todayBoostCandidates.length] : "";
+const getPropOddsForSide = (card, current, lineIdx, side) => {
+  const raw = side === "over" ? current?.overOdds : current?.underOdds;
+  return boostOddsForDaily(raw, boostedBetKey === `${card?.id}_${side}`);
+};
+const isBoostedPropSide = (card, lineIdx, side) => boostedBetKey === `${card?.id}_${side}`;
+const getStatLabel = (field) => (PROP_FIELD_CONFIG[field]?.label || RIVALRY_FIELDS.find(f => f.id === field)?.label || field || "stat");
+const addCustomProp = async () => {
+  bbHaptic(14);
+  const player = activePropPlayer;
+  const field = customPropField || "goals";
+  const line = Math.max(0.5, Math.min(999, Number(customPropLine) || 0.5));
+  if (!player) return;
+  const item = {
+    id:`${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+    playerId:player.id,
+    playerName:player.name,
+    mode:normalizeGameMode(propModeFilter || "3v3"),
+    field,
+    fieldLabel:getStatLabel(field),
+    line,
+    createdBy:currentPlayer,
+    createdAt:new Date().toISOString(),
+  };
+  const nextPoints = { ...points, __customProps:[item, ...customProps].slice(0, CUSTOM_PROP_LIMIT) };
+  setPoints(nextPoints);
+  await storeSet("points", nextPoints);
+  setShowCustomPropBuilder(false);
+};
+const rivalryPlayers = PLAYERS;
+const safeRivalryPick = rivalryPlayers.find(p => p.id === rivalryPickId) || rivalryPlayers[0];
+const safeRivalryOpp = rivalryPlayers.find(p => p.id === rivalryOpponentId && p.id !== safeRivalryPick?.id) || rivalryPlayers.find(p => p.id !== safeRivalryPick?.id) || rivalryPlayers[1];
+const getRivalryOdds = (pickId, opponentId, field, mode) => {
+  const historyFor = (pid) => sanitizeStatsForRender(stats).filter(g => g.playerId === pid && normalizeGameMode(g.mode) === normalizeGameMode(mode)).slice(-20);
+  if (field === "match_winner") {
+    const rateFor = (pid) => { const h=historyFor(pid); return h.length ? h.filter(gameIsWin).length / h.length : 0.5; };
+    const a = rateFor(pickId); const b = rateFor(opponentId);
+    const pct = Math.max(0.18, Math.min(0.82, 0.5 + (a-b)*0.8));
+    return { odds:calcOdds(pct), avg:Math.round(a*100), oppAvg:Math.round(b*100), pct };
+  }
+  const avgFor = (pid) => {
+    const vals = historyFor(pid).map(g => Number(g[field]) || 0);
+    return vals.length ? vals.reduce((a,b)=>a+b,0) / vals.length : 0;
+  };
+  const a = avgFor(pickId);
+  const b = avgFor(opponentId);
+  const pct = Math.max(0.18, Math.min(0.82, 1 / (1 + Math.exp(-(a - b) * 0.7))));
+  return { odds:calcOdds(pct), avg:a, oppAvg:b, pct };
+};
+const placeRivalryBet = async (pickId = safeRivalryPick?.id) => {
+  bbHaptic(14);
+  const pick = PLAYERS.find(p => p.id === pickId);
+  const opp = PLAYERS.find(p => p.id === (pickId === safeRivalryPick?.id ? safeRivalryOpp?.id : safeRivalryPick?.id));
+  const wagerAmt = clampWager(rivalryWager, 0);
+  if (!pick || !opp || pick.id === opp.id || wagerAmt < 1 || myPoints < wagerAmt) return;
+  const oddsData = getRivalryOdds(pick.id, opp.id, rivalryField, rivalryMode);
+  const payout = calcPayout(wagerAmt, oddsData.odds.decimal);
+  const statKeysAtPlacement = sanitizeStatsForRender(stats).filter(g => normalizeGameMode(g.mode) === normalizeGameMode(rivalryMode)).map(getBetGameKey).filter(Boolean);
+  const bet = {
+    id:Date.now().toString(),
+    bettorId:currentPlayer,
+    type:"rivalry",
+    pickPlayerId:pick.id,
+    pickPlayerName:pick.name,
+    opponentPlayerId:opp.id,
+    opponentPlayerName:opp.name,
+    playerId:pick.id,
+    playerName:pick.name,
+    field:rivalryField,
+    fieldLabel:rivalryField === "match_winner" ? "win" : getStatLabel(rivalryField),
+    wager:wagerAmt,
+    payout,
+    odds:oddsData.odds.american,
+    status:"open",
+    placedAt:new Date().toISOString(),
+    settleAt:nextTenAmIso(),
+    targetMode:normalizeGameMode(rivalryMode),
+    targetText:rivalryField === "match_winner" ? `will ${pick.name} win next ${normalizeGameMode(rivalryMode)} game?` : `next logged ${normalizeGameMode(rivalryMode)} games for both players`,
+    statKeysAtPlacement,
+  };
+  const nextPoints = { ...points, [currentPlayer]: myPoints - wagerAmt };
+  setPoints(nextPoints);
+  await storeSet("points", nextPoints);
+  const nextBets = [...(bets || []), bet];
+  setBets(nextBets);
+  await storeSet("bets", nextBets);
+  await notifyPropBetPlacedPush(bet);
+};
 
 const getLegPropKey = (leg) => leg.propKey || `${leg.playerId}_${leg.field}_${leg.line}`;
 const toggleParlayLeg = (leg) => {
@@ -11320,7 +16187,7 @@ const toggleParlayLeg = (leg) => {
 
     // only one side from the same prop can be active at once
     const withoutSameProp = prev.filter(l => getLegPropKey(l) !== getLegPropKey(leg));
-    if (withoutSameProp.length >= 4) return withoutSameProp;
+    if (withoutSameProp.length >= PARLAY_MAX_LEGS) return withoutSameProp;
     return [...withoutSameProp, leg];
   });
 };
@@ -11332,8 +16199,16 @@ const getParlayLegDecimalOdds = (odds) => {
   if (!Number.isFinite(numeric) || numeric === 0) return 2;
   return raw.startsWith("+") ? (numeric / 100) + 1 : (100 / Math.abs(numeric)) + 1;
 };
-const propsParlayMultiplier = parlayLegs.reduce((m, leg) => m * Math.min(getParlayLegDecimalOdds(leg.odds), 3), 1);
-const propsParlayPayout = Math.round(Number(parlayWager || 0) * propsParlayMultiplier);
+const multiplierWeekKey = `multiplier_${currentPlayer}_${Math.floor(Date.now()/WEEK_MS)}`;
+const multipliersUsedThisWeek = Number(points?.[multiplierWeekKey] || 0);
+const canUseWeeklyMultiplier = multipliersUsedThisWeek < 3;
+const basePropsParlayMultiplier = parlayLegs.reduce((m, leg) => m * Math.min(getParlayLegDecimalOdds(leg.odds), 4), 1);
+const weeklyMultiplierBoost = useWeeklyMultiplier && canUseWeeklyMultiplier ? 1.35 : 1;
+const propsParlayMultiplier = basePropsParlayMultiplier * weeklyMultiplierBoost;
+const propsParlayFullPayout = capParlayPayout(Math.round(Number(parlayWager || 0) * propsParlayMultiplier));
+const propsParlaySplitMaxPayout = calcSplitParlayAwardFromPayout(propsParlayFullPayout, parlayLegs.length, parlayLegs.length);
+const propsParlaySplitPerLeg = calcSplitParlayAwardFromPayout(propsParlayFullPayout, 1, parlayLegs.length);
+const propsParlayPayout = useSplitParlay ? propsParlaySplitMaxPayout : propsParlayFullPayout;
 const placeOwnPropsParlay = async () => {
   bbHaptic([14, 35, 18]);
   const cleanWager = Number(parlayWager) || 0;
@@ -11351,25 +16226,42 @@ const placeOwnPropsParlay = async () => {
       line: l.line,
       side: l.side,
       odds: l.odds,
+      oddsBoosted: !!l.oddsBoosted,
       targetMode: l.targetMode || l.mode || "3v3",
+      targetText: l.targetText || "",
       duoIds: l.duoIds || null,
       duoLabel: l.duoLabel || "",
       combined: !!l.combined,
+      statKeysAtPlacement: l.statKeysAtPlacement || getBetSeenGameKeysForPlacement(stats, {
+        playerId: l.playerId,
+        targetMode: l.targetMode || l.mode || "3v3",
+        duoIds: l.duoIds || null,
+        combined: !!l.combined,
+      }),
     })),
     wager: cleanWager,
     payout: propsParlayPayout,
+    fullPayoutBeforeSplit: propsParlayFullPayout,
+    splitMaxPayout: useSplitParlay ? propsParlaySplitMaxPayout : null,
+    splitPerLegPayout: useSplitParlay ? propsParlaySplitPerLeg : null,
+    payoutCap: getCurrentParlayMaxPayout(),
+    splitPayoutEnabled: useSplitParlay,
     multiplier: propsParlayMultiplier.toFixed(2),
+    baseMultiplier: basePropsParlayMultiplier.toFixed(2),
+    weeklyMultiplierUsed: useWeeklyMultiplier && canUseWeeklyMultiplier,
     status: "open",
     placedAt: new Date().toISOString(),
     settleAt: nextTenAmIso(),
   };
-  const upd = { ...points, [currentPlayer]: myPoints - cleanWager };
+  const upd = { ...points, [currentPlayer]: myPoints - cleanWager, ...(useWeeklyMultiplier && canUseWeeklyMultiplier ? { [multiplierWeekKey]: multipliersUsedThisWeek + 1 } : {}) };
   setPoints(upd); await storeSet("points", upd);
   const updBets = [...(bets || []), parlayBet];
   setBets(updBets); await storeSet("bets", updBets);
   await notifyPropBetPlacedPush(parlayBet);
   setParlayLegs([]);
   setParlayWager(50);
+  setUseWeeklyMultiplier(false);
+  setUseSplitParlay(false);
   setShowParlay(false);
 };
 const renderPropsParlayBuilder = () => (
@@ -11404,10 +16296,18 @@ const renderPropsParlayBuilder = () => (
             </div>
           </div>
           <div style={{flex:1}}>
-            <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>TO WIN</div>
+            <div style={{fontSize:10,color:"#4A5066",marginBottom:4}}>{useSplitParlay ? "MAX SPLIT WIN" : "TO WIN"}</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:"#7CFFB2"}}>{propsParlayPayout}</div>
           </div>
         </div>
+        <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:.6,textTransform:"uppercase",marginTop:10}}>up to {PARLAY_MAX_LEGS} legs</div>
+        {useSplitParlay && parlayLegs.length > 0 && (
+          <div style={{fontSize:10.5,color:"#7CFFB2",fontWeight:900,marginTop:7,lineHeight:1.35}}>
+            split: {propsParlaySplitPerLeg.toLocaleString()} pts per hit leg
+          </div>
+        )}
+        <button onClick={()=>canUseWeeklyMultiplier&&setUseWeeklyMultiplier(v=>!v)} disabled={!canUseWeeklyMultiplier} className="bb-pressable" style={{width:"100%",background:useWeeklyMultiplier?"rgba(255,209,102,0.18)":"rgba(255,255,255,0.05)",border:`1px solid ${useWeeklyMultiplier?"rgba(255,209,102,0.38)":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px",fontSize:11,fontWeight:900,color:useWeeklyMultiplier?"#FFD166":canUseWeeklyMultiplier?"#8B92A8":"#4A5066",cursor:canUseWeeklyMultiplier?"pointer":"default",marginTop:8}}>{useWeeklyMultiplier ? "weekly multiplier ON" : `weekly multiplier OFF · ${Math.max(0,3-multipliersUsedThisWeek)} left`}</button>
+        <button onClick={()=>setUseSplitParlay(v=>!v)} className="bb-pressable" style={{width:"100%",background:useSplitParlay?"rgba(124,255,178,0.14)":"rgba(255,255,255,0.05)",border:`1px solid ${useSplitParlay?"rgba(124,255,178,0.34)":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"10px",fontSize:11,fontWeight:900,color:useSplitParlay?"#7CFFB2":"#8B92A8",cursor:"pointer",marginTop:8}}>{useSplitParlay ? "split payout ON · half max, pays each hit leg" : "split payout OFF · all legs must hit"}</button>
         <button onClick={placeOwnPropsParlay} disabled={parlayLegs.length<2||myPoints<Number(parlayWager)} className="bb-pressable bb-glow-lime bb-force-dark" aria-label="submit parlay" title="submit parlay" style={{...s.primaryBtn,marginTop:12,opacity:parlayLegs.length<2||myPoints<Number(parlayWager)?0.4:1,display:"flex",alignItems:"center",justifyContent:"center",minHeight:48}}>
           <span style={{display:"inline-block",color:"#06070D",fontSize:13,fontWeight:900,letterSpacing:.4,textTransform:"uppercase"}}>submit</span>
         </button>
@@ -11474,11 +16374,13 @@ const spinWheel = async () => {
       const freshPoints = await storeGet("points") || {};
       const currentBalance = Number(freshPoints[currentPlayer] ?? startingPoints) || 0;
       const newPts = Math.max(0, currentBalance - wager + payout);
-      const updatedPoints = {
+      let updatedPoints = {
         ...freshPoints,
         [currentPlayer]: newPts,
         [spinCountKey]: (Number(freshPoints[spinCountKey] ?? spinsUsed) || 0) + 1,
       };
+      const baseWheelTotal = DAILY_SPINS_MAX + (Number(freshPoints[currentPlayer+"_bonusSpins"]) || 0);
+      updatedPoints = withBoostResetStamp(updatedPoints, currentPlayer, "wheel", baseWheelTotal - updatedPoints[spinCountKey]);
 
       setPoints(updatedPoints);
       await storeSet("points", updatedPoints);
@@ -11500,7 +16402,7 @@ const placeBet = async (chosenLine) => {
   const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor(card.lineOptions.length / 2);
   const current = card.lineOptions[lineIdx];
   const line = chosenLine ?? current.line;
-  const odds = propSide === "over" ? current.overOdds : current.underOdds;
+  const odds = getPropOddsForSide(card, current, lineIdx, propSide);
   const payout = calcPayout(safePropWager, odds.decimal);
 
   const bet = {
@@ -11515,6 +16417,8 @@ const placeBet = async (chosenLine) => {
     wager: safePropWager,
     payout,
     odds: odds.american,
+    oddsBoosted: !!odds.boosted,
+    oddsBoostRate: odds.boosted ? DAILY_ODDS_BOOST_RATE : null,
     status: "open",
     placedAt: new Date().toISOString(),
     settleAt: nextTenAmIso(),
@@ -11556,6 +16460,119 @@ const placeBet = async (chosenLine) => {
 
 };
 
+const renderCustomPropBuilder = () => (
+  <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(184,255,77,0.14)",borderRadius:14,padding:12,marginBottom:12}}>
+    <button onClick={()=>setShowCustomPropBuilder(v=>!v)} className="bb-pressable" style={{width:"100%",background:showCustomPropBuilder?"rgba(184,255,77,0.14)":"rgba(255,255,255,0.045)",border:"1px solid rgba(184,255,77,0.22)",borderRadius:11,padding:"10px 11px",fontSize:11,fontWeight:900,color:"#B8FF4D",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <span>custom prop builder</span><span>{showCustomPropBuilder ? "hide" : "+ build"}</span>
+    </button>
+    {showCustomPropBuilder && (
+      <div style={{marginTop:10}}>
+        <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:7}}>build for {activePropPlayer?.name || "player"} · {propModeFilter}</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 96px",gap:8,marginBottom:8}}>
+          <select value={customPropField} onChange={e=>setCustomPropField(e.target.value)} style={{...s.modalInput,height:42}}>
+            {Object.entries(PROP_FIELD_CONFIG).map(([id,cfg]) => <option key={id} value={id}>{cfg.label}</option>)}
+            <option value="score">score</option>
+          </select>
+          <input type="number" step="0.5" min="0.5" inputMode="decimal" value={customPropLine} onChange={e=>setCustomPropLine(e.target.value)} style={{...s.modalInput,height:42,textAlign:"center"}}/>
+        </div>
+        <button onClick={addCustomProp} className="bb-pressable bb-glow-lime bb-force-dark" style={{width:"100%",background:"#B8FF4D",border:"none",borderRadius:11,padding:"11px",fontSize:12,fontWeight:900,color:"#06070D",cursor:"pointer"}}>add custom prop to board</button>
+        <div style={{fontSize:10,color:"#4A5066",marginTop:7,lineHeight:1.35}}>uses the selected player/mode above. everyone can bet it, then you can still move the line before placing.</div>
+      </div>
+    )}
+  </div>
+);
+
+const renderRivalryPicks = () => {
+  const pick = safeRivalryPick;
+  const opp = safeRivalryOpp;
+  const pickOdds = getRivalryOdds(pick?.id, opp?.id, rivalryField, rivalryMode);
+  const oppOdds = getRivalryOdds(opp?.id, pick?.id, rivalryField, rivalryMode);
+  const wagerAmt = clampWager(rivalryWager, 50);
+  return (
+    <div style={{background:"linear-gradient(135deg,#1A1324,#0B0D17)",border:"1px solid rgba(255,209,102,0.18)",borderRadius:14,padding:12,marginBottom:12}}>
+      <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>rivalry picks</div>
+      <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>pick which teammate beats the other in one stat for their next synced {rivalryMode} game.</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+        <select value={pick?.id || ""} onChange={e=>{ setRivalryPickId(e.target.value); if (e.target.value === rivalryOpponentId) setRivalryOpponentId(PLAYERS.find(p=>p.id!==e.target.value)?.id || ""); }} style={{...s.modalInput,height:40}}>
+          {PLAYERS.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={opp?.id || ""} onChange={e=>setRivalryOpponentId(e.target.value)} style={{...s.modalInput,height:40}}>
+          {PLAYERS.filter(p=>p.id!==pick?.id).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 90px",gap:8,marginBottom:10}}>
+        <select value={rivalryField} onChange={e=>setRivalryField(e.target.value)} style={{...s.modalInput,height:40}}>
+          {RIVALRY_FIELDS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+        </select>
+        <select value={rivalryMode} onChange={e=>setRivalryMode(e.target.value)} style={{...s.modalInput,height:40}}>
+          {["1v1","2v2","3v3"].map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input type="number" min="1" max="200" inputMode="numeric" value={rivalryWager} onChange={e=>setRivalryWager(e.target.value)} onBlur={e=>setRivalryWager(clampWager(e.target.value,50))} style={{...s.modalInput,height:40,textAlign:"center"}}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        {[{p:pick,o:opp,data:pickOdds},{p:opp,o:pick,data:oppOdds}].filter(x=>x.p&&x.o).map(x => {
+          const payout = calcPayout(wagerAmt, x.data.odds.decimal);
+          return (
+            <button key={x.p.id} onClick={()=>placeRivalryBet(x.p.id)} disabled={myPoints < wagerAmt} className="bb-pressable" style={{background:`${x.p.color}12`,border:`1px solid ${x.p.color}44`,borderRadius:12,padding:"10px 8px",cursor:myPoints<wagerAmt?"not-allowed":"pointer",opacity:myPoints<wagerAmt?0.45:1,textAlign:"left"}}>
+              <div style={{fontSize:12,fontWeight:900,color:x.p.color,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{x.p.name}</div>
+              <div style={{fontSize:10,color:"#8B92A8",marginTop:3}}>avg {x.data.avg.toFixed(1)} vs {x.data.oppAvg.toFixed(1)}</div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginTop:7}}>
+                <span style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:"#FFD166"}}>{x.data.odds.american}</span>
+                <span style={{fontSize:10,fontWeight:900,color:"#7CFFB2"}}>win {payout}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const renderBetHistorySection = () => {
+  const mine = (bets || []).filter(b => b.bettorId === currentPlayer);
+  const settled = mine.filter(b => b.status && b.status !== "open");
+  const totalWagered = mine.reduce((sum,b)=>sum + (Number(b.wager) || 0), 0);
+  const totalReturned = settled.reduce((sum,b)=>sum + (b.status === "won" ? Number((b.wonAmount ?? b.splitAward ?? b.payout) || 0) : b.status === "void" ? Number(b.wager || 0) : 0), 0);
+  const biggest = settled.filter(b=>b.status==="won").reduce((max,b)=>Math.max(max, Number((b.wonAmount ?? b.splitAward ?? b.payout) || 0)), 0);
+  const parlaySettled = settled.filter(b=>b.isParlay);
+  const parlayWins = parlaySettled.filter(b=>b.status==="won").length;
+  const typeCounts = mine.reduce((acc,b)=>{ const key=b.isParlay?"parlay":b.type==="rivalry"?"rivalry":"prop"; acc[key]=(acc[key]||0)+1; return acc; },{});
+  const favoriteType = Object.entries(typeCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || "none";
+  const modeCounts = mine.reduce((acc,b)=>{ const mode=formatBetModeLabel(b); acc[mode]=(acc[mode]||0)+1; return acc; },{});
+  const bestMode = Object.entries(modeCounts).sort((a,b)=>b[1]-a[1])[0]?.[0] || "none";
+  const net = totalReturned - totalWagered;
+  const statCard = (label, value, sub, color="#E8ECF4") => (
+    <div style={{background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:12}}>
+      <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>{label}</div>
+      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color}}>{value}</div>
+      {sub && <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>{sub}</div>}
+    </div>
+  );
+  return (
+    <div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:16,padding:14,marginBottom:14}}>
+        <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>bet slip history</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          {statCard("total wagered", totalWagered.toLocaleString(), `${mine.length} bets`)}
+          {statCard("returned", totalReturned.toLocaleString(), "wins + voids", "#7CFFB2")}
+          {statCard("net", `${net >= 0 ? "+" : ""}${net.toLocaleString()}`, "after wagers", net >= 0 ? "#7CFFB2" : "#FF5C8A")}
+          {statCard("biggest win", biggest.toLocaleString(), "single slip", "#FFD166")}
+          {statCard("favorite type", favoriteType, `${typeCounts[favoriteType] || 0} slips`, "#A78BFA")}
+          {statCard("best mode", bestMode, "most used mode", "#4D9EFF")}
+        </div>
+        <div style={{marginTop:10,background:"rgba(255,209,102,0.07)",border:"1px solid rgba(255,209,102,0.18)",borderRadius:12,padding:11,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>parlay hit rate</div>
+            <div style={{fontSize:11,color:"#8B92A8",marginTop:3}}>{parlayWins}/{parlaySettled.length} settled parlays</div>
+          </div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:"#FFD166"}}>{parlaySettled.length ? Math.round((parlayWins / parlaySettled.length) * 100) : 0}%</div>
+        </div>
+      </div>
+      <div style={{fontSize:11,color:"#4A5066",lineHeight:1.45}}>history is based on saved bet slips in this app. changing the Parse key does not reset this.</div>
+    </div>
+  );
+};
+
   const segAngle = 360 / WHEEL_SEGMENTS.length;
 
 const noBettingWeek = isEventActive("no_betting");
@@ -11577,22 +16594,21 @@ const noBettingWeek = isEventActive("no_betting");
       {/* Header */}
      <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${playerColor}33`,borderRadius:16,padding:"14px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div>
-          <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>YOUR BALANCE</div>
+          <div style={{fontSize:10,color:"#4A5066",fontWeight:700,letterSpacing:0.8,marginBottom:2}}>{getAppCopy(appCustomizer, "boostBalanceLabel", "YOUR BALANCE")}</div>
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,fontWeight:600,color:playerColor}}>{spinning && spinStartPoints != null ? spinStartPoints : myPoints}<span style={{fontSize:12,color:"#4A5066",marginLeft:4}}>pts</span></div>
-        <div style={{display:"flex",gap:12,marginTop:6}}>
-          <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:spinsLeft>0?playerColor:"#FF5C8A",fontWeight:700}}>{spinsLeft}</span> spins left</div>
-          <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:slotsLeft>0?"#A78BFA":"#FF5C8A",fontWeight:700}}>{slotsLeft}</span> slots left</div>
+        <div style={{display:"flex",gap:12,marginTop:6,flexWrap:"wrap"}}>
+          <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:spinsLeft>0?playerColor:"#FF5C8A",fontWeight:700}}>{spinsLeft}</span> spins left{spinsLeft <= 0 && wheelResetLabel ? ` · reset ${wheelResetLabel}` : ""}</div>
+          <div style={{fontSize:11,color:"#4A5066"}}><span style={{color:slotsLeft>0?"#A78BFA":"#FF5C8A",fontWeight:700}}>{slotsLeft}</span> slots left{slotsLeft <= 0 && slotResetLabel ? ` · reset ${slotResetLabel}` : ""}</div>
         </div>
         </div>
         <div style={{fontSize:11,color:"#4A5066",textAlign:"right"}}>
-          <div style={{color:"#FFD166",fontWeight:700,fontSize:13}}>{myOpenBets.length} open bets</div>
-          
+          <button onClick={()=>{ try { localStorage.setItem("bb_open_social_bets", "1"); } catch (_) {} window.dispatchEvent(new CustomEvent("bb-open-social-bets")); }} className="bb-pressable" style={{background:"rgba(255,209,102,0.10)",border:"1px solid rgba(255,209,102,0.26)",borderRadius:11,padding:"8px 10px",color:"#FFD166",fontWeight:900,fontSize:12,cursor:"pointer"}}>{myOpenBets.length} open bets</button>
         </div>
       </div>
 
       {/* Section tabs */}
       <div style={{display:"flex",gap:8,marginBottom:18}}>
-     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"games",label:"games"}].map(sec=>(
+     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"history",label:"history"}].map(sec=>(
           <button key={sec.id} onClick={()=>setSection(sec.id)} className="bb-pressable"
             style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?playerColor:"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
             {sec.label}
@@ -11737,6 +16753,9 @@ const noBettingWeek = isEventActive("no_betting");
                 ))}
               </div>
             )}
+            {showPropStream && canWatchPropStream && (
+              <button onClick={()=>setPropMatchLocked(v=>!v)} className="bb-pressable" style={{width:"100%",marginTop:10,background:propMatchLocked?"rgba(255,92,138,0.13)":"rgba(184,255,77,0.08)",border:`1px solid ${propMatchLocked?"rgba(255,92,138,0.32)":"rgba(184,255,77,0.24)"}`,borderRadius:11,padding:"9px 10px",fontSize:11,fontWeight:900,color:propMatchLocked?"#FF5C8A":"#B8FF4D",cursor:"pointer"}}>{propMatchLocked ? "match detected / bets locked — tap when game ends" : "watching stream — tap if match starts to lock bets"}</button>
+            )}
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
             <button onClick={()=>setShowParlay(v=>!v)} className="bb-pressable" style={{flex:1,background:showParlay?"#FFD166":"rgba(255,209,102,0.12)",border:"1px solid rgba(255,209,102,0.32)",borderRadius:12,padding:"11px 12px",fontSize:12,fontWeight:900,color:showParlay?"#06070D":"#FFD166",cursor:"pointer"}}>
@@ -11747,6 +16766,8 @@ const noBettingWeek = isEventActive("no_betting");
             )}
           </div>
           {showParlay&&renderPropsParlayBuilder()}
+          {renderRivalryPicks()}
+          {propMatchLocked && (() => { const playerBetIds = new Set(activePropStreamPlayers.map(p=>p.id)); const liveParlays = (bets||[]).filter(b=>b.bettorId===currentPlayer && b.isParlay && (b.legs||[]).some(l=>playerBetIds.has(l.playerId))); return <div style={{background:"rgba(255,92,138,0.06)",border:"1px solid rgba(255,92,138,0.18)",borderRadius:14,padding:12,marginBottom:14}}><div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>locked · your parlays on this player</div>{liveParlays.length ? liveParlays.slice(0,5).map(b=><div key={b.id} style={{fontSize:12,color:"#E8ECF4",fontWeight:800,padding:"6px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>{(b.legs||[]).length}-leg parlay · {b.wager} → {b.payout} · {String(b.status||"open").toUpperCase()}</div>) : <div style={{fontSize:12,color:"#8B92A8"}}>no parlays placed for this player yet.</div>}</div>; })()}
           <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
             <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>player</div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
@@ -11785,12 +16806,17 @@ const noBettingWeek = isEventActive("no_betting");
             const lineIdx = lineIndexByProp[card.id] ?? Math.floor(card.lineOptions.length/2);
             const current = card.lineOptions[lineIdx];
             const isSelected = selectedProp===card.id;
-            const overParlayLeg = {id:`${card.id}_over_${current.line}`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"over",odds:current.overOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
-            const underParlayLeg = {id:`${card.id}_under_${current.line}`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"under",odds:current.underOdds.american,targetMode:card.mode,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined};
+            const betPlacementKeys = getBetSeenGameKeysForPlacement(stats, { playerId: card.playerId, targetMode: card.mode, duoIds: card.duoIds || null, combined: !!card.combined });
+            const overOdds = getPropOddsForSide(card, current, lineIdx, "over");
+            const underOdds = getPropOddsForSide(card, current, lineIdx, "under");
+            const overBoosted = isBoostedPropSide(card, lineIdx, "over");
+            const underBoosted = isBoostedPropSide(card, lineIdx, "under");
+            const overParlayLeg = {id:`${card.id}_over_${current.line}`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"over",odds:overOdds.american,oddsBoosted:overBoosted,targetMode:card.mode,targetText:card.targetText || `next logged ${card.mode || "3v3"} game`,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined,statKeysAtPlacement:betPlacementKeys};
+            const underParlayLeg = {id:`${card.id}_under_${current.line}`,propKey:card.id,playerId:card.playerId,playerName:card.playerName,field:card.field,fieldLabel:card.fieldLabel,line:current.line,side:"under",odds:underOdds.american,oddsBoosted:underBoosted,targetMode:card.mode,targetText:card.targetText || `next logged ${card.mode || "3v3"} game`,duoIds:card.duoIds || null,duoLabel:card.duoLabel || "",combined:!!card.combined,statKeysAtPlacement:betPlacementKeys};
             const overInParlay = isParlayLegSelected(overParlayLeg.id);
             const underInParlay = isParlayLegSelected(underParlayLeg.id);
             return (
-              <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${isSelected?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.05)"}`}}>
+              <div key={card.id} style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:10,border:`1px solid ${propMatchLocked?"rgba(255,92,138,0.24)":isSelected?"rgba(184,255,77,0.3)":"rgba(255,255,255,0.05)"}`,opacity:propMatchLocked?0.52:1,pointerEvents:propMatchLocked?"none":"auto"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
                   <div style={{width:8,height:8,borderRadius:99,background:card.playerColor}}/>
                   <span style={{fontWeight:700,fontSize:13,color:card.playerColor}}>{card.playerName}</span>
@@ -11798,6 +16824,12 @@ const noBettingWeek = isEventActive("no_betting");
                   <span style={{fontSize:10,color:"#4A5066",fontWeight:800,textTransform:"uppercase",marginLeft:4}}>{card.mode}{card.combined?" · duo total":""}</span>
                   <span style={{fontSize:11,color:"#4A5066",marginLeft:"auto"}}>avg: {card.avg} ({card.gamesPlayed}g)</span>
                 </div>
+                {(overBoosted || underBoosted || card.customProp) && (
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+                    {(overBoosted || underBoosted) && <span style={{fontSize:9.5,color:"#FFD166",fontWeight:900,letterSpacing:.7,textTransform:"uppercase",background:"rgba(255,209,102,0.12)",border:"1px solid rgba(255,209,102,0.24)",borderRadius:999,padding:"4px 7px"}}>boosted odds today</span>}
+                    {card.customProp && <span style={{fontSize:9.5,color:"#B8FF4D",fontWeight:900,letterSpacing:.7,textTransform:"uppercase",background:"rgba(184,255,77,0.10)",border:"1px solid rgba(184,255,77,0.22)",borderRadius:999,padding:"4px 7px"}}>custom prop</span>}
+                  </div>
+                )}
 
                 {/* Line slider */}
                 <div style={{margin:"14px 0 12px"}}>
@@ -11831,12 +16863,12 @@ const noBettingWeek = isEventActive("no_betting");
                   <button onClick={()=>{setSelectedProp(card.id);setPropSide("over");}} className="bb-pressable"
                     style={{flex:1,background:isSelected&&propSide==="over"?"#7CFFB2":"rgba(124,255,178,0.08)",border:`1px solid ${isSelected&&propSide==="over"?"#7CFFB2":"rgba(124,255,178,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer"}}>
                     <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>OVER {current.line}</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="over"?"#06070D":"#7CFFB2"}}>{current.overOdds.american}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="over"?"#06070D":"#7CFFB2"}}>{overOdds.american}{overBoosted ? " 🔥" : ""}</div>
                   </button>
                   <button onClick={()=>{setSelectedProp(card.id);setPropSide("under");}} className="bb-pressable"
                     style={{flex:1,background:isSelected&&propSide==="under"?"#FF5C8A":"rgba(255,92,138,0.08)",border:`1px solid ${isSelected&&propSide==="under"?"#FF5C8A":"rgba(255,92,138,0.2)"}`,borderRadius:10,padding:"10px 0",cursor:"pointer"}}>
                     <div style={{fontSize:10,color:"#4A5066",fontWeight:700,marginBottom:2}}>UNDER {current.line}</div>
-                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="under"?"#06070D":"#FF5C8A"}}>{current.underOdds.american}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:isSelected&&propSide==="under"?"#06070D":"#FF5C8A"}}>{underOdds.american}{underBoosted ? " 🔥" : ""}</div>
                   </button>
                 </div>
                 <div style={{display:"flex",gap:8,marginTop:8}}>
@@ -11851,7 +16883,7 @@ const noBettingWeek = isEventActive("no_betting");
             );
           })}
 
-          {selectedProp&&propSide&&(
+          {selectedProp&&propSide&&!propMatchLocked&&(
             <div style={{position:"sticky",bottom:"env(safe-area-inset-bottom, 0px)",background:"#0A0C16",borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 0",marginTop:8}}>
               <div style={{fontSize:11,color:"#4A5066",fontWeight:700,marginBottom:8}}>WAGER AMOUNT</div>
               <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,marginBottom:10}}>
@@ -11870,7 +16902,7 @@ const noBettingWeek = isEventActive("no_betting");
                 const card = props.find(p => p.id === selectedProp);
                 const lineIdx = lineIndexByProp[selectedProp] ?? Math.floor((card?.lineOptions.length||1)/2);
                 const current = card?.lineOptions[lineIdx];
-                const odds = propSide === "over" ? current?.overOdds : current?.underOdds;
+                const odds = card && current ? getPropOddsForSide(card, current, lineIdx, propSide) : null;
                 const payout = odds ? calcPayout(propWager, odds.decimal) : 0;
                 return (
                   <div style={{display:"flex",gap:8,alignItems:"center"}}>
@@ -11889,6 +16921,9 @@ const noBettingWeek = isEventActive("no_betting");
           )}
         </div>
       )}
+
+      {/* HISTORY */}
+      {section==="history"&&renderBetHistorySection()}
 
      {/* SLOTS */}
       {section==="slots"&&(()=>{
@@ -11932,7 +16967,9 @@ const noBettingWeek = isEventActive("no_betting");
               const newPts = Math.max(0, myPoints - slotWager + payout);
               const upd = {...points,[currentPlayer]:newPts};
               setPoints(upd); storeSet("points",upd);
-              const updCount2 = {...upd,[slotCountKey]:slotsUsed+1};
+              let updCount2 = {...upd,[slotCountKey]:slotsUsed+1};
+              const baseSlotTotal = DAILY_SLOTS_MAX + (Number(points?.[currentPlayer+"_bonusSlots"]) || 0);
+              updCount2 = withBoostResetStamp(updCount2, currentPlayer, "slot", baseSlotTotal - updCount2[slotCountKey]);
               setPoints(updCount2); storeSet("points",updCount2);
               setSlotResult({results,mult,payout,net,allSame,twosame});
               bbHaptic(net >= 0 ? [16, 35, 18] : 24);
@@ -11989,10 +17026,6 @@ const noBettingWeek = isEventActive("no_betting");
           </div>
         );
       })()}
-    
-
-    
-      {section==="games"&&(<GamesTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={null} setActiveRace={()=>{}} raceStart={null} setRaceStart={()=>{}}/>)}
 
     {/* PREDICTION MARKET */}
 {section==="predict"&&(()=>{
@@ -12509,11 +17542,13 @@ const RACE_OBJECTIVES = [
   { id:"goals_50",     label:"50 Goals",     field:"goals",   target:50,  emoji:"⚽", color:"#FFD166" },
   { id:"demos_30",     label:"30 Demos",     field:"demos",   target:30,  emoji:"💥", color:"#FF8C42" },
 ];
+const RACE_DURATION_MS = 2 * DAY_MS;
 
 function RaceModeTab({ stats, currentPlayer, points, setPoints, activeRace, setActiveRace, raceStart, setRaceStart }) {
 
   const weekStart = getWeekStart();
   const [raceEntryFee, setRaceEntryFee] = useState(25);
+  const [selectedRaceId, setSelectedRaceId] = useState(null);
   const [raceJar, setRaceJar] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -12534,17 +17569,29 @@ function RaceModeTab({ stats, currentPlayer, points, setPoints, activeRace, setA
     return pg.reduce((s, g) => s + (g[objective.field] || 0), 0);
   };
 const startRace = async (obj) => {
+    if (!obj?.id) return;
     const existing = await storeGet("active_race");
     if (existing && existing.objectiveId) return; // already one running
     const fee = clampWager(raceEntryFee, 25);
     const freshPts = await storeGet("points") || points || {};
     if ((Number(freshPts[currentPlayer]) || 0) < fee) return;
     const ts = new Date().toISOString();
-    const raceData = { objectiveId: obj.id, startedAt: ts, startedBy: currentPlayer, entryFee: fee, pot: fee, participants:[currentPlayer] };
+    const endsAt = new Date(Date.now() + RACE_DURATION_MS).toISOString();
+    const raceData = {
+      objectiveId: obj.id,
+      startedAt: ts,
+      endsAt,
+      startedBy: currentPlayer,
+      entryFee: fee,
+      pot: fee,
+      participants:[currentPlayer],
+      payouts:{},
+    };
     const updPts = { ...freshPts, [currentPlayer]: Math.max(0, (Number(freshPts[currentPlayer]) || 0) - fee) };
     setPoints(updPts);
     await storeSet("points", updPts);
     setRaceJar(raceData);
+    setSelectedRaceId(null);
     setActiveRace(obj.id);
     setRaceStart(ts);
     await storeSetWithPush("active_race", raceData);
@@ -12569,13 +17616,18 @@ const endRace = async () => {
     setRaceStart(null);
     await storeSetWithPush("active_race", { objectiveId: null, cancelled: true, cancelledBy: currentPlayer, cancelledAt: new Date().toISOString() });
   };
-  const currentObj = RACE_OBJECTIVES.find(o => o.id === activeRace);
-  const raceEndsAt = raceStart ? new Date(new Date(raceStart).getTime() + 3 * DAY_MS) : null;
+  const currentObj = RACE_OBJECTIVES.find(o => o.id === (activeRace || raceJar?.objectiveId));
+  const selectedObj = RACE_OBJECTIVES.find(o => o.id === selectedRaceId) || null;
+  const selectedFee = clampWager(raceEntryFee, 25);
+  const raceEndsAt = raceJar?.endsAt ? new Date(raceJar.endsAt) : raceStart ? new Date(new Date(raceStart).getTime() + RACE_DURATION_MS) : null;
   const raceMsLeft = raceEndsAt ? Math.max(0, raceEndsAt.getTime() - Date.now()) : 0;
   const raceTimeLeftLabel = raceEndsAt ? `${Math.floor(raceMsLeft / DAY_MS)}d ${String(Math.floor((raceMsLeft % DAY_MS) / 3600000)).padStart(2,"0")}h ${String(Math.floor((raceMsLeft % 3600000) / 60000)).padStart(2,"0")}m left` : "";
 
+  const raceParticipantIds = Array.isArray(raceJar?.participants) && raceJar.participants.length
+    ? raceJar.participants
+    : PLAYERS.map(p => p.id);
   const leaderboard = currentObj
-    ? [...PLAYERS].map(p => ({
+    ? [...PLAYERS].filter(p => raceParticipantIds.includes(p.id)).map(p => ({
         player: p,
         progress: getProgress(p.id, currentObj),
       })).sort((a, b) => b.progress - a.progress)
@@ -12587,19 +17639,41 @@ const endRace = async () => {
     if (!currentObj || !activeRace) return;
     const savedRace = await storeGet("active_race");
     if (!savedRace?.objectiveId || savedRace.settledAt) return;
-    const raceWinner = winner || leaderboard[0];
+    const participants = Array.isArray(savedRace.participants) && savedRace.participants.length ? savedRace.participants : raceParticipantIds;
+    const ranked = leaderboard.filter(entry => participants.includes(entry.player.id));
+    const raceWinner = winner || ranked[0] || leaderboard[0];
     const pts = await storeGet("points") || {};
-    const pot = Number(savedRace.pot || 0);
-    let updPts = pts;
-    if (raceWinner?.player?.id && pot > 0) {
-      updPts = { ...pts, [raceWinner.player.id]: (Number(pts[raceWinner.player.id]) || 0) + pot };
-      setPoints(updPts);
-      await storeSet("points", updPts);
-    }
+    const pot = Math.max(0, Number(savedRace.pot || 0));
+    const topEntries = ranked.slice(0, 3);
+    const split = topEntries.length >= 3 ? [0.7, 0.2, 0.1] : topEntries.length === 2 ? [0.75, 0.25] : [1];
+    const payouts = {};
+    let allocated = 0;
+    topEntries.forEach((entry, idx) => {
+      const amount = idx === topEntries.length - 1 ? pot - allocated : Math.floor(pot * (split[idx] || 0));
+      payouts[entry.player.id] = Math.max(0, amount);
+      allocated += Math.max(0, amount);
+    });
+    let updPts = { ...pts };
+    Object.entries(payouts).forEach(([pid, amount]) => {
+      updPts[pid] = (Number(updPts[pid]) || 0) + Number(amount || 0);
+    });
+    setPoints(updPts);
+    await storeSet("points", updPts);
     setRaceJar(null);
     setActiveRace(null);
     setRaceStart(null);
-    await storeSetWithPush("active_race", { objectiveId:null, settled:true, settledAt:new Date().toISOString(), settledBy:currentPlayer, winnerId:raceWinner?.player?.id || null, pot, participants:savedRace.participants || [], reason });
+    await storeSetWithPush("active_race", {
+      objectiveId:null,
+      settled:true,
+      settledAt:new Date().toISOString(),
+      settledBy:currentPlayer,
+      winnerId:raceWinner?.player?.id || null,
+      pot,
+      payouts,
+      participants,
+      leaderboard: ranked.map(entry => ({ playerId: entry.player.id, progress: entry.progress })),
+      reason,
+    });
   };
 
   useEffect(() => {
@@ -12617,7 +17691,7 @@ const endRace = async () => {
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:9}}>
               <div>
                 <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>fund jar</div>
-                <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>everyone who joins pays in. winner takes the whole pot.</div>
+                <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>pick an amount, pick a race, then submit. top 3 split the jar.</div>
               </div>
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,color:"#FFD166",fontWeight:700}}>{raceEntryFee}<span style={{fontSize:10,color:"#4A5066",marginLeft:3}}>pts</span></div>
             </div>
@@ -12626,19 +17700,32 @@ const endRace = async () => {
                 <button key={amt} onClick={()=>setRaceEntryFee(amt)} className="bb-pressable" style={{background:raceEntryFee===amt?"#FFD166":"rgba(255,255,255,0.05)",border:`1px solid ${raceEntryFee===amt?"#FFD166":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:11,fontWeight:900,color:raceEntryFee===amt?"#06070D":"#8B92A8",cursor:"pointer"}}>{amt}</button>
               ))}
             </div>
+            <div style={{marginTop:12,background:selectedObj?`${selectedObj.color}12`:"rgba(255,255,255,0.035)",border:`1px solid ${selectedObj?selectedObj.color+"44":"rgba(255,255,255,0.07)"}`,borderRadius:13,padding:"11px 12px",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{fontSize:22}}>{selectedObj?.emoji || "🏁"}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>selected race</div>
+                <div style={{fontSize:14,fontWeight:900,color:selectedObj?.color || "#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{selectedObj ? selectedObj.label : "tap a race mode below"}</div>
+              </div>
+            </div>
+            <button onClick={()=>selectedObj && startRace(selectedObj)} disabled={!selectedObj || (Number(points?.[currentPlayer]) || 0) < selectedFee} className="bb-pressable bb-glow-lime" style={{width:"100%",marginTop:10,background:selectedObj?"#FFD166":"rgba(255,255,255,0.05)",border:`1px solid ${selectedObj?"#FFD166":"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"12px 0",fontSize:12,fontWeight:900,color:selectedObj?"#06070D":"#8B92A8",cursor:selectedObj?"pointer":"default"}}>
+              {selectedObj ? `submit race — ${selectedFee} pts jar` : "pick a race to unlock submit"}
+            </button>
           </div>
           <div style={{...s.sectionLabel,marginBottom:12}}>pick an objective</div>
-          {RACE_OBJECTIVES.map(obj => (
-            <button key={obj.id} onClick={() => startRace(obj)} disabled={!!activeRace} className="bb-pressable"
-              style={{width:"100%",background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${obj.color}22`,borderRadius:16,padding:"16px",marginBottom:10,textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
+          {RACE_OBJECTIVES.map(obj => {
+            const selected = selectedRaceId === obj.id;
+            return (
+            <button key={obj.id} onClick={() => setSelectedRaceId(obj.id)} disabled={!!activeRace} className="bb-pressable"
+              style={{width:"100%",background:selected?`linear-gradient(135deg,${obj.color}18,#0C0E18)`:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${selected?obj.color+"88":obj.color+"22"}`,borderRadius:16,padding:"16px",marginBottom:10,textAlign:"left",cursor:"pointer",display:"flex",alignItems:"center",gap:14}}>
               <span style={{fontSize:32}}>{obj.emoji}</span>
               <div style={{flex:1}}>
                 <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,color:obj.color}}>{obj.label}</div>
-                <div style={{fontSize:11,color:"#4A5066",marginTop:3}}>first to {obj.target} · {raceEntryFee} pts to join · winner takes jar</div>
+                <div style={{fontSize:11,color:"#4A5066",marginTop:3}}>first to {obj.target} · 2 day limit · {raceEntryFee} pts to join</div>
               </div>
-              <ChevronRight size={16} color="#4A5066"/>
+              <div style={{fontSize:12,fontWeight:900,color:selected?obj.color:"#4A5066"}}>{selected ? "selected" : "pick"}</div>
             </button>
-          ))}
+            );
+          })}
         </>
       ) : (
         <>
@@ -12647,14 +17734,14 @@ const endRace = async () => {
             <div style={{fontSize:11,color:currentObj.color,fontWeight:700,letterSpacing:1,marginBottom:6}}>RACE IN PROGRESS</div>
             <div style={{fontSize:42,marginBottom:6}}>{currentObj.emoji}</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,color:"#E8ECF4",marginBottom:4}}>{currentObj.label}</div>
-            <div style={{fontSize:12,color:"#8B92A8"}}>first to {currentObj.target} wins the jar</div>
+            <div style={{fontSize:12,color:"#8B92A8"}}>first to {currentObj.target} or highest after 2 days wins</div>
             <div style={{fontFamily:"'Oswald',sans-serif",fontSize:26,color:"#FFD166",fontWeight:700,marginTop:8}}>🏺 {Number(raceJar?.pot || 0)} pts</div>
-            <div style={{fontSize:10,color:"#4A5066",marginTop:3}}>{(raceJar?.participants || []).length || 0} joined · {Number(raceJar?.entryFee || 0)} pts entry</div>
+            <div style={{fontSize:10,color:"#4A5066",marginTop:3}}>{(raceJar?.participants || []).length || 0} joined · {Number(raceJar?.entryFee || 0)} pts entry · 1st 70% / 2nd 20% / 3rd 10%</div>
             {raceStart && <div style={{fontSize:11,color:"#4A5066",marginTop:6}}>started {fmtRelTime(raceStart)} · closes in {raceTimeLeftLabel}</div>}
           </div>
           {raceJar?.objectiveId && (
             <button onClick={joinRaceJar} disabled={(raceJar?.participants || []).includes(currentPlayer) || (Number(points?.[currentPlayer]) || 0) < Number(raceJar?.entryFee || 0)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:(raceJar?.participants || []).includes(currentPlayer)?"rgba(124,255,178,0.12)":"rgba(255,209,102,0.12)",border:`1px solid ${(raceJar?.participants || []).includes(currentPlayer)?"rgba(124,255,178,0.35)":"rgba(255,209,102,0.35)"}`,borderRadius:14,padding:"12px 14px",fontSize:12,fontWeight:900,color:(raceJar?.participants || []).includes(currentPlayer)?"#7CFFB2":"#FFD166",cursor:(raceJar?.participants || []).includes(currentPlayer)?"default":"pointer",marginBottom:16}}>
-              {(raceJar?.participants || []).includes(currentPlayer) ? "✓ you are in the fund jar" : `tap jar to join — ${Number(raceJar?.entryFee || 0)} pts`}
+              {(raceJar?.participants || []).includes(currentPlayer) ? "✓ you accepted the fund jar" : `accept jar — ${Number(raceJar?.entryFee || 0)} pts`}
             </button>
           )}
 
@@ -12665,10 +17752,10 @@ const endRace = async () => {
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#FFD166",marginBottom:4}}>
                 {winner.player.name} wins!
               </div>
-              <div style={{fontSize:12,color:"#8B92A8"}}>wins the {Number(raceJar?.pot || 0)} pt jar</div>
+              <div style={{fontSize:12,color:"#8B92A8"}}>leads the jar split · 2nd/3rd get smaller cuts</div>
               <button onClick={()=>settleRace("winner")} className="bb-pressable bb-glow-lime"
                 style={{...s.primaryBtn,marginTop:12,background:"#FFD166",color:"#06070D"}}>
-                settle race
+                settle + split race
               </button>
             </div>
           )}
@@ -12715,10 +17802,13 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
   const [chemSelectedGame, setChemSelectedGame] = useState(null);
   const getSyncedCountKey = (key) => `${key}_syncedCount`;
   useEffect(() => {
+    // Data safety: older builds force-wiped chemistry when this version changed.
+    // Keep the version marker without deleting existing chemistry/team-link history.
     if (chemistry?._resetVersion === CHEMISTRY_RESET_VERSION) return;
-    const wiped = { _resetVersion: CHEMISTRY_RESET_VERSION };
-    setChemistry(wiped);
-    storeSet("chemistry", wiped);
+    const next = { ...(chemistry && typeof chemistry === "object" && !Array.isArray(chemistry) ? chemistry : {}), _resetVersion: CHEMISTRY_RESET_VERSION };
+    setChemistry(next);
+    storeSet("chemistry", next).catch(() => {});
+    if (isMeaningfulChemistrySnapshot(next)) storeSet("chemistry_backup", next).catch(() => {});
   }, [chemistry?._resetVersion]);
   const [duoSwipeOffset, setDuoSwipeOffset] = useState(0);
   const duoSwipeStartX = useRef(0);
@@ -12752,8 +17842,9 @@ const syncChemXP = async (pid1, pid2, sharedGamesList) => {
 
   const newGames = sharedGamesList.slice(alreadySynced);
   const newAssists = newGames.reduce((sum, pair) => sum + (Number(pair.p1game?.assists) || 0) + (Number(pair.p2game?.assists) || 0), 0);
+  const newWins = newGames.filter(pair => gameIsWin(pair.p1game)).length;
 
-  const xpGain = newAssists * 5 + newGamesCount * 2;
+  const xpGain = newAssists * 12 + newWins * 30;
   const current = chemistry?.[key] || 0;
 
   const upd = {
@@ -12810,6 +17901,8 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
   return linked;
 };
 
+  const selectedDuoKey = selectedDuo ? `2v2_${getChemistryKey(selectedDuo.pid1, selectedDuo.pid2)}` : "";
+
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       {CHEMISTRY_PAIRS.map(([pid1, pid2]) => {
@@ -12825,12 +17918,15 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
         const sharedAssists = shared.reduce((sum, pair) => sum + (Number(pair.p1game?.assists) || 0) + (Number(pair.p2game?.assists) || 0), 0);
         const earnedBadges = getEarnedDuoBadges(sharedAllTime, lvl.level);
         const isMyPair = pid1 === currentPlayer || pid2 === currentPlayer;
-        const nextLvlXP = [10,60,150,300,500,999][lvl.level];
-        const prevLvlXP = [0,10,60,150,300,500][lvl.level];
+        const nextLvlXP = [100,350,1000,2500,5000,9999][lvl.level];
+        const prevLvlXP = [0,100,350,1000,2500,5000][lvl.level];
         const pct = lvl.level >= 5 ? 1 : (chemXP - prevLvlXP) / (nextLvlXP - prevLvlXP);
+        const isSelectedDuo = selectedDuoKey === key;
+        const sortedShared = [...shared].sort((a,b) => new Date(b.p1game.ts) - new Date(a.p1game.ts));
 
         return (
-          <div key={key} onClick={() => setSelectedDuo({ pid1, pid2 })} className="bb-pressable" style={{ background: isMyPair ? "linear-gradient(135deg,#11131F,#0C0E18)" : "#11131F", borderRadius:18, padding:"16px", marginBottom:14, border:`1px solid ${isMyPair ? lvl.color+"44" : "rgba(255,255,255,0.05)"}`, boxShadow: isMyPair ? `0 0 20px ${lvl.color}10` : "none", cursor:"pointer" }}>
+          <div key={key} style={{position:"relative",marginBottom:14}}>
+          <div onClick={() => setSelectedDuo(isSelectedDuo ? null : { pid1, pid2 })} className="bb-pressable" style={{ background: isMyPair ? "linear-gradient(135deg,#11131F,#0C0E18)" : "#11131F", borderRadius:18, padding:"16px", marginBottom:isSelectedDuo?8:0, border:`1px solid ${isSelectedDuo ? lvl.color : isMyPair ? lvl.color+"44" : "rgba(255,255,255,0.05)"}`, boxShadow: isSelectedDuo ? `0 20px 46px rgba(0,0,0,0.36), 0 0 0 1px ${lvl.color}22` : isMyPair ? `0 0 20px ${lvl.color}10` : "none", cursor:"pointer" }}>
             {/* Duo header */}
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
               <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -12868,7 +17964,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
                 <div style={{ fontSize:14, fontWeight:700, color:lvl.color }}>{shared.length}</div>
               </div>
               <div style={{ flex:1, background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"8px", textAlign:"center" }}>
-                <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>ASSISTS TOGETHER</div>
+                <div style={{ fontSize:9, color:"#4A5066", fontWeight:700, marginBottom:2 }}>ASSISTS</div>
                 <div style={{ fontSize:14, fontWeight:700, color:"#7CFFB2" }}>{sharedAssists}</div>
               </div>
               <div style={{ flex:1, background:"rgba(255,255,255,0.03)", borderRadius:10, padding:"8px", textAlign:"center" }}>
@@ -12897,10 +17993,66 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
                 <button onClick={(e) => { e.stopPropagation(); if (!isSynced) syncChemXP(pid1, pid2, shared); }} className="bb-pressable bb-glow-lime"
                   disabled={isSynced}
                   style={{ width:"100%", background: isSynced ? "rgba(255,255,255,0.04)" : `${lvl.color}18`, border:`1px solid ${isSynced ? "rgba(255,255,255,0.08)" : lvl.color+"44"}`, borderRadius:10, padding:"10px 0", fontSize:12, fontWeight:700, color: isSynced ? "#4A5066" : lvl.color, cursor: isSynced ? "default" : "pointer", marginTop:12 }}>
-                  {isSynced ? "✓ synced — up to date" : `sync chemistry (+${(() => { const newGames = shared.slice(alreadySynced); const newAssists = newGames.reduce((sum, pair) => sum + (Number(pair.p1game?.assists) || 0) + (Number(pair.p2game?.assists) || 0), 0); return newAssists*5 + newCount*2; })()} xp from assists in ${newCount} new game${newCount!==1?"s":""})`}
+                  {isSynced ? "✓ synced — up to date" : `sync chemistry (+${(() => { const newGames = shared.slice(alreadySynced); const newAssists = newGames.reduce((sum, pair) => sum + (Number(pair.p1game?.assists) || 0) + (Number(pair.p2game?.assists) || 0), 0); const newWins = newGames.filter(pair => gameIsWin(pair.p1game)).length; return newAssists*12 + newWins*30; })()} xp from wins + assists in ${newCount} new game${newCount!==1?"s":""})`}
                 </button>
               );
             })()}
+          </div>
+          {isSelectedDuo && (
+            <div onClick={(e)=>e.stopPropagation()} style={{position:"relative",zIndex:6,background:"linear-gradient(135deg,#121626,#080A12)",border:`1px solid ${lvl.color}55`,borderRadius:18,padding:14,margin:"0 0 2px",boxShadow:`0 24px 60px rgba(0,0,0,0.42), 0 0 28px ${lvl.color}14`,animation:"bbPopCardIn .18s ease both"}}>
+              <div style={{position:"absolute",top:-9,left:24,width:18,height:18,background:"#121626",borderLeft:`1px solid ${lvl.color}55`,borderTop:`1px solid ${lvl.color}55`,transform:"rotate(45deg)",borderTopLeftRadius:4}}/>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12,position:"relative"}}>
+                <div>
+                  <div style={{fontSize:10,color:lvl.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>duo details</div>
+                  <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4"}}>{p1.name} × {p2.name}</div>
+                </div>
+                <button onClick={()=>setSelectedDuo(null)} className="bb-pressable" style={{width:34,height:34,borderRadius:11,background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.08)",color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><X size={16}/></button>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"72px 1fr",gap:12,alignItems:"center",background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:12,marginBottom:12}}>
+                <div style={{fontSize:36,textAlign:"center"}}>{lvl.emoji}</div>
+                <div>
+                  <div style={{fontSize:13,color:lvl.color,fontWeight:900}}>{lvl.label} · Level {lvl.level}</div>
+                  <div style={{fontSize:11,color:"#8B92A8",marginTop:3}}>{chemXP} xp · {shared.length} shared games this week</div>
+                  <div style={{height:7,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden",marginTop:8}}>
+                    <div style={{height:"100%",width:`${Math.min(1,pct)*100}%`,background:lvl.color,borderRadius:99}}/>
+                  </div>
+                </div>
+              </div>
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:7}}>badges · {earnedBadges.length}/{DUO_BADGE_DEFS.length}</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:7}}>
+                  {earnedBadges.length === 0 && <div style={{fontSize:11,color:"#8B92A8"}}>no badges earned yet</div>}
+                  {earnedBadges.map(b => (
+                    <div key={b.id} title={b.desc} style={{background:`${lvl.color}14`,border:`1px solid ${lvl.color}30`,borderRadius:11,padding:"7px 9px",fontSize:10,fontWeight:900,color:lvl.color}}>
+                      {b.emoji} {b.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>shared game history · {sortedShared.length}</div>
+              {chemSelectedGame && (
+                <GameDetailModal
+                  game={chemSelectedGame.game}
+                  allPlayerGames={chemSelectedGame.allPlayerGames}
+                  onClose={() => setChemSelectedGame(null)}
+                />
+              )}
+              {sortedShared.length === 0 && <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:12,fontSize:11,color:"#8B92A8",textAlign:"center"}}>no shared games logged this week yet</div>}
+              {sortedShared.slice(0,6).map(({p1game, p2game}) => {
+                const won = gameIsWin(p1game);
+                const myAllGames = stats.filter(g => g.playerId === p1game.playerId && g.mode === p1game.mode).sort((a,b) => new Date(a.ts)-new Date(b.ts));
+                return (
+                  <button key={p1game.id} onClick={() => setChemSelectedGame({ game: p1game, allPlayerGames: myAllGames })} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.035)",borderRadius:12,padding:"11px 12px",marginBottom:7,border:`1px solid ${won?"rgba(124,255,178,0.16)":"rgba(255,92,138,0.14)"}`,display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer",textAlign:"left"}}>
+                    <div>
+                      <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,color:"#E8ECF4"}}>{formatGameScore(p1game)}</div>
+                      <div style={{fontSize:10.5,color:"#8B92A8",marginTop:2}}>{fmtRelTime(p1game.ts)}{p1game.sessionCode ? ` · ${p1game.sessionCode}` : ""}</div>
+                    </div>
+                    <div style={{fontSize:10,fontWeight:900,color:won?"#7CFFB2":"#FF5C8A",border:`1px solid ${won?"rgba(124,255,178,0.4)":"rgba(255,92,138,0.4)"}`,borderRadius:99,padding:"3px 9px"}}>{won?"WIN":"LOSS"}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
           </div>
         );
       })}
@@ -12923,7 +18075,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
       </div>
 
       {/* Duo detail modal */}
-      {selectedDuo && (() => {
+      {false && selectedDuo && (() => {
         const { pid1, pid2 } = selectedDuo;
         const key = `2v2_${getChemistryKey(pid1, pid2)}`;
         const chemXP = chemistry?.[key] || 0;
@@ -12936,25 +18088,26 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 
         return (
         <div
+          className="bb-fullscreen-shell"
           onTouchStart={handleDuoTouchStart}
           onTouchMove={handleDuoTouchMove}
           onTouchEnd={handleDuoTouchEnd}
           style={{
-            position:"fixed", inset:0, zIndex:400, background:"#040818",
+            position:"fixed", inset:0, zIndex:1400, background:"rgba(0,0,0,0.72)", backdropFilter:"blur(12px)",
             display:"flex", flexDirection:"column",
             animation:"scaleFadeIn .3s cubic-bezier(.2,.8,.2,1)",
             transform:`translateX(${duoSwipeOffset}px)`,
             opacity: Math.max(0, 1 - duoSwipeOffset / 280),
             transition: duoSwipeOffset === 0 ? "transform .25s ease, opacity .25s ease" : "none",
           }}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
+            <div className="bb-floating-fullscreen-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px",paddingTop:"max(16px,env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={()=>setSelectedDuo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
                 <ChevronLeft size={18}/>
               </button>
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>{p1.name} × {p2.name}</div>
               <button onClick={()=>setSelectedDuo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"}}><X size={20}/></button>
             </div>
-            <div style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
+            <div className="bb-fullscreen-scroll" style={{flex:1,overflowY:"auto",padding:"20px 16px"}}>
          <div style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",borderRadius:18,padding:"24px",textAlign:"center",marginBottom:20,border:`1px solid ${lvl.color}33`}}>
                 <div style={{fontSize:40,marginBottom:6}}>{lvl.emoji}</div>
                 <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:700,color:lvl.color}}>{lvl.label}</div>
@@ -13018,12 +18171,75 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 }  
                   
 // ===================== RLCS Bets =====================
-// Fallback matches only show if you have not synced real matches yet.
-const RLCS_MATCHES = [
-  { id:"sample_m1", home:"NRG",          away:"G2 Esports",    league:"RLCS Sample", date:"sync real matches", homeOdds:"-120", awayOdds:"+105", source:"sample" },
-  { id:"sample_m2", home:"Karmine Corp", away:"Vitality",      league:"RLCS Sample", date:"sync real matches", homeOdds:"+110", awayOdds:"-130", source:"sample" },
-  { id:"sample_m3", home:"Team Falcons", away:"Team BDS",      league:"RLCS Sample", date:"sync real matches", homeOdds:"-105", awayOdds:"-105", source:"sample" },
+// APP101_RLCS_LIVE_STARTGG_BACKEND_PATCH
+// Live LCQ pulls happen through /api/rlcs-lcq so your start.gg token never ships in App.jsx.
+const RLCS_KNOWN_TEAM_WATCHLIST = [
+  "Dignitas",
+  "Gen.G Mobil1 Racing",
+  "M80",
+  "FUT Esports",
+  "Veloce Gaming",
+  "GSK",
+  "AML",
+  "Certified",
+  "Unc & Nephews",
+  "2026 New York Knicks",
+  "KCG Wonderpets",
+  "KCG Ukiyo",
+  "VANTA",
+  "Vello-1",
+  "Vortex Esports",
+  "VORTEX GAMING",
+  "Velocity Esports",
+  "Veylox Esports",
+  "Valor Esports USA",
+  "Undefined Esports",
+  "Torrent Corp",
+  "Torrent Crossfire",
+  "Reign Esports",
+  "RGN Black",
+  "Next2Nu Esports",
+  "Lotus Esports",
+  "Kozmosis Esports",
+  "F9 Esports",
+  "G11 eSports",
+  "CLRTY Esports",
+  "Control Esports",
+  "Cosmic Rift Esports",
+  "DME",
+  "DME GENESIX",
+  "NTX",
+  "NTX Academy",
+  "NTX Esports",
+  "SkyOne Gaming",
+  "Team Factor",
+  "The Fifth Element",
+  "Virtue",
+  "VitrixGG",
+  "West Coast Warriors",
+  "Fortior Eclipse",
+  "InGenious eSports",
+  "Inherent Skill Esports",
+  "LatinSeven Eternals",
+  "7VEN Club",
+  "ATK",
+  "925 Esports",
+  "Aether storm",
+  "Affinity",
+  "AVID Academy",
+  "Phantom Esports",
+  "Paradox Gaming",
+  "VON ESPORTS",
+  "Vornux",
+  "Meow Esports",
+  "MZ Esports",
+  "MED Gaming",
+  "North Country Elite",
+  "Lumina Esports",
+  "Astronyx Esports"
 ];
+const RLCS_LCQ_STORAGE_KEY = "rlcs_lcq_live_matches";
+const RLCS_LCQ_REFRESH_MS = 2 * 60 * 1000;
 
 function americanToDecimal(odds) {
   const n = parseInt(String(odds).replace("+",""));
@@ -13048,78 +18264,296 @@ function fmtRlcsDate(value) {
   return d.toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" });
 }
 
-// This accepts either your own backend's cleaned match shape OR raw PandaScore-ish objects.
+function cleanRlcsTeamName(name = "") {
+  return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function rlcsWatchTeamsForMatch(match, watchlist = RLCS_KNOWN_TEAM_WATCHLIST) {
+  const names = [match?.team1, match?.team2].map(cleanRlcsTeamName);
+  return (watchlist || []).filter(team => names.includes(cleanRlcsTeamName(team)));
+}
+
+// Accepts your live backend shape, the old snapshot shape, or raw tournament-ish objects.
 function normalizeRlcsMatch(raw, idx = 0) {
   const opponents = raw?.opponents || raw?.teams || [];
   const homeObj = raw?.home || raw?.team1 || opponents?.[0]?.opponent || opponents?.[0] || {};
   const awayObj = raw?.away || raw?.team2 || opponents?.[1]?.opponent || opponents?.[1] || {};
 
-  const home =
-    raw?.homeName ||
-    raw?.home ||
-    homeObj?.name ||
-    homeObj?.acronym ||
-    raw?.team1_name ||
-    "TBD";
-
-  const away =
-    raw?.awayName ||
-    raw?.away ||
-    awayObj?.name ||
-    awayObj?.acronym ||
-    raw?.team2_name ||
-    "TBD";
-
-  const id = String(raw?.id || raw?.matchId || raw?.slug || `${home}_${away}_${raw?.begin_at || raw?.date || idx}`);
-  const league = raw?.league || raw?.league?.name || raw?.tournament?.name || raw?.serie?.name || raw?.name || "Rocket League";
-  const beginAt = raw?.begin_at || raw?.scheduled_at || raw?.date || raw?.startTime || raw?.start_time;
-  const seed = `${id}_${home}_${away}`;
-
-  return {
+  const team1 = raw?.team1 || raw?.homeName || homeObj?.name || homeObj?.acronym || raw?.team1_name || "TBD";
+  const team2 = raw?.team2 || raw?.awayName || awayObj?.name || awayObj?.acronym || raw?.team2_name || "TBD";
+  const id = String(raw?.setId || raw?.id || raw?.matchId || raw?.slug || `${team1}_${team2}_${raw?.begin_at || raw?.date || idx}`);
+  const startAt = raw?.startAt || raw?.begin_at || raw?.scheduled_at || raw?.date || raw?.startTime || raw?.start_time || null;
+  const seed = `${id}_${team1}_${team2}`;
+  const match = {
+    ...raw,
     id,
-    home,
-    away,
-    league,
-    date: fmtRlcsDate(beginAt),
-    beginAt,
-    status: raw?.status || "upcoming",
-    homeOdds: raw?.homeOdds || pseudoOdds(seed, "home"),
-    awayOdds: raw?.awayOdds || pseudoOdds(seed, "away"),
-    source: raw?.source || "pandascore",
+    setId: raw?.setId || raw?.id || raw?.matchId || id,
+    team1,
+    team2,
+    team1Id: raw?.team1Id || raw?.homeId || homeObj?.id || null,
+    team2Id: raw?.team2Id || raw?.awayId || awayObj?.id || null,
+    team1Players: Array.isArray(raw?.team1Players) ? raw.team1Players : (homeObj?.participants || []).map(p => p.gamerTag || p.name).filter(Boolean),
+    team2Players: Array.isArray(raw?.team2Players) ? raw.team2Players : (awayObj?.participants || []).map(p => p.gamerTag || p.name).filter(Boolean),
+    phase: raw?.phase || raw?.phaseName || "RLCS LCQ",
+    pool: raw?.pool || raw?.displayIdentifier || raw?.poolName || "pool",
+    round: raw?.round || raw?.fullRoundText || raw?.roundText || "match",
+    startAt,
+    winnerId: raw?.winnerId || raw?.winner_id || null,
+    state: raw?.state ?? raw?.status ?? null,
+    source: raw?.source || "start.gg live",
+  };
+  match.watchTeams = Array.isArray(raw?.watchTeams) && raw.watchTeams.length ? raw.watchTeams : rlcsWatchTeamsForMatch(match);
+  match.bettableNow = raw?.bettableNow !== undefined ? !!raw.bettableNow : !!(match.team1Id && match.team2Id && match.team1 !== "TBD" && match.team2 !== "TBD" && !match.winnerId);
+  match.team1Odds = raw?.team1Odds || raw?.homeOdds || pseudoOdds(seed, "home");
+  match.team2Odds = raw?.team2Odds || raw?.awayOdds || pseudoOdds(seed, "away");
+  return match;
+}
+
+function getRlcsBetKey(match, side) {
+  return `rlcs_${match?.setId || match?.id}_${side}`;
+}
+
+function getRlcsMatchLabel(match) {
+  return `${match?.team1 || match?.home || "TBD"} vs ${match?.team2 || match?.away || "TBD"}`;
+}
+
+function getRlcsMatchStatus(match) {
+  if (match?.winnerId) return "complete";
+  if (String(match?.team1 || "").toUpperCase() === "TBD" || String(match?.team2 || "").toUpperCase() === "TBD") return "waiting";
+  const startMs = safeDateObj(match?.startAt || match?.beginAt || match?.date || 0, 0).getTime();
+  if (Number.isFinite(startMs) && startMs > Date.now()) return "scheduled";
+  return "live/checking";
+}
+
+function normalizeRlcsStart(match) {
+  return match?.startAt || match?.beginAt || match?.date || null;
+}
+
+function getRlcsSideOdds(match, side) {
+  const seed = `${match?.setId || match?.id || ""}_${match?.team1 || ""}_${match?.team2 || ""}`;
+  return side === "team1" ? (match?.team1Odds || match?.homeOdds || pseudoOdds(seed, "home")) : (match?.team2Odds || match?.awayOdds || pseudoOdds(seed, "away"));
+}
+
+async function fetchRlcsLcqLive({ force = false } = {}) {
+  const qs = force ? `?refresh=1&t=${Date.now()}` : "";
+  const res = await fetch(`/api/rlcs-lcq${qs}`, { cache:"no-store" });
+  if (!res.ok) throw new Error(`RLCS live pull failed (${res.status})`);
+  const json = await res.json();
+  if (!json?.ok) throw new Error(json?.error || "RLCS live pull failed");
+  return {
+    ...json,
+    matches: (Array.isArray(json.matches) ? json.matches : []).map(normalizeRlcsMatch),
   };
 }
 
-function RLCSBets({ currentPlayer, points, setPoints, bets, setBets }) {
-  const RLCS_LIVE_VIDEO_ID = "hzs2x4irAD0";
-  const [showLive, setShowLive] = useState(false);
-  return (
-    <div>
-      <div style={{background:"linear-gradient(135deg,#180B22,#0B0E18)",border:"2px solid rgba(255,97,193,0.25)",borderRadius:20,padding:14,marginBottom:14,boxShadow:"0 14px 34px rgba(255,97,193,0.08)"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:showLive?12:0}}>
-          <div>
-            <div style={{fontSize:11,color:"#FF61C1",fontWeight:900,letterSpacing:1}}>RLCS LIVE</div>
-            <div style={{fontSize:12,color:"#8B92A8",marginTop:3}}>watch the Rocket League stream inside the app</div>
-          </div>
-          {!showLive && (
-            <button onClick={()=>setShowLive(true)} className="bb-pressable bb-glow-pink" style={{background:"#FF61C1",border:"none",borderRadius:14,padding:"10px 14px",fontSize:12,fontWeight:900,color:"#06070D",cursor:"pointer",flexShrink:0}}>
-              ▶ watch
-            </button>
-          )}
+function resolveOpenRlcsBetsFromMatches({ matches = [], bets = [], points = {}, setBets, setPoints }) {
+  const matchMap = new Map((matches || []).map(m => [String(m.setId || m.id), m]));
+  let changed = false;
+  let nextPoints = { ...(points || {}) };
+  const nextBets = (bets || []).map(b => {
+    if (b?.type !== "rlcs_match" || b.status !== "open") return b;
+    const match = matchMap.get(String(b.setId || b.matchId));
+    if (!match || !match.winnerId) return b;
+    const won = Number(match.winnerId) === Number(b.pickTeamId);
+    changed = true;
+    if (won) {
+      nextPoints[b.playerId] = (Number(nextPoints[b.playerId]) || 0) + (Number(b.payout) || 0);
+    }
+    return {
+      ...b,
+      status: won ? "won" : "lost",
+      settledAt: new Date().toISOString(),
+      resultTeamId: match.winnerId,
+      resultTeam: Number(match.winnerId) === Number(match.team1Id) ? match.team1 : match.team2,
+      note: won ? "start.gg winner matched your pick" : "start.gg winner did not match your pick",
+    };
+  });
+  if (changed) {
+    setBets?.(nextBets);
+    setPoints?.(nextPoints);
+    try { storeSet("bets", nextBets); storeSet("points", nextPoints); } catch (_) {}
+  }
+}
+
+function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomizer }) {
+  const cfg = normalizeStreamDirectoryConfig(appCustomizer?.streamDirectory);
+  const streams = cfg.streams.filter(st=>st.enabled !== false && st.url);
+  const [activeId,setActiveId]=useState(streams[0]?.id || "");
+  const [viewMode,setViewMode]=useState("known");
+  const [wager,setWager]=useState(25);
+  const [liveData,setLiveData]=useState({ matches:[], updatedAt:null, source:"start.gg live", cached:false, error:null, loading:true });
+  const active = streams.find(s=>s.id===activeId) || streams[0];
+  const viewStreams = cfg.multiview ? streams.slice(0,4) : (active ? [active] : []);
+  const myPoints = Number(points?.[currentPlayer]) || 0;
+  const liveMatches = (liveData.matches || []).slice().sort((a,b)=>String(normalizeRlcsStart(a)||"").localeCompare(String(normalizeRlcsStart(b)||"")) || String(a.pool||"").localeCompare(String(b.pool||"")));
+  const bettableKnownMatches = liveMatches.filter(m => m.bettableNow && !m.winnerId && m.team1 !== "TBD" && m.team2 !== "TBD");
+  const futureKnownMatches = liveMatches.filter(m => !m.bettableNow || m.team1 === "TBD" || m.team2 === "TBD");
+  const completedKnownMatches = liveMatches.filter(m => !!m.winnerId);
+  const visibleMatches = viewMode === "ready" ? bettableKnownMatches : viewMode === "future" ? futureKnownMatches : viewMode === "complete" ? completedKnownMatches : liveMatches;
+  const openRlcsBets = (bets || []).filter(b => b?.type === "rlcs_match" && b.playerId === currentPlayer && b.status === "open");
+
+  const loadRlcs = useCallback(async (force = false) => {
+    setLiveData(prev => ({ ...prev, loading:true, error:null }));
+    try {
+      const json = await fetchRlcsLcqLive({ force });
+      const next = {
+        matches: json.matches || [],
+        updatedAt: json.generatedAt || new Date().toISOString(),
+        source: json.source || "start.gg live",
+        cached: !!json.cached,
+        stats: json.stats || {},
+        event: json.event || null,
+        loading:false,
+        error:null,
+      };
+      setLiveData(next);
+      try { storeSet(RLCS_LCQ_STORAGE_KEY, next); } catch (_) {}
+    } catch (err) {
+      const saved = await storeGet(RLCS_LCQ_STORAGE_KEY).catch(() => null);
+      if (saved?.matches?.length) {
+        setLiveData({ ...saved, matches:(saved.matches || []).map(normalizeRlcsMatch), loading:false, error:`live pull failed · showing last saved ${fmtRelTime(saved.updatedAt)}` });
+      } else {
+        setLiveData(prev => ({ ...prev, loading:false, error:err?.message || "could not load RLCS matches" }));
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const firstLoad = async () => { if (alive) await loadRlcs(false); };
+    firstLoad();
+    const timer = setInterval(() => { if (alive) loadRlcs(false); }, RLCS_LCQ_REFRESH_MS);
+    return () => { alive = false; clearInterval(timer); };
+  }, [loadRlcs]);
+
+  useEffect(() => {
+    if (!liveMatches.length) return;
+    resolveOpenRlcsBetsFromMatches({ matches:liveMatches, bets, points, setBets, setPoints });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveData.updatedAt, bets?.length, points?.[currentPlayer]]);
+
+  const placeRlcsBet = async (match, side) => {
+    if (!match || match.winnerId || match.team1 === "TBD" || match.team2 === "TBD") return;
+    const amount = Math.max(5, Math.min(500, Number(wager) || 25));
+    if (myPoints < amount) return;
+    const pickTeam = side === "team1" ? match.team1 : match.team2;
+    const pickTeamId = side === "team1" ? match.team1Id : match.team2Id;
+    const opponentTeam = side === "team1" ? match.team2 : match.team1;
+    const odds = getRlcsSideOdds(match, side);
+    const payout = Math.round(amount * americanToDecimal(odds));
+    const bet = {
+      id: `${getRlcsBetKey(match, side)}_${currentPlayer}_${Date.now()}`,
+      type: "rlcs_match",
+      source: "startgg_lcq_live",
+      playerId: currentPlayer,
+      status: "open",
+      placedAt: new Date().toISOString(),
+      wager: amount,
+      payout,
+      odds,
+      setId: match.setId || match.id,
+      matchId: match.setId || match.id,
+      pool: match.pool,
+      round: match.round,
+      startsAt: normalizeRlcsStart(match),
+      pickSide: side,
+      pickTeam,
+      pickTeamId,
+      opponentTeam,
+      title: `${pickTeam} to beat ${opponentTeam}`,
+      sub: `${match.pool} · ${match.round} · ${fmtRlcsDate(normalizeRlcsStart(match))}`,
+    };
+    const nextPoints = { ...(points || {}), [currentPlayer]: myPoints - amount };
+    const nextBets = [bet, ...(bets || [])];
+    setPoints?.(nextPoints);
+    setBets?.(nextBets);
+    await storeSet("points", nextPoints);
+    await storeSet("bets", nextBets);
+    bbHaptic(18);
+  };
+
+  const alreadyBetOnSet = (match) => openRlcsBets.some(b => String(b.setId || b.matchId) === String(match.setId || match.id));
+  const sourceLabel = liveData.error ? "offline fallback" : liveData.cached ? "cached live" : "start.gg live";
+
+  return <div style={{display:"grid",gap:12}}>
+    <div style={{background:"linear-gradient(135deg,#180B22,#0B0E18)",border:"2px solid rgba(255,97,193,0.25)",borderRadius:20,padding:14,marginBottom:2,boxShadow:"0 14px 34px rgba(255,97,193,0.08)"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+        <div>
+          <div style={{fontSize:11,color:"#FF61C1",fontWeight:900,letterSpacing:1}}>RLCS LCQ HUB</div>
+          <div style={{fontSize:12,color:"#8B92A8",marginTop:3}}>known teams only · {bettableKnownMatches.length} bet cards · {futureKnownMatches.length} future/TBD · {completedKnownMatches.length} complete</div>
         </div>
-        {showLive && (
-          <div style={{position:"relative",paddingTop:"56.25%",borderRadius:16,overflow:"hidden",background:"#05060C",border:"1px solid rgba(255,255,255,0.08)"}}>
-            <iframe
-              src={`https://www.youtube.com/embed/${RLCS_LIVE_VIDEO_ID}?autoplay=1&controls=1&modestbranding=1&rel=0&playsinline=1`}
-              title="RLCS Live"
-              allow="autoplay; encrypted-media; picture-in-picture"
-              allowFullScreen
-              style={{position:"absolute",inset:0,width:"100%",height:"100%",border:"none"}}
-            />
-          </div>
-        )}
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:10,color:liveData.error?"#FFD166":"#B8FF4D",fontWeight:900,textTransform:"uppercase"}}>{sourceLabel}</div>
+          <div style={{fontSize:9.5,color:"#4A5066",fontWeight:800,marginTop:3}}>{liveData.loading ? "checking…" : liveData.updatedAt ? fmtRelTime(liveData.updatedAt) : "not synced"}</div>
+        </div>
+      </div>
+      {liveData.error && <div style={{fontSize:10.5,color:"#FFD166",marginTop:8,lineHeight:1.35}}>⚠ {liveData.error}</div>}
+      <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:10,paddingBottom:4}}>
+        {[
+          ["known","all known"],
+          ["ready","bettable now"],
+          ["future","future/TBD"],
+          ["complete","complete"],
+        ].map(([id,label]) => (
+          <button key={id} onClick={()=>setViewMode(id)} className="bb-pressable" style={{flexShrink:0,background:viewMode===id?"#FF61C1":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px 10px",color:viewMode===id?"#06070D":"#E8ECF4",fontSize:10,fontWeight:900}}>{label}</button>
+        ))}
+        <button onClick={()=>loadRlcs(true)} disabled={liveData.loading} className="bb-pressable" style={{flexShrink:0,background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.25)",borderRadius:10,padding:"8px 10px",color:"#B8FF4D",fontSize:10,fontWeight:900,opacity:liveData.loading?.7:1}}>force refresh</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 96px",gap:8,alignItems:"center",marginTop:10}}>
+        <div style={{fontSize:10.5,color:"#8B92A8"}}>Wager: <b style={{color:"#E8ECF4"}}>{Number(wager).toLocaleString()} pts</b> · balance: <b style={{color:"#FFD166"}}>{myPoints.toLocaleString()} pts</b> · open RLCS bets: {openRlcsBets.length}</div>
+        <input type="number" min="5" max="500" step="5" value={wager} onChange={e=>setWager(e.target.value)} style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:10,padding:"8px 9px",color:"#E8ECF4",fontSize:11,fontWeight:900}}/>
       </div>
     </div>
-  );
+
+    <div style={{display:"grid",gap:10}}>
+      {visibleMatches.length ? visibleMatches.slice(0,100).map(match => {
+        const locked = match.team1 === "TBD" || match.team2 === "TBD" || !!match.winnerId || alreadyBetOnSet(match);
+        const status = getRlcsMatchStatus(match);
+        const o1 = getRlcsSideOdds(match, "team1");
+        const o2 = getRlcsSideOdds(match, "team2");
+        const winnerName = match.winnerId ? (Number(match.winnerId) === Number(match.team1Id) ? match.team1 : match.team2) : null;
+        return <div key={match.setId || match.id} style={{background:"linear-gradient(135deg,#11131F,#090B12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{match.pool} · {match.round}</div>
+              <div style={{fontSize:15,color:"#E8ECF4",fontWeight:900,marginTop:3,lineHeight:1.15}}>{getRlcsMatchLabel(match)}</div>
+              <div style={{fontSize:10.5,color:"#8B92A8",marginTop:5}}>{fmtRlcsDate(normalizeRlcsStart(match))} · {status}{winnerName ? ` · winner: ${winnerName}` : ""}</div>
+            </div>
+            <div style={{fontSize:10,color:status==="waiting"?"#FFD166":status==="complete"?"#7CFFB2":"#B8FF4D",fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{status}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {["team1","team2"].map(side => {
+              const team = side === "team1" ? match.team1 : match.team2;
+              const odds = side === "team1" ? o1 : o2;
+              const playerList = side === "team1" ? match.team1Players : match.team2Players;
+              const isWatch = (match.watchTeams || []).includes(team);
+              const isWinner = winnerName && winnerName === team;
+              return <button key={side} disabled={locked || myPoints < wager} onClick={()=>placeRlcsBet(match, side)} className="bb-pressable" style={{background:isWinner?"rgba(124,255,178,.16)":isWatch?"rgba(255,97,193,.14)":"rgba(255,255,255,.045)",border:`1px solid ${isWinner?"rgba(124,255,178,.35)":isWatch?"rgba(255,97,193,.3)":"rgba(255,255,255,.08)"}`,borderRadius:13,padding:10,textAlign:"left",opacity:(locked || myPoints < wager)?.7:1}}>
+                <div style={{fontSize:12.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{team}</div>
+                <div style={{fontSize:10,color:isWinner?"#7CFFB2":isWatch?"#FF61C1":"#4A5066",fontWeight:900,marginTop:3}}>{isWinner ? "winner" : `${odds} · pays ${Math.round(wager * americanToDecimal(odds)).toLocaleString()} pts`}</div>
+                {!!playerList?.length && <div style={{fontSize:9.5,color:"#8B92A8",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{playerList.slice(0,4).join(" · ")}</div>}
+              </button>;
+            })}
+          </div>
+          {alreadyBetOnSet(match) && <div style={{fontSize:10,color:"#FFD166",fontWeight:800,marginTop:8}}>you already have an open bet on this set</div>}
+          {status==="waiting" && <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>locked until start.gg fills both teams</div>}
+        </div>;
+      }) : <EmptyState icon="🏁" title={liveData.loading?"Checking start.gg…":"No known-team matches loaded"} body="The backend will pull all pools, filter your watchlist, then this fills automatically." />}
+    </div>
+
+    <div style={{background:"linear-gradient(135deg,#180B22,#0B0E18)",border:"1px solid rgba(255,97,193,0.18)",borderRadius:18,padding:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,marginBottom:9}}>
+        <div>
+          <div style={{fontSize:11,color:"#FF61C1",fontWeight:900,letterSpacing:1}}>WATCH STREAMS</div>
+          <div style={{fontSize:11,color:"#8B92A8",marginTop:2}}>admin stream directory</div>
+        </div>
+        <div style={{fontSize:10,color:cfg.multiview?"#B8FF4D":"#4A5066",fontWeight:900}}>{cfg.multiview?"multiview":"single"}</div>
+      </div>
+      <div style={{display:"flex",gap:7,overflowX:"auto",marginBottom:10,paddingBottom:4}}>{streams.map(st=><button key={st.id} onClick={()=>setActiveId(st.id)} className="bb-pressable" style={{flexShrink:0,background:(active?.id===st.id)?"#FF61C1":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px 10px",color:(active?.id===st.id)?"#06070D":"#E8ECF4",fontSize:10,fontWeight:900}}>{st.label}</button>)}</div>
+      <div style={{display:"grid",gridTemplateColumns:cfg.multiview && viewStreams.length>1?"1fr 1fr":"1fr",gap:10}}>{viewStreams.map(st=><div key={st.id} style={{background:"#000",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,overflow:"hidden"}}><iframe src={getStreamEmbedSrc(st.url)} title={st.label} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen style={{width:"100%",aspectRatio:"16/9",border:0,display:"block"}}/><div style={{padding:10,background:"#0B0D17",fontSize:11,color:"#8B92A8",fontWeight:800}}>{st.label}</div></div>)}</div>
+      {!streams.length&&<EmptyState icon="📺" title="No streams added" body="Add Twitch or YouTube links in Admin → stream directory." />}
+    </div>
+  </div>;
 }
 
 
@@ -13129,21 +18563,32 @@ const GAME_CARDS = [
   { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
   { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
   { id:"rlcsbets", label:"RLCS Live",        desc:"watch the live Rocket League hub",    color:"#FF61C1" },
-  { id:"stocks",   label:"Stock Market",     desc:"invest pts in teammates before matches",    color:"#7CFFB2" },
 ];
 
 function TeamLinkTab({ stats, onUpdateOpponentScore }) {
+  const [mode, setMode] = useState("3v3");
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4}}>team link</div>
-      <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginBottom:16}}>synced team games grouped by day and game.</div>
-      <TeamLinkGames stats={stats} onUpdateOpponentScore={onUpdateOpponentScore} />
+      <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginBottom:12}}>pick a mode, then open each day's synced logs.</div>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        {["1v1","2v2","3v3"].map(m => (
+          <button key={m} onClick={()=>setMode(m)} className="bb-pressable" style={{flex:1,background:mode===m?"#B8FF4D":"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"10px 0",fontSize:12,fontWeight:900,color:mode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>{m}</button>
+        ))}
+      </div>
+      <TeamLinkGames stats={stats} onUpdateOpponentScore={onUpdateOpponentScore} modeFilter={mode}/>
     </div>
   );
 }
 
-function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, activeRace, setActiveRace, raceStart, setRaceStart }) {
-  const [active, setActive] = useState(null);
+function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, activeRace, setActiveRace, raceStart, setRaceStart, appCustomizer }) {
+  const [active, setActive] = useState(() => {
+    try { return localStorage.getItem("bb_open_games_active") || null; } catch (_) { return null; }
+  });
+  useEffect(() => {
+    if (!active) return;
+    try { localStorage.removeItem("bb_open_games_active"); } catch (_) {}
+  }, [active]);
   const myPoints = points?.[currentPlayer] || 0;
 
   if (active === "trivia") return (
@@ -13173,22 +18618,13 @@ function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, acti
   if (active === "rlcsbets") return (
     <div className="bb-tab-content" style={s.tabContent}>
       <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
-      <RLCSBets currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets}/>
+      <RLCSBets currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} appCustomizer={appCustomizer}/>
     </div>
   );
-  if (active === "stocks") return (
-    <div className="bb-tab-content" style={s.tabContent}>
-      <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
-      <StockMarketTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={{}} setStocks={()=>{}}/>
-    </div>
-  );
-
   return (
     <div className="bb-tab-content" style={s.tabContent}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4}}>arcade</div>
-      <div style={{fontSize:12,color:"#B8FF4D",marginBottom:20,fontWeight:700}}>
-        balance: <span style={{color:"#B8FF4D",fontWeight:900}}>{myPoints} pts</span>
-      </div>
+      
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         {GAME_CARDS.map(card => (
           <button key={card.id} onClick={()=>setActive(card.id)} className="bb-pressable"
@@ -13211,12 +18647,20 @@ const backBtnStyle = {
                   
                   
                   
+
+function UnderConstructionPage({ tabId, appCustomizer }) {
+  const label = (tabId || "page").replace(/([A-Z])/g," $1");
+  const msg = appCustomizer?.underConstruction?.[tabId]?.message || "this page is being worked on right now. check back soon.";
+  return <div className="bb-tab-content" style={s.tabContent}><div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,209,102,.24)",borderRadius:22,padding:22,textAlign:"center",marginTop:20}}><div style={{fontSize:34,marginBottom:10}}>🚧</div><div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>under construction</div><div style={{fontSize:22,color:"#E8ECF4",fontWeight:900,marginTop:6,textTransform:"lowercase"}}>{label}</div><div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginTop:8}}>{msg}</div></div></div>;
+}
+
 function AppInner() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
   const [currentPlayer,setCurrentPlayer]=useState(null);
 const [toasts, setToasts] = useState([]);
   const [loading,setLoading]=useState(false);
+  const [sharedDataReady, setSharedDataReady] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -13245,7 +18689,28 @@ const [toasts, setToasts] = useState([]);
     };
   }, []);
   const [tab,setTab]=useState("home");
+  useEffect(() => {
+    const handler = (e) => {
+      const next = e?.detail?.tab;
+      if (typeof next === "string" && next) setTab(next);
+    };
+    window.addEventListener("bb-navigate-tab", handler);
+    return () => window.removeEventListener("bb-navigate-tab", handler);
+  }, []);
   const [navPosition, setNavPosition] = useState("top");
+  const [tabAnimationStyle, setTabAnimationStyle] = useState("float");
+  const [fullScreenFloatMode, setFullScreenFloatMode] = useState(true);
+  const [appCustomizer, setAppCustomizer] = useState(DEFAULT_APP_CUSTOMIZER);
+  useEffect(() => {
+    let alive = true;
+    storeGet(APP_CUSTOMIZER_KEY).then(cfg => {
+      if (!alive) return;
+      setAppCustomizer(normalizeAppCustomizer(cfg));
+    }).catch(() => {});
+    const onCustom = (e) => setAppCustomizer(normalizeAppCustomizer(e?.detail));
+    try { window.addEventListener("bb-app-customizer-updated", onCustom); } catch (_) {}
+    return () => { alive = false; try { window.removeEventListener("bb-app-customizer-updated", onCustom); } catch (_) {} };
+  }, []);
   useEffect(() => {
     let alive = true;
     storeGet("nav_position").then(pos => {
@@ -13253,6 +18718,74 @@ const [toasts, setToasts] = useState([]);
       if (pos === "bottom" || pos === "top") setNavPosition(pos);
     }).catch(() => {});
     return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    storeGet("tab_animation_style").then(style => {
+      if (!alive) return;
+      if (["off","float","soft","spring","pop","slide","swoop","cascade","floaty","flip","zoom","drift","glitch","stack","wipe"].includes(style)) setTabAnimationStyle(style);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    storeGet("full_screen_float_mode").then(mode => {
+      if (!alive) return;
+      if (mode === "sheet" || mode === false) setFullScreenFloatMode(false);
+      if (mode === "float" || mode === true || mode === null || mode === undefined) setFullScreenFloatMode(true);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.remove("bb-tab-anim-off","bb-tab-anim-float","bb-tab-anim-soft","bb-tab-anim-spring","bb-tab-anim-pop","bb-tab-anim-slide","bb-tab-anim-swoop","bb-tab-anim-cascade","bb-tab-anim-floaty","bb-tab-anim-flip","bb-tab-anim-zoom","bb-tab-anim-drift","bb-tab-anim-glitch","bb-tab-anim-stack","bb-tab-anim-wipe");
+    document.body.classList.add(`bb-tab-anim-${tabAnimationStyle || "float"}`);
+  }, [tabAnimationStyle]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onAdminShopUpdated = (e) => {
+      const next = Array.isArray(e?.detail) ? e.detail : getAdminShopItemsSync();
+      setAdminShopItems(next);
+      cacheAdminShopItems(next);
+    };
+    window.addEventListener("bb-admin-shop-updated", onAdminShopUpdated);
+    return () => window.removeEventListener("bb-admin-shop-updated", onAdminShopUpdated);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.remove("bb-fullscreen-float", "bb-fullscreen-sheet");
+    document.body.classList.add(fullScreenFloatMode ? "bb-fullscreen-float" : "bb-fullscreen-sheet");
+  }, [fullScreenFloatMode]);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.body.classList.toggle("bb-hide-borders", !!appCustomizer?.hideBorders);
+    document.body.classList.toggle("bb-compact-cards", !!appCustomizer?.compactCards);
+    document.body.classList.toggle("bb-hide-muted-text", !!appCustomizer?.hideMutedText);
+    document.body.classList.toggle("bb-hide-top-nav-box", !!appCustomizer?.hideTopNavBox);
+    document.body.classList.toggle("bb-smooth-social", appCustomizer?.smoothSocialLoading !== false);
+    document.body.classList.toggle("bb-motion-low", appCustomizer?.animationDepth === "low");
+    document.body.classList.toggle("bb-motion-high", appCustomizer?.animationDepth === "high");
+    document.body.classList.toggle("bb-button-bouncy", appCustomizer?.buttonMotion === "bouncy");
+    document.body.classList.toggle("bb-ambient-fx-on", appCustomizer?.ambientFx !== false);
+    document.body.classList.remove("bb-finish-default","bb-finish-neon_pro","bb-finish-glass_final","bb-finish-tournament_broadcast","bb-finish-minimal_compact","bb-finish-arcade_luxe","bb-finish-midnight_terminal","bb-finish-sunset_glass","bb-finish-ice_blue","bb-finish-purple_haze","bb-finish-carbon_lime","bb-finish-whiteout","bb-finish-redline","bb-finish-ocean","bb-finish-gold_room");
+    document.body.classList.add(`bb-finish-${normalizeAppCustomizer(appCustomizer).finishStyle}`);
+    document.body.classList.remove("bb-ui-default","bb-ui-glass_panels","bb-ui-floating_bento","bb-ui-terminal_blocks","bb-ui-broadcast_cards","bb-ui-compact_tiles");
+    document.body.classList.add(`bb-ui-${normalizeAppCustomizer(appCustomizer).uiPanelMode}`);
+  }, [appCustomizer]);
+  useEffect(() => {
+    if (appCustomizer?.hiddenTabs?.[tab] && tab !== "home") setTab("home");
+  }, [appCustomizer, tab]);
+  useEffect(() => {
+    const open = () => {
+      setTab("social");
+      setSocialDeepLink({ subTab:"bets", id:`open-bets-${Date.now()}` });
+      setTimeout(() => scrollToTop(), 60);
+    };
+    window.addEventListener("bb-open-social-bets", open);
+    try { if (localStorage.getItem("bb_open_social_bets")) { localStorage.removeItem("bb_open_social_bets"); setTimeout(open, 150); } } catch (_) {}
+    return () => window.removeEventListener("bb-open-social-bets", open);
   }, []);
   const [schedule,setSchedule]=useState({league:buildLeagueWeeks(),playoffs:buildPlayoffRounds()});
   const [mmrProfiles,setMmrProfiles]=useState({});
@@ -13263,19 +18796,54 @@ const [toasts, setToasts] = useState([]);
   const [posts,setPosts]=useState([]);
   const [streamProfiles,setStreamProfiles]=useState({});
   const [stats,setStats]=useState([]);
+  const statsRef = useRef([]);
+  useEffect(() => { statsRef.current = Array.isArray(stats) ? stats : []; }, [stats]);
   const [presence,setPresence]=useState({});
+  const presenceRef = useRef({});
+  useEffect(() => { presenceRef.current = presence || {}; }, [presence]);
   const [myMode,setMyMode]=useState(null);
   const [pings,setPings]=useState([]);
   const [points,setPoints]=useState({});
+  const pointsRef = useRef({});
+  useEffect(() => { pointsRef.current = points || {}; }, [points]);
 const [parseCredits, setParseCredits] = useState({});
 const [creditRequests, setCreditRequests] = useState([]);                      
 const [bets,setBets]=useState([]);
+const [adminShopItems, setAdminShopItems]=useState(() => getAdminShopItemsSync());
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const equipped = points?.[currentPlayer + "_equipped"] || {};
+    const collage = getAllShopItems(adminShopItems).find(i => i.type === "text_collage" && equipped[i.id]);
+    document.body.classList.toggle("bb-text-collage-on", !!collage);
+    document.body.classList.toggle("bb-text-collage-clay", collage?.finish === "clay");
+    document.body.classList.toggle("bb-text-collage-knit", collage?.finish === "knit");
+    if (collage?.colors) {
+      document.body.style.setProperty("--bb-collage-a", collage.colors[0] || "#B8FF4D");
+      document.body.style.setProperty("--bb-collage-b", collage.colors[1] || "#FF61C1");
+      document.body.style.setProperty("--bb-collage-c", collage.colors[2] || "#4D9EFF");
+      document.body.style.setProperty("--bb-collage-glow", collage.finish === "glow" ? "8px" : "0px");
+      document.body.style.setProperty("--bb-collage-shadow", collage.colors[0] || "#B8FF4D");
+    }
+    return () => {
+      document.body.classList.remove("bb-text-collage-on","bb-text-collage-clay","bb-text-collage-knit");
+    };
+  }, [points, currentPlayer, adminShopItems]);
   const [resyncingId,setResyncingId]=useState(null);
 const [passXP, setPassXP] = useState({});       // { [playerId]: number }
+const passXPRef = useRef({});
+useEffect(() => { passXPRef.current = passXP || {}; }, [passXP]);
 const [passPremium, setPassPremium] = useState({}); // { [playerId]: true }
+const passPremiumRef = useRef({});
+useEffect(() => { passPremiumRef.current = passPremium || {}; }, [passPremium]);
 const [passClaimed, setPassClaimed] = useState({}); // { [playerId+"_"+track+"_"+tier]: true }
+const passClaimedRef = useRef({});
+useEffect(() => { passClaimedRef.current = passClaimed || {}; }, [passClaimed]);
 const [passTokens, setPassTokens] = useState({});   // { [playerId]: [{id,type,label,earnedAt}] }
+const passTokensRef = useRef({});
+useEffect(() => { passTokensRef.current = passTokens || {}; }, [passTokens]);
 const [passActiveBoosts, setPassActiveBoosts] = useState({}); // { [playerId]: {type,label,activatedAt,expiresAt} }
+const passActiveBoostsRef = useRef({});
+useEffect(() => { passActiveBoostsRef.current = passActiveBoosts || {}; }, [passActiveBoosts]);
   const [resyncOverlay,setResyncOverlay]=useState(false);
   const [pendingResyncPlayer,setPendingResyncPlayer]=useState(null);
   const [commentDay,setCommentDay]=useState(null);
@@ -13301,12 +18869,12 @@ const [timeLogs, setTimeLogs] = useState([]);
   }, [points]);
 
   useEffect(() => {
-    if (!isMeaningfulGenericSnapshot(passXP)) return;
+    if (!hasAnyStoredKey(passXP)) return;
     storeSet("pass_xp_backup", passXP).catch(() => {});
   }, [passXP]);
 
   useEffect(() => {
-    if (!isMeaningfulGenericSnapshot(passPremium)) return;
+    if (!hasAnyStoredKey(passPremium)) return;
     storeSet("pass_premium_backup", passPremium).catch(() => {});
   }, [passPremium]);
 
@@ -13337,7 +18905,9 @@ const [timeLogs, setTimeLogs] = useState([]);
     });
   }, [posts]);
 
-const [chemistry, setChemistry] = useState({});   
+const [chemistry, setChemistry] = useState({});
+const chemistryRef = useRef({});
+useEffect(() => { chemistryRef.current = chemistry || {}; }, [chemistry]);   
 const [activityFeed, setActivityFeed] = useState([]);
 const [pendingActivityToasts, setPendingActivityToasts] = useState([]);  
 const [catchupQueue, setCatchupQueue] = useState([]);
@@ -13356,9 +18926,66 @@ const [sessionPingBanner, setSessionPingBanner] = useState(null);
 const [autoJoinVoiceNonce, setAutoJoinVoiceNonce] = useState(null);
 const [roomMusicEnabled, setRoomMusicEnabled] = useState(false);
 const [soundboardEvent, setSoundboardEvent] = useState(null);
+const [burtonOS, setBurtonOS] = useState(DEFAULT_BURTON_OS);
+const burtonOSRef = useRef(DEFAULT_BURTON_OS);
+useEffect(() => { burtonOSRef.current = normalizeBurtonOS(burtonOS); }, [burtonOS]);
+
+// Auto-unlock achievement/limited titles. This only appends newly earned title IDs to owned inventory.
+useEffect(() => {
+  if (!currentPlayer || !sharedDataReady) return;
+  const ownedKey = `${currentPlayer}_owned`;
+  const owned = Array.isArray(points?.[ownedKey]) ? points[ownedKey] : [];
+  const earnedIds = getEarnedAchievementTitleIds({ playerId: currentPlayer, stats, burtonOS, points, passXP });
+  const missing = earnedIds.filter(id => !owned.includes(id));
+  if (!missing.length) return;
+  const nextPoints = { ...points, [ownedKey]: Array.from(new Set([...owned, ...missing])) };
+  setPoints(nextPoints);
+  storeSetWithPush("points", nextPoints).catch(() => storeSet("points", nextPoints));
+  const first = getTitleItemByIdSafe(missing[0]);
+  addToast?.(missing.length === 1 ? `title unlocked: ${first?.value || first?.label || "new title"}` : `${missing.length} titles unlocked`, first?.emoji || "🏷️");
+}, [currentPlayer, sharedDataReady, stats, burtonOS, points, passXP]);
+const burtonStatsInitRef = useRef(false);
+
+useEffect(() => {
+  if (authStage !== "app") setSharedDataReady(false);
+}, [authStage]);
+
+const WEEKLY_CHALLENGE_RESET_VERSION_APP77 = 77;
+useEffect(() => {
+  if (authStage !== "app" || !currentPlayer || !sharedDataReady || !points) return;
+  const key = "weekly_challenge_reset_v" + WEEKLY_CHALLENGE_RESET_VERSION_APP77;
+  if (points[key]) return;
+  const cleanedPoints = { ...points, [key]: true };
+  Object.keys(cleanedPoints).forEach(k => { if (/^challenge_/.test(k) || /live_poll/i.test(k)) delete cleanedPoints[k]; });
+  setPoints(cleanedPoints);
+  storeSet("points", cleanedPoints).catch(() => {});
+}, [authStage, currentPlayer, sharedDataReady, points]);
+useEffect(() => {
+  if (authStage !== "app" || !currentPlayer || !sharedDataReady || !completions) return;
+  if (completions.__weeklyChallengeResetVersion === WEEKLY_CHALLENGE_RESET_VERSION_APP77) return;
+  const cleaned = { ...completions, __weeklyChallengeResetVersion: WEEKLY_CHALLENGE_RESET_VERSION_APP77 };
+  Object.keys(cleaned).forEach(k => { if (/^challenge_/.test(k) || /live_poll/i.test(k)) delete cleaned[k]; });
+  setCompletions(cleaned);
+  storeSet("completions", cleaned).catch(() => {});
+}, [authStage, currentPlayer, sharedDataReady, completions]);
+
 const [typingStatus, setTypingStatus] = useState({});
 const theme = THEMES[themeId];
+
+// Keep background readability class in a stable hook position so logging in never changes hook order.
+useEffect(() => {
+  if (typeof document === "undefined") return;
+  const eqForBg = points?.[currentPlayer + "_equipped"] || {};
+  const ownedForBg = points?.[currentPlayer + "_owned"] || [];
+  const readableBgId = Array.isArray(ownedForBg)
+    ? ownedForBg.find(id => eqForBg[id] && getAllShopItems().some(item => item.id === id && item.type === "background"))
+    : null;
+  const hasCustomBg = !!points?.[currentPlayer + "_customBg"];
+  document.body.classList.toggle("bb-readable-background", !!readableBgId || hasCustomBg);
+}, [points, currentPlayer]);
 const lastActiveRef = useRef(Date.now());
+const lastPresenceStoreWriteRef = useRef(0);
+const lastPresenceFullReadRef = useRef(0);
 const AUTO_LOCK_MS = 365 * 24 * 60 * 60 * 1000; // effectively disable auto-lock so voice/tab switching never kicks back to lock
 const toastDismissedAll = useRef(false);
 const toastDedupeRef = useRef({});
@@ -13391,7 +19018,9 @@ const addNotificationToast = useCallback((text, icon = "🔔") => {
 }, [addToast]);
 
   useEffect(() => {
-    if (authStage !== "app" || !currentPlayer || !points || Object.keys(points).length === 0) return;
+    // APP79: temporary test-spin grant disabled so login never edits/wipes the shared points store.
+    return;
+    if (authStage !== "app" || !currentPlayer || !sharedDataReady || !points || Object.keys(points).length === 0) return;
     const grantKey = `${currentPlayer}_wheel_visual_test_spins_v1`;
     if (points[grantKey]) return;
     const bonusKey = `${currentPlayer}_bonusSpins`;
@@ -13399,7 +19028,7 @@ const addNotificationToast = useCallback((text, icon = "🔔") => {
     setPoints(upd);
     storeSet("points", upd).catch(() => {});
     addToast?.("+2 test wheel spins", "🎡");
-  }, [authStage, currentPlayer, points, addToast]);
+  }, [authStage, currentPlayer, sharedDataReady, points, addToast]);
 
   useEffect(() => {
     if (authStage !== "app" || !currentPlayer) return;
@@ -13446,7 +19075,7 @@ const addNotificationToast = useCallback((text, icon = "🔔") => {
 
 
 useEffect(() => {
-  if (!currentPlayer || authStage !== "app") return;
+  if (!currentPlayer || authStage !== "app" || !sharedDataReady) return;
   let cancelled = false;
   (async () => {
     try {
@@ -13501,10 +19130,10 @@ useEffect(() => {
     }
   })();
   return () => { cancelled = true; };
-}, [currentPlayer, authStage]);
+}, [currentPlayer, authStage, sharedDataReady]);
 
 useEffect(() => {
-  if (!currentPlayer || authStage !== "app") return;
+  if (!currentPlayer || authStage !== "app" || !sharedDataReady) return;
   let cancelled = false;
   (async () => {
     try {
@@ -13533,8 +19162,40 @@ useEffect(() => {
 }, [stats]);
 
 useEffect(() => {
+  if (!currentPlayer || authStage !== "app" || !sharedDataReady || !Array.isArray(stats)) return;
+  const os = normalizeBurtonOS(burtonOSRef.current);
+  const safeStats = sanitizeStatsForRender(stats);
+  if (!burtonStatsInitRef.current) {
+    burtonStatsInitRef.current = true;
+    if (!Object.keys(os.processedGames || {}).length && safeStats.length) {
+      const processed = {};
+      safeStats.slice(0, 80).forEach(g => { const k = getGameKeyForBurtonOS(g); if (k) processed[k] = Date.now(); });
+      const seeded = normalizeBurtonOS({ ...os, processedGames:processed, economy:buildTeamEconomyHealth(points || {}, passXP || {}, safeStats) });
+      burtonOSRef.current = seeded;
+      setBurtonOS(seeded);
+      storeSet(BURTON_OS_KEY, seeded).catch(() => {});
+    }
+    return;
+  }
+  const processed = os.processedGames || {};
+  const newGames = safeStats.filter(g => {
+    const key = getGameKeyForBurtonOS(g);
+    return key && !processed[key];
+  }).slice(0, 12);
+  if (!newGames.length) return;
+  const next = buildBurtonOSAfterGames(os, newGames, safeStats, points || {}, passXP || {}, currentPlayer);
+  burtonOSRef.current = next;
+  setBurtonOS(next);
+  storeSetWithPush(BURTON_OS_KEY, next).catch(() => {});
+}, [stats, currentPlayer, authStage, sharedDataReady]);
+
+useEffect(() => {
   if (Array.isArray(teamSessions) && teamSessions.length) storeSet("team_sessions_backup", teamSessions).catch(() => {});
 }, [teamSessions]);
+
+useEffect(() => {
+  if (isMeaningfulChemistrySnapshot(chemistry)) storeSet("chemistry_backup", chemistry).catch(() => {});
+}, [chemistry]);
 
 useEffect(() => {
   if (Array.isArray(timeLogs) && timeLogs.length) storeSet("time_logs_backup", timeLogs).catch(() => {});
@@ -13609,7 +19270,7 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
       return;
     }
     if (link.action === "chat") {
-      setTab("home");
+      setTab("room");
       setChatOpen(true);
       done();
       return;
@@ -13643,8 +19304,17 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
       done();
       return;
     }
+    if (link.action === "stocks") {
+      setChatOpen(false);
+      setTab("stocks");
+      done();
+      return;
+    }
     if (link.action === "boost") {
       setChatOpen(false);
+      if (link.type === "race" || link.open === "race" || link.game === "race") {
+        try { localStorage.setItem("bb_open_games_active", "race"); } catch (_) {}
+      }
       setTab("boost");
       done();
       return;
@@ -13731,7 +19401,7 @@ useEffect(() => {
   };
 
   pollVoicePresence();
-  const timer = setInterval(pollVoicePresence, 1000);
+  const timer = setInterval(pollVoicePresence, 45000);
   return () => { alive = false; clearInterval(timer); };
 }, [currentPlayer]);
 
@@ -13742,6 +19412,7 @@ useEffect(() => {
 }, [voiceJoinBanner?.id]);
 
 useEffect(() => {
+  burtonStatsInitRef.current = false;
   sessionPingSeenRef.current = new Set();
   sessionPingInitializedRef.current = false;
   setSessionPingBanner(null);
@@ -13812,7 +19483,7 @@ useEffect(() => {
   run();
   const timer = setInterval(run, 60 * 1000);
   return () => { stopped = true; clearInterval(timer); };
-}, [currentPlayer, bets, stats, points]);
+}, [currentPlayer, sharedDataReady, bets, stats, points]);
 
 useEffect(() => {
   if (!currentPlayer) return;
@@ -13822,34 +19493,86 @@ useEffect(() => {
   return () => clearInterval(timer);
 }, [currentPlayer]);                      
 
+useEffect(() => {
+  if (!currentPlayer) return;
+  const run = () => maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurtonOS, pings, setPings, appCustomizer, addToast }).catch(e => console.warn("job shift reminder failed", e));
+  run();
+  const timer = setInterval(run, 60 * 1000);
+  return () => clearInterval(timer);
+}, [currentPlayer, burtonOS, pings, appCustomizer]);
+
   // ── Real-time: subscribe to all shared KV keys once logged in ──
   useEffect(() => {
     if (!currentPlayer) return;
-const heartbeat = async () => {
-      const fresh = await storeGet("presence") || {};
-      const upd = { ...fresh, [currentPlayer]: new Date().toISOString() };
-      setPresence(upd);
-      await storeSet("presence", upd);
+const heartbeat = async (force = false) => {
+      const now = Date.now();
+      const nowIso = new Date(now).toISOString();
+      const base = presenceRef.current && typeof presenceRef.current === "object" ? presenceRef.current : {};
+      const localUpd = { ...base, [currentPlayer]: nowIso };
+      presenceRef.current = localUpd;
+      setPresence(localUpd);
+
+      // Keep online status instant locally, but write to Supabase at most about once a minute.
+      // Touch/mouse events were forcing a write every interaction and spiking Supabase CPU.
+      if (!force && now - lastPresenceStoreWriteRef.current < 55000) return;
+      lastPresenceStoreWriteRef.current = now;
+
+      try {
+        let safeFresh = base;
+        if (force || !Object.keys(base).length || now - lastPresenceFullReadRef.current > 300000) {
+          const fresh = await storeGet("presence").catch(() => null);
+          if (fresh && typeof fresh === "object" && !Array.isArray(fresh)) safeFresh = fresh;
+          lastPresenceFullReadRef.current = now;
+        }
+        const upd = { ...safeFresh, [currentPlayer]: nowIso };
+        presenceRef.current = upd;
+        setPresence(upd);
+        await storeSet("presence", upd);
+      } catch (_) {
+        storeSet("presence", localUpd).catch(() => {});
+      }
     };
-heartbeat(); const updateActive = () => { lastActiveRef.current = Date.now(); };
-window.addEventListener("focus", updateActive);
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) updateActive();
-});
+heartbeat(true);
+setTimeout(() => heartbeat(false), 650);
+let lastLocalPresencePulse = 0;
+let lastForcedPresencePulse = 0;
+const updateActive = () => {
+  const now = Date.now();
+  lastActiveRef.current = now;
+  if (now - lastLocalPresencePulse > 10000) {
+    lastLocalPresencePulse = now;
+    heartbeat(false);
+  }
+};
+const updateActiveForce = () => {
+  const now = Date.now();
+  lastActiveRef.current = now;
+  if (now - lastForcedPresencePulse > 30000) {
+    lastForcedPresencePulse = now;
+    heartbeat(true);
+  } else {
+    heartbeat(false);
+  }
+};
+const onVisibilityChange = () => { if (!document.hidden) updateActiveForce(); };
+window.addEventListener("focus", updateActiveForce);
+document.addEventListener("visibilitychange", onVisibilityChange);
 document.addEventListener("touchstart", updateActive, { passive: true });
 document.addEventListener("mousemove", updateActive, { passive: true });
-    const hbInterval = setInterval(heartbeat, 30000);
-    const unsub = subscribeKVMulti(RT_KEYS, ({ key, value }) => {
+    const hbInterval = setInterval(() => heartbeat(false), 60000);
+    const unsub = subscribeKVMulti(RT_KEYS_LIVE, ({ key, value }) => {
       if (key === "chat") {
+  const chatList = Array.isArray(value) ? value.filter(Boolean) : [];
   setMessages(prev => {
-    const newMsgs = value.filter(m => m.playerId !== currentPlayer && !prev.find(p => p.id === m.id));
+    const prevList = Array.isArray(prev) ? prev : [];
+    const newMsgs = chatList.filter(m => m?.playerId !== currentPlayer && !prevList.find(p => p?.id === m?.id));
     if (appIsVisible()) {
       newMsgs.forEach(m => {
         const sender = PLAYERS.find(pl => pl.id === m.playerId);
-        addNotificationToast(`${sender?.name}: ${m.text}`, "💬");
+        addNotificationToast(`${sender?.name || "team"}: ${m.text || ""}`, "💬");
       });
     }
-    return value;
+    return chatList;
   });
 }
       if (key === "posts")          setPosts(Array.isArray(value) ? value : []);
@@ -13858,7 +19581,26 @@ if (key === "time_logs") setTimeLogs(value);
 if (key === "flip_challenges") setFlipChallenges(Array.isArray(value) ? value : []);
 if (key === "stocks") setStocks(value);
 if (key === "flowers") setFlowers(Array.isArray(value) ? value : []);
-if (key === "chemistry") setChemistry(value || {});
+if (key === "chemistry") {
+  const incomingChem = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const currentChem = chemistryRef.current || {};
+  if (isMeaningfulChemistrySnapshot(currentChem) && !isMeaningfulChemistrySnapshot(incomingChem)) {
+    (async () => {
+      const backup = await storeGet("chemistry_backup").catch(() => null);
+      const restore = backupHasMoreChemistryData(backup, incomingChem) ? backup : currentChem;
+      if (restore && isMeaningfulChemistrySnapshot(restore)) {
+        chemistryRef.current = restore;
+        setChemistry(restore);
+        await storeSet("chemistry", restore).catch(() => {});
+        await storeSet("chemistry_backup", restore).catch(() => {});
+      }
+    })();
+  } else {
+    chemistryRef.current = incomingChem;
+    setChemistry(incomingChem);
+    if (isMeaningfulChemistrySnapshot(incomingChem)) storeSet("chemistry_backup", incomingChem).catch(() => {});
+  }
+}
 if (key === "coin_flips") setCoinFlips(value);
 if (key === "team_room") setTeamRoom(value?.closed ? null : value);
 if (key === "team_sessions") setTeamSessions(Array.isArray(value) ? value : []);
@@ -13890,18 +19632,166 @@ if (key === "active_race") {
       if (key === "schedule")       setSchedule(value);
       if (key === "comments")       setComments(value);
       if (key === "stream_profiles") setStreamProfiles(value);
-       if (key === "stats") setStats(Array.isArray(value) ? value : []);
-      if (key === "presence")        setPresence(value);
+       if (key === "stats") {
+        const incomingStats = Array.isArray(value) ? sanitizeStatsForRender(value) : [];
+        const currentStats = Array.isArray(statsRef.current) ? statsRef.current : [];
+        if (shouldRejectIncomingStatsSnapshot(incomingStats, currentStats)) {
+          (async () => {
+            const backup = await storeGet("stats_backup").catch(() => null);
+            const restore = backupHasMoreStatsData(backup, incomingStats) ? sanitizeStatsForRender(backup) : (isMeaningfulStatsSnapshot(currentStats) ? currentStats : null);
+            if (restore) {
+              statsRef.current = restore;
+              setStats(restore);
+              await storeSet("stats", restore).catch(() => {});
+              await storeSet("stats_backup", restore).catch(() => {});
+            }
+          })();
+        } else {
+          statsRef.current = incomingStats;
+          setStats(incomingStats);
+          if (isMeaningfulStatsSnapshot(incomingStats)) storeSet("stats_backup", incomingStats).catch(() => {});
+        }
+      }
+      if (key === "presence") {
+        const incoming = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+        const mine = incoming[currentPlayer] || presenceRef.current?.[currentPlayer] || new Date().toISOString();
+        const merged = { ...incoming, [currentPlayer]: mine };
+        presenceRef.current = merged;
+        setPresence(merged);
+      }
       if (key === "pings")           setPings(Array.isArray(value) ? value : []);
-      if (key === "points")          setPoints(value);
+      if (key === "points") {
+        const incomingPoints = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+        const currentPoints = pointsRef.current || {};
+        if (shouldRejectIncomingPointsSnapshot(incomingPoints, currentPoints)) {
+          (async () => {
+            const backup = await storeGet("points_backup").catch(() => null);
+            const restore = backupHasMorePointData(backup, incomingPoints) ? backup : (isMeaningfulPointsSnapshot(currentPoints) ? currentPoints : null);
+            if (restore) {
+              setPoints(restore);
+              pointsRef.current = restore;
+              await storeSet("points", restore).catch(() => {});
+              await storeSet("points_backup", restore).catch(() => {});
+            }
+          })();
+        } else {
+          setPoints(incomingPoints);
+          pointsRef.current = incomingPoints;
+        }
+      }
 if (key === "bets")            setBets(Array.isArray(value) ? value : []);
-if (key === "pass_xp")      setPassXP(value);
-if (key === "pass_premium") setPassPremium(value);
-if (key === "pass_claimed") setPassClaimed(value);
-if (key === "pass_tokens")  setPassTokens(value);
-if (key === "pass_active_boosts") setPassActiveBoosts(value);
+if (key === "pass_xp") {
+  const incoming = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const current = passXPRef.current || {};
+  if (shouldAcceptPassXPUpdate(incoming, current)) {
+    setPassXP(incoming);
+    passXPRef.current = incoming;
+    if (hasAnyStoredKey(incoming)) storeSet("pass_xp_backup", incoming).catch(() => {});
+  } else if (hasAnyStoredKey(current)) {
+    storeSet("pass_xp", current).catch(() => {});
+    storeSet("pass_xp_backup", current).catch(() => {});
+  }
+}
+if (key === "pass_premium") {
+  const incoming = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const current = passPremiumRef.current || {};
+  if (shouldAcceptPremiumUpdate(incoming, current)) {
+    setPassPremium(incoming);
+    passPremiumRef.current = incoming;
+    if (hasAnyStoredKey(incoming)) storeSet("pass_premium_backup", incoming).catch(() => {});
+  } else if (hasAnyStoredKey(current)) {
+    storeSet("pass_premium", current).catch(() => {});
+    storeSet("pass_premium_backup", current).catch(() => {});
+  }
+}
+if (key === "pass_claimed") {
+  const incoming = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const current = passClaimedRef.current || {};
+  if (isMeaningfulGenericSnapshot(current) && !isMeaningfulGenericSnapshot(incoming)) {
+    storeSet("pass_claimed", current).catch(() => {});
+    storeSet("pass_claimed_backup", current).catch(() => {});
+  } else {
+    setPassClaimed(incoming);
+    passClaimedRef.current = incoming;
+    if (isMeaningfulGenericSnapshot(incoming)) storeSet("pass_claimed_backup", incoming).catch(() => {});
+  }
+}
+if (key === "pass_tokens") {
+  const incoming = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const current = passTokensRef.current || {};
+  if (isMeaningfulGenericSnapshot(current) && !isMeaningfulGenericSnapshot(incoming)) {
+    storeSet("pass_tokens", current).catch(() => {});
+    storeSet("pass_tokens_backup", current).catch(() => {});
+  } else {
+    setPassTokens(incoming);
+    passTokensRef.current = incoming;
+    if (isMeaningfulGenericSnapshot(incoming)) storeSet("pass_tokens_backup", incoming).catch(() => {});
+  }
+}
+if (key === "pass_active_boosts") {
+  const incoming = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const current = passActiveBoostsRef.current || {};
+  if (isMeaningfulGenericSnapshot(current) && !isMeaningfulGenericSnapshot(incoming)) {
+    storeSet("pass_active_boosts", current).catch(() => {});
+    storeSet("pass_active_boosts_backup", current).catch(() => {});
+  } else {
+    setPassActiveBoosts(incoming);
+    passActiveBoostsRef.current = incoming;
+    if (isMeaningfulGenericSnapshot(incoming)) storeSet("pass_active_boosts_backup", incoming).catch(() => {});
+  }
+}
 if (key === "typing") setTypingStatus(value || {});
 if (key === "soundboard_events") setSoundboardEvent(value || null);
+if (key === "admin_shop_items") {
+  const incomingAdminItems = Array.isArray(value) ? value : [];
+  let localDirty = false;
+  try { localDirty = localStorage.getItem("bb_admin_shop_items_dirty") === "1"; } catch (_) {}
+  const cachedAdminItems = getAdminShopItemsSync();
+  if (localDirty && cachedAdminItems.length > incomingAdminItems.length) {
+    setAdminShopItems(cachedAdminItems);
+  } else {
+    setAdminShopItems(incomingAdminItems);
+    cacheAdminShopItems(incomingAdminItems);
+  }
+}
+if (key === "full_screen_float_mode") setFullScreenFloatMode(value === "sheet" || value === false ? false : true);
+if (key === "app_customizer") setAppCustomizer(normalizeAppCustomizer(value));
+if (key === "burton_os") { const safeBos = normalizeBurtonOS(value); burtonOSRef.current = safeBos; setBurtonOS(safeBos); }
+if (key === ADMIN_LIVE_SYNC_KEY) {
+  const evt = value && typeof value === "object" ? value : null;
+  if (evt && (evt.to === currentPlayer || evt.to === "all")) {
+    if (evt.body) addToast(evt.body, "🛡️");
+    const snap = evt.snapshot && typeof evt.snapshot === "object" && !Array.isArray(evt.snapshot) ? evt.snapshot : null;
+    if (evt.key === "points" && snap && !shouldRejectIncomingPointsSnapshot(snap, pointsRef.current || {})) {
+      pointsRef.current = snap;
+      setPoints(snap);
+    } else if (evt.key === "pass_xp" && snap) {
+      passXPRef.current = snap;
+      setPassXP(snap);
+    } else if (evt.key === "pass_premium" && snap) {
+      passPremiumRef.current = snap;
+      setPassPremium(snap);
+    } else {
+      // Older deployed clients may still send events without a snapshot. Fetch once only for compatibility.
+      (async () => {
+        try {
+          if (evt.key === "points") {
+            const fresh = await storeGet("points").catch(() => null);
+            if (fresh && typeof fresh === "object" && !Array.isArray(fresh) && !shouldRejectIncomingPointsSnapshot(fresh, pointsRef.current || {})) { pointsRef.current = fresh; setPoints(fresh); }
+          }
+          if (evt.key === "pass_xp") {
+            const fresh = await storeGet("pass_xp").catch(() => null);
+            if (fresh && typeof fresh === "object" && !Array.isArray(fresh)) { passXPRef.current = fresh; setPassXP(fresh); }
+          }
+          if (evt.key === "pass_premium") {
+            const fresh = await storeGet("pass_premium").catch(() => null);
+            if (fresh && typeof fresh === "object" && !Array.isArray(fresh)) { passPremiumRef.current = fresh; setPassPremium(fresh); }
+          }
+        } catch (_) {}
+      })();
+    }
+  }
+}
 if (key === "parse_credits") setParseCredits(value || {});
 if (key === "credit_requests") setCreditRequests(Array.isArray(value) ? value : []);
 if (key === "activity_feed") {
@@ -13921,9 +19811,48 @@ return () => {
     unsub?.();
     document.removeEventListener("touchstart", updateActive);
     document.removeEventListener("mousemove", updateActive);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
     window.removeEventListener("focus", updateActive);
   };
   }, [currentPlayer, addNotificationToast]);
+
+  useEffect(() => {
+    if (!currentPlayer || authStage !== "app") return;
+    let stopped = false;
+    const applyCritical = async () => {
+      try {
+        const [freshPresence, freshPoints, freshPassXP, freshPremium] = await Promise.all([
+          storeGet("presence").catch(() => null),
+          storeGet("points").catch(() => null),
+          storeGet("pass_xp").catch(() => null),
+          storeGet("pass_premium").catch(() => null),
+        ]);
+        if (stopped) return;
+        if (freshPresence && typeof freshPresence === "object" && !Array.isArray(freshPresence)) {
+          const mine = freshPresence[currentPlayer] || presenceRef.current?.[currentPlayer] || new Date().toISOString();
+          const merged = { ...freshPresence, [currentPlayer]: mine };
+          presenceRef.current = merged;
+          setPresence(merged);
+        }
+        if (freshPoints && typeof freshPoints === "object" && !Array.isArray(freshPoints) && !shouldRejectIncomingPointsSnapshot(freshPoints, pointsRef.current || {})) {
+          pointsRef.current = freshPoints;
+          setPoints(freshPoints);
+        }
+        if (freshPassXP && typeof freshPassXP === "object" && !Array.isArray(freshPassXP) && shouldAcceptPassXPUpdate(freshPassXP, passXPRef.current || {})) {
+          passXPRef.current = freshPassXP;
+          setPassXP(freshPassXP);
+        }
+        if (freshPremium && typeof freshPremium === "object" && !Array.isArray(freshPremium) && shouldAcceptPremiumUpdate(freshPremium, passPremiumRef.current || {})) {
+          passPremiumRef.current = freshPremium;
+          setPassPremium(freshPremium);
+        }
+      } catch (_) {}
+    };
+    // Two light catch-up reads after opening. Realtime subscriptions handle live updates after that.
+    const t1 = setTimeout(applyCritical, 350);
+    const t2 = setTimeout(applyCritical, 2500);
+    return () => { stopped = true; clearTimeout(t1); clearTimeout(t2); };
+  }, [currentPlayer, authStage]);
 
   useEffect(() => {
   if (!currentPlayer) return;
@@ -13976,188 +19905,267 @@ return () => {
 }, [currentPlayer]);
 
 
-  const selectName=async(pid)=>{
+  const selectName=(pid)=>{
     setSelectedPlayerId(pid);
     setAuthStage("enter");
-    const auth=await storeGet(`auth:${pid}`);
-    if (!auth) setAuthStage("create");
+    // Never let auth lookup freeze the login flow. If no passcode exists and storage answers quickly,
+    // then show create-passcode. Otherwise keep the keypad usable.
+    Promise.race([
+      Promise.resolve(storeGet(`auth:${pid}`)).catch(() => ({ passcode:"" })),
+      new Promise(resolve => setTimeout(() => resolve({ passcode:"" }), 650))
+    ]).then(auth => {
+      if (!auth && selectedPlayerId === pid) setAuthStage("create");
+    }).catch(() => {});
   };
 
-const loadSharedData = async (pid) => {
+const loadSharedData = (pid) => {
+  // APP82_LOGIN_UNLOCK_PATCH: never let storage delays/errors block passcode login.
+  // Open the app immediately, then hydrate saved data safely in the background.
+  if (!pid) return Promise.resolve(false);
+  setLoading(false);
+  setSelectedPlayerId(pid);
   setCurrentPlayer(pid);
-  setAuthStage("app");
   setTab("home");
-  setLoading(false); // manual restore patch: no login spinner flash
+  setAuthStage("app");
+  setSharedDataReady(false);
+  const loginPresenceTs = new Date().toISOString();
+  setPresence(prev => {
+    const upd = { ...(prev || {}), [pid]: loginPresenceTs };
+    presenceRef.current = upd;
+    return upd;
+  });
+  Promise.resolve(storeGet("presence")).then(fresh => {
+    const upd = { ...((fresh && typeof fresh === "object" && !Array.isArray(fresh)) ? fresh : {}), [pid]: loginPresenceTs };
+    presenceRef.current = upd;
+    setPresence(upd);
+    return storeSet("presence", upd);
+  }).catch(() => {});
 
-  const [sched,training,comp,chat,cmts,pst,strm,sts,prs,pngs,tr,tsess,pts,bts,pxp,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
-storeGet("schedule"),
-storeGet("training"),
-storeGet("completions"),
-storeGet("chat"),
-storeGet("comments"),
-storeGet("posts"),
-storeGet("stream_profiles"),
-storeGet("stats"),
-storeGet("presence"),
-storeGet("pings"),
-storeGet("team_room"),
-storeGet("team_sessions"),
-storeGet("points"),
-storeGet("bets"),
-storeGet("pass_xp"),
-storeGet("pass_premium"),
-storeGet("pass_claimed"),
-storeGet("pass_tokens"),
-storeGet("pass_active_boosts"),
-storeGet("time_logs"),
-storeGet("stocks"),
-storeGet("coin_flips"),
-storeGet("active_race"),
-storeGet("chemistry"),
-storeGet("flip_challenges"),
-storeGet("activity_feed"),
-storeGet("parse_credits"),
-storeGet("credit_requests"),
-  ]);
-
-  if (sched) setSchedule(sched);
-  if (training) setTrainingData(training);
-  if (comp) setCompletions(comp);
-  if (chat) setMessages(Array.isArray(chat) ? chat : []);
-  if (cmts) setComments(cmts);
-  if (pst) setPosts(Array.isArray(pst) ? pst : []);
-  if (strm) setStreamProfiles(strm);
-  if (sts) setStats(Array.isArray(sts) ? sts : []);
-  if (prs) { setPresence(prs); setMyMode(prs[pid+"_mode"] || null); }
-  if (pngs) setPings(Array.isArray(pngs) ? pngs : []);
-setTeamRoom(tr && !tr.closed ? tr : null);
-  if (tsess) setTeamSessions(Array.isArray(tsess) ? tsess : []);
-  {
-    const pointsCurrent = pts && typeof pts === "object" ? pts : {};
-    const pointsBackup = await storeGet("points_backup").catch(() => null);
-    if (backupHasMorePointData(pointsBackup, pointsCurrent)) {
-      await storeSet("points", pointsBackup);
-      setPoints(pointsBackup);
-      addToast("points restored from backup", "↩");
-    } else if (pts) {
-      setPoints(pointsCurrent);
+  const safeGet = async (key, fallback = null, timeoutMs = 520) => {
+    try {
+      let finished = false;
+      const work = Promise.resolve(storeGet(key)).then(v => {
+        finished = true;
+        return v === undefined ? fallback : v;
+      }).catch(() => fallback);
+      const timer = new Promise(resolve => setTimeout(() => {
+        if (!finished) resolve(fallback);
+      }, timeoutMs));
+      return await Promise.race([work, timer]);
+    } catch (_) {
+      return fallback;
     }
-  }
-  if (bts) setBets(Array.isArray(bts) ? bts : []);
+  };
 
   const restoreSnapshotIfBetter = async (key, currentValue, setter, label) => {
     const current = currentValue && typeof currentValue === "object" ? currentValue : {};
-    const backup = await storeGet(`${key}_backup`).catch(() => null);
+    const backup = await safeGet(`${key}_backup`, null, 650);
     if (backupHasMoreGenericData(backup, current)) {
-      await storeSet(key, backup);
       setter(backup);
+      // Save the restored value only when it is real data. Never write empty fallbacks on login.
+      storeSet(key, backup).catch(() => {});
       addToast(`${label} restored from backup`, "↩");
-      return;
+      return backup;
     }
     if (currentValue) setter(current);
+    return currentValue;
   };
 
-  await restoreSnapshotIfBetter("pass_xp", pxp, setPassXP, "pass xp");
-  await restoreSnapshotIfBetter("pass_premium", ppm, setPassPremium, "premium pass");
-  await restoreSnapshotIfBetter("pass_claimed", pcl, setPassClaimed, "pass claims");
-  await restoreSnapshotIfBetter("pass_tokens", ptk, setPassTokens, "pass rewards");
-  await restoreSnapshotIfBetter("pass_active_boosts", pab, setPassActiveBoosts, "pass boosts");
-  if (tlogs) setTimeLogs(Array.isArray(tlogs) ? tlogs : []);
-  if (stks) setStocks(stks);
-  if (cf) setCoinFlips(Array.isArray(cf) ? cf : []);
-  if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.startedAt); }
-  if (chem) setChemistry(chem);
-  if (fc) setFlipChallenges(Array.isArray(fc) ? fc : []);
-  if (tr && !tr.closed) setTeamRoom(tr);
+  const hydrateCritical = async () => {
+    try {
+      const [sched, training, comp, sts, pts, pxp, asi, customizer, floatMode, bos] = await Promise.all([
+        safeGet("schedule"),
+        safeGet("training"),
+        safeGet("completions"),
+        safeGet("stats"),
+        safeGet("points"),
+        safeGet("pass_xp"),
+        safeGet(ADMIN_SHOP_ITEMS_KEY),
+        safeGet(APP_CUSTOMIZER_KEY),
+        safeGet("full_screen_float_mode"),
+        safeGet(BURTON_OS_KEY),
+      ]);
 
-  if (af) {
-    const myFeed = (Array.isArray(af) ? af : []).filter(e => e.to === pid);
-    setActivityFeed(myFeed);
-
-const lastLoginAt = await storeGet(`lastLoginAt:${pid}`);
-const newSince = lastLoginAt ? new Date(lastLoginAt).getTime() : Date.now();
-await storeSet(`lastLoginAt:${pid}`, new Date().toISOString());
-
-const unseenNew = myFeed.filter(e =>
-      !e.seen && new Date(e.ts).getTime() > newSince
-    );
-
-    const missedChats = (Array.isArray(chat) ? chat : [])
-      .filter(m => m.playerId !== pid && new Date(m.ts).getTime() > newSince)
-      .slice(-3)
-      .map(m => ({
-        id: m.id,
-        fromName: PLAYERS.find(p => p.id === m.playerId)?.name || "teammate",
-        text: `said: "${m.text.slice(0, 40)}${m.text.length > 40 ? "…" : ""}"`,
-        type: "chat",
-        ts: m.ts,
-      }));
-
-    const myPostIds = new Set((Array.isArray(pst) ? pst : [])
-      .filter(p => p.playerId === pid).map(p => p.id));
-    const missedPostActivity = [];
-    (Array.isArray(pst) ? pst : []).forEach(post => {
-      if (!myPostIds.has(post.id)) return;
-      (post.comments || [])
-        .filter(c => c.playerId !== pid && new Date(c.ts).getTime() > newSince)
-        .forEach(c => {
-          const name = PLAYERS.find(p => p.id === c.playerId)?.name || "someone";
-          missedPostActivity.push({ id: c.id, fromName: name, text: "commented on your post", type: "comment", ts: c.ts });
-        });
-    });
-
-    const allCatchup = [...unseenNew, ...missedChats, ...missedPostActivity]
-      .sort((a, b) => new Date(a.ts) - new Date(b.ts));
-
-if (allCatchup.length > 0) {
-  // login catch-up stays in the notification hub only; no dropdown spam when opening from a phone alert
-  // immediately mark all as seen so they don't repeat
-  const allIds = new Set(allCatchup.map(e => e.id).filter(Boolean));
-  const markedAll = (Array.isArray(af) ? af : []).map(e =>
-    allIds.has(e.id) ? { ...e, seen: true } : e
-  );
-  await storeSetWithPush("activity_feed", markedAll);
-}
-
-    if (unseenNew.length > 0) {
-      const seenIds = new Set(unseenNew.map(e => e.id));
-      const markedSeen = af.map(e => seenIds.has(e.id) ? { ...e, seen: true } : e);
-      await storeSetWithPush("activity_feed", markedSeen);
-    }
-  }
-
-
-if (pc) setParseCredits(pc);
-if (cr) setCreditRequests(Array.isArray(cr) ? cr : []);
-
-const profiles = {};
-  for (const p of PLAYERS) {
-    const profile = await getMMR(p.id);
-    if (profile) {
-      if (!profile.ranks?.[0]?.prevMmr) {
-        const stamped = { ...profile, ranks: profile.ranks.map(r => ({ ...r, prevMmr: r.mmr, prevRank: r.rank })) };
-        await setMMR(p.id, stamped);
-        profiles[p.id] = stamped;
-      } else {
-        profiles[p.id] = profile;
+      if (sched && typeof sched === "object") setSchedule(sched);
+      if (training && typeof training === "object") setTrainingData(training);
+      if (comp && typeof comp === "object") setCompletions(comp);
+      const statsCurrent = Array.isArray(sts) ? sanitizeStatsForRender(sts) : null;
+      const statsBackup = await safeGet("stats_backup", null, 650);
+      if (isMeaningfulStatsSnapshot(statsCurrent)) {
+        setStats(statsCurrent);
+        statsRef.current = statsCurrent;
+        storeSet("stats_backup", statsCurrent).catch(() => {});
+      } else if (backupHasMoreStatsData(statsBackup, statsCurrent || [])) {
+        const restoredStats = sanitizeStatsForRender(statsBackup);
+        setStats(restoredStats);
+        statsRef.current = restoredStats;
+        storeSet("stats", restoredStats).catch(() => {});
+        storeSet("stats_backup", restoredStats).catch(() => {});
+        addToast("game history restored", "↩");
+      } else if (Array.isArray(statsCurrent)) {
+        setStats(statsCurrent);
+        statsRef.current = statsCurrent;
       }
+      if (customizer && typeof customizer === "object") setAppCustomizer(normalizeAppCustomizer(customizer));
+      if (floatMode !== undefined && floatMode !== null) setFullScreenFloatMode(floatMode === "sheet" || floatMode === false ? false : true);
+      if (bos && typeof bos === "object") { const safeBos = normalizeBurtonOS(bos); setBurtonOS(safeBos); burtonOSRef.current = safeBos; }
+
+      const pointsCurrent = pts && typeof pts === "object" ? pts : null;
+      const pointsBackup = await safeGet("points_backup", null, 650);
+      const currentHasGoodPoints = isMeaningfulPointsSnapshot(pointsCurrent) && !looksLikeWipedPointsSnapshot(pointsCurrent);
+      const backupHasGoodPoints = isMeaningfulPointsSnapshot(pointsBackup) && !looksLikeWipedPointsSnapshot(pointsBackup);
+
+      if (currentHasGoodPoints) {
+        setPoints(pointsCurrent);
+        pointsRef.current = pointsCurrent || {};
+      } else if (backupHasGoodPoints) {
+        setPoints(pointsBackup);
+        pointsRef.current = pointsBackup || {};
+        storeSet("points", pointsBackup).catch(() => {});
+        addToast("points restored from backup", "↩");
+      } else if (pointsCurrent && Object.keys(pointsCurrent).length) {
+        // Keep partial data visible, but do not mark it as a good backup.
+        setPoints(pointsCurrent);
+        pointsRef.current = pointsCurrent || {};
+      }
+
+      if (pxp && typeof pxp === "object" && hasAnyStoredKey(pxp)) {
+        setPassXP(pxp);
+        passXPRef.current = pxp;
+      } else {
+        const restoredPassXP = await safeGet("pass_xp_backup", null, 650);
+        if (restoredPassXP && typeof restoredPassXP === "object" && hasAnyStoredKey(restoredPassXP)) {
+          setPassXP(restoredPassXP);
+          passXPRef.current = restoredPassXP;
+          storeSet("pass_xp", restoredPassXP).catch(() => {});
+        }
+      }
+
+      const cachedAdminItems = getAdminShopItemsSync();
+      const safeAdminItems = Array.isArray(asi) && asi.length ? asi.map(normalizeAdminShopItem).filter(Boolean) : cachedAdminItems;
+      if (safeAdminItems.length) {
+        setAdminShopItems(safeAdminItems);
+        cacheAdminShopItems(safeAdminItems);
+      }
+    } catch (err) {
+      console.warn("BB login hydrate skipped", err);
+    } finally {
+      // This unlocks effects after we had a chance to load/restore the progress-critical stores.
+      setSharedDataReady(true);
+      setLoading(false);
     }
-  }
-  setMmrProfiles(profiles);
-  setCurrentPlayer(pid);
+  };
 
-  const savedLastSeen = await storeGet(`lastSeen:${pid}`);
-  const chatCountForSeen = Array.isArray(chat) ? chat.length : 0;
-  const postCountForSeen = Array.isArray(pst) ? pst.length : 0;
-  if (savedLastSeen) setLastSeen({ social: savedLastSeen.social ?? postCountForSeen, chat: savedLastSeen.chat ?? chatCountForSeen, training: savedLastSeen.training ?? 0 });
-  else setLastSeen({ social: postCountForSeen, chat: chatCountForSeen, training: 0 });
+  const hydrateSecondary = async () => {
+    try {
+      const [chat,cmts,pst,strm,prs,pngs,tr,tsess,bts,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
+        safeGet("chat", [], 1000), safeGet("comments", {}, 1000), safeGet("posts", [], 1000), safeGet("stream_profiles", {}, 1000),
+        safeGet("presence", {}, 1000), safeGet("pings", [], 1000), safeGet("team_room", null, 1000), safeGet("team_sessions", [], 1000),
+        safeGet("bets", [], 1000), safeGet("pass_premium", {}, 1000), safeGet("pass_claimed", {}, 1000), safeGet("pass_tokens", {}, 1000),
+        safeGet("pass_active_boosts", {}, 1000), safeGet("time_logs", [], 1000), safeGet("stocks", {}, 1000), safeGet("coin_flips", [], 1000),
+        safeGet("active_race", null, 1000), safeGet("chemistry", {}, 1000), safeGet("flip_challenges", [], 1000), safeGet("activity_feed", [], 1000),
+        safeGet("parse_credits", {}, 1000), safeGet("credit_requests", [], 1000),
+      ]);
+      if (Array.isArray(chat)) setMessages(chat);
+      if (cmts && typeof cmts === "object") setComments(cmts);
+      if (Array.isArray(pst)) setPosts(pst);
+      if (strm && typeof strm === "object") setStreamProfiles(strm);
+      if (prs && typeof prs === "object") {
+        const mine = presenceRef.current?.[pid] || new Date().toISOString();
+        const mergedPresence = { ...prs, [pid]: mine };
+        presenceRef.current = mergedPresence;
+        setPresence(mergedPresence);
+        setMyMode(mergedPresence[pid+"_mode"] || null);
+      }
+      if (Array.isArray(pngs)) setPings(pngs);
+      setTeamRoom(tr && !tr.closed ? tr : null);
+      if (Array.isArray(tsess)) setTeamSessions(tsess);
+      if (Array.isArray(bts)) setBets(bts);
+      if (ppm && typeof ppm === "object" && hasAnyStoredKey(ppm)) {
+        setPassPremium(ppm);
+        passPremiumRef.current = ppm;
+      } else {
+        const restoredPremium = await safeGet("pass_premium_backup", null, 650);
+        if (restoredPremium && typeof restoredPremium === "object" && hasAnyStoredKey(restoredPremium)) {
+          setPassPremium(restoredPremium);
+          passPremiumRef.current = restoredPremium;
+          storeSet("pass_premium", restoredPremium).catch(() => {});
+        }
+      }
+      await restoreSnapshotIfBetter("pass_claimed", pcl, setPassClaimed, "pass claims");
+      await restoreSnapshotIfBetter("pass_tokens", ptk, setPassTokens, "pass rewards");
+      await restoreSnapshotIfBetter("pass_active_boosts", pab, setPassActiveBoosts, "pass boosts");
+      if (Array.isArray(tlogs)) setTimeLogs(tlogs);
+      if (stks && typeof stks === "object") setStocks(stks);
+      if (Array.isArray(cf)) setCoinFlips(cf);
+      if (ar && ar.objectiveId) { setActiveRace(ar.objectiveId); setRaceStart(ar.startedAt); }
+      const chemBackup = await safeGet("chemistry_backup", null, 650);
+      if (chem && typeof chem === "object" && isMeaningfulChemistrySnapshot(chem)) {
+        setChemistry(chem);
+        chemistryRef.current = chem;
+        storeSet("chemistry_backup", chem).catch(() => {});
+      } else if (backupHasMoreChemistryData(chemBackup, chem || {})) {
+        setChemistry(chemBackup);
+        chemistryRef.current = chemBackup;
+        storeSet("chemistry", chemBackup).catch(() => {});
+        storeSet("chemistry_backup", chemBackup).catch(() => {});
+        addToast("chemistry restored", "↩");
+      } else if (chem && typeof chem === "object") {
+        setChemistry(chem);
+        chemistryRef.current = chem;
+      }
+      if (Array.isArray(fc)) setFlipChallenges(fc);
+      if (pc && typeof pc === "object") setParseCredits(pc);
+      if (Array.isArray(cr)) setCreditRequests(cr);
 
-  if (!profiles[pid]) setAuthStage("tracker");
-  else setAuthStage("app");
+      const savedLastSeen = await safeGet(`lastSeen:${pid}`, null, 650);
+      const chatCountForSeen = Array.isArray(chat) ? chat.length : 0;
+      const postCountForSeen = Array.isArray(pst) ? pst.length : 0;
+      if (savedLastSeen) setLastSeen({ social: savedLastSeen.social ?? postCountForSeen, chat: savedLastSeen.chat ?? chatCountForSeen, training: savedLastSeen.training ?? 0 });
+      else setLastSeen({ social: postCountForSeen, chat: chatCountForSeen, training: 0 });
 
-  setLoading(false);
+      if (Array.isArray(af)) {
+        const myFeed = af.filter(e => e.to === pid);
+        setActivityFeed(myFeed);
+        const lastLoginAt = await safeGet(`lastLoginAt:${pid}`, null, 650);
+        const newSince = lastLoginAt ? new Date(lastLoginAt).getTime() : Date.now();
+        storeSet(`lastLoginAt:${pid}`, new Date().toISOString()).catch(() => {});
+        const unseenNew = myFeed.filter(e => !e.seen && new Date(e.ts).getTime() > newSince);
+        if (unseenNew.length > 0) {
+          const seenIds = new Set(unseenNew.map(e => e.id));
+          const markedSeen = af.map(e => seenIds.has(e.id) ? { ...e, seen: true } : e);
+          storeSetWithPush("activity_feed", markedSeen).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn("BB secondary hydrate skipped", err);
+    }
+  };
+
+  const hydrateMmr = async () => {
+    try {
+      const profiles = {};
+      for (const p of PLAYERS) {
+        try {
+          const profile = await getMMR(p.id);
+          if (profile) {
+            if (!profile.ranks?.[0]?.prevMmr) {
+              const stamped = { ...profile, ranks: profile.ranks.map(r => ({ ...r, prevMmr: r.mmr, prevRank: r.rank })) };
+              setMMR(p.id, stamped).catch?.(() => {});
+              profiles[p.id] = stamped;
+            } else profiles[p.id] = profile;
+          }
+        } catch (_) {}
+      }
+      setMmrProfiles(profiles);
+    } catch (_) {}
+  };
+
+  hydrateCritical();
+  setTimeout(hydrateSecondary, 25);
+  setTimeout(hydrateMmr, 250);
+  return Promise.resolve(true);
 };
-
 
 const useParseCredit = async (playerId) => {
   const current = parseCredits?.[playerId] ?? PARSE_CREDITS_DEFAULT;
@@ -14184,7 +20192,7 @@ const handleResync = async (pid) => {
     try {
       const res = await fetch(
         `https://api.parse.bot/scraper/d0dcf8e8-3a72-4b21-bffb-8fa735257835/get_player_sessions?platform=${existing.platform}&username=${existing.handle}`,
-        { headers: { "X-API-Key": "pmx_0ef23d05b57bfab79e0c1ef1e3e8ef75" } }
+        { headers: { "X-API-Key": PARSE_API_KEY } }
       );
       const json = await res.json();
       const segments = json?.data?.segments || [];
@@ -14266,30 +20274,38 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   };
   if (authStage==="select") return <><GlobalStyles/><NameSelectScreen onSelect={selectName}/></>;
   const selectedPlayer=PLAYERS.find((p)=>p.id===selectedPlayerId);
-  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"none",border:"none",padding:"9px 0",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AppSectionBoundary resetKey={`admin-standalone-${adminStandalone}`} label="admin" accent="#FF5C8A" onGoHome={()=>setAdminStandalone(false)}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition}/></AppSectionBoundary></div></div></>;
+  if (adminStandalone&&currentPlayer===ADMIN_ID) return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",animation:"fadeSlideUp .25s ease"}}><button onClick={()=>setAdminStandalone(false)} className="bb-pressable" style={{position:"fixed",top:"max(14px, env(safe-area-inset-top))",left:14,zIndex:20,background:"none",border:"none",padding:"9px 0",color:"#E8ECF4",fontSize:12,fontWeight:900,cursor:"pointer"}}>← back to app</button><div style={{height:"100dvh",overflowY:"auto",paddingTop:"max(58px, env(safe-area-inset-top))",paddingBottom:30}}><AppSectionBoundary resetKey={`admin-standalone-${adminStandalone}`} label="admin" accent="#FF5C8A" onGoHome={()=>setAdminStandalone(false)}><AdminTab trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition} points={points} setPoints={setPoints} passPremium={passPremium} setPassPremium={setPassPremium} adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} tabAnimationStyle={tabAnimationStyle} setTabAnimationStyle={setTabAnimationStyle} fullScreenFloatMode={fullScreenFloatMode} setFullScreenFloatMode={setFullScreenFloatMode} appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} comments={comments} setComments={setComments} currentPlayer={currentPlayer} burtonOS={burtonOS} setBurtonOS={setBurtonOS}/></AppSectionBoundary></div></div></>;
 
   if (authStage==="create") return <><GlobalStyles/><CreatePasscodeScreen player={selectedPlayer} onCreated={()=>loadSharedData(selectedPlayerId)}/></>;
-  if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ await loadSharedData(selectedPlayerId); setAdminStandalone(true); }:undefined}/></>;
-if (loading && authStage !== "app") return <><GlobalStyles/><div style={{...s.screen,alignItems:"center",justifyContent:"center",animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}><div style={{width:20,height:20,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.14)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/></div></>;
+  if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ setAdminStandalone(true); await loadSharedData(selectedPlayerId); setCurrentPlayer(selectedPlayerId); setAuthStage("app"); setAdminStandalone(true); }:undefined}/></>;
+// APP78: no full-screen login loading screen; keep rendering the current page while shared data warms up.
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onUseCredit={async()=>{ const current = parseCredits?.[selectedPlayerId] ?? PARSE_CREDITS_DEFAULT; if(current<=0) return false; const upd={...parseCredits,[selectedPlayerId]:current-1}; setParseCredits(upd); await storeSet("parse_credits",upd); return true; }} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const userColor = playerObj?.color || "#B8FF4D";
   const isAdmin=currentPlayer===ADMIN_ID;
-const TABS=[
+const BASE_TABS=[
     {id:"home",     icon:Home,       label:"home"},
+    {id:"jobs",     icon:ClipboardCheck, label:"jobs"},
+    {id:"court",    icon:Shield,     label:"court"},
     {id:"room",     icon:MessageCircle, label:"room"},
     {id:"social",   icon:ImageIcon,  label:"social"},
     {id:"stats",    icon:BarChart2,  label:"stats"},
     {id:"presence", icon:Circle,     label:"squad"},
+    {id:"games",    icon:Tv,         label:"games"},
+    {id:"stocks",   icon:BarChart2,  label:"stocks"},
     {id:"boost",    icon:Dice5,      label:"boost"},
     {id:"coinflip", icon:Dice5,      label:"flip"},
     {id:"garage",   icon:Trophy,     label:"pass"},
 ];
+const tabById = Object.fromEntries(BASE_TABS.map(t => [t.id, t]));
+const customTabOrder = normalizeAppCustomizer(appCustomizer).tabOrder;
+const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS.filter(t=>!customTabOrder.includes(t.id))].filter(t => !appCustomizer?.hiddenTabs?.[t.id]);
   const badges = {
     social: 0,
     chat: lastSeen.chat > 0 ? Math.max(0, messages.length - lastSeen.chat) : 0,
     training: Math.max(0, Object.keys(completions).filter(k => k.endsWith(`__${currentPlayer}`) && completions[k].status==="pending").length - lastSeen.training),
   };
+  const pageUnderConstruction = currentPlayer !== ADMIN_ID && !!normalizeAppCustomizer(appCustomizer).underConstruction?.[tab]?.enabled;
   const navAtBottom = navPosition === "bottom";
   const hidePushMirroredInAppNotifs = false;
   const topActivityNotifs = hidePushMirroredInAppNotifs ? [] : (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
@@ -14307,8 +20323,10 @@ const TABS=[
         ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} started a ${p.mode || "3v3"} session ${p.minutesUntil ? `in ${p.minutesUntil} min` : "soon"}`
         : p.type==="coinflip"
           ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} challenged you to a coin flip`
-          : `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} wants to run 2s`,
-    icon: p.type==="flower" ? "🌸" : p.type==="session" ? "⏱️" : p.type==="coinflip" ? "🪙" : "🎮",
+          : p.type==="chaos"
+            ? `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} launched ${p.mode || "chaos"}`
+            : `${PLAYERS.find(pl=>pl.id===p.from)?.name || "someone"} wants to run 2s`,
+    icon: p.type==="flower" ? "🌸" : p.type==="session" ? "⏱️" : p.type==="coinflip" ? "🪙" : p.type==="chaos" ? "🌀" : "🎮",
   }));
   const topTrainingNotifs = hidePushMirroredInAppNotifs ? [] : Object.entries(completions||{})
     .filter(([k,v]) => v?.status==="approved" && k.endsWith(`__${currentPlayer}`))
@@ -14321,13 +20339,14 @@ const TABS=[
     .slice(0, 40);
   const eq = points?.[currentPlayer+"_equipped"] || {};
   const own = points?.[currentPlayer+"_owned"] || [];
-  const bgId = own.find(id => eq[id] && BACKGROUND_ITEM_IDS.includes(id));
+  const bgId = own.find(id => eq[id] && getAllShopItems().some(item => item.id === id && item.type === "background"));
   const customUrl = points?.[currentPlayer+"_customBg"];
   const equippedTextKitId = getEquippedTextKitId(points, currentPlayer);
   const equippedTextKitMeta = getTextKitMeta(equippedTextKitId);
   const textColors = getAppliedTextColors(points, currentPlayer, theme, userColor);
   const bgStyle = getBackgroundVisualStyle(bgId, customUrl, theme);
-
+  const stateBgStyle = getBurtonStateVisualStyle(burtonOS, currentPlayer);
+  const activeBgStyle = stateBgStyle || bgStyle;
   const acceptSessionFromBanner = async () => {
     if (!sessionPingBanner?.sessionId) return;
     const updSessions = (teamSessions || []).map(s => s.id === sessionPingBanner.sessionId
@@ -14345,7 +20364,7 @@ const TABS=[
   };
 
   return (
-    <div key={`${currentPlayer}-${bgId || "default"}-${customUrl || ""}-${equippedTextKitId || "defaultText"}`} style={{...s.appShell, ...bgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
+    <div key={`${currentPlayer || "guest"}`} style={{...s.appShell, ...activeBgStyle, color:textColors.main || theme.text, "--bb-main-text":textColors.main || theme.text, "--bb-muted-text":textColors.muted || "#8B92A8", "--bb-accent-text":textColors.accent || userColor, "--bb-accent": userColor, animation:"fadeSlideUp .22s cubic-bezier(.2,.8,.2,1)"}}>
       <GlobalStyles/>
       {false&&loading&&authStage==="app"&&<div style={{position:"fixed",top:"max(12px, env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1200,width:22,height:22,borderRadius:"50%",border:"2px solid rgba(255,255,255,0.16)",borderTopColor:"#B8FF4D",animation:"spin .7s linear infinite"}}/>}
       {(points?.[currentPlayer+"_showStars"] !== false) && <StarfieldBg/>}
@@ -14407,15 +20426,25 @@ const TABS=[
  <div style={s.topBar}>
   <div style={s.topBarTitle}>
     <div style={{display:"flex",alignItems:"center",gap:7}}>
-      {isAdmin&&<Shield size={13} color="#FF5C8A"/>}
+      {isAdmin&&(
+        <button
+          onClick={()=>{ bbHaptic(10); setChatOpen(false); setAdminStandalone(true); }}
+          className="bb-pressable"
+          title="open admin"
+          aria-label="open admin"
+          style={{background:"rgba(255,92,138,0.08)",border:"1px solid rgba(255,92,138,0.20)",borderRadius:9,width:28,height:28,padding:0,color:"#FF5C8A",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}
+        >
+          <Shield size={14} color="#FF5C8A"/>
+        </button>
+      )}
       <div style={{...s.youDot,background:playerObj.color,boxShadow:`0 0 8px ${playerObj.color}99`}}/>
       <span style={s.youName}>{playerObj.name}</span>
     </div>
   </div>
 <div style={s.topBarRight}>
   <button onClick={async()=>{ const upd={...points,[currentPlayer+"_showStars"]: points?.[currentPlayer+"_showStars"] === false}; setPoints(upd); await storeSet("points",upd); }} className="bb-pressable" style={s.logoutBtn}>{points?.[currentPlayer+"_showStars"] === false ? "☀️" : "🌙"}</button>
-  <button onClick={()=>setShowTopNotifs(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}><Bell size={15}/>{topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}</button>
-  <button onClick={()=>setChatOpen(true)} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
+  <button onClick={(e)=>{ e.stopPropagation(); setShowTopNotifs(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}><Bell size={15}/>{topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}</button>
+  <button onClick={(e)=>{ e.stopPropagation(); setChatOpen(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
     <MessageCircle size={16}/>
     {lastSeen.chat > 0 && Math.max(0, messages.length - lastSeen.chat) > 0 && (
       <div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>
@@ -14424,7 +20453,15 @@ const TABS=[
     )}
   </button>
 <button
-  onClick={async () => {
+  onClick={async (e) => {
+    e?.stopPropagation?.();
+    const now = Date.now();
+    if (!window.__bbLogoutConfirmAt || now - window.__bbLogoutConfirmAt > 2600) {
+      window.__bbLogoutConfirmAt = now;
+      addToast?.("tap logout again to exit", "↪");
+      return;
+    }
+    window.__bbLogoutConfirmAt = 0;
     const fresh = await storeGet("presence") || {};
     const upd = { ...fresh, [currentPlayer + "_mode"]: null };
     delete upd[currentPlayer];
@@ -14447,6 +20484,8 @@ const TABS=[
 
     setMyMode(null);
 
+    setSharedDataReady(false);
+    setSharedDataReady(false);
     setCurrentPlayer(null);
     setAuthStage("select");
     setSelectedPlayerId(null);
@@ -14461,12 +20500,13 @@ const TABS=[
 </div>
 </div>
       {!chatOpen && (
-        <div style={navAtBottom ? s.pageButtonNavBottom : s.pageButtonNav}>
+        <div className="bb-page-button-nav" style={navAtBottom ? s.pageButtonNavBottom : s.pageButtonNav}>
           {TABS.map((t)=>{
             const active = tab === t.id;
             const accent = t.id === "admin" || t.id === "verify" ? "#FF5C8A" : userColor;
             return (
-              <button key={t.id} onClick={()=>{
+              <button key={t.id} onClick={(e)=>{
+                e?.stopPropagation?.();
                 setTab(t.id);
                 setChatOpen(false);
                 setTimeout(() => scrollToTop(), 0);
@@ -14532,8 +20572,10 @@ const TABS=[
       )}
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setJumpKey(key); setShowTrainingFull(true); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1, paddingBottom: navAtBottom ? "calc(96px + env(safe-area-inset-bottom, 0px))" : 0}} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-<AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>
-{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)}/>}
+<AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>{pageUnderConstruction ? <UnderConstructionPage tabId={tab} appCustomizer={appCustomizer}/> : <>
+{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)} burtonOS={burtonOS} setBurtonOS={setBurtonOS} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer} setTab={setTab}/>}
+{tab==="jobs"&&<JobsTab key={tab} burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stats={stats} appCustomizer={appCustomizer} addToast={addToast} setTab={setTab}/>}
+{tab==="court"&&<CourtTab key={tab} burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} pings={pings} setPings={setPings} appCustomizer={appCustomizer} addToast={addToast}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
       <div style={{display:tab==="social"?"block":"none",height:"100%",minHeight:"100%"}} aria-hidden={tab!=="social"}><SocialTab key="social-mounted" posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)}/></div>
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
@@ -14548,16 +20590,17 @@ const TABS=[
   </div>
 )}    
           
-{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
- {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} streamProfiles={streamProfiles}/>} 
+{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit} points={points} setPoints={setPoints} bets={bets} setBets={setBets} chemistry={chemistry} setChemistry={setChemistry}/>}
+ {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} streamProfiles={streamProfiles} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer}/>} 
 {tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
 
-{tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks}/>}
-{(tab==="presence" || tab==="squad")&&<SquadTabErrorBoundary resetKey={`${currentPlayer}-${tab}`} currentPlayer={currentPlayer} presence={presence} points={points} setTab={setTab}><PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles}/></SquadTabErrorBoundary>}
-{tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts}/>}
+{tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks} passXP={passXP}/>}
+{(tab==="presence" || tab==="squad")&&<SquadTabErrorBoundary resetKey={`${currentPlayer}-${tab}`} currentPlayer={currentPlayer} presence={presence} points={points} setTab={setTab}><PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} adminShopItems={adminShopItems} appCustomizer={appCustomizer}/></SquadTabErrorBoundary>}
+{tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts} addToast={addToast}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
-{tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
- {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition}/>}
+{tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer}/>}
+ {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition} points={points} setPoints={setPoints} passPremium={passPremium} setPassPremium={setPassPremium} adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} tabAnimationStyle={tabAnimationStyle} setTabAnimationStyle={setTabAnimationStyle} fullScreenFloatMode={fullScreenFloatMode} setFullScreenFloatMode={setFullScreenFloatMode} appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} comments={comments} setComments={setComments} currentPlayer={currentPlayer} burtonOS={burtonOS} setBurtonOS={setBurtonOS}/>}
+</>}
 </AppSectionBoundary>
       </div>
 
@@ -14598,14 +20641,15 @@ const TABS=[
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team chat</div>
             </div>
            <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
-<AppSectionBoundary resetKey={`chat-${chatOpen}`} label="chat" accent={userColor} onGoHome={()=>setChatOpen(false)}><ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus} setTab={setTab} setChatOpen={setChatOpen}/></AppSectionBoundary>
+<AppSectionBoundary resetKey={`chat-${chatOpen}`} label="chat" accent={userColor} onGoHome={()=>setChatOpen(false)}><ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus} setTab={setTab} setChatOpen={setChatOpen} appCustomizer={appCustomizer}/></AppSectionBoundary>
 </div>
           </div>
         </div>
       )}
    {false && !chatOpen && <div style={s.tabBar}>
         {TABS.map((t)=>(
-        <button key={t.id} onClick={()=>{
+        <button key={t.id} onClick={(e)=>{
+    e?.stopPropagation?.();
     setTab(t.id);
     setChatOpen(false);
     setTimeout(() => scrollToTop(), 0);
@@ -14754,9 +20798,9 @@ modalBox:{background:"linear-gradient(180deg,#121526,#0B0D17)",borderRadius:"24p
   trainingDesc:{fontSize:13.5,color:"#A8B2C4",lineHeight:1.5,marginBottom:8},
   packCode:{fontSize:12.5,color:"#8B92A8",fontFamily:"monospace",marginBottom:12},
   rejectNote:{fontSize:12.5,color:"#E8ECF4",background:"rgba(255,92,138,0.08)",border:"1px solid rgba(255,92,138,0.2)",borderRadius:9,padding:"8px 10px",marginBottom:12,lineHeight:1.4},
-  trainingActions:{display:"flex",gap:8},
-  completeBtn:{flex:1,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",boxShadow:"0 10px 24px rgba(0,0,0,0.14)"},
-  commentBtn:{width:42,background:"rgba(255,255,255,0.05)",border:"none",borderRadius:11,color:"#8B92A8",cursor:"pointer"},
+  trainingActions:{display:"grid",gridTemplateColumns:"1fr 46px",gap:8,alignItems:"stretch"},
+  completeBtn:{flex:1,width:"100%",minHeight:50,border:"none",borderRadius:15,padding:"14px 12px",fontSize:14,fontWeight:900,display:"flex",alignItems:"center",justifyContent:"center",gap:6,cursor:"pointer",boxShadow:"0 10px 24px rgba(0,0,0,0.14)",whiteSpace:"nowrap",textAlign:"center"},
+  commentBtn:{width:46,minHeight:50,background:"rgba(255,255,255,0.05)",border:"none",borderRadius:13,color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
   numericWrap:{marginTop:4},
   numericLabel:{fontSize:11.5,color:"#A78BFA",fontWeight:700,marginBottom:10},
   numericCounter:{display:"flex",alignItems:"center",justifyContent:"center",gap:18,background:"rgba(255,255,255,0.03)",borderRadius:13,padding:"10px 0"},
