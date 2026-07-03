@@ -1,4 +1,4 @@
-// APP102_RLCS_BET_ROOM_TIERS_POPOUT_PATCH
+// APP104_RLCS_CLEAN_BOARD_STREAM_FIX_PROPS_PATCH
 // Vercel/Node serverless route: keeps STARTGG_TOKEN private and returns a trimmed LCQ betting board.
 const DEFAULT_EVENT_SLUG = "tournament/rlcs-2026-north-america-last-chance-qualifier/event/3v3-bracket";
 const CACHE_MS = 2 * 60 * 1000;
@@ -7,42 +7,13 @@ const HIGH_TIER_WATCHLIST = [
   "Dignitas",
   "Gen.G Mobil1 Racing",
   "M80",
-  "FUT Esports",
-  "Veloce Gaming",
-  "GSK",
-  "AML",
-  "KCG Wonderpets",
-  "KCG Ukiyo",
-  "Next2Nu Esports",
-  "DME",
-  "NTX Esports"
+  "FUT Esports"
 ];
 
 const LOW_TIER_WATCHLIST = [
-  "Certified",
-  "Unc & Nephews",
-  "2026 New York Knicks",
-  "VANTA",
-  "Vello-1",
-  "Velocity Esports",
-  "Veylox Esports",
-  "Undefined Esports",
-  "Reign Esports",
-  "RGN Black",
-  "Kozmosis Esports",
-  "F9 Esports",
-  "CLRTY Esports",
-  "Control Esports",
-  "Cosmic Rift Esports",
-  "Team Factor",
-  "The Fifth Element",
-  "VitrixGG",
-  "Virtue",
-  "West Coast Warriors",
-  "Torrent Corp",
-  "Torrent Crossfire",
-  "VORTEX GAMING",
-  "Vortex Esports"
+  "Lil Step Bros",
+  "Next2Nu Esports",
+  "Veloce Gaming"
 ];
 
 const DEFAULT_WATCHLIST = Array.from(new Set([...HIGH_TIER_WATCHLIST, ...LOW_TIER_WATCHLIST]));
@@ -207,15 +178,16 @@ function flattenKnownMatches(pools, lists) {
         winnerId: set.winnerId || null,
         team1,
         team1Id: slot1?.id || null,
-        team1Players: (slot1?.participants || []).map(p => p.gamerTag).filter(Boolean),
+        team1Players: (slot1?.participants || []).map(p => p.gamerTag).filter(Boolean).slice(0, 3),
         team2,
         team2Id: slot2?.id || null,
-        team2Players: (slot2?.participants || []).map(p => p.gamerTag).filter(Boolean),
+        team2Players: (slot2?.participants || []).map(p => p.gamerTag).filter(Boolean).slice(0, 3),
         watchTeams,
         watchTiers,
         tier,
         bettableNow: !!(slot1?.id && slot2?.id && !set.winnerId),
         source: "start.gg live",
+        propsAvailable: false,
       });
     }
   }
@@ -263,6 +235,7 @@ async function pullLive() {
       lowTierBettable: matches.filter(m => m.tier === "low" && m.bettableNow && !m.winnerId).length,
       completed: matches.filter(m => !!m.winnerId).length,
       futureOrTbd: matches.filter(m => !m.bettableNow || !m.team1Id || !m.team2Id).length,
+      propsAvailable: false,
     },
   };
 }
