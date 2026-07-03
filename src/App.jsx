@@ -18211,9 +18211,10 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
                   
 // ===================== RLCS Bets =====================
 // APP104_RLCS_CLEAN_BOARD_STREAM_FIX_PROPS_PATCH
+// APP105_RLCS_CORE_TEAMS_ONLY_STAT_FEED_READY_PATCH
+// APP106_RLCS_NO_PROPS_CORE_BOARD_PLAYER_COLOR_PATCH
 // Live LCQ pulls happen through /api/rlcs-lcq so your start.gg token never ships in App.jsx.
-// Bets are now split into high-tier and low-tier rooms, with low-tier paying safer/smaller,
-// high-tier paying louder, and upset picks getting an extra underdog multiplier.
+// Bets are trimmed to only the teams you said you know. Player props are removed until a real stat feed exists.
 const RLCS_HIGH_TIER_TEAMS = [
   "Dignitas",
   "Gen.G Mobil1 Racing",
@@ -18221,17 +18222,15 @@ const RLCS_HIGH_TIER_TEAMS = [
   "FUT Esports"
 ];
 const RLCS_LOW_TIER_TEAMS = [
-  "Lil Step Bros",
-  "Next2Nu Esports",
-  "Veloce Gaming"
+  "Lil Step Bros"
 ];
 const RLCS_KNOWN_TEAM_WATCHLIST = Array.from(new Set([...RLCS_HIGH_TIER_TEAMS, ...RLCS_LOW_TIER_TEAMS]));
 const RLCS_LCQ_STORAGE_KEY = "rlcs_lcq_live_matches";
 const RLCS_LCQ_REFRESH_MS = 2 * 60 * 1000;
 const RLCS_TIER_META = {
-  high: { id:"high", label:"Major-team room", short:"major", color:"#FF61C1", payMult:1.35, cardLimit:6, desc:"M80 · FUT · DIG · Gen.G" },
-  low: { id:"low", label:"Known-player room", short:"known", color:"#4D9EFF", payMult:0.82, cardLimit:5, desc:"Lil Step Bros · Aqua/Next2Nu · Veloce" },
-  all: { id:"all", label:"Clean board", short:"clean", color:"#B8FF4D", payMult:1, cardLimit:9, desc:"only teams you actually know" },
+  high: { id:"high", label:"Major-team room", short:"major", color:"#FF61C1", payMult:1.35, cardLimit:8, desc:"M80 · FUT · DIG · Gen.G" },
+  low: { id:"low", label:"Lil Step Bros room", short:"known", color:"#4D9EFF", payMult:0.95, cardLimit:6, desc:"Lil Step Bros only" },
+  all: { id:"all", label:"Your known board", short:"known", color:"#B8FF4D", payMult:1, cardLimit:10, desc:"M80 · FUT · DIG · Gen.G · Lil Step Bros" },
 };
 const RLCS_UPSET_MULT = 2.1;
 const RLCS_MAX_BET = 500;
@@ -18325,8 +18324,8 @@ function normalizeRlcsMatch(raw, idx = 0) {
     team2,
     team1Id: raw?.team1Id || raw?.homeId || homeObj?.id || null,
     team2Id: raw?.team2Id || raw?.awayId || awayObj?.id || null,
-    team1Players: Array.isArray(raw?.team1Players) ? raw.team1Players : (homeObj?.participants || []).map(p => p.gamerTag || p.name).filter(Boolean),
-    team2Players: Array.isArray(raw?.team2Players) ? raw.team2Players : (awayObj?.participants || []).map(p => p.gamerTag || p.name).filter(Boolean),
+    team1Players: (Array.isArray(raw?.team1Players) ? raw.team1Players : (homeObj?.participants || []).map(p => p.gamerTag || p.name).filter(Boolean)).slice(0,3),
+    team2Players: (Array.isArray(raw?.team2Players) ? raw.team2Players : (awayObj?.participants || []).map(p => p.gamerTag || p.name).filter(Boolean)).slice(0,3),
     phase: raw?.phase || raw?.phaseName || "RLCS LCQ",
     pool: raw?.pool || raw?.displayIdentifier || raw?.poolName || "pool",
     round: raw?.round || raw?.fullRoundText || raw?.roundText || "match",
@@ -18468,11 +18467,11 @@ function RlcsMiniBetRows({ bets = [], compact = false, emptyText = "no RLCS bets
 
 function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomizer, pings, setPings, addToast }) {
   const cfg = normalizeStreamDirectoryConfig(appCustomizer?.streamDirectory);
+  const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
   const streams = cfg.streams.filter(st=>st.enabled !== false && st.url);
   const [activeId,setActiveId]=useState(streams[0]?.id || "");
   const [hubTab,setHubTab]=useState("bets");
   const [viewMode,setViewMode]=useState("ready");
-  const [tierMode,setTierMode]=useState("high");
   const [wager,setWager]=useState(25);
   const [performanceMode,setPerformanceMode]=useState(() => { try { return localStorage.getItem("bb_rlcs_perf_mode") === "1"; } catch (_) { return false; } });
   const [liveData,setLiveData]=useState({ matches:[], updatedAt:null, source:"start.gg live", cached:false, error:null, loading:true });
@@ -18484,13 +18483,9 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const completedKnownMatches = liveMatches.filter(m => !!m.winnerId);
   const openRlcsBets = (bets || []).filter(b => b?.type === "rlcs_match" && b.playerId === currentPlayer && b.status === "open");
   const settledRlcsBets = (bets || []).filter(b => b?.type === "rlcs_match" && b.playerId === currentPlayer && b.status !== "open");
-  const tierMeta = RLCS_TIER_META[tierMode] || RLCS_TIER_META.high;
-  const statusBaseMatches = viewMode === "ready" ? bettableKnownMatches : viewMode === "future" ? futureKnownMatches : viewMode === "complete" ? completedKnownMatches : liveMatches;
-  const tierFilteredMatches = statusBaseMatches.filter(m => tierMode === "all" || getRlcsMatchTier(m) === tierMode);
-  const visibleMatches = tierFilteredMatches.slice(0, tierMeta.cardLimit || 8);
-  const highReady = bettableKnownMatches.filter(m => getRlcsMatchTier(m) === "high").length;
-  const lowReady = bettableKnownMatches.filter(m => getRlcsMatchTier(m) === "low").length;
-  const sourceLabel = liveData.error ? "offline fallback" : liveData.cached ? "cached live" : "start.gg live";
+  const statusBaseMatches = viewMode === "future" ? futureKnownMatches : bettableKnownMatches;
+  const visibleMatches = statusBaseMatches.slice(0, 8);
+  const sourceLabel = liveData.error ? "last saved" : liveData.cached ? "cached live" : "start.gg live";
 
   const loadRlcs = useCallback(async (force = false) => {
     setLiveData(prev => ({ ...prev, loading:true, error:null }));
@@ -18594,55 +18589,42 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const shellBg = performanceMode ? "linear-gradient(135deg,#070A12,#04060B)" : "linear-gradient(135deg,#180B22,#0B0E18)";
   const dimNote = performanceMode ? "performance mode · cooler refresh" : "live mode · full effects";
 
-  const HubTabs = () => <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:6,margin:"10px 0"}}>
-    {[{id:"bets",label:"Bets"},{id:"streams",label:"Streams"},{id:"yourbets",label:"Your Bets"},{id:"props",label:"Props"}].map(t=>(
-      <button key={t.id} onClick={()=>setHubTab(t.id)} className="bb-pressable" style={{minWidth:0,background:hubTab===t.id?"#FF61C1":"rgba(255,255,255,.055)",border:`1px solid ${hubTab===t.id?"#FF61C1":"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"10px 5px",color:hubTab===t.id?"#06070D":"#8B92A8",fontSize:10.5,fontWeight:1000}}>{t.label}</button>
+  const HubTabs = () => <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:6,margin:"10px 0"}}>
+    {[{id:"bets",label:"bets"},{id:"streams",label:"streams"},{id:"yourbets",label:"your bets"}].map(t=>(
+      <button key={t.id} onClick={()=>setHubTab(t.id)} className="bb-pressable" style={{minWidth:0,background:hubTab===t.id?playerColor:"rgba(255,255,255,.055)",border:`1px solid ${hubTab===t.id?playerColor:"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"10px 5px",color:hubTab===t.id?"#06070D":"#8B92A8",fontSize:10.5,fontWeight:1000,textTransform:"lowercase"}}>{t.label}</button>
     ))}
   </div>;
 
-  const Header = () => <div style={{background:shellBg,border:`2px solid ${performanceMode?"rgba(77,158,255,.22)":"rgba(255,97,193,0.25)"}`,borderRadius:20,padding:14,marginBottom:2,boxShadow:performanceMode?"0 10px 26px rgba(0,0,0,.26)":"0 14px 34px rgba(255,97,193,0.08)",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+  const Header = () => <div style={{background:shellBg,border:`2px solid ${playerColor}40`,borderRadius:20,padding:14,marginBottom:2,boxShadow:performanceMode?"0 10px 26px rgba(0,0,0,.26)":`0 14px 34px ${playerColor}14`,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
     <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start"}}>
       <div style={{minWidth:0}}>
-        <div style={{fontSize:11,color:performanceMode?"#4D9EFF":"#FF61C1",fontWeight:900,letterSpacing:1}}>RLCS LIVE HUB</div>
-        <div style={{fontSize:12,color:"#8B92A8",marginTop:3,lineHeight:1.35}}>high: {highReady} ready · low: {lowReady} ready · future/TBD: {futureKnownMatches.length} · complete: {completedKnownMatches.length}</div>
+        <div style={{fontSize:11,color:playerColor,fontWeight:900,letterSpacing:1,textTransform:"lowercase"}}>rlcs live hub</div>
+        <div style={{fontSize:12,color:"#8B92A8",marginTop:3,lineHeight:1.35,textTransform:"lowercase"}}>bettable: {bettableKnownMatches.length} · future/tbd: {futureKnownMatches.length} · complete: {completedKnownMatches.length}</div>
       </div>
       <div style={{textAlign:"right",minWidth:86}}>
-        <div style={{fontSize:10,color:liveData.error?"#FFD166":"#B8FF4D",fontWeight:900,textTransform:"uppercase"}}>{sourceLabel}</div>
+        <div style={{fontSize:10,color:liveData.error?"#FFD166":playerColor,fontWeight:900,textTransform:"lowercase"}}>{sourceLabel}</div>
         <div style={{fontSize:9.5,color:"#4A5066",fontWeight:800,marginTop:3}}>{liveData.loading ? "checking…" : liveData.updatedAt ? fmtRelTime(liveData.updatedAt) : "not synced"}</div>
       </div>
     </div>
     {liveData.error && <div style={{fontSize:10.5,color:"#FFD166",marginTop:8,lineHeight:1.35}}>⚠ {liveData.error}</div>}
     <HubTabs />
     <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:4,paddingBottom:4,alignItems:"center",maxWidth:"100%"}}>
-      <button onClick={()=>setPerf(!performanceMode)} className="bb-pressable" style={{flexShrink:0,fontSize:10,color:performanceMode?"#4D9EFF":"#A78BFA",fontWeight:900,background:performanceMode?"rgba(77,158,255,.12)":"rgba(167,139,250,.1)",border:`1px solid ${performanceMode?"rgba(77,158,255,.28)":"rgba(167,139,250,.22)"}`,borderRadius:999,padding:"7px 9px"}}>{performanceMode ? "performance on" : "performance off"}</button>
-      <div style={{flexShrink:0,fontSize:10,color:performanceMode?"#4D9EFF":"#8B92A8",fontWeight:900,background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:999,padding:"7px 9px"}}>{dimNote}</div>
-      <button onClick={()=>loadRlcs(true)} disabled={liveData.loading} className="bb-pressable" style={{flexShrink:0,background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.25)",borderRadius:999,padding:"7px 9px",color:"#B8FF4D",fontSize:10,fontWeight:900,opacity:liveData.loading?.7:1}}>refresh results</button>
+      <button onClick={()=>setPerf(!performanceMode)} className="bb-pressable" style={{flexShrink:0,fontSize:10,color:playerColor,fontWeight:900,background:`${playerColor}18`,border:`1px solid ${playerColor}44`,borderRadius:999,padding:"7px 9px"}}>{performanceMode ? "performance on" : "performance off"}</button>
+      <div style={{flexShrink:0,fontSize:10,color:"#8B92A8",fontWeight:900,background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:999,padding:"7px 9px",textTransform:"lowercase"}}>{dimNote}</div>
+      <button onClick={()=>loadRlcs(true)} disabled={liveData.loading} className="bb-pressable" style={{flexShrink:0,background:`${playerColor}18`,border:`1px solid ${playerColor}44`,borderRadius:999,padding:"7px 9px",color:playerColor,fontSize:10,fontWeight:900,opacity:liveData.loading ? .7 : 1}}>refresh</button>
     </div>
   </div>;
 
   const BetsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
-    <div style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:16,padding:10,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+    <div style={{background:"rgba(255,255,255,.035)",border:`1px solid ${playerColor}24`,borderRadius:16,padding:10,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box",textTransform:"lowercase"}}>
       <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,alignItems:"center"}}>
-        <select value={tierMode} onChange={e=>setTierMode(e.target.value)} style={{minWidth:0,width:"100%",background:"rgba(255,255,255,.055)",border:`1px solid ${tierMeta.color}66`,borderRadius:11,padding:"9px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900,outline:"none"}}>
-          <option value="high">Major teams · pays more</option>
-          <option value="low">Known-player teams · pays less</option>
-          <option value="all">Clean board</option>
-        </select>
-        <select value={viewMode} onChange={e=>setViewMode(e.target.value)} style={{minWidth:0,width:"100%",background:"rgba(255,255,255,.055)",border:"1px solid rgba(255,255,255,.1)",borderRadius:11,padding:"9px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900,outline:"none"}}>
-          <option value="ready">Bettable now</option>
-          <option value="future">Future/TBD</option>
-          <option value="known">All shown</option>
-          <option value="complete">Complete</option>
-        </select>
-      </div>
-      <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:9,paddingBottom:3,alignItems:"center"}}>
-        <div style={{flexShrink:0,fontSize:10,color:tierMeta.color,fontWeight:900,background:`${tierMeta.color}18`,border:`1px solid ${tierMeta.color}40`,borderRadius:999,padding:"7px 9px"}}>{tierMeta.desc}</div>
-        <div style={{flexShrink:0,fontSize:10,color:"#FFD166",fontWeight:900,background:"rgba(255,209,102,.1)",border:"1px solid rgba(255,209,102,.25)",borderRadius:999,padding:"7px 9px"}}>upsets pay extra</div>
-        <div style={{flexShrink:0,fontSize:10,color:"#8B92A8",fontWeight:900,background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:999,padding:"7px 9px"}}>showing {visibleMatches.length}/{tierFilteredMatches.length}</div>
+        {[{id:"ready",label:"bettable now"},{id:"future",label:"future"}].map(btn => (
+          <button key={btn.id} onClick={()=>setViewMode(btn.id)} className="bb-pressable" style={{minWidth:0,width:"100%",background:viewMode===btn.id?playerColor:"rgba(255,255,255,.055)",border:`1px solid ${viewMode===btn.id?playerColor:"rgba(255,255,255,.1)"}`,borderRadius:11,padding:"10px 8px",color:viewMode===btn.id?"#06070D":"#E8ECF4",fontSize:11,fontWeight:1000,textTransform:"lowercase"}}>{btn.label}</button>
+        ))}
       </div>
       <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 86px",gap:8,alignItems:"center",marginTop:9}}>
-        <div style={{minWidth:0,fontSize:10.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Wager <b style={{color:"#E8ECF4"}}>{Number(wager).toLocaleString()}</b> · balance <b style={{color:"#FFD166"}}>{myPoints.toLocaleString()}</b> · open {openRlcsBets.length}</div>
-        <input type="number" min={RLCS_MIN_BET} max={RLCS_MAX_BET} step="5" value={wager} onChange={e=>setWager(e.target.value)} style={{minWidth:0,width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:10,padding:"8px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900}}/>
+        <div style={{minWidth:0,fontSize:10.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>wager <b style={{color:"#E8ECF4"}}>{Number(wager).toLocaleString()}</b> · balance <b style={{color:"#FFD166"}}>{myPoints.toLocaleString()}</b> · open {openRlcsBets.length}</div>
+        <input type="number" min={RLCS_MIN_BET} max={RLCS_MAX_BET} step="5" value={wager} onChange={e=>setWager(e.target.value)} style={{minWidth:0,width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:`1px solid ${playerColor}33`,borderRadius:10,padding:"8px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900}}/>
       </div>
     </div>
 
@@ -18652,14 +18634,15 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
         const status = getRlcsMatchStatus(match);
         const winnerName = match.winnerId ? (Number(match.winnerId) === Number(match.team1Id) ? match.team1 : match.team2) : null;
         const mt = getRlcsTierMeta(match);
-        return <div key={match.setId || match.id} style={{background:"linear-gradient(135deg,#11131F,#090B12)",border:`1px solid ${mt.color}30`,borderRadius:16,padding:12,cursor:"default",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+        const cardAccent = playerColor;
+        return <div key={match.setId || match.id} style={{background:"linear-gradient(135deg,#11131F,#090B12)",border:`1px solid ${cardAccent}30`,borderRadius:16,padding:12,cursor:"default",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
           <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start",marginBottom:10}}>
             <div style={{minWidth:0}}>
-              <div style={{fontSize:10,color:mt.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mt.short} · {match.pool} · {match.round}</div>
+              <div style={{fontSize:10,color:cardAccent,fontWeight:900,letterSpacing:1,textTransform:"lowercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mt.short} · {match.pool} · {match.round}</div>
               <div style={{fontSize:15,color:"#E8ECF4",fontWeight:900,marginTop:3,lineHeight:1.15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getRlcsMatchLabel(match)}</div>
               <div style={{fontSize:10.5,color:"#8B92A8",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtRlcsDate(normalizeRlcsStart(match))} · {status}{winnerName ? ` · winner: ${winnerName}` : ""}</div>
             </div>
-            <div style={{fontSize:10,color:status==="waiting"?"#FFD166":status==="complete"?"#7CFFB2":mt.color,fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{status}</div>
+            <div style={{fontSize:10,color:status==="waiting"?"#FFD166":status==="complete"?"#7CFFB2":cardAccent,fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{status}</div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,maxWidth:"100%",overflow:"hidden"}}>
             {["team1","team2"].map(side => {
@@ -18670,12 +18653,12 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
               const isWatch = pickMeta.isWatch;
               const isWinner = winnerName && winnerName === team;
               const payout = getRlcsPayout(match, side, wager);
-              return <button key={side} disabled={locked || myPoints < wager} onClick={(e)=>{ e.stopPropagation(); placeRlcsBet(match, side); }} className="bb-pressable" style={{minWidth:0,width:"100%",boxSizing:"border-box",background:isWinner?"rgba(124,255,178,.16)":pickMeta.isUpset?"rgba(255,209,102,.13)":isWatch?`${mt.color}18`:"rgba(255,255,255,.045)",border:`1px solid ${isWinner?"rgba(124,255,178,.35)":pickMeta.isUpset?"rgba(255,209,102,.35)":isWatch?`${mt.color}50`:"rgba(255,255,255,.08)"}`,borderRadius:13,padding:10,textAlign:"left",opacity:(locked || myPoints < wager)?.7:1,overflow:"hidden"}}>
+              return <button key={side} disabled={locked || myPoints < wager} onClick={(e)=>{ e.stopPropagation(); placeRlcsBet(match, side); }} className="bb-pressable" style={{minWidth:0,width:"100%",boxSizing:"border-box",background:isWinner?"rgba(124,255,178,.16)":pickMeta.isUpset?"rgba(255,209,102,.13)":isWatch?`${cardAccent}18`:"rgba(255,255,255,.045)",border:`1px solid ${isWinner?"rgba(124,255,178,.35)":pickMeta.isUpset?"rgba(255,209,102,.35)":isWatch?`${cardAccent}50`:"rgba(255,255,255,.08)"}`,borderRadius:13,padding:10,textAlign:"left",opacity:(locked || myPoints < wager) ? .7 : 1,overflow:"hidden"}}>
                 <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,overflow:"hidden"}}>
                   <div style={{fontSize:12.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{team}</div>
                   {pickMeta.isUpset && <span style={{fontSize:8.5,color:"#06070D",background:"#FFD166",borderRadius:999,padding:"2px 5px",fontWeight:900,flexShrink:0}}>UPSET</span>}
                 </div>
-                <div style={{fontSize:10,color:isWinner?"#7CFFB2":pickMeta.isUpset?"#FFD166":isWatch?mt.color:"#4A5066",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{isWinner ? "winner" : `${displayOdds} · pays ${payout.toLocaleString()}`}</div>
+                <div style={{fontSize:10,color:isWinner?"#7CFFB2":pickMeta.isUpset?"#FFD166":isWatch?cardAccent:"#4A5066",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{isWinner ? "winner" : `${displayOdds} · pays ${payout.toLocaleString()}`}</div>
                 {!!playerList?.length && <div style={{fontSize:9.5,color:"#8B92A8",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{playerList.slice(0,3).join(" · ")}</div>}
               </button>;
             })}
@@ -18683,17 +18666,17 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
           {alreadyBetOnSet(match) && <div style={{fontSize:10,color:"#FFD166",fontWeight:800,marginTop:8}}>you already have an open bet on this set</div>}
           {status==="waiting" && <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>locked until start.gg fills both teams</div>}
         </div>;
-      }) : <EmptyState icon="🏁" title={liveData.loading?"Checking start.gg…":"No matches here"} body="Switch the dropdown or refresh results. The backend still pulls start.gg, then the app shows the trimmed betting board." />}
+      }) : <EmptyState icon="🏁" title={liveData.loading?"checking start.gg…":"no matches here"} body="this board only shows M80, FUT Esports, Dignitas, Gen.G Mobil1 Racing, and Lil Step Bros." />}
     </div>
   </div>;
 
   const StreamsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
-    {!streams.length ? <EmptyState icon="📺" title="No streams added" body="Add Twitch or YouTube links in Admin → stream directory." /> : <>
-      <div style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:3}}>{streams.map(st=><button key={st.id} onClick={()=>setActiveId(st.id)} className="bb-pressable" style={{flexShrink:0,background:(active?.id===st.id)?"#FF61C1":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px 10px",color:(active?.id===st.id)?"#06070D":"#E8ECF4",fontSize:10,fontWeight:900}}>{st.label}</button>)}</div>
-      <div style={{background:"linear-gradient(135deg,#101526,#090B12)",border:"1px solid rgba(255,97,193,.25)",borderRadius:18,padding:12,boxShadow:performanceMode?"0 10px 25px rgba(0,0,0,.24)":"0 14px 34px rgba(0,0,0,.22)",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+    {!streams.length ? <EmptyState icon="📺" title="no streams added" body="Add Twitch or YouTube links in Admin → stream directory." /> : <>
+      <div style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:3}}>{streams.map(st=><button key={st.id} onClick={()=>setActiveId(st.id)} className="bb-pressable" style={{flexShrink:0,background:(active?.id===st.id)?playerColor:"rgba(255,255,255,.05)",border:`1px solid ${(active?.id===st.id)?playerColor:"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"8px 10px",color:(active?.id===st.id)?"#06070D":"#E8ECF4",fontSize:10,fontWeight:900}}>{st.label}</button>)}</div>
+      <div style={{background:"linear-gradient(135deg,#101526,#090B12)",border:`1px solid ${playerColor}40`,borderRadius:18,padding:12,boxShadow:performanceMode?"0 10px 25px rgba(0,0,0,.24)":"0 14px 34px rgba(0,0,0,.22)",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
         <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start",marginBottom:10}}>
           <div style={{minWidth:0}}>
-            <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>stream tab</div>
+            <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,textTransform:"lowercase"}}>stream tab</div>
             <div style={{fontSize:16,color:"#E8ECF4",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{active?.matchLabel || active?.label || "RLCS stream"}</div>
             {active?.info && <div style={{fontSize:10.5,color:"#8B92A8",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{active.info}</div>}
           </div>
@@ -18708,12 +18691,12 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   </div>;
 
   const YourBetsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
-    <div style={{background:"rgba(184,255,77,.06)",border:"1px solid rgba(184,255,77,.16)",borderRadius:16,padding:12,display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center"}}>
+    <div style={{background:`${playerColor}0F`,border:`1px solid ${playerColor}28`,borderRadius:16,padding:12,display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center"}}>
       <div style={{minWidth:0}}>
-        <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>your rlcs bets</div>
+        <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,textTransform:"lowercase"}}>your rlcs bets</div>
         <div style={{fontSize:11,color:"#8B92A8",marginTop:3}}>open {openRlcsBets.length} · settled {settledRlcsBets.length}</div>
       </div>
-      <button onClick={()=>loadRlcs(true)} className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.25)",borderRadius:10,padding:"8px 10px",color:"#B8FF4D",fontSize:10,fontWeight:900}}>check results</button>
+      <button onClick={()=>loadRlcs(true)} className="bb-pressable" style={{background:`${playerColor}18`,border:`1px solid ${playerColor}44`,borderRadius:10,padding:"8px 10px",color:playerColor,fontSize:10,fontWeight:900}}>check results</button>
     </div>
     <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>open tickets</div>
     <RlcsMiniBetRows bets={openRlcsBets} emptyText="no open RLCS bets" />
@@ -18721,31 +18704,11 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
     <RlcsMiniBetRows bets={settledRlcsBets} emptyText="no settled RLCS bets yet" />
   </div>;
 
-  const PropsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
-    <div style={{background:"rgba(255,209,102,.07)",border:"1px solid rgba(255,209,102,.18)",borderRadius:16,padding:12}}>
-      <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>player props</div>
-      <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900,marginTop:4}}>Locked until a real player-stat feed exists</div>
-      <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:5}}>start.gg gives us teams, players, start times, set ids, and winners. It does not give live goals, saves, shots, assists, demos, or score for each player, so the app will not fake prop payouts.</div>
-    </div>
-    {(visibleMatches.length ? visibleMatches : liveMatches.slice(0,4)).slice(0,4).map(match => {
-      const players = [...(match.team1Players || []).slice(0,3).map(name => ({ name, team:match.team1 })), ...(match.team2Players || []).slice(0,3).map(name => ({ name, team:match.team2 }))].slice(0,6);
-      return <div key={`props_${match.setId || match.id}`} style={{background:"linear-gradient(135deg,#11131F,#090B12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:12,overflow:"hidden"}}>
-        <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{match.pool} · {match.round}</div>
-        <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getRlcsMatchLabel(match)}</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:7,marginTop:9}}>
-          {players.map(pl => <div key={`${match.setId}_${pl.team}_${pl.name}`} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.07)",borderRadius:11,padding:8,opacity:.72}}>
-            <div style={{fontSize:11,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pl.name}</div>
-            <div style={{fontSize:9,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pl.team}</div>
-            <div style={{fontSize:9,color:"#FFD166",fontWeight:900,marginTop:5}}>props unavailable</div>
-          </div>)}
-        </div>
-      </div>;
-    })}
-  </div>;
+
 
   return <div style={{display:"grid",gap:12,width:"100%",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
     <Header />
-    {hubTab === "bets" ? <BetsTab /> : hubTab === "streams" ? <StreamsTab /> : hubTab === "yourbets" ? <YourBetsTab /> : <PropsTab />}
+    {hubTab === "bets" ? <BetsTab /> : hubTab === "streams" ? <StreamsTab /> : <YourBetsTab />}
   </div>;
 }
 
@@ -18754,7 +18717,7 @@ const GAME_CARDS = [
   { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
   { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
   { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
-  { id:"rlcsbets", label:"RLCS Live",        desc:"bets, streams, props, and your RLCS tickets",    color:"#FF61C1" },
+  { id:"rlcsbets", label:"RLCS Live",        desc:"your core teams only · bets and streams",    color:"#FF61C1" },
 ];
 
 function TeamLinkTab({ stats, onUpdateOpponentScore }) {

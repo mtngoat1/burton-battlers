@@ -1,5 +1,7 @@
 // APP104_RLCS_CLEAN_BOARD_STREAM_FIX_PROPS_PATCH
-// Vercel/Node serverless route: keeps STARTGG_TOKEN private and returns a trimmed LCQ betting board.
+// APP105_RLCS_CORE_TEAMS_ONLY_STAT_FEED_READY_PATCH
+// APP106_RLCS_NO_PROPS_CORE_BOARD_PLAYER_COLOR_PATCH
+// Vercel/Node serverless route: keeps STARTGG_TOKEN private and returns only the core LCQ teams.
 const DEFAULT_EVENT_SLUG = "tournament/rlcs-2026-north-america-last-chance-qualifier/event/3v3-bracket";
 const CACHE_MS = 2 * 60 * 1000;
 
@@ -11,9 +13,7 @@ const HIGH_TIER_WATCHLIST = [
 ];
 
 const LOW_TIER_WATCHLIST = [
-  "Lil Step Bros",
-  "Next2Nu Esports",
-  "Veloce Gaming"
+  "Lil Step Bros"
 ];
 
 const DEFAULT_WATCHLIST = Array.from(new Set([...HIGH_TIER_WATCHLIST, ...LOW_TIER_WATCHLIST]));
@@ -28,13 +28,14 @@ function readListEnv(name) {
 }
 
 function getWatchlists() {
-  const high = Array.from(new Set([...HIGH_TIER_WATCHLIST, ...readListEnv("RLCS_HIGH_TIER_WATCHLIST")]));
-  const low = Array.from(new Set([...LOW_TIER_WATCHLIST, ...readListEnv("RLCS_LOW_TIER_WATCHLIST")]));
-  const extra = readListEnv("RLCS_WATCHLIST");
+  // Defaults are locked to the exact teams you said you know.
+  // To intentionally add more later, use RLCS_EXTRA_HIGH_TIER_WATCHLIST or RLCS_EXTRA_LOW_TIER_WATCHLIST.
+  const high = Array.from(new Set([...HIGH_TIER_WATCHLIST, ...readListEnv("RLCS_EXTRA_HIGH_TIER_WATCHLIST")]));
+  const low = Array.from(new Set([...LOW_TIER_WATCHLIST, ...readListEnv("RLCS_EXTRA_LOW_TIER_WATCHLIST")]));
   return {
     high,
     low,
-    all: Array.from(new Set([...high, ...low, ...extra])),
+    all: Array.from(new Set([...high, ...low])),
   };
 }
 
@@ -165,7 +166,6 @@ function flattenKnownMatches(pools, lists) {
 
       const watchTiers = watchTeams.map(team => ({ team, tier: getTierForTeam(team, lists) || "low" }));
       const tier = watchTiers.some(t => t.tier === "high") ? "high" : "low";
-
       matches.push({
         phase: pool.phaseName,
         pool: pool.displayIdentifier,
@@ -187,7 +187,6 @@ function flattenKnownMatches(pools, lists) {
         tier,
         bettableNow: !!(slot1?.id && slot2?.id && !set.winnerId),
         source: "start.gg live",
-        propsAvailable: false,
       });
     }
   }
@@ -235,13 +234,13 @@ async function pullLive() {
       lowTierBettable: matches.filter(m => m.tier === "low" && m.bettableNow && !m.winnerId).length,
       completed: matches.filter(m => !!m.winnerId).length,
       futureOrTbd: matches.filter(m => !m.bettableNow || !m.team1Id || !m.team2Id).length,
-      propsAvailable: false,
     },
   };
 }
 
 export default async function handler(req, res) {
   try {
+    res.setHeader("Access-Control-Allow-Origin", "*");
     const force = String(req.query?.refresh || "") === "1";
     const now = Date.now();
     if (!force && memoryCache?.expiresAt && memoryCache.expiresAt > now) {
