@@ -8661,16 +8661,28 @@ function AdminWeeklyAndStreams({ appCustomizer, setAppCustomizer, addToast }) {
   const save=(patch,msg)=>saveAppCustomizer(normalizeAppCustomizer({...cfg,...patch}),setAppCustomizer,addToast,msg||"saved");
   const streamCfg=normalizeStreamDirectoryConfig(cfg.streamDirectory);
   const updateStream=(idx,patch)=>{ const streams=[...streamCfg.streams]; streams[idx]={...streams[idx],...patch}; save({streamDirectory:{...streamCfg,streams}},"stream directory saved"); };
-  const addStream=()=>save({streamDirectory:{...streamCfg,streams:[...streamCfg.streams,{id:`stream_${Date.now()}`,enabled:true,label:"New Stream",type:"youtube",url:"",info:""}]}},"stream added");
+  const addStream=()=>save({streamDirectory:{...streamCfg,streams:[...streamCfg.streams,{id:`stream_${Date.now()}`,enabled:true,label:"New Stream",type:"youtube",url:"",matchLabel:"",info:""}]}},"stream added");
+  const removeStream=(idx)=>save({streamDirectory:{...streamCfg,streams:streamCfg.streams.filter((_,i)=>i!==idx)}},"stream removed");
   const weekNum=String(Math.floor(Date.now()/WEEK_MS));
   const wk=safeObj(cfg.weeklyAdmin?.weeks?.[weekNum]);
   const setWeeklyText=(mode,text)=>{ const rows=text.split(/\n/g).map((line,i)=>({id:`wk_${mode}_${i}`,enabled:true,mode,text:line.trim(),type:"cumulative",field:i%2?"saves":"goals",target:5+i,color:mode==="3v3"?"#B8FF4D":mode==="2v2"?"#FF61C1":"#4D9EFF"})).filter(x=>x.text); save({weeklyAdmin:{...cfg.weeklyAdmin,weeks:{...cfg.weeklyAdmin?.weeks,[weekNum]:{...wk,[mode]:rows}}}},"weekly challenges saved"); };
-  return <AdminCollapse title="weekly challenges + rlcs stream directory" subtitle="edit weekly sets, shop library hooks, and live hub streams" accent="#4D9EFF">
+  return <AdminCollapse title="weekly challenges + rlcs stream directory" subtitle="edit weekly sets and manually label each stream to a match/game" accent="#4D9EFF">
     <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,textTransform:"uppercase",marginBottom:8}}>weekly challenge text for this week</div>
-    {["3v3","2v2","1v1"].map(mode=><textarea key={mode} defaultValue={(Array.isArray(wk[mode])?wk[mode]:[]).map(x=>x.text).join("\n")} onBlur={e=>setWeeklyText(mode,e.target.value)} placeholder={`${mode} weekly challenges, one per line`} style={{width:"100%",minHeight:60,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:"#E8ECF4",fontSize:11,marginBottom:8}}/>)}
+    {["3v3","2v2","1v1"].map(mode=><textarea key={mode} defaultValue={(Array.isArray(wk[mode])?wk[mode]:[]).map(x=>x.text).join("\n")} onBlur={e=>setWeeklyText(mode,e.target.value)} placeholder={`${mode} weekly challenges, one per line`} style={{width:"100%",minHeight:60,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:"#E8ECF4",fontSize:11,marginBottom:8,boxSizing:"border-box"}}/>)}
     <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,textTransform:"uppercase",margin:"10px 0 8px"}}>rlcs stream directory</div>
     <button onClick={()=>save({streamDirectory:{...streamCfg,multiview:!streamCfg.multiview}},streamCfg.multiview?"multiview off":"multiview on")} style={{width:"100%",background:streamCfg.multiview?"rgba(255,97,193,.14)":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:9,color:streamCfg.multiview?"#FF61C1":"#8B92A8",fontWeight:900,marginBottom:8}}>multiview {streamCfg.multiview?"on":"off"}</button>
-    {streamCfg.streams.map((st,idx)=><div key={st.id} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:12,padding:9,marginBottom:8}}><div style={{display:"grid",gridTemplateColumns:"54px 1fr",gap:7,marginBottom:7}}><button onClick={()=>updateStream(idx,{enabled:!st.enabled})} style={{background:st.enabled?"rgba(184,255,77,.12)":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,color:st.enabled?"#B8FF4D":"#8B92A8",fontWeight:900}}>{st.enabled?"on":"off"}</button><input defaultValue={st.label} onBlur={e=>updateStream(idx,{label:e.target.value})} placeholder="label" style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11}}/></div><input defaultValue={st.url} onBlur={e=>updateStream(idx,{url:e.target.value})} placeholder="twitch or youtube url" style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11,marginBottom:7}}/><textarea defaultValue={st.info} onBlur={e=>updateStream(idx,{info:e.target.value})} placeholder="stream info / directory text" style={{width:"100%",minHeight:48,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11}}/></div>)}
+    {streamCfg.streams.map((st,idx)=>(
+      <div key={st.id} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:12,padding:9,marginBottom:8,boxSizing:"border-box"}}>
+        <div style={{display:"grid",gridTemplateColumns:"54px minmax(0,1fr) 42px",gap:7,marginBottom:7,alignItems:"center"}}>
+          <button onClick={()=>updateStream(idx,{enabled:!st.enabled})} style={{background:st.enabled?"rgba(184,255,77,.12)":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,color:st.enabled?"#B8FF4D":"#8B92A8",fontWeight:900,padding:8}}>{st.enabled?"on":"off"}</button>
+          <input defaultValue={st.label} onBlur={e=>updateStream(idx,{label:e.target.value})} placeholder="stream button label" style={{minWidth:0,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11}}/>
+          <button onClick={()=>removeStream(idx)} style={{background:"rgba(255,92,138,.1)",border:"1px solid rgba(255,92,138,.2)",borderRadius:9,color:"#FF5C8A",fontWeight:900,padding:8}}>×</button>
+        </div>
+        <input defaultValue={st.matchLabel} onBlur={e=>updateStream(idx,{matchLabel:e.target.value})} placeholder="admin match title shown above stream, ex: VitrixGG vs Virtue" style={{width:"100%",boxSizing:"border-box",background:"rgba(255,209,102,.055)",border:"1px solid rgba(255,209,102,.15)",borderRadius:9,padding:8,color:"#FFD166",fontSize:11,marginBottom:7}}/>
+        <input defaultValue={st.url} onBlur={e=>updateStream(idx,{url:e.target.value})} placeholder="twitch or youtube url" style={{width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11,marginBottom:7}}/>
+        <textarea defaultValue={st.info} onBlur={e=>updateStream(idx,{info:e.target.value})} placeholder="stream info / notes" style={{width:"100%",boxSizing:"border-box",minHeight:48,background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:8,color:"#E8ECF4",fontSize:11}}/>
+      </div>
+    ))}
     <button onClick={addStream} style={{width:"100%",background:"#4D9EFF",border:"none",borderRadius:10,padding:10,color:"#06070D",fontWeight:1000}}>add stream</button>
   </AdminCollapse>;
 }
@@ -12020,8 +12032,19 @@ function normalizeWeeklyAdminConfig(input = {}) {
 }
 function normalizeStreamDirectoryConfig(input = {}) {
   const src = safeObj(input);
-  const streams = Array.isArray(src.streams) && src.streams.length ? src.streams : [{ id:"rlcs_main", enabled:true, label:"RLCS Main", type:"youtube", url:"https://www.youtube.com/watch?v=hzs2x4irAD0", info:"main Rocket League live hub" }];
-  return { multiview:src.multiview !== false, streams:streams.map((st,i)=>({ id:String(st.id||`stream_${i}_${stableHashString(st.url||st.label||i)}`), enabled:st.enabled !== false, label:String(st.label||`Stream ${i+1}`).slice(0,50), type:String(st.type||"youtube"), url:String(st.url||"").trim(), info:String(st.info||"").slice(0,220) })).slice(0,12) };
+  const streams = Array.isArray(src.streams) && src.streams.length ? src.streams : [{ id:"rlcs_main", enabled:true, label:"RLCS Main", type:"youtube", url:"https://www.youtube.com/watch?v=hzs2x4irAD0", info:"main Rocket League live hub", matchLabel:"" }];
+  return {
+    multiview:src.multiview !== false,
+    streams:streams.map((st,i)=>({
+      id:String(st.id||`stream_${i}_${stableHashString(st.url||st.label||i)}`),
+      enabled:st.enabled !== false,
+      label:String(st.label||`Stream ${i+1}`).slice(0,50),
+      type:String(st.type||"youtube"),
+      url:String(st.url||"").trim(),
+      matchLabel:String(st.matchLabel || st.gameTitle || "").slice(0,90),
+      info:String(st.info||"").slice(0,220)
+    })).slice(0,12)
+  };
 }
 function getWeeklyChallengePool(appCustomizer, weekNum, mode) {
   const cfg = normalizeWeeklyAdminConfig(appCustomizer?.weeklyAdmin);
@@ -18171,7 +18194,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 }  
                   
 // ===================== RLCS Bets =====================
-// APP102_RLCS_BET_ROOM_TIERS_POPOUT_PATCH
+// APP103_RLCS_SPLIT_TABS_PERFORMANCE_STREAM_ADMIN_PATCH
 // Live LCQ pulls happen through /api/rlcs-lcq so your start.gg token never ships in App.jsx.
 // Bets are now split into high-tier and low-tier rooms, with low-tier paying safer/smaller,
 // high-tier paying louder, and upset picks getting an extra underdog multiplier.
@@ -18219,9 +18242,9 @@ const RLCS_KNOWN_TEAM_WATCHLIST = Array.from(new Set([...RLCS_HIGH_TIER_TEAMS, .
 const RLCS_LCQ_STORAGE_KEY = "rlcs_lcq_live_matches";
 const RLCS_LCQ_REFRESH_MS = 2 * 60 * 1000;
 const RLCS_TIER_META = {
-  high: { id:"high", label:"High-tier room", short:"high", color:"#FF61C1", payMult:1.35, cardLimit:14, desc:"major teams · boosted payout" },
-  low: { id:"low", label:"Low-tier room", short:"low", color:"#4D9EFF", payMult:0.72, cardLimit:16, desc:"safer board · smaller payout" },
-  all: { id:"all", label:"All rooms", short:"all", color:"#B8FF4D", payMult:1, cardLimit:28, desc:"high + low combined" },
+  high: { id:"high", label:"High-tier room", short:"high", color:"#FF61C1", payMult:1.35, cardLimit:8, desc:"major teams · boosted payout" },
+  low: { id:"low", label:"Low-tier room", short:"low", color:"#4D9EFF", payMult:0.72, cardLimit:8, desc:"safer board · smaller payout" },
+  all: { id:"all", label:"All rooms", short:"all", color:"#B8FF4D", payMult:1, cardLimit:14, desc:"high + low combined" },
 };
 const RLCS_UPSET_MULT = 2.1;
 const RLCS_MAX_BET = 500;
@@ -18387,9 +18410,10 @@ async function fetchRlcsLcqLive({ force = false } = {}) {
   };
 }
 
-function resolveOpenRlcsBetsFromMatches({ matches = [], bets = [], points = {}, setBets, setPoints }) {
+async function resolveOpenRlcsBetsFromMatches({ matches = [], bets = [], points = {}, setBets, setPoints, currentPlayer, pings = [], setPings, addToast }) {
   const matchMap = new Map((matches || []).map(m => [String(m.setId || m.id), m]));
   let changed = false;
+  const settlementPings = [];
   let nextPoints = { ...(points || {}) };
   const nextBets = (bets || []).map(b => {
     if (b?.type !== "rlcs_match" || b.status !== "open") return b;
@@ -18400,86 +18424,109 @@ function resolveOpenRlcsBetsFromMatches({ matches = [], bets = [], points = {}, 
     if (won) {
       nextPoints[b.playerId] = (Number(nextPoints[b.playerId]) || 0) + (Number(b.payout) || 0);
     }
+    const resultTeam = Number(match.winnerId) === Number(match.team1Id) ? match.team1 : match.team2;
+    settlementPings.push({
+      id:`rlcs_settle_${b.id || b.setId}_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      from:"system",
+      to:b.playerId,
+      type:"rlcs_bet",
+      icon:won?"💰":"📉",
+      text:won ? `RLCS bet won: ${b.pickTeam} paid ${Number(b.payout||0).toLocaleString()} pts` : `RLCS bet lost: ${b.pickTeam} lost to ${resultTeam}`,
+      ts:new Date().toISOString(),
+      betId:b.id,
+      setId:b.setId || b.matchId,
+      url:makeNotificationUrl("games", { type:"rlcs_bet", id:b.id })
+    });
     return {
       ...b,
       status: won ? "won" : "lost",
       settledAt: new Date().toISOString(),
       resultTeamId: match.winnerId,
-      resultTeam: Number(match.winnerId) === Number(match.team1Id) ? match.team1 : match.team2,
+      resultTeam,
       note: won ? "start.gg winner matched your pick" : "start.gg winner did not match your pick",
     };
   });
   if (changed) {
     setBets?.(nextBets);
     setPoints?.(nextPoints);
-    try { storeSet("bets", nextBets); storeSet("points", nextPoints); } catch (_) {}
+    try { await storeSetWithPush("bets", nextBets); await storeSetWithPush("points", nextPoints); } catch (_) { try { await storeSet("bets", nextBets); await storeSet("points", nextPoints); } catch (__) {} }
+    if (settlementPings.length) {
+      const fresh = await storeGet("pings").catch(() => null);
+      const base = Array.isArray(fresh) ? fresh : (Array.isArray(pings) ? pings : []);
+      const nextPings = [...settlementPings, ...base].slice(0,140);
+      setPings?.(nextPings);
+      await storeSetWithPush("pings", nextPings).catch(() => storeSet("pings", nextPings));
+      const mine = settlementPings.find(p => p.to === currentPlayer);
+      if (mine) addToast?.(mine.text, mine.icon || "🔔");
+    }
   }
+  return changed;
 }
 
-function RlcsMiniBetRows({ bets = [], compact = false }) {
-  const rows = (bets || []).filter(Boolean).slice(0, compact ? 3 : 8);
-  if (!rows.length) return <div style={{fontSize:10.5,color:"#4A5066",fontWeight:800}}>no open bets in this room yet</div>;
-  return <div style={{display:"grid",gap:6}}>{rows.map(b => (
-    <div key={b.id || `${b.setId}-${b.pickTeam}`} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:compact?"7px 8px":"8px 9px"}}>
-      <div style={{minWidth:0}}>
+function RlcsMiniBetRows({ bets = [], compact = false, emptyText = "no RLCS bets yet" }) {
+  const rows = (bets || []).filter(Boolean).slice(0, compact ? 3 : 12);
+  if (!rows.length) return <div style={{fontSize:10.5,color:"#4A5066",fontWeight:800}}>{emptyText}</div>;
+  return <div style={{display:"grid",gap:6,width:"100%",maxWidth:"100%",overflow:"hidden"}}>{rows.map(b => {
+    const status = String(b.status || "open").toLowerCase();
+    const color = status === "won" ? "#7CFFB2" : status === "lost" ? "#FF5C8A" : "#B8FF4D";
+    return <div key={b.id || `${b.setId}-${b.pickTeam}`} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:8,alignItems:"center",background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.07)",borderRadius:10,padding:compact?"7px 8px":"8px 9px",maxWidth:"100%",overflow:"hidden"}}>
+      <div style={{minWidth:0,overflow:"hidden"}}>
         <div style={{fontSize:compact?10.5:11.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.pickTeam || b.title}</div>
-        <div style={{fontSize:9.5,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.tierLabel || b.tier || "RLCS"} · {b.betKind === "upset" ? "upset" : "pick"} · wager {Number(b.wager||0).toLocaleString()}</div>
+        <div style={{fontSize:9.5,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{b.tierLabel || b.tier || "RLCS"} · {b.betKind === "upset" ? "upset" : "pick"} · wager {Number(b.wager||0).toLocaleString()} · {status}</div>
       </div>
-      <div style={{fontSize:compact?10:11,color:"#B8FF4D",fontWeight:900,whiteSpace:"nowrap"}}>pays {Number(b.payout||0).toLocaleString()}</div>
-    </div>
-  ))}</div>;
+      <div style={{fontSize:compact?10:11,color,fontWeight:900,whiteSpace:"nowrap"}}>{status === "lost" ? "lost" : `pays ${Number(b.payout||0).toLocaleString()}`}</div>
+    </div>;
+  })}</div>;
 }
 
 function RLCSGlobalMiniRoom({ room, onClose, onOpenGames }) {
-  if (!room?.stream?.url && !room?.match) return null;
-  const match = room?.match || {};
+  if (!room?.stream?.url && !room?.bets?.length) return null;
   const stream = room?.stream || {};
-  const tierMeta = getRlcsTierMeta(match?.tier || room?.tier || "high");
+  const tierMeta = getRlcsTierMeta(room?.tier || "high");
   return createPortal(
     <div style={{position:"fixed",right:10,bottom:"calc(84px + env(safe-area-inset-bottom, 0px))",zIndex:1200,width:"min(330px, calc(100vw - 20px))",background:"linear-gradient(135deg,#120819,#05070E)",border:`1px solid ${tierMeta.color}66`,borderRadius:18,boxShadow:"0 22px 60px rgba(0,0,0,.55)",overflow:"hidden"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,padding:"9px 10px",background:"rgba(255,255,255,.04)",borderBottom:"1px solid rgba(255,255,255,.08)"}}>
         <button onClick={onOpenGames} className="bb-pressable" style={{background:"transparent",border:"none",padding:0,textAlign:"left",minWidth:0,cursor:"pointer"}}>
-          <div style={{fontSize:9.5,color:tierMeta.color,fontWeight:900,letterSpacing:.9,textTransform:"uppercase"}}>RLCS betting room · {tierMeta.short}</div>
-          <div style={{fontSize:11.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:245}}>{getRlcsMatchLabel(match)}</div>
+          <div style={{fontSize:9.5,color:tierMeta.color,fontWeight:900,letterSpacing:.9,textTransform:"uppercase"}}>RLCS stream popout</div>
+          <div style={{fontSize:11.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:245}}>{stream.matchLabel || stream.label || "RLCS stream"}</div>
         </button>
         <button onClick={onClose} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:10,color:"#8B92A8",width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer"}}><X size={15}/></button>
       </div>
       {stream?.url ? <iframe src={getStreamEmbedSrc(stream.url)} title={stream.label || "RLCS stream"} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen style={{width:"100%",aspectRatio:"16/9",border:0,display:"block",background:"#000"}}/> : null}
       <div style={{padding:10}}>
-        <RlcsMiniBetRows bets={room?.bets || []} compact />
+        <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>your rlcs bets</div>
+        <RlcsMiniBetRows bets={room?.bets || []} compact emptyText="no open RLCS bets" />
       </div>
     </div>,
     document.body
   );
 }
 
-function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomizer }) {
+function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomizer, pings, setPings, addToast }) {
   const cfg = normalizeStreamDirectoryConfig(appCustomizer?.streamDirectory);
   const streams = cfg.streams.filter(st=>st.enabled !== false && st.url);
   const [activeId,setActiveId]=useState(streams[0]?.id || "");
+  const [hubTab,setHubTab]=useState("bets");
   const [viewMode,setViewMode]=useState("ready");
   const [tierMode,setTierMode]=useState("high");
   const [wager,setWager]=useState(25);
-  const [roomMatchId,setRoomMatchId]=useState(null);
+  const [performanceMode,setPerformanceMode]=useState(() => { try { return localStorage.getItem("bb_rlcs_perf_mode") === "1"; } catch (_) { return false; } });
   const [liveData,setLiveData]=useState({ matches:[], updatedAt:null, source:"start.gg live", cached:false, error:null, loading:true });
-  const active = streams.find(s=>s.id===activeId) || streams[0];
-  const roomStream = active || streams[0] || null;
+  const active = streams.find(s=>s.id===activeId) || streams[0] || null;
   const myPoints = Number(points?.[currentPlayer]) || 0;
   const liveMatches = (liveData.matches || []).slice().sort((a,b)=>String(normalizeRlcsStart(a)||"").localeCompare(String(normalizeRlcsStart(b)||"")) || String(a.pool||"").localeCompare(String(b.pool||"")));
   const bettableKnownMatches = liveMatches.filter(m => m.bettableNow && !m.winnerId && m.team1 !== "TBD" && m.team2 !== "TBD");
   const futureKnownMatches = liveMatches.filter(m => !m.bettableNow || m.team1 === "TBD" || m.team2 === "TBD");
   const completedKnownMatches = liveMatches.filter(m => !!m.winnerId);
-  const highTierMatches = liveMatches.filter(m => getRlcsMatchTier(m) === "high");
-  const lowTierMatches = liveMatches.filter(m => getRlcsMatchTier(m) === "low");
   const openRlcsBets = (bets || []).filter(b => b?.type === "rlcs_match" && b.playerId === currentPlayer && b.status === "open");
-  const openSetIds = new Set(openRlcsBets.map(b => String(b.setId || b.matchId)).filter(Boolean));
-  const roomMatch = liveMatches.find(m => String(m.setId || m.id) === String(roomMatchId)) || liveMatches.find(m => openSetIds.has(String(m.setId || m.id))) || (tierMode === "low" ? lowTierMatches[0] : highTierMatches[0]) || liveMatches[0] || null;
-  const roomBets = openRlcsBets.filter(b => roomMatch && String(b.setId || b.matchId) === String(roomMatch.setId || roomMatch.id));
+  const settledRlcsBets = (bets || []).filter(b => b?.type === "rlcs_match" && b.playerId === currentPlayer && b.status !== "open");
   const tierMeta = RLCS_TIER_META[tierMode] || RLCS_TIER_META.high;
   const statusBaseMatches = viewMode === "ready" ? bettableKnownMatches : viewMode === "future" ? futureKnownMatches : viewMode === "complete" ? completedKnownMatches : liveMatches;
-  const visibleMatches = statusBaseMatches
-    .filter(m => tierMode === "all" || getRlcsMatchTier(m) === tierMode)
-    .slice(0, tierMeta.cardLimit || 16);
+  const tierFilteredMatches = statusBaseMatches.filter(m => tierMode === "all" || getRlcsMatchTier(m) === tierMode);
+  const visibleMatches = tierFilteredMatches.slice(0, tierMeta.cardLimit || 8);
+  const highReady = bettableKnownMatches.filter(m => getRlcsMatchTier(m) === "high").length;
+  const lowReady = bettableKnownMatches.filter(m => getRlcsMatchTier(m) === "low").length;
+  const sourceLabel = liveData.error ? "offline fallback" : liveData.cached ? "cached live" : "start.gg live";
 
   const loadRlcs = useCallback(async (force = false) => {
     setLiveData(prev => ({ ...prev, loading:true, error:null }));
@@ -18511,32 +18558,42 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
     let alive = true;
     const firstLoad = async () => { if (alive) await loadRlcs(false); };
     firstLoad();
-    const timer = setInterval(() => { if (alive) loadRlcs(false); }, RLCS_LCQ_REFRESH_MS);
-    return () => { alive = false; clearInterval(timer); };
-  }, [loadRlcs]);
+    const intervalMs = performanceMode ? 4 * 60 * 1000 : RLCS_LCQ_REFRESH_MS;
+    const timer = setInterval(() => { if (alive) loadRlcs(false); }, intervalMs);
+    const onVisible = () => { if (!document.hidden) loadRlcs(false); };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
+    return () => { alive = false; clearInterval(timer); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible); };
+  }, [loadRlcs, performanceMode]);
 
   useEffect(() => {
     if (!liveMatches.length) return;
-    resolveOpenRlcsBetsFromMatches({ matches:liveMatches, bets, points, setBets, setPoints });
+    resolveOpenRlcsBetsFromMatches({ matches:liveMatches, bets, points, setBets, setPoints, currentPlayer, pings, setPings, addToast }).catch(e => console.error("rlcs settle failed", e));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveData.updatedAt, bets?.length, points?.[currentPlayer]]);
 
-  const pushMiniRoom = (match, roomBetsOverride = null) => {
-    if (typeof window === "undefined" || !match) return;
-    const payload = {
-      match,
-      tier:getRlcsMatchTier(match),
-      stream: roomStream ? { id:roomStream.id, label:roomStream.label, url:roomStream.url, type:roomStream.type } : null,
-      bets: roomBetsOverride || openRlcsBets.filter(b => String(b.setId || b.matchId) === String(match.setId || match.id)),
-      updatedAt:new Date().toISOString(),
-    };
-    window.dispatchEvent(new CustomEvent("bb-rlcs-mini-room", { detail:payload }));
+  const setPerf = (next) => {
+    setPerformanceMode(next);
+    try { localStorage.setItem("bb_rlcs_perf_mode", next ? "1" : "0"); } catch (_) {}
+    addToast?.(next ? "RLCS performance mode on" : "RLCS performance mode off", next ? "🌙" : "⚡");
   };
+
+  const popStream = (stream = active) => {
+    if (typeof window === "undefined" || !stream?.url) return;
+    window.dispatchEvent(new CustomEvent("bb-rlcs-mini-room", { detail:{
+      stream:{ id:stream.id, label:stream.label, url:stream.url, type:stream.type, matchLabel:stream.matchLabel, info:stream.info },
+      bets:openRlcsBets,
+      tier:tierMode,
+      updatedAt:new Date().toISOString(),
+    }}));
+  };
+
+  const alreadyBetOnSet = (match) => openRlcsBets.some(b => String(b.setId || b.matchId) === String(match.setId || match.id));
 
   const placeRlcsBet = async (match, side) => {
     if (!match || match.winnerId || match.team1 === "TBD" || match.team2 === "TBD") return;
     const amount = Math.max(RLCS_MIN_BET, Math.min(RLCS_MAX_BET, Number(wager) || 25));
-    if (myPoints < amount) return;
+    if (myPoints < amount) { addToast?.("not enough points", "❌"); return; }
+    if (alreadyBetOnSet(match)) { addToast?.("you already have an open bet on this set", "⚠️"); return; }
     const pickMeta = getRlcsPickMeta(match, side);
     const pickTeam = side === "team1" ? match.team1 : match.team2;
     const pickTeamId = side === "team1" ? match.team1Id : match.team2Id;
@@ -18573,92 +18630,83 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
     const nextBets = [bet, ...(bets || [])];
     setPoints?.(nextPoints);
     setBets?.(nextBets);
-    setRoomMatchId(match.setId || match.id);
-    await storeSet("points", nextPoints);
-    await storeSet("bets", nextBets);
-    pushMiniRoom(match, [bet, ...roomBets]);
+    await storeSetWithPush("points", nextPoints).catch(() => storeSet("points", nextPoints));
+    await storeSetWithPush("bets", nextBets).catch(() => storeSet("bets", nextBets));
+    addToast?.(`RLCS bet placed: ${pickTeam} pays ${payout.toLocaleString()}`, "🎟️");
     bbHaptic(18);
   };
 
-  const alreadyBetOnSet = (match) => openRlcsBets.some(b => String(b.setId || b.matchId) === String(match.setId || match.id));
-  const sourceLabel = liveData.error ? "offline fallback" : liveData.cached ? "cached live" : "start.gg live";
-  const highReady = bettableKnownMatches.filter(m => getRlcsMatchTier(m) === "high").length;
-  const lowReady = bettableKnownMatches.filter(m => getRlcsMatchTier(m) === "low").length;
+  const shellBg = performanceMode ? "linear-gradient(135deg,#070A12,#04060B)" : "linear-gradient(135deg,#180B22,#0B0E18)";
+  const dimNote = performanceMode ? "performance mode · cooler refresh" : "live mode · full effects";
 
-  return <div style={{display:"grid",gap:12}}>
-    <div style={{background:"linear-gradient(135deg,#180B22,#0B0E18)",border:"2px solid rgba(255,97,193,0.25)",borderRadius:20,padding:14,marginBottom:2,boxShadow:"0 14px 34px rgba(255,97,193,0.08)"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-        <div>
-          <div style={{fontSize:11,color:"#FF61C1",fontWeight:900,letterSpacing:1}}>RLCS BETTING ROOM</div>
-          <div style={{fontSize:12,color:"#8B92A8",marginTop:3}}>high: {highReady} ready · low: {lowReady} ready · future/TBD: {futureKnownMatches.length} · complete: {completedKnownMatches.length}</div>
-        </div>
-        <div style={{textAlign:"right"}}>
-          <div style={{fontSize:10,color:liveData.error?"#FFD166":"#B8FF4D",fontWeight:900,textTransform:"uppercase"}}>{sourceLabel}</div>
-          <div style={{fontSize:9.5,color:"#4A5066",fontWeight:800,marginTop:3}}>{liveData.loading ? "checking…" : liveData.updatedAt ? fmtRelTime(liveData.updatedAt) : "not synced"}</div>
-        </div>
+  const HubTabs = () => <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:8,margin:"10px 0"}}>
+    {[{id:"bets",label:"Bets"},{id:"streams",label:"Streams"},{id:"yourbets",label:"Your Bets"}].map(t=>(
+      <button key={t.id} onClick={()=>setHubTab(t.id)} className="bb-pressable" style={{minWidth:0,background:hubTab===t.id?"#FF61C1":"rgba(255,255,255,.055)",border:`1px solid ${hubTab===t.id?"#FF61C1":"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"10px 7px",color:hubTab===t.id?"#06070D":"#8B92A8",fontSize:11,fontWeight:1000}}>{t.label}</button>
+    ))}
+  </div>;
+
+  const Header = () => <div style={{background:shellBg,border:`2px solid ${performanceMode?"rgba(77,158,255,.22)":"rgba(255,97,193,0.25)"}`,borderRadius:20,padding:14,marginBottom:2,boxShadow:performanceMode?"0 10px 26px rgba(0,0,0,.26)":"0 14px 34px rgba(255,97,193,0.08)",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+    <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start"}}>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:11,color:performanceMode?"#4D9EFF":"#FF61C1",fontWeight:900,letterSpacing:1}}>RLCS LIVE HUB</div>
+        <div style={{fontSize:12,color:"#8B92A8",marginTop:3,lineHeight:1.35}}>high: {highReady} ready · low: {lowReady} ready · future/TBD: {futureKnownMatches.length} · complete: {completedKnownMatches.length}</div>
       </div>
-      {liveData.error && <div style={{fontSize:10.5,color:"#FFD166",marginTop:8,lineHeight:1.35}}>⚠ {liveData.error}</div>}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,alignItems:"center",marginTop:10}}>
-        <select value={tierMode} onChange={e=>setTierMode(e.target.value)} style={{background:"rgba(255,255,255,.055)",border:`1px solid ${tierMeta.color}66`,borderRadius:11,padding:"9px 10px",color:"#E8ECF4",fontSize:11,fontWeight:900,outline:"none"}}>
-          <option value="high">High-tier teams · pays more</option>
-          <option value="low">Low-tier teams · pays less</option>
+      <div style={{textAlign:"right",minWidth:86}}>
+        <div style={{fontSize:10,color:liveData.error?"#FFD166":"#B8FF4D",fontWeight:900,textTransform:"uppercase"}}>{sourceLabel}</div>
+        <div style={{fontSize:9.5,color:"#4A5066",fontWeight:800,marginTop:3}}>{liveData.loading ? "checking…" : liveData.updatedAt ? fmtRelTime(liveData.updatedAt) : "not synced"}</div>
+      </div>
+    </div>
+    {liveData.error && <div style={{fontSize:10.5,color:"#FFD166",marginTop:8,lineHeight:1.35}}>⚠ {liveData.error}</div>}
+    <HubTabs />
+    <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:4,paddingBottom:4,alignItems:"center",maxWidth:"100%"}}>
+      <button onClick={()=>setPerf(!performanceMode)} className="bb-pressable" style={{flexShrink:0,fontSize:10,color:performanceMode?"#4D9EFF":"#A78BFA",fontWeight:900,background:performanceMode?"rgba(77,158,255,.12)":"rgba(167,139,250,.1)",border:`1px solid ${performanceMode?"rgba(77,158,255,.28)":"rgba(167,139,250,.22)"}`,borderRadius:999,padding:"7px 9px"}}>{performanceMode ? "performance on" : "performance off"}</button>
+      <div style={{flexShrink:0,fontSize:10,color:performanceMode?"#4D9EFF":"#8B92A8",fontWeight:900,background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:999,padding:"7px 9px"}}>{dimNote}</div>
+      <button onClick={()=>loadRlcs(true)} disabled={liveData.loading} className="bb-pressable" style={{flexShrink:0,background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.25)",borderRadius:999,padding:"7px 9px",color:"#B8FF4D",fontSize:10,fontWeight:900,opacity:liveData.loading?.7:1}}>refresh results</button>
+    </div>
+  </div>;
+
+  const BetsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
+    <div style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:16,padding:10,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,alignItems:"center"}}>
+        <select value={tierMode} onChange={e=>setTierMode(e.target.value)} style={{minWidth:0,width:"100%",background:"rgba(255,255,255,.055)",border:`1px solid ${tierMeta.color}66`,borderRadius:11,padding:"9px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900,outline:"none"}}>
+          <option value="high">High-tier · pays more</option>
+          <option value="low">Low-tier · pays less</option>
           <option value="all">All betting rooms</option>
         </select>
-        <select value={viewMode} onChange={e=>setViewMode(e.target.value)} style={{background:"rgba(255,255,255,.055)",border:"1px solid rgba(255,255,255,.1)",borderRadius:11,padding:"9px 10px",color:"#E8ECF4",fontSize:11,fontWeight:900,outline:"none"}}>
+        <select value={viewMode} onChange={e=>setViewMode(e.target.value)} style={{minWidth:0,width:"100%",background:"rgba(255,255,255,.055)",border:"1px solid rgba(255,255,255,.1)",borderRadius:11,padding:"9px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900,outline:"none"}}>
           <option value="ready">Bettable now</option>
           <option value="future">Future/TBD</option>
           <option value="known">All shown</option>
           <option value="complete">Complete</option>
         </select>
       </div>
-      <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:10,paddingBottom:4,alignItems:"center"}}>
+      <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:9,paddingBottom:3,alignItems:"center"}}>
         <div style={{flexShrink:0,fontSize:10,color:tierMeta.color,fontWeight:900,background:`${tierMeta.color}18`,border:`1px solid ${tierMeta.color}40`,borderRadius:999,padding:"7px 9px"}}>{tierMeta.desc}</div>
-        <div style={{flexShrink:0,fontSize:10,color:"#FFD166",fontWeight:900,background:"rgba(255,209,102,.1)",border:"1px solid rgba(255,209,102,.25)",borderRadius:999,padding:"7px 9px"}}>upset picks pay extra</div>
-        <button onClick={()=>loadRlcs(true)} disabled={liveData.loading} className="bb-pressable" style={{flexShrink:0,background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.25)",borderRadius:10,padding:"8px 10px",color:"#B8FF4D",fontSize:10,fontWeight:900,opacity:liveData.loading?.7:1}}>force refresh</button>
+        <div style={{flexShrink:0,fontSize:10,color:"#FFD166",fontWeight:900,background:"rgba(255,209,102,.1)",border:"1px solid rgba(255,209,102,.25)",borderRadius:999,padding:"7px 9px"}}>upsets pay extra</div>
+        <div style={{flexShrink:0,fontSize:10,color:"#8B92A8",fontWeight:900,background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:999,padding:"7px 9px"}}>showing {visibleMatches.length}/{tierFilteredMatches.length}</div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 96px",gap:8,alignItems:"center",marginTop:10}}>
-        <div style={{fontSize:10.5,color:"#8B92A8"}}>Wager: <b style={{color:"#E8ECF4"}}>{Number(wager).toLocaleString()} pts</b> · balance: <b style={{color:"#FFD166"}}>{myPoints.toLocaleString()} pts</b> · open RLCS bets: {openRlcsBets.length}</div>
-        <input type="number" min={RLCS_MIN_BET} max={RLCS_MAX_BET} step="5" value={wager} onChange={e=>setWager(e.target.value)} style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:10,padding:"8px 9px",color:"#E8ECF4",fontSize:11,fontWeight:900}}/>
-      </div>
-    </div>
-
-    <div style={{background:"linear-gradient(135deg,#101526,#090B12)",border:`1px solid ${getRlcsTierMeta(roomMatch || tierMode).color}45`,borderRadius:18,padding:12,boxShadow:"0 14px 34px rgba(0,0,0,.22)"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
-        <div style={{minWidth:0}}>
-          <div style={{fontSize:10,color:getRlcsTierMeta(roomMatch || tierMode).color,fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>live room · {roomMatch ? `${roomMatch.pool} · ${roomMatch.round}` : tierMeta.label}</div>
-          <div style={{fontSize:16,color:"#E8ECF4",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{roomMatch ? getRlcsMatchLabel(roomMatch) : "Pick a match to open its room"}</div>
-          {roomMatch && <div style={{fontSize:10.5,color:"#8B92A8",marginTop:4}}>{fmtRlcsDate(normalizeRlcsStart(roomMatch))} · {getRlcsMatchStatus(roomMatch)}</div>}
-        </div>
-        <button onClick={()=>pushMiniRoom(roomMatch)} disabled={!roomMatch || !roomStream} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,padding:"8px 10px",color:"#E8ECF4",fontSize:10,fontWeight:900,opacity:(!roomMatch || !roomStream)?.55:1,cursor:"pointer",whiteSpace:"nowrap"}}>pop out</button>
-      </div>
-      {streams.length ? <>
-        <div style={{display:"flex",gap:7,overflowX:"auto",marginBottom:9,paddingBottom:3}}>{streams.map(st=><button key={st.id} onClick={()=>setActiveId(st.id)} className="bb-pressable" style={{flexShrink:0,background:(active?.id===st.id)?"#FF61C1":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px 10px",color:(active?.id===st.id)?"#06070D":"#E8ECF4",fontSize:10,fontWeight:900}}>{st.label}</button>)}</div>
-        <div style={{background:"#000",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,overflow:"hidden"}}>
-          <iframe src={getStreamEmbedSrc(roomStream?.url)} title={roomStream?.label || "RLCS stream"} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen style={{width:"100%",aspectRatio:"16/9",border:0,display:"block"}}/>
-        </div>
-      </> : <EmptyState icon="📺" title="No streams added" body="Add Twitch or YouTube links in Admin → stream directory." />}
-      <div style={{marginTop:10}}>
-        <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:7}}>your bets in this room</div>
-        <RlcsMiniBetRows bets={roomBets} />
+      <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 86px",gap:8,alignItems:"center",marginTop:9}}>
+        <div style={{minWidth:0,fontSize:10.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Wager <b style={{color:"#E8ECF4"}}>{Number(wager).toLocaleString()}</b> · balance <b style={{color:"#FFD166"}}>{myPoints.toLocaleString()}</b> · open {openRlcsBets.length}</div>
+        <input type="number" min={RLCS_MIN_BET} max={RLCS_MAX_BET} step="5" value={wager} onChange={e=>setWager(e.target.value)} style={{minWidth:0,width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:10,padding:"8px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900}}/>
       </div>
     </div>
 
-    <div style={{display:"grid",gap:10}}>
+    <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
       {visibleMatches.length ? visibleMatches.map(match => {
         const locked = match.team1 === "TBD" || match.team2 === "TBD" || !!match.winnerId || alreadyBetOnSet(match);
         const status = getRlcsMatchStatus(match);
         const winnerName = match.winnerId ? (Number(match.winnerId) === Number(match.team1Id) ? match.team1 : match.team2) : null;
         const mt = getRlcsTierMeta(match);
-        return <div key={match.setId || match.id} onClick={()=>setRoomMatchId(match.setId || match.id)} style={{background:"linear-gradient(135deg,#11131F,#090B12)",border:`1px solid ${mt.color}30`,borderRadius:16,padding:12,cursor:"pointer"}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+        return <div key={match.setId || match.id} style={{background:"linear-gradient(135deg,#11131F,#090B12)",border:`1px solid ${mt.color}30`,borderRadius:16,padding:12,cursor:"default",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start",marginBottom:10}}>
             <div style={{minWidth:0}}>
-              <div style={{fontSize:10,color:mt.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{mt.short} · {match.pool} · {match.round}</div>
-              <div style={{fontSize:15,color:"#E8ECF4",fontWeight:900,marginTop:3,lineHeight:1.15}}>{getRlcsMatchLabel(match)}</div>
-              <div style={{fontSize:10.5,color:"#8B92A8",marginTop:5}}>{fmtRlcsDate(normalizeRlcsStart(match))} · {status}{winnerName ? ` · winner: ${winnerName}` : ""}</div>
+              <div style={{fontSize:10,color:mt.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{mt.short} · {match.pool} · {match.round}</div>
+              <div style={{fontSize:15,color:"#E8ECF4",fontWeight:900,marginTop:3,lineHeight:1.15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getRlcsMatchLabel(match)}</div>
+              <div style={{fontSize:10.5,color:"#8B92A8",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtRlcsDate(normalizeRlcsStart(match))} · {status}{winnerName ? ` · winner: ${winnerName}` : ""}</div>
             </div>
             <div style={{fontSize:10,color:status==="waiting"?"#FFD166":status==="complete"?"#7CFFB2":mt.color,fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{status}</div>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,maxWidth:"100%",overflow:"hidden"}}>
             {["team1","team2"].map(side => {
               const team = side === "team1" ? match.team1 : match.team2;
               const pickMeta = getRlcsPickMeta(match, side);
@@ -18667,12 +18715,12 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
               const isWatch = pickMeta.isWatch;
               const isWinner = winnerName && winnerName === team;
               const payout = getRlcsPayout(match, side, wager);
-              return <button key={side} disabled={locked || myPoints < wager} onClick={(e)=>{ e.stopPropagation(); placeRlcsBet(match, side); }} className="bb-pressable" style={{background:isWinner?"rgba(124,255,178,.16)":pickMeta.isUpset?"rgba(255,209,102,.13)":isWatch?`${mt.color}18`:"rgba(255,255,255,.045)",border:`1px solid ${isWinner?"rgba(124,255,178,.35)":pickMeta.isUpset?"rgba(255,209,102,.35)":isWatch?`${mt.color}50`:"rgba(255,255,255,.08)"}`,borderRadius:13,padding:10,textAlign:"left",opacity:(locked || myPoints < wager)?.7:1}}>
-                <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0}}>
+              return <button key={side} disabled={locked || myPoints < wager} onClick={(e)=>{ e.stopPropagation(); placeRlcsBet(match, side); }} className="bb-pressable" style={{minWidth:0,width:"100%",boxSizing:"border-box",background:isWinner?"rgba(124,255,178,.16)":pickMeta.isUpset?"rgba(255,209,102,.13)":isWatch?`${mt.color}18`:"rgba(255,255,255,.045)",border:`1px solid ${isWinner?"rgba(124,255,178,.35)":pickMeta.isUpset?"rgba(255,209,102,.35)":isWatch?`${mt.color}50`:"rgba(255,255,255,.08)"}`,borderRadius:13,padding:10,textAlign:"left",opacity:(locked || myPoints < wager)?.7:1,overflow:"hidden"}}>
+                <div style={{display:"flex",alignItems:"center",gap:5,minWidth:0,overflow:"hidden"}}>
                   <div style={{fontSize:12.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",minWidth:0}}>{team}</div>
                   {pickMeta.isUpset && <span style={{fontSize:8.5,color:"#06070D",background:"#FFD166",borderRadius:999,padding:"2px 5px",fontWeight:900,flexShrink:0}}>UPSET</span>}
                 </div>
-                <div style={{fontSize:10,color:isWinner?"#7CFFB2":pickMeta.isUpset?"#FFD166":isWatch?mt.color:"#4A5066",fontWeight:900,marginTop:3}}>{isWinner ? "winner" : `${displayOdds} · pays ${payout.toLocaleString()} pts`}</div>
+                <div style={{fontSize:10,color:isWinner?"#7CFFB2":pickMeta.isUpset?"#FFD166":isWatch?mt.color:"#4A5066",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{isWinner ? "winner" : `${displayOdds} · pays ${payout.toLocaleString()}`}</div>
                 {!!playerList?.length && <div style={{fontSize:9.5,color:"#8B92A8",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{playerList.slice(0,4).join(" · ")}</div>}
               </button>;
             })}
@@ -18680,8 +18728,47 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
           {alreadyBetOnSet(match) && <div style={{fontSize:10,color:"#FFD166",fontWeight:800,marginTop:8}}>you already have an open bet on this set</div>}
           {status==="waiting" && <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>locked until start.gg fills both teams</div>}
         </div>;
-      }) : <EmptyState icon="🏁" title={liveData.loading?"Checking start.gg…":"No matches in this room"} body="Switch the dropdown or force refresh. The backend still pulls start.gg, then the app shows the trimmed betting board." />}
+      }) : <EmptyState icon="🏁" title={liveData.loading?"Checking start.gg…":"No matches here"} body="Switch the dropdown or refresh results. The backend still pulls start.gg, then the app shows the trimmed betting board." />}
     </div>
+  </div>;
+
+  const StreamsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
+    {!streams.length ? <EmptyState icon="📺" title="No streams added" body="Add Twitch or YouTube links in Admin → stream directory." /> : <>
+      <div style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:3}}>{streams.map(st=><button key={st.id} onClick={()=>setActiveId(st.id)} className="bb-pressable" style={{flexShrink:0,background:(active?.id===st.id)?"#FF61C1":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px 10px",color:(active?.id===st.id)?"#06070D":"#E8ECF4",fontSize:10,fontWeight:900}}>{st.label}</button>)}</div>
+      <div style={{background:"linear-gradient(135deg,#101526,#090B12)",border:"1px solid rgba(255,97,193,.25)",borderRadius:18,padding:12,boxShadow:performanceMode?"0 10px 25px rgba(0,0,0,.24)":"0 14px 34px rgba(0,0,0,.22)",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start",marginBottom:10}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>stream room</div>
+            <div style={{fontSize:16,color:"#E8ECF4",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{active?.matchLabel || active?.label || "RLCS stream"}</div>
+            {active?.info && <div style={{fontSize:10.5,color:"#8B92A8",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{active.info}</div>}
+          </div>
+          <button onClick={()=>popStream(active)} disabled={!active?.url} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,padding:"8px 10px",color:"#E8ECF4",fontSize:10,fontWeight:900,opacity:!active?.url?.55:1,cursor:"pointer",whiteSpace:"nowrap"}}>pop out</button>
+        </div>
+        {hubTab === "streams" && active?.url ? <div style={{background:"#000",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,overflow:"hidden"}}>
+          <iframe src={getStreamEmbedSrc(active.url)} title={active.label || "RLCS stream"} allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowFullScreen style={{width:"100%",aspectRatio:"16/9",border:0,display:"block"}}/>
+        </div> : null}
+      </div>
+      <div style={{fontSize:10.5,color:"#4A5066",lineHeight:1.35}}>Streams are separate from bets now. Use Admin to title a stream to whatever game you want, then pop it out while using jobs, spins, stats, or bets.</div>
+    </>}
+  </div>;
+
+  const YourBetsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
+    <div style={{background:"rgba(184,255,77,.06)",border:"1px solid rgba(184,255,77,.16)",borderRadius:16,padding:12,display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"center"}}>
+      <div style={{minWidth:0}}>
+        <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>your rlcs bets</div>
+        <div style={{fontSize:11,color:"#8B92A8",marginTop:3}}>open {openRlcsBets.length} · settled {settledRlcsBets.length}</div>
+      </div>
+      <button onClick={()=>loadRlcs(true)} className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.25)",borderRadius:10,padding:"8px 10px",color:"#B8FF4D",fontSize:10,fontWeight:900}}>check results</button>
+    </div>
+    <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>open tickets</div>
+    <RlcsMiniBetRows bets={openRlcsBets} emptyText="no open RLCS bets" />
+    <div style={{fontSize:10,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginTop:2}}>history</div>
+    <RlcsMiniBetRows bets={settledRlcsBets} emptyText="no settled RLCS bets yet" />
+  </div>;
+
+  return <div style={{display:"grid",gap:12,width:"100%",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+    <Header />
+    {hubTab === "bets" ? <BetsTab /> : hubTab === "streams" ? <StreamsTab /> : <YourBetsTab />}
   </div>;
 }
 
@@ -18690,7 +18777,7 @@ const GAME_CARDS = [
   { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
   { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
   { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
-  { id:"rlcsbets", label:"RLCS Live",        desc:"watch the live Rocket League hub",    color:"#FF61C1" },
+  { id:"rlcsbets", label:"RLCS Live",        desc:"bets, streams, and your RLCS tickets",    color:"#FF61C1" },
 ];
 
 function TeamLinkTab({ stats, onUpdateOpponentScore }) {
@@ -18709,7 +18796,7 @@ function TeamLinkTab({ stats, onUpdateOpponentScore }) {
   );
 }
 
-function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, activeRace, setActiveRace, raceStart, setRaceStart, appCustomizer }) {
+function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, activeRace, setActiveRace, raceStart, setRaceStart, appCustomizer, pings, setPings, addToast }) {
   const [active, setActive] = useState(() => {
     try { return localStorage.getItem("bb_open_games_active") || null; } catch (_) { return null; }
   });
@@ -18746,7 +18833,7 @@ function GamesTab({ stats, currentPlayer, points, setPoints, bets, setBets, acti
   if (active === "rlcsbets") return (
     <div className="bb-tab-content" style={s.tabContent}>
       <button onClick={()=>setActive(null)} className="bb-pressable" style={backBtnStyle}>← back to games</button>
-      <RLCSBets currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} appCustomizer={appCustomizer}/>
+      <RLCSBets currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} appCustomizer={appCustomizer} pings={pings} setPings={setPings} addToast={addToast}/>
     </div>
   );
   return (
@@ -20736,7 +20823,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
 {(tab==="presence" || tab==="squad")&&<SquadTabErrorBoundary resetKey={`${currentPlayer}-${tab}`} currentPlayer={currentPlayer} presence={presence} points={points} setTab={setTab}><PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} adminShopItems={adminShopItems} appCustomizer={appCustomizer}/></SquadTabErrorBoundary>}
 {tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts} addToast={addToast}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
-{tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer}/>}
+{tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer} pings={pings} setPings={setPings} addToast={addToast}/>}
  {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition} points={points} setPoints={setPoints} passPremium={passPremium} setPassPremium={setPassPremium} adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} tabAnimationStyle={tabAnimationStyle} setTabAnimationStyle={setTabAnimationStyle} fullScreenFloatMode={fullScreenFloatMode} setFullScreenFloatMode={setFullScreenFloatMode} appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} comments={comments} setComments={setComments} currentPlayer={currentPlayer} burtonOS={burtonOS} setBurtonOS={setBurtonOS}/>}
 </>}
 </AppSectionBoundary>
