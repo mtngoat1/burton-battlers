@@ -18213,6 +18213,9 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 // APP104_RLCS_CLEAN_BOARD_STREAM_FIX_PROPS_PATCH
 // APP105_RLCS_CORE_TEAMS_ONLY_STAT_FEED_READY_PATCH
 // APP106_RLCS_NO_PROPS_CORE_BOARD_PLAYER_COLOR_PATCH
+// APP107_RLCS_FOUR_TEAM_FAST_REFRESH_PATCH
+// APP108_RLCS_CORE_ONLY_LIVE_ACTIVITY_PRESENCE_CRON_PATCH
+// APP109_RLCS_LIVE_BRACKET_VIEW_PATCH
 // Live LCQ pulls happen through /api/rlcs-lcq so your start.gg token never ships in App.jsx.
 // Bets are trimmed to only the teams you said you know. Player props are removed until a real stat feed exists.
 const RLCS_HIGH_TIER_TEAMS = [
@@ -18221,16 +18224,17 @@ const RLCS_HIGH_TIER_TEAMS = [
   "M80",
   "FUT Esports"
 ];
-const RLCS_LOW_TIER_TEAMS = [
-  "Lil Step Bros"
-];
+const RLCS_LOW_TIER_TEAMS = [];
 const RLCS_KNOWN_TEAM_WATCHLIST = Array.from(new Set([...RLCS_HIGH_TIER_TEAMS, ...RLCS_LOW_TIER_TEAMS]));
 const RLCS_LCQ_STORAGE_KEY = "rlcs_lcq_live_matches";
-const RLCS_LCQ_REFRESH_MS = 2 * 60 * 1000;
+const RLCS_LCQ_REFRESH_MS = 75 * 1000;
+const RLCS_PRESENCE_KEY = "rlcs_live_presence";
+const RLCS_PRESENCE_TTL_MS = 2 * 60 * 1000;
+const RLCS_ACTIVITY_LIMIT = 8;
 const RLCS_TIER_META = {
   high: { id:"high", label:"Major-team room", short:"major", color:"#FF61C1", payMult:1.35, cardLimit:8, desc:"M80 · FUT · DIG · Gen.G" },
-  low: { id:"low", label:"Lil Step Bros room", short:"known", color:"#4D9EFF", payMult:0.95, cardLimit:6, desc:"Lil Step Bros only" },
-  all: { id:"all", label:"Your known board", short:"known", color:"#B8FF4D", payMult:1, cardLimit:10, desc:"M80 · FUT · DIG · Gen.G · Lil Step Bros" },
+  low: { id:"low", label:"major-team room", short:"major", color:"#4D9EFF", payMult:1.35, cardLimit:6, desc:"M80 · FUT · DIG · Gen.G" },
+  all: { id:"all", label:"major-team board", short:"major", color:"#B8FF4D", payMult:1.35, cardLimit:8, desc:"M80 · FUT · DIG · Gen.G" },
 };
 const RLCS_UPSET_MULT = 2.1;
 const RLCS_MAX_BET = 500;
@@ -18351,11 +18355,102 @@ function getRlcsMatchLabel(match) {
 }
 
 function getRlcsMatchStatus(match) {
-  if (match?.winnerId) return "complete";
+  if (match?.winnerId || Number(match?.state) === 3) return "complete";
   if (String(match?.team1 || "").toUpperCase() === "TBD" || String(match?.team2 || "").toUpperCase() === "TBD") return "waiting";
+  if (Number(match?.state) === 2) return "live";
   const startMs = safeDateObj(match?.startAt || match?.beginAt || match?.date || 0, 0).getTime();
-  if (Number.isFinite(startMs) && startMs > Date.now()) return "scheduled";
-  return "live/checking";
+  if (Number.isFinite(startMs) && startMs > Date.now()) {
+    const mins = Math.ceil((startMs - Date.now()) / 60000);
+    return mins <= 10 ? "starting soon" : "scheduled";
+  }
+  if (Number.isFinite(startMs) && Date.now() - startMs < 90 * 60000) return "checking result";
+  return "waiting result";
+}
+
+function getRlcsStatusColor(status, accent = "#B8FF4D") {
+  const s = String(status || "").toLowerCase();
+  if (s.includes("complete")) return "#7CFFB2";
+  if (s.includes("waiting")) return "#FFD166";
+  if (s.includes("live") || s.includes("starting")) return accent;
+  return "#8B92A8";
+}
+
+function getRlcsRoundOrder(round = "") {
+  const r = String(round || "").toLowerCase();
+  const n = Number(String(round || "").match(/-?\d+/)?.[0]);
+  if (r.includes("winners")) return 100 + (Number.isFinite(n) ? n : 0);
+  if (r.includes("losers")) return 200 + Math.abs(Number.isFinite(n) ? n : 0);
+  if (r.includes("day 2")) return 300;
+  return 500 + (Number.isFinite(n) ? Math.abs(n) : 0);
+}
+
+function normalizeRlcsBracketSet(raw = {}, idx = 0) {
+  const match = normalizeRlcsMatch(raw, idx);
+  const score1 = raw?.team1Score ?? raw?.score1 ?? raw?.slots?.[0]?.standing?.stats?.score?.value ?? null;
+  const score2 = raw?.team2Score ?? raw?.score2 ?? raw?.slots?.[1]?.standing?.stats?.score?.value ?? null;
+  return {
+    ...match,
+    identifier: raw?.identifier || match.identifier || "",
+    team1Score: score1 === null || score1 === undefined || score1 === "" ? null : Number(score1),
+    team2Score: score2 === null || score2 === undefined || score2 === "" ? null : Number(score2),
+    round: raw?.round || raw?.fullRoundText || match.round || "match",
+  };
+}
+
+function getRlcsBracketPools(liveData = {}, fallbackMatches = []) {
+  const rawPools = Array.isArray(liveData?.bracket?.pools) ? liveData.bracket.pools : [];
+  const pools = rawPools.length ? rawPools.map(pool => ({
+    poolId: pool.poolId || pool.id || pool.displayIdentifier || pool.pool,
+    pool: pool.pool || pool.displayIdentifier || String(pool.poolId || pool.id || "pool"),
+    phase: pool.phase || pool.phaseName || "day 1 bracket",
+    sets: (Array.isArray(pool.sets) ? pool.sets : []).map(normalizeRlcsBracketSet).sort((a,b)=>getRlcsRoundOrder(a.round)-getRlcsRoundOrder(b.round) || String(a.identifier || "").localeCompare(String(b.identifier || ""))),
+  })) : [];
+  if (pools.length) return pools;
+  const grouped = {};
+  (fallbackMatches || []).forEach((m, idx) => {
+    const key = m.pool || "core";
+    if (!grouped[key]) grouped[key] = { poolId:key, pool:key, phase:m.phase || "day 1 bracket", sets:[] };
+    grouped[key].sets.push(normalizeRlcsBracketSet(m, idx));
+  });
+  return Object.values(grouped).sort((a,b)=>String(a.pool).localeCompare(String(b.pool), undefined, { numeric:true }));
+}
+
+function getRlcsSetScoreLabel(score) {
+  return Number.isFinite(Number(score)) ? String(Number(score)) : "";
+}
+
+function buildRlcsActivityItems({ matches = [], bets = [], playerId = null, accent = "#B8FF4D" }) {
+  const now = Date.now();
+  const matchItems = (matches || []).map(m => {
+    const status = getRlcsMatchStatus(m);
+    const startMs = safeDateObj(normalizeRlcsStart(m) || 0, 0).getTime();
+    const winnerName = m?.winnerId ? (Number(m.winnerId) === Number(m.team1Id) ? m.team1 : m.team2) : null;
+    let text = `${getRlcsMatchLabel(m)} · ${status}`;
+    let icon = status === "complete" ? "✓" : status === "live" ? "●" : status === "starting soon" ? "⌁" : "○";
+    if (winnerName) text = `${winnerName} result detected · ${getRlcsMatchLabel(m)}`;
+    return { id:`match_${m.setId || m.id}`, ts:Number.isFinite(startMs) ? startMs : now, icon, text, sub:`${m.pool || "pool"} · ${m.round || "match"}`, color:getRlcsStatusColor(status, accent), weight: status === "live" ? 4 : status === "starting soon" ? 3 : status === "complete" ? 2 : 1 };
+  });
+  const betItems = (bets || []).filter(b => b?.type === "rlcs_match" && (!playerId || b.playerId === playerId)).slice(0,5).map(b => ({
+    id:`bet_${b.id}`,
+    ts:new Date(b.placedAt || Date.now()).getTime(),
+    icon:b.status === "won" ? "💰" : b.status === "lost" ? "×" : "🎟️",
+    text:`${b.status || "open"} bet · ${b.pickTeam || b.title}`,
+    sub:`pays ${Number(b.payout || 0).toLocaleString()} · wager ${Number(b.wager || 0).toLocaleString()}`,
+    color:b.status === "won" ? "#7CFFB2" : b.status === "lost" ? "#FF5C8A" : accent,
+    weight:5,
+  }));
+  return [...betItems, ...matchItems]
+    .filter(Boolean)
+    .sort((a,b)=>(b.weight || 0)-(a.weight || 0) || (b.ts || 0)-(a.ts || 0))
+    .slice(0, RLCS_ACTIVITY_LIMIT);
+}
+
+function extractTwitchChannel(url = "") {
+  const raw = String(url || "");
+  const m = raw.match(/twitch\.tv\/(?:videos\/\d+|embed\?channel=)?([^/?&#]+)/i);
+  if (!m) return null;
+  const ch = decodeURIComponent(m[1] || "").replace(/[^a-z0-9_]/gi, "");
+  return ch || null;
 }
 
 function normalizeRlcsStart(match) {
@@ -18472,12 +18567,17 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const [activeId,setActiveId]=useState(streams[0]?.id || "");
   const [hubTab,setHubTab]=useState("bets");
   const [viewMode,setViewMode]=useState("ready");
+  const [bracketPoolId,setBracketPoolId]=useState("");
   const [wager,setWager]=useState(25);
   const [performanceMode,setPerformanceMode]=useState(() => { try { return localStorage.getItem("bb_rlcs_perf_mode") === "1"; } catch (_) { return false; } });
-  const [liveData,setLiveData]=useState({ matches:[], updatedAt:null, source:"start.gg live", cached:false, error:null, loading:true });
+  const [liveData,setLiveData]=useState({ matches:[], bracket:null, updatedAt:null, source:"start.gg live", cached:false, error:null, loading:true });
+  const [rlcsPresence,setRlcsPresence]=useState({});
+  const [twitchLive,setTwitchLive]=useState({ connected:false, channels:{}, loading:false });
   const active = streams.find(s=>s.id===activeId) || streams[0] || null;
   const myPoints = Number(points?.[currentPlayer]) || 0;
   const liveMatches = (liveData.matches || []).slice().sort((a,b)=>String(normalizeRlcsStart(a)||"").localeCompare(String(normalizeRlcsStart(b)||"")) || String(a.pool||"").localeCompare(String(b.pool||"")));
+  const bracketPools = getRlcsBracketPools(liveData, liveMatches);
+  const activeBracketPool = bracketPools.find(p => String(p.poolId) === String(bracketPoolId)) || bracketPools[0] || null;
   const bettableKnownMatches = liveMatches.filter(m => m.bettableNow && !m.winnerId && m.team1 !== "TBD" && m.team2 !== "TBD");
   const futureKnownMatches = liveMatches.filter(m => !m.bettableNow || m.team1 === "TBD" || m.team2 === "TBD");
   const completedKnownMatches = liveMatches.filter(m => !!m.winnerId);
@@ -18486,6 +18586,10 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const statusBaseMatches = viewMode === "future" ? futureKnownMatches : bettableKnownMatches;
   const visibleMatches = statusBaseMatches.slice(0, 8);
   const sourceLabel = liveData.error ? "last saved" : liveData.cached ? "cached live" : "start.gg live";
+  const onlineRlcsUsers = Object.values(rlcsPresence || {}).filter(v => v && Date.now() - new Date(v.ts || 0).getTime() < RLCS_PRESENCE_TTL_MS);
+  const liveActivity = buildRlcsActivityItems({ matches:liveMatches, bets, playerId:currentPlayer, accent:playerColor });
+  const activeTwitchChannel = extractTwitchChannel(active?.url || "");
+  const activeTwitchInfo = activeTwitchChannel ? twitchLive.channels?.[activeTwitchChannel.toLowerCase()] : null;
 
   const loadRlcs = useCallback(async (force = false) => {
     setLiveData(prev => ({ ...prev, loading:true, error:null }));
@@ -18493,6 +18597,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
       const json = await fetchRlcsLcqLive({ force });
       const next = {
         matches: json.matches || [],
+        bracket: json.bracket || null,
         updatedAt: json.generatedAt || new Date().toISOString(),
         source: json.source || "start.gg live",
         cached: !!json.cached,
@@ -18517,12 +18622,62 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
     let alive = true;
     const firstLoad = async () => { if (alive) await loadRlcs(false); };
     firstLoad();
-    const intervalMs = performanceMode ? 4 * 60 * 1000 : RLCS_LCQ_REFRESH_MS;
-    const timer = setInterval(() => { if (alive) loadRlcs(false); }, intervalMs);
+    const intervalMs = performanceMode ? 3 * 60 * 1000 : RLCS_LCQ_REFRESH_MS;
+    const timer = setInterval(() => { if (alive && (typeof document === "undefined" || !document.hidden)) loadRlcs(false); }, intervalMs);
     const onVisible = () => { if (!document.hidden) loadRlcs(false); };
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
     return () => { alive = false; clearInterval(timer); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible); };
   }, [loadRlcs, performanceMode]);
+
+  useEffect(() => {
+    if (!bracketPools.length) return;
+    if (!bracketPoolId || !bracketPools.some(p => String(p.poolId) === String(bracketPoolId))) {
+      setBracketPoolId(String(bracketPools[0].poolId));
+    }
+  }, [bracketPools.map(p => p.poolId).join("|"), bracketPoolId]);
+
+  useEffect(() => {
+    let alive = true;
+    const writePresence = async () => {
+      try {
+        const nowIso = new Date().toISOString();
+        const currentName = PLAYERS.find(p => p.id === currentPlayer)?.name || currentPlayer;
+        const fresh = await storeGet(RLCS_PRESENCE_KEY).catch(() => ({}));
+        const base = fresh && typeof fresh === "object" && !Array.isArray(fresh) ? fresh : {};
+        const cutoff = Date.now() - RLCS_PRESENCE_TTL_MS;
+        const cleaned = Object.fromEntries(Object.entries(base).filter(([_, v]) => v && new Date(v.ts || 0).getTime() > cutoff));
+        const next = { ...cleaned, [currentPlayer]: { playerId:currentPlayer, name:currentName, color:playerColor, tab:hubTab, ts:nowIso } };
+        if (!alive) return;
+        setRlcsPresence(next);
+        await storeSetWithPush(RLCS_PRESENCE_KEY, next).catch(() => storeSet(RLCS_PRESENCE_KEY, next));
+      } catch (_) {}
+    };
+    writePresence();
+    const timer = setInterval(writePresence, performanceMode ? 90000 : 45000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [currentPlayer, hubTab, playerColor, performanceMode]);
+
+  useEffect(() => {
+    const channels = Array.from(new Set((streams || []).map(st => extractTwitchChannel(st.url)).filter(Boolean).map(s => s.toLowerCase())));
+    if (hubTab !== "streams" || !channels.length) return;
+    let alive = true;
+    const loadTwitch = async () => {
+      try {
+        setTwitchLive(prev => ({ ...prev, loading:true }));
+        const res = await fetch(`/api/twitch-live?channels=${encodeURIComponent(channels.join(","))}`, { cache:"no-store" });
+        const json = await res.json().catch(() => ({}));
+        if (!alive) return;
+        const map = {};
+        (json.streams || []).forEach(st => { if (st?.user_login) map[String(st.user_login).toLowerCase()] = st; });
+        setTwitchLive({ connected:!!json.connected, channels:map, loading:false, error:json.error || null });
+      } catch (err) {
+        if (alive) setTwitchLive(prev => ({ ...prev, connected:false, loading:false, error:"twitch status unavailable" }));
+      }
+    };
+    loadTwitch();
+    const timer = setInterval(loadTwitch, performanceMode ? 5 * 60 * 1000 : 2 * 60 * 1000);
+    return () => { alive = false; clearInterval(timer); };
+  }, [hubTab, streams.map(s=>s.url).join("|"), performanceMode]);
 
   useEffect(() => {
     if (!liveMatches.length) return;
@@ -18589,10 +18744,34 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const shellBg = performanceMode ? "linear-gradient(135deg,#070A12,#04060B)" : "linear-gradient(135deg,#180B22,#0B0E18)";
   const dimNote = performanceMode ? "performance mode · cooler refresh" : "live mode · full effects";
 
-  const HubTabs = () => <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:6,margin:"10px 0"}}>
-    {[{id:"bets",label:"bets"},{id:"streams",label:"streams"},{id:"yourbets",label:"your bets"}].map(t=>(
+  const HubTabs = () => <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:6,margin:"10px 0"}}>
+    {[{id:"bets",label:"bets"},{id:"bracket",label:"bracket"},{id:"streams",label:"streams"},{id:"yourbets",label:"your bets"}].map(t=>(
       <button key={t.id} onClick={()=>setHubTab(t.id)} className="bb-pressable" style={{minWidth:0,background:hubTab===t.id?playerColor:"rgba(255,255,255,.055)",border:`1px solid ${hubTab===t.id?playerColor:"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"10px 5px",color:hubTab===t.id?"#06070D":"#8B92A8",fontSize:10.5,fontWeight:1000,textTransform:"lowercase"}}>{t.label}</button>
     ))}
+  </div>;
+
+  const RlcsPresenceStrip = () => <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2,marginTop:8}}>
+    {onlineRlcsUsers.length ? onlineRlcsUsers.map(u => <div key={u.playerId} style={{flexShrink:0,display:"flex",alignItems:"center",gap:6,background:"rgba(255,255,255,.045)",border:`1px solid ${(u.color || playerColor)}33`,borderRadius:999,padding:"6px 8px"}}>
+      <span style={{width:7,height:7,borderRadius:999,background:u.color || playerColor,boxShadow:`0 0 10px ${u.color || playerColor}`}}/>
+      <span style={{fontSize:10,color:"#E8ECF4",fontWeight:900,textTransform:"lowercase"}}>{u.name}</span>
+      <span style={{fontSize:9,color:"#8B92A8",fontWeight:800,textTransform:"lowercase"}}>{u.tab || "rlcs"}</span>
+    </div>) : <div style={{fontSize:10,color:"#4A5066",fontWeight:800}}>only you here right now</div>}
+  </div>;
+
+  const RlcsActivityPanel = () => <div style={{background:"rgba(255,255,255,.035)",border:`1px solid ${playerColor}24`,borderRadius:16,padding:10,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
+      <div style={{fontSize:10,color:playerColor,fontWeight:1000,letterSpacing:1,textTransform:"lowercase"}}>live activity</div>
+      <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"lowercase"}}>core teams only</div>
+    </div>
+    <div style={{display:"grid",gap:6}}>
+      {liveActivity.length ? liveActivity.map(item => <div key={item.id} style={{display:"grid",gridTemplateColumns:"24px minmax(0,1fr)",gap:8,alignItems:"center",background:"rgba(0,0,0,.13)",border:"1px solid rgba(255,255,255,.045)",borderRadius:11,padding:"7px 8px"}}>
+        <div style={{width:24,height:24,borderRadius:9,background:`${item.color || playerColor}18`,color:item.color || playerColor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900}}>{item.icon}</div>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textTransform:"lowercase"}}>{item.text}</div>
+          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:1,textTransform:"lowercase"}}>{item.sub}</div>
+        </div>
+      </div>) : <div style={{fontSize:10.5,color:"#4A5066",fontWeight:800}}>waiting for start.gg data…</div>}
+    </div>
   </div>;
 
   const Header = () => <div style={{background:shellBg,border:`2px solid ${playerColor}40`,borderRadius:20,padding:14,marginBottom:2,boxShadow:performanceMode?"0 10px 26px rgba(0,0,0,.26)":`0 14px 34px ${playerColor}14`,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
@@ -18608,7 +18787,8 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
     </div>
     {liveData.error && <div style={{fontSize:10.5,color:"#FFD166",marginTop:8,lineHeight:1.35}}>⚠ {liveData.error}</div>}
     <HubTabs />
-    <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:4,paddingBottom:4,alignItems:"center",maxWidth:"100%"}}>
+    <RlcsPresenceStrip />
+    <div style={{display:"flex",gap:7,overflowX:"auto",marginTop:6,paddingBottom:4,alignItems:"center",maxWidth:"100%"}}>
       <button onClick={()=>setPerf(!performanceMode)} className="bb-pressable" style={{flexShrink:0,fontSize:10,color:playerColor,fontWeight:900,background:`${playerColor}18`,border:`1px solid ${playerColor}44`,borderRadius:999,padding:"7px 9px"}}>{performanceMode ? "performance on" : "performance off"}</button>
       <div style={{flexShrink:0,fontSize:10,color:"#8B92A8",fontWeight:900,background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:999,padding:"7px 9px",textTransform:"lowercase"}}>{dimNote}</div>
       <button onClick={()=>loadRlcs(true)} disabled={liveData.loading} className="bb-pressable" style={{flexShrink:0,background:`${playerColor}18`,border:`1px solid ${playerColor}44`,borderRadius:999,padding:"7px 9px",color:playerColor,fontSize:10,fontWeight:900,opacity:liveData.loading ? .7 : 1}}>refresh</button>
@@ -18628,6 +18808,8 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
       </div>
     </div>
 
+    <RlcsActivityPanel />
+
     <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
       {visibleMatches.length ? visibleMatches.map(match => {
         const locked = match.team1 === "TBD" || match.team2 === "TBD" || !!match.winnerId || alreadyBetOnSet(match);
@@ -18642,7 +18824,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
               <div style={{fontSize:15,color:"#E8ECF4",fontWeight:900,marginTop:3,lineHeight:1.15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getRlcsMatchLabel(match)}</div>
               <div style={{fontSize:10.5,color:"#8B92A8",marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{fmtRlcsDate(normalizeRlcsStart(match))} · {status}{winnerName ? ` · winner: ${winnerName}` : ""}</div>
             </div>
-            <div style={{fontSize:10,color:status==="waiting"?"#FFD166":status==="complete"?"#7CFFB2":cardAccent,fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{status}</div>
+            <div style={{fontSize:10,color:getRlcsStatusColor(status, cardAccent),fontWeight:900,textTransform:"lowercase",whiteSpace:"nowrap"}}>{status}</div>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)",gap:8,maxWidth:"100%",overflow:"hidden"}}>
             {["team1","team2"].map(side => {
@@ -18666,9 +18848,67 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
           {alreadyBetOnSet(match) && <div style={{fontSize:10,color:"#FFD166",fontWeight:800,marginTop:8}}>you already have an open bet on this set</div>}
           {status==="waiting" && <div style={{fontSize:10,color:"#4A5066",marginTop:8}}>locked until start.gg fills both teams</div>}
         </div>;
-      }) : <EmptyState icon="🏁" title={liveData.loading?"checking start.gg…":"no matches here"} body="this board only shows M80, FUT Esports, Dignitas, Gen.G Mobil1 Racing, and Lil Step Bros." />}
+      }) : <EmptyState icon="🏁" title={liveData.loading?"checking start.gg…":"no matches here"} body="this board only shows M80, FUT Esports, Dignitas, and Gen.G Mobil1 Racing." />}
     </div>
   </div>;
+
+
+  const BracketTab = () => {
+    const rounds = activeBracketPool ? Array.from(new Set((activeBracketPool.sets || []).map(s => s.round || "match"))).sort((a,b)=>getRlcsRoundOrder(a)-getRlcsRoundOrder(b)) : [];
+    return <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
+      <div style={{background:"rgba(255,255,255,.035)",border:`1px solid ${playerColor}24`,borderRadius:16,padding:10,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box",textTransform:"lowercase"}}>
+        <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:8,alignItems:"center",marginBottom:8}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:10,color:playerColor,fontWeight:1000,letterSpacing:1,textTransform:"lowercase"}}>live bracket</div>
+            <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3,lineHeight:1.35}}>pulling the core start.gg pools for m80 · fut · dignitas · gen.g</div>
+          </div>
+          <button onClick={()=>loadRlcs(true)} disabled={liveData.loading} className="bb-pressable" style={{background:`${playerColor}18`,border:`1px solid ${playerColor}44`,borderRadius:10,padding:"8px 10px",color:playerColor,fontSize:10,fontWeight:900,opacity:liveData.loading?.7:1}}>refresh</button>
+        </div>
+        <div style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:3,maxWidth:"100%"}}>
+          {bracketPools.length ? bracketPools.map(pool => <button key={pool.poolId} onClick={()=>setBracketPoolId(String(pool.poolId))} className="bb-pressable" style={{flexShrink:0,background:String(activeBracketPool?.poolId)===String(pool.poolId)?playerColor:"rgba(255,255,255,.055)",border:`1px solid ${String(activeBracketPool?.poolId)===String(pool.poolId)?playerColor:"rgba(255,255,255,.09)"}`,borderRadius:999,padding:"8px 10px",color:String(activeBracketPool?.poolId)===String(pool.poolId)?"#06070D":"#E8ECF4",fontSize:10,fontWeight:1000,textTransform:"lowercase"}}>{pool.pool}</button>) : <div style={{fontSize:10,color:"#4A5066",fontWeight:800}}>no bracket data yet</div>}
+        </div>
+      </div>
+      {activeBracketPool ? <div style={{background:"linear-gradient(135deg,#101526,#070A12)",border:`1px solid ${playerColor}32`,borderRadius:18,padding:12,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:13,color:"#E8ECF4",fontWeight:1000,textTransform:"lowercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>pool {activeBracketPool.pool}</div>
+            <div style={{fontSize:10,color:"#8B92A8",marginTop:2,textTransform:"lowercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{activeBracketPool.phase} · {(activeBracketPool.sets || []).length} sets</div>
+          </div>
+          <div style={{fontSize:10,color:playerColor,fontWeight:900,textTransform:"lowercase",whiteSpace:"nowrap"}}>{sourceLabel}</div>
+        </div>
+        <div style={{display:"grid",gridAutoFlow:"column",gridAutoColumns:"minmax(210px, 245px)",gap:10,overflowX:"auto",paddingBottom:4,maxWidth:"100%"}}>
+          {rounds.map(round => {
+            const sets = (activeBracketPool.sets || []).filter(s => String(s.round || "match") === String(round));
+            return <div key={round} style={{minWidth:0}}>
+              <div style={{fontSize:10,color:playerColor,fontWeight:1000,letterSpacing:.8,textTransform:"lowercase",marginBottom:7,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{round}</div>
+              <div style={{display:"grid",gap:7}}>{sets.map(set => {
+                const status = getRlcsMatchStatus(set);
+                const winner = set.winnerId ? (Number(set.winnerId) === Number(set.team1Id) ? "team1" : Number(set.winnerId) === Number(set.team2Id) ? "team2" : null) : null;
+                const watched = !!(set.watchTeams || []).length;
+                const row = (side) => {
+                  const team = side === "team1" ? set.team1 : set.team2;
+                  const score = side === "team1" ? set.team1Score : set.team2Score;
+                  const isWinner = winner === side;
+                  const isKnown = rlcsTeamTier(team) === "high";
+                  return <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 28px",gap:6,alignItems:"center",padding:"5px 6px",borderRadius:9,background:isWinner?"rgba(124,255,178,.16)":isKnown?`${playerColor}14`:"rgba(255,255,255,.035)",border:`1px solid ${isWinner?"rgba(124,255,178,.35)":isKnown?`${playerColor}35`:"rgba(255,255,255,.055)"}`}}>
+                    <div style={{fontSize:10.5,color:isWinner?"#7CFFB2":"#E8ECF4",fontWeight:isKnown||isWinner?1000:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textTransform:"lowercase"}}>{team}</div>
+                    <div style={{fontSize:11,color:isWinner?"#7CFFB2":"#8B92A8",fontWeight:1000,textAlign:"right"}}>{getRlcsSetScoreLabel(score)}</div>
+                  </div>;
+                };
+                return <div key={set.setId || set.id} style={{background:"rgba(0,0,0,.18)",border:`1px solid ${watched?`${playerColor}36`:"rgba(255,255,255,.06)"}`,borderRadius:12,padding:7,boxShadow:watched?`0 0 0 1px ${playerColor}10 inset`:undefined}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:6,alignItems:"center",marginBottom:6}}>
+                    <div style={{fontSize:9,color:watched?playerColor:"#4A5066",fontWeight:1000,textTransform:"lowercase"}}>{set.identifier || "set"}</div>
+                    <div style={{fontSize:8.8,color:getRlcsStatusColor(status, playerColor),fontWeight:1000,textTransform:"lowercase",whiteSpace:"nowrap"}}>{status}</div>
+                  </div>
+                  <div style={{display:"grid",gap:5}}>{row("team1")}{row("team2")}</div>
+                </div>;
+              })}</div>
+            </div>;
+          })}
+        </div>
+      </div> : <EmptyState icon="🏆" title={liveData.loading?"checking bracket…":"no bracket loaded"} body="refresh the live route after deployment to pull the start.gg bracket." />}
+    </div>;
+  };
 
   const StreamsTab = () => <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
     {!streams.length ? <EmptyState icon="📺" title="no streams added" body="Add Twitch or YouTube links in Admin → stream directory." /> : <>
@@ -18679,6 +18919,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
             <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,textTransform:"lowercase"}}>stream tab</div>
             <div style={{fontSize:16,color:"#E8ECF4",fontWeight:900,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{active?.matchLabel || active?.label || "RLCS stream"}</div>
             {active?.info && <div style={{fontSize:10.5,color:"#8B92A8",marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{active.info}</div>}
+            {activeTwitchChannel && <div style={{fontSize:10,color:activeTwitchInfo?.live?"#7CFFB2":twitchLive.connected?"#8B92A8":"#FFD166",fontWeight:900,marginTop:5,textTransform:"lowercase"}}>{activeTwitchInfo?.live ? `live · ${Number(activeTwitchInfo.viewer_count||0).toLocaleString()} viewers` : twitchLive.connected ? "not live from twitch api" : "stream status manual"}</div>}
           </div>
           {active?.url ? <a href={getStreamOpenUrl(active.url)} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,padding:"8px 10px",color:"#E8ECF4",fontSize:10,fontWeight:900,textDecoration:"none",whiteSpace:"nowrap"}}>open source</a> : null}
         </div>
@@ -18708,7 +18949,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
 
   return <div style={{display:"grid",gap:12,width:"100%",maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
     <Header />
-    {hubTab === "bets" ? <BetsTab /> : hubTab === "streams" ? <StreamsTab /> : <YourBetsTab />}
+    {hubTab === "bets" ? <BetsTab /> : hubTab === "bracket" ? <BracketTab /> : hubTab === "streams" ? <StreamsTab /> : <YourBetsTab />}
   </div>;
 }
 
@@ -18717,7 +18958,7 @@ const GAME_CARDS = [
   { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
   { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
   { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
-  { id:"rlcsbets", label:"RLCS Live",        desc:"your core teams only · bets and streams",    color:"#FF61C1" },
+  { id:"rlcsbets", label:"RLCS Live",        desc:"m80 · fut · dig · gen.g only",    color:"#FF61C1" },
 ];
 
 function TeamLinkTab({ stats, onUpdateOpponentScore }) {
