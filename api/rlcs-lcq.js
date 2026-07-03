@@ -1,9 +1,9 @@
-// APP101_RLCS_LIVE_STARTGG_BACKEND_PATCH
-// Vercel/Node serverless route: keeps STARTGG_TOKEN private and returns only known-team LCQ matches.
+// APP102_RLCS_BET_ROOM_TIERS_POPOUT_PATCH
+// Vercel/Node serverless route: keeps STARTGG_TOKEN private and returns a trimmed LCQ betting board.
 const DEFAULT_EVENT_SLUG = "tournament/rlcs-2026-north-america-last-chance-qualifier/event/3v3-bracket";
 const CACHE_MS = 2 * 60 * 1000;
 
-const DEFAULT_WATCHLIST = [
+const HIGH_TIER_WATCHLIST = [
   "Dignitas",
   "Gen.G Mobil1 Racing",
   "M80",
@@ -11,74 +11,67 @@ const DEFAULT_WATCHLIST = [
   "Veloce Gaming",
   "GSK",
   "AML",
+  "KCG Wonderpets",
+  "KCG Ukiyo",
+  "Next2Nu Esports",
+  "DME",
+  "NTX Esports"
+];
+
+const LOW_TIER_WATCHLIST = [
   "Certified",
   "Unc & Nephews",
   "2026 New York Knicks",
-  "KCG Wonderpets",
-  "KCG Ukiyo",
   "VANTA",
   "Vello-1",
-  "Vortex Esports",
-  "VORTEX GAMING",
   "Velocity Esports",
   "Veylox Esports",
-  "Valor Esports USA",
   "Undefined Esports",
-  "Torrent Corp",
-  "Torrent Crossfire",
   "Reign Esports",
   "RGN Black",
-  "Next2Nu Esports",
-  "Lotus Esports",
   "Kozmosis Esports",
   "F9 Esports",
-  "G11 eSports",
   "CLRTY Esports",
   "Control Esports",
   "Cosmic Rift Esports",
-  "DME",
-  "DME GENESIX",
-  "NTX",
-  "NTX Academy",
-  "NTX Esports",
-  "SkyOne Gaming",
   "Team Factor",
   "The Fifth Element",
-  "Virtue",
   "VitrixGG",
+  "Virtue",
   "West Coast Warriors",
-  "Fortior Eclipse",
-  "InGenious eSports",
-  "Inherent Skill Esports",
-  "LatinSeven Eternals",
-  "7VEN Club",
-  "ATK",
-  "925 Esports",
-  "Aether storm",
-  "Affinity",
-  "AVID Academy",
-  "Phantom Esports",
-  "Paradox Gaming",
-  "VON ESPORTS",
-  "Vornux",
-  "Meow Esports",
-  "MZ Esports",
-  "MED Gaming",
-  "North Country Elite",
-  "Lumina Esports",
-  "Astronyx Esports"
+  "Torrent Corp",
+  "Torrent Crossfire",
+  "VORTEX GAMING",
+  "Vortex Esports"
 ];
 
+const DEFAULT_WATCHLIST = Array.from(new Set([...HIGH_TIER_WATCHLIST, ...LOW_TIER_WATCHLIST]));
 let memoryCache = null;
 
 function cleanName(name = "") {
   return String(name || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function getWatchlist() {
-  const fromEnv = process.env.RLCS_WATCHLIST || "";
-  const extra = fromEnv.split(/[,\n]/).map(s => s.trim()).filter(Boolean);
-  return [...new Set([...DEFAULT_WATCHLIST, ...extra])];
+function readListEnv(name) {
+  return String(process.env[name] || "").split(/[,\n]/).map(s => s.trim()).filter(Boolean);
+}
+
+function getWatchlists() {
+  const high = Array.from(new Set([...HIGH_TIER_WATCHLIST, ...readListEnv("RLCS_HIGH_TIER_WATCHLIST")]));
+  const low = Array.from(new Set([...LOW_TIER_WATCHLIST, ...readListEnv("RLCS_LOW_TIER_WATCHLIST")]));
+  const extra = readListEnv("RLCS_WATCHLIST");
+  return {
+    high,
+    low,
+    all: Array.from(new Set([...high, ...low, ...extra])),
+  };
+}
+
+function getTierForTeam(team, lists) {
+  const clean = cleanName(team);
+  if ((lists.high || []).some(t => cleanName(t) === clean)) return "high";
+  if ((lists.low || []).some(t => cleanName(t) === clean)) return "low";
+  return null;
 }
 
 async function gql(query, variables = {}) {
@@ -182,8 +175,8 @@ async function getAllSetsForGroup(phaseGroupId) {
   return { ...groupInfo, sets: all };
 }
 
-function flattenKnownMatches(pools, watchlist) {
-  const watchClean = new Map(watchlist.map(team => [cleanName(team), team]));
+function flattenKnownMatches(pools, lists) {
+  const watchClean = new Map((lists.all || []).map(team => [cleanName(team), team]));
   const matches = [];
   let totalSets = 0;
 
@@ -198,6 +191,9 @@ function flattenKnownMatches(pools, watchlist) {
         .map(t => watchClean.get(cleanName(t)))
         .filter(Boolean);
       if (!watchTeams.length) continue;
+
+      const watchTiers = watchTeams.map(team => ({ team, tier: getTierForTeam(team, lists) || "low" }));
+      const tier = watchTiers.some(t => t.tier === "high") ? "high" : "low";
 
       matches.push({
         phase: pool.phaseName,
@@ -216,6 +212,8 @@ function flattenKnownMatches(pools, watchlist) {
         team2Id: slot2?.id || null,
         team2Players: (slot2?.participants || []).map(p => p.gamerTag).filter(Boolean),
         watchTeams,
+        watchTiers,
+        tier,
         bettableNow: !!(slot1?.id && slot2?.id && !set.winnerId),
         source: "start.gg live",
       });
@@ -228,7 +226,7 @@ function flattenKnownMatches(pools, watchlist) {
 
 async function pullLive() {
   const slug = process.env.STARTGG_EVENT_SLUG || DEFAULT_EVENT_SLUG;
-  const watchlist = getWatchlist();
+  const watchlists = getWatchlists();
   const eventData = await gql(EVENT_QUERY, { slug });
   const event = eventData?.event;
   if (!event?.id) throw new Error("Could not find start.gg event");
@@ -242,21 +240,27 @@ async function pullLive() {
     }
   }
 
-  const { matches, totalSets } = flattenKnownMatches(pools, watchlist);
+  const { matches, totalSets } = flattenKnownMatches(pools, watchlists);
   const generatedAt = new Date().toISOString();
   return {
     ok: true,
     source: "start.gg live",
     generatedAt,
     event: { id: event.id, name: event.name, slug },
-    watchlist,
+    watchlist: watchlists.all,
+    highTierWatchlist: watchlists.high,
+    lowTierWatchlist: watchlists.low,
     matches,
     stats: {
       phases: event.phases?.length || 0,
       pools: pools.length,
       totalSets,
       knownMatches: matches.length,
+      highTierMatches: matches.filter(m => m.tier === "high").length,
+      lowTierMatches: matches.filter(m => m.tier === "low").length,
       bettable: matches.filter(m => m.bettableNow && !m.winnerId).length,
+      highTierBettable: matches.filter(m => m.tier === "high" && m.bettableNow && !m.winnerId).length,
+      lowTierBettable: matches.filter(m => m.tier === "low" && m.bettableNow && !m.winnerId).length,
       completed: matches.filter(m => !!m.winnerId).length,
       futureOrTbd: matches.filter(m => !m.bettableNow || !m.team1Id || !m.team2Id).length,
     },
