@@ -1673,6 +1673,48 @@ function getJobStartGateLabel(job, nowMs = Date.now()) {
   if (ms <= 0) return "ready";
   return `starts in ${fmtShortDuration(ms)}`;
 }
+function getJobShiftReminderDedupKey(job, playerId) {
+  return `job_shift_reminder_${job?.id || "job"}_${playerId || "player"}`;
+}
+function getJobShiftReminderLocalKey(job, playerId) {
+  return `bb_${getJobShiftReminderDedupKey(job, playerId)}`;
+}
+function hasLocalJobShiftReminderSent(job, playerId) {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) return false;
+    return !!window.localStorage.getItem(getJobShiftReminderLocalKey(job, playerId));
+  } catch (_) {
+    return false;
+  }
+}
+function markLocalJobShiftReminderSent(job, playerId, sentAt = new Date().toISOString()) {
+  try {
+    if (typeof window !== "undefined" && window.localStorage) window.localStorage.setItem(getJobShiftReminderLocalKey(job, playerId), sentAt);
+  } catch (_) {}
+}
+function hasStoredJobShiftReminderPing(pings, job, playerId) {
+  const jobId = String(job?.id || "");
+  if (!jobId || !playerId || !Array.isArray(pings)) return false;
+  const stableId = getJobShiftReminderDedupKey(job, playerId);
+  return pings.some(p => (
+    p &&
+    p.type === "job_shift" &&
+    String(p.to || "") === String(playerId) &&
+    (String(p.id || "") === stableId || String(p.jobId || "") === jobId)
+  ));
+}
+function markJobShiftReminderSentOnOS(os, job, playerId, sentAt = new Date().toISOString()) {
+  const jobs = Array.isArray(os?.jobs) ? os.jobs : [];
+  return {
+    ...os,
+    jobs: jobs.map(j => String(j?.id || "") === String(job?.id || "") ? {
+      ...j,
+      lastShiftReminderSentAt:sentAt,
+      shiftReminderSentAtByPlayer:{...(j.shiftReminderSentAtByPlayer || {}), [playerId]:sentAt},
+      [`shiftReminderSentAt_${playerId}`]:sentAt
+    } : j)
+  };
+}
 async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurtonOS, pings, setPings, appCustomizer, addToast }) {
   if (!currentPlayer) return;
   const os = normalizeBurtonOS(burtonOS);
@@ -1683,6 +1725,8 @@ async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurton
     if (!["reserved","active"].includes(job.status)) return false;
     const sentMap = job.shiftReminderSentAtByPlayer && typeof job.shiftReminderSentAtByPlayer === "object" ? job.shiftReminderSentAtByPlayer : {};
     if (sentMap[currentPlayer] || job[`shiftReminderSentAt_${currentPlayer}`]) return false;
+    if (hasLocalJobShiftReminderSent(job, currentPlayer)) return false;
+    if (hasStoredJobShiftReminderPing(pings, job, currentPlayer)) return false;
     const start = safeDateObj(job.startAt, null);
     const reminderAt = getJobReminderAt(job, appCustomizer);
     if (!start || !reminderAt) return false;
@@ -1691,27 +1735,36 @@ async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurton
     return Number.isFinite(startMs) && Number.isFinite(remindMs) && now >= remindMs && now <= startMs + 5 * 60000;
   });
   if (!dueJob) return;
+  const freshPings = await storeGet("pings").catch(() => null);
+  const basePings = Array.isArray(freshPings) ? freshPings : (Array.isArray(pings) ? pings : []);
+  const reminderSentAt = new Date().toISOString();
+
+  // Hard dedupe: if another tab/device already created this reminder, just mark this job as sent
+  // locally and on Burton OS. Do not create another ping or push notification.
+  if (hasStoredJobShiftReminderPing(basePings, dueJob, currentPlayer) || hasLocalJobShiftReminderSent(dueJob, currentPlayer)) {
+    markLocalJobShiftReminderSent(dueJob, currentPlayer, reminderSentAt);
+    const nextOS = markJobShiftReminderSentOnOS(os, dueJob, currentPlayer, reminderSentAt);
+    setBurtonOS?.(nextOS);
+    await storeSetWithPush(BURTON_OS_KEY, nextOS).catch(() => {});
+    return;
+  }
+
+  // Mark before sending so the once-a-minute checker cannot double-fire while storage sync catches up.
+  markLocalJobShiftReminderSent(dueJob, currentPlayer, reminderSentAt);
+
   const actualMinutes = Math.max(0, Math.ceil((safeDateObj(dueJob.startAt).getTime() - now) / 60000));
   const reminderMinutes = Math.max(1, Math.round(Number(dueJob.reminderMinutes || 30) || 30));
   const displayMinutes = actualMinutes > Math.max(0, reminderMinutes - 5) && actualMinutes <= reminderMinutes ? reminderMinutes : actualMinutes;
   const title = displayMinutes > 0 ? `⏰ Shift starts in ${displayMinutes} minutes` : "⏰ Shift starts now";
   const body = `Your shift starts ${displayMinutes > 0 ? `in ${displayMinutes} minutes` : "now"} · ${dueJob.title || "Job"} · ${dueJob.slotLabel || formatJobStartTime(dueJob)} · pays ${Number(dueJob.payout || 0).toLocaleString()} pts`;
-  const ping = { id:`job_shift_reminder_${dueJob.id}_${Date.now()}`, from:"system", to:currentPlayer, type:"job_shift", jobId:dueJob.id, text:body, ts:new Date().toISOString() };
-  const freshPings = await storeGet("pings").catch(() => null);
-  const basePings = Array.isArray(freshPings) ? freshPings : (Array.isArray(pings) ? pings : []);
-  const nextPings = [ping, ...basePings].slice(0, 140);
+  const ping = { id:getJobShiftReminderDedupKey(dueJob, currentPlayer), from:"system", to:currentPlayer, type:"job_shift", jobId:dueJob.id, text:body, ts:reminderSentAt };
+  const cleanedBase = basePings.filter(p => !(p && p.type === "job_shift" && String(p.to || "") === String(currentPlayer) && String(p.jobId || "") === String(dueJob.id || "")));
+  const nextPings = [ping, ...cleanedBase].slice(0, 140);
   setPings?.(nextPings);
   await storeSetWithPush("pings", nextPings);
-  await sendPushToPlayersOnce(`job_shift:${dueJob.id}`, [currentPlayer], title, body, { url:makeNotificationUrl("home", { open:"jobs", id:dueJob.id }), type:"job_shift", id:dueJob.id });
+  await sendPushToPlayersOnce(`job_shift:${dueJob.id}:${currentPlayer}`, [currentPlayer], title, body, { url:makeNotificationUrl("home", { open:"jobs", id:dueJob.id }), type:"job_shift", id:dueJob.id });
   showLocalNotification(title, body, { url:"/", type:"job_shift", id:dueJob.id }).catch(() => {});
-  const reminderSentAt = new Date().toISOString();
-  const nextJobs = jobs.map(j => j.id === dueJob.id ? {
-    ...j,
-    lastShiftReminderSentAt:reminderSentAt,
-    shiftReminderSentAtByPlayer:{...(j.shiftReminderSentAtByPlayer || {}), [currentPlayer]:reminderSentAt},
-    [`shiftReminderSentAt_${currentPlayer}`]:reminderSentAt
-  } : j);
-  const nextOS = { ...os, jobs:nextJobs };
+  const nextOS = markJobShiftReminderSentOnOS(os, dueJob, currentPlayer, reminderSentAt);
   setBurtonOS?.(nextOS);
   await storeSetWithPush(BURTON_OS_KEY, nextOS);
   addToast?.("shift reminder sent", "⏰");
@@ -5571,11 +5624,17 @@ onClick={async () => {
 
 function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, pings, setPings, addToast }) {
   const [minutes, setMinutes] = useState(30);
+  const duoTargets = PLAYERS.filter(p => p.id !== currentPlayer);
+  const [duoTarget, setDuoTarget] = useState(duoTargets[0]?.id || "");
   const player = PLAYERS.find(p => p.id === currentPlayer);
   const now = Date.now();
   const openSessions = (teamSessions || [])
     .filter(s => !s.cancelled && new Date(s.startsAt).getTime() > now - 2 * 60 * 60 * 1000)
     .sort((a,b) => new Date(a.startsAt) - new Date(b.startsAt));
+
+  useEffect(() => {
+    if (!duoTargets.some(p => p.id === duoTarget)) setDuoTarget(duoTargets[0]?.id || "");
+  }, [currentPlayer, duoTarget]);
 
   const makeSessionPings = (session, targets) => targets.map((pid, idx) => ({
     id: `${session.id}_ping_${pid}_${Date.now()+idx}`,
@@ -5586,7 +5645,9 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     mode: session.mode,
     sessionId: session.id,
     startsAt: session.startsAt,
+    targetPlayers: session.targetPlayers || [],
     minutesUntil: Math.max(0, Math.round((new Date(session.startsAt).getTime() - Date.now()) / 60000)),
+    text: `${playerNameById(currentPlayer)} pinged you for ${session.mode || "3v3"}`,
   }));
 
   const sendPings = async (session, targetIds) => {
@@ -5597,26 +5658,44 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     const upd = [...freshPings, ...newPings].slice(-120);
     setPings(upd);
     await storeSetWithPush("pings", upd);
-    addToast?.(`session ping sent to ${targets.length === 1 ? PLAYERS.find(p=>p.id===targets[0])?.name : "everyone"}`, "⏱️");
+    const targetName = targets.length === 1 ? PLAYERS.find(p=>p.id===targets[0])?.name : "everyone";
+    addToast?.(`${session.mode || "3v3"} ping sent to ${targetName}`, "⏱️");
   };
 
-  const createSession = async () => {
+  const buildSession = (mode, targetPlayers) => {
     const mins = [15,30,45,60].includes(Number(minutes)) ? Number(minutes) : 30;
-    const startsAt = new Date(Date.now() + mins * 60000).toISOString();
-    const session = {
-      id: Date.now().toString(),
-      mode: "3v3",
+    return {
+      id: `${mode}_${Date.now()}`,
+      mode,
       createdBy: currentPlayer,
       createdByName: player?.name || currentPlayer,
       createdAt: new Date().toISOString(),
-      startsAt,
+      startsAt: new Date(Date.now() + mins * 60000).toISOString(),
+      targetPlayers,
       responses: { [currentPlayer]: "accepted" },
     };
+  };
+
+  const saveSessionAndPing = async (session, targetIds) => {
     const upd = [session, ...(teamSessions || []).filter(s => !s.cancelled)].slice(0, 10);
     setTeamSessions(upd);
     await storeSet("team_sessions", upd);
-    await sendPings(session, PLAYERS.map(p => p.id).filter(pid => pid !== currentPlayer));
-    addToast?.(`3v3 session set for ${mins} min`, "⏱️");
+    await sendPings(session, targetIds);
+    const mins = Math.max(0, Math.round((new Date(session.startsAt).getTime() - Date.now()) / 60000));
+    addToast?.(`${session.mode || "3v3"} session set for ${mins} min`, "⏱️");
+  };
+
+  const createTeamSession = async () => {
+    const targets = PLAYERS.map(p => p.id);
+    const session = buildSession("3v3", targets);
+    await saveSessionAndPing(session, targets.filter(pid => pid !== currentPlayer));
+  };
+
+  const createDuoSession = async () => {
+    const target = duoTarget || duoTargets[0]?.id;
+    if (!target) return;
+    const session = buildSession("2v2", [currentPlayer, target]);
+    await saveSessionAndPing(session, [target]);
   };
 
   const acceptSession = async (session) => {
@@ -5642,7 +5721,7 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
   const sessionSwipeRef = useRef({ x:0, y:0 });
   const clearStartedSessions = async () => {
     const startedIds = new Set((teamSessions || [])
-      .filter(s => !s.cancelled && s.mode === "3v3" && new Date(s.startsAt).getTime() <= Date.now())
+      .filter(s => !s.cancelled && new Date(s.startsAt).getTime() <= Date.now())
       .map(s => s.id));
     if (!startedIds.size) return;
     const nextSessions = (teamSessions || []).filter(s => !startedIds.has(s.id));
@@ -5652,18 +5731,21 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     const nextPings = freshPings.filter(p => !(p.type === "session" && startedIds.has(p.sessionId)));
     setPings(nextPings);
     await storeSetWithPush("pings", nextPings);
-    addToast?.("started 3v3 pings cleared", "🧹");
+    addToast?.("started session pings cleared", "🧹");
   };
+
+  const selectedDuoPlayer = PLAYERS.find(p => p.id === duoTarget) || duoTargets[0];
 
   return (
     <div style={{background:"linear-gradient(135deg,#101421,#080A12)",border:"1px solid rgba(167,139,250,0.18)",borderRadius:16,padding:16,marginTop:14,boxShadow:"0 0 22px rgba(0,0,0,0.2)"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:12}}>
         <div>
-          <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:.9}}>3V3 SESSION</div>
-          <div style={{fontSize:11,color:"#6F7892",marginTop:2}}>schedule and ping the squad</div>
+          <div style={{fontSize:11,color:"#A78BFA",fontWeight:900,letterSpacing:.9}}>SESSION PINGS</div>
+          <div style={{fontSize:11,color:"#6F7892",marginTop:2}}>schedule 2s or 3s from the voice room</div>
         </div>
-        <div style={{fontSize:10,color:"#6F7892",fontWeight:800}}></div>
+        <div style={{fontSize:10,color:"#6F7892",fontWeight:800}}>{openSessions.length ? `${openSessions.length} open` : ""}</div>
       </div>
+
       <div style={{display:"flex",gap:8,marginBottom:12}}>
         {[15,30,45,60].map(m => (
           <button key={m} onClick={()=>setMinutes(m)} className="bb-pressable" style={{flex:1,background:Number(minutes)===m?"#A78BFA":"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,padding:"8px 0",fontSize:11,fontWeight:900,color:Number(minutes)===m?"#06070D":"#8B92A8",cursor:"pointer"}}>
@@ -5671,12 +5753,34 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
           </button>
         ))}
       </div>
-      <button onClick={createSession} className="bb-pressable bb-glow-violet" style={{width:"100%",background:"#A78BFA",border:"none",borderRadius:12,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",marginBottom:10}}>
-        ping squad for 3v3
-      </button>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+        <div style={{background:"rgba(77,158,255,0.065)",border:"1px solid rgba(77,158,255,0.20)",borderRadius:14,padding:11}}>
+          <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>2v2 duo</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr",gap:6,marginBottom:9}}>
+            {duoTargets.map(p => (
+              <button key={p.id} onClick={()=>setDuoTarget(p.id)} className="bb-pressable" style={{background:duoTarget===p.id?`${p.color}22`:"rgba(255,255,255,0.045)",border:`1px solid ${duoTarget===p.id?p.color+"66":"rgba(255,255,255,0.08)"}`,borderRadius:10,padding:"8px 7px",fontSize:10.5,fontWeight:900,color:duoTarget===p.id?p.color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+                {duoTarget===p.id ? "✓ " : ""}{p.name}
+              </button>
+            ))}
+          </div>
+          <button onClick={createDuoSession} disabled={!selectedDuoPlayer} className="bb-pressable" style={{width:"100%",background:selectedDuoPlayer?"#4D9EFF":"rgba(255,255,255,0.05)",border:"none",borderRadius:12,padding:"11px 0",fontSize:11.5,fontWeight:900,color:selectedDuoPlayer?"#06070D":"#4A5066",cursor:selectedDuoPlayer?"pointer":"default"}}>
+            ping {selectedDuoPlayer?.name || "teammate"} for 2s
+          </button>
+        </div>
+
+        <div style={{background:"rgba(167,139,250,0.065)",border:"1px solid rgba(167,139,250,0.20)",borderRadius:14,padding:11}}>
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>3v3 squad</div>
+          <div style={{fontSize:10.5,color:"#6F7892",lineHeight:1.35,minHeight:50,marginBottom:9}}>Ping both teammates for a full 3s session using the same timer.</div>
+          <button onClick={createTeamSession} className="bb-pressable bb-glow-violet" style={{width:"100%",background:"#A78BFA",border:"none",borderRadius:12,padding:"11px 0",fontSize:11.5,fontWeight:900,color:"#06070D",cursor:"pointer"}}>
+            ping squad for 3v3
+          </button>
+        </div>
+      </div>
+
       {openSessions.some(s => new Date(s.startsAt).getTime() <= Date.now()) && (
         <button onClick={clearStartedSessions} className="bb-pressable" style={{width:"100%",background:"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.26)",borderRadius:12,padding:"10px 0",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer",marginBottom:14}}>
-          clear all started 3v3 pings
+          clear all started pings
         </button>
       )}
 
@@ -5686,18 +5790,25 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
         const minsLeft = Math.round((new Date(session.startsAt).getTime() - Date.now()) / 60000);
         const accepted = Object.entries(session.responses || {}).filter(([_, v]) => v === "accepted").map(([pid]) => pid);
         const iAccepted = session.responses?.[currentPlayer] === "accepted";
+        const modeLabel = session.mode === "2v2" ? "2v2" : "3v3";
+        const visiblePlayers = session.mode === "2v2"
+          ? PLAYERS.filter(p => (session.targetPlayers || []).includes(p.id))
+          : PLAYERS;
+        const withLabel = session.mode === "2v2"
+          ? visiblePlayers.map(p => p.name).join(" + ")
+          : "full squad";
         return (
           <div
             key={session.id}
             onTouchStart={(e)=>{ const t=e.touches?.[0]; sessionSwipeRef.current={x:t?.clientX||0,y:t?.clientY||0}; }}
             onTouchEnd={(e)=>{ const t=e.changedTouches?.[0]; const dx=(t?.clientX||0)-sessionSwipeRef.current.x; const dy=Math.abs((t?.clientY||0)-sessionSwipeRef.current.y); if (minsLeft <= 0 && dx < -70 && dy < 60) clearStartedSessions(); }}
-            style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(184,255,77,0.12)",borderRadius:13,padding:12,marginTop:8,touchAction:"pan-y"}}
+            style={{background:"rgba(255,255,255,0.035)",border:`1px solid ${session.mode === "2v2" ? "rgba(77,158,255,0.22)" : "rgba(184,255,77,0.12)"}`,borderRadius:13,padding:12,marginTop:8,touchAction:"pan-y"}}
           >
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start"}}>
               <div>
-                <div style={{fontSize:13,fontWeight:900,color:"#E8ECF4"}}>3v3 {minsLeft > 0 ? `in ${minsLeft} min` : "starting now"}</div>
+                <div style={{fontSize:13,fontWeight:900,color:"#E8ECF4"}}>{modeLabel} {minsLeft > 0 ? `in ${minsLeft} min` : "starting now"}</div>
                 {minsLeft <= 0 && <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:800,marginTop:3}}>swipe left to clear started sessions</div>}
-                <div style={{fontSize:10.5,color:"#6F7892",marginTop:3}}>set by {PLAYERS.find(p=>p.id===session.createdBy)?.name || session.createdByName}</div>
+                <div style={{fontSize:10.5,color:"#6F7892",marginTop:3}}>with {withLabel} · set by {PLAYERS.find(p=>p.id===session.createdBy)?.name || session.createdByName}</div>
               </div>
               {!iAccepted ? (
                 <button onClick={()=>acceptSession(session)} className="bb-pressable bb-glow-lime" style={{background:"#B8FF4D",border:"none",borderRadius:10,padding:"8px 10px",fontSize:11,fontWeight:900,color:"#06070D",cursor:"pointer"}}>accept</button>
@@ -5706,8 +5817,8 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
               )}
             </div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:10}}>
-              {PLAYERS.map(p => (
-                <button key={p.id} onClick={()=>sendPings(session,[p.id])} className="bb-pressable" style={{background:accepted.includes(p.id)?`${p.color}18`:"rgba(255,255,255,0.04)",border:`1px solid ${accepted.includes(p.id)?p.color+"55":"rgba(255,255,255,0.07)"}`,borderRadius:99,padding:"5px 8px",fontSize:10,fontWeight:800,color:accepted.includes(p.id)?p.color:"#8B92A8",cursor:p.id===currentPlayer?"default":"pointer"}}>
+              {visiblePlayers.map(p => (
+                <button key={p.id} disabled={p.id===currentPlayer} onClick={()=>{ if (p.id !== currentPlayer) sendPings(session,[p.id]); }} className="bb-pressable" style={{background:accepted.includes(p.id)?`${p.color}18`:"rgba(255,255,255,0.04)",border:`1px solid ${accepted.includes(p.id)?p.color+"55":"rgba(255,255,255,0.07)"}`,borderRadius:99,padding:"5px 8px",fontSize:10,fontWeight:800,color:accepted.includes(p.id)?p.color:"#8B92A8",cursor:p.id===currentPlayer?"default":"pointer",opacity:p.id===currentPlayer ? .72 : 1}}>
                   {accepted.includes(p.id)?"✓ ":"ping "}{p.name}
                 </button>
               ))}
@@ -5721,7 +5832,6 @@ function TeamSessionPlanner({ currentPlayer, teamSessions, setTeamSessions, ping
     </div>
   );
 }
-
 
 
 function RoomMusicPlayer({ currentPlayer, addToast }) {
@@ -13843,11 +13953,17 @@ await storeSetWithPush("pings", pingUpd2);
     </div>
     {myPings.filter(p => p.type !== "flower").map(p=>{
       const from = PLAYERS.find(pl=>pl.id===p.from);
+      const isSessionPing = p.type === "session";
+      const modeLabel = p.mode || "3v3";
+      const minsUntilStart = p.startsAt ? Math.round((new Date(p.startsAt).getTime() - Date.now()) / 60000) : Number(p.minutesUntil || 0);
+      const pingText = isSessionPing
+        ? `${from?.name} pinged ${modeLabel} ${minsUntilStart > 0 ? `in ${minsUntilStart} min` : "now"}`
+        : `${from?.name} wants to run 2s`;
       return (
         <div key={p.id} style={{background:"rgba(184,255,77,0.06)",border:"1px solid rgba(184,255,77,0.2)",borderRadius:13,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:10}}>
-          <span style={{fontSize:18}}>🎮</span>
+          <span style={{fontSize:18}}>{isSessionPing ? "⏱️" : "🎮"}</span>
           <div style={{flex:1}}>
-            <div style={{fontSize:13,fontWeight:700,color:"#B8FF4D"}}>{from?.name} wants to run 2s</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#B8FF4D"}}>{pingText}</div>
             <div style={{fontSize:11,color:"#4A5066"}}>{fmtRelTime(p.ts)}</div>
           </div>
         </div>
