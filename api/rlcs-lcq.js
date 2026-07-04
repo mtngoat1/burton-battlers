@@ -1,4 +1,4 @@
-// APP113_RLCS_NA_EU_REGION_TABS_PATCH
+// APP114_RLCS_CLEAN_BETS_BRACKET_UI_FIX
 // Drop this in: api/rlcs-lcq.js
 // Supports ?region=na and ?region=eu. Bets are filtered to known teams only; bracket can show all pulled pools.
 
@@ -18,7 +18,7 @@ const REGION_CONFIGS = {
     label: "Europe",
     eventSlug: "tournament/rlcs-2026-europe-last-chance-qualifier/event/3v3-bracket",
     // Small default EU known-team board. Override with RLCS_EU_BET_TEAMS if you want a different list.
-    watchlist: ["Karmine Corp", "Team BDS", "Team Vitality", "Gentle Mates Alpine", "Team Liquid", "Oxygen Esports", "Williams Resolve", "Geekay Esports"],
+    watchlist: ["Novo Esports", "Magnolia", "Kaydop Corp"],
     // Day 1 EU pools appear to use this phase/pool range on start.gg. Day 2 is discovered from event phases when available.
     day1CorePoolIds: [3325158, 3325159, 3325160, 3325161, 3325162, 3325163, 3325164, 3325165],
     fallbackDay2PhaseId: 2297130,
@@ -222,7 +222,7 @@ function normalizeSet(pool, set, watchlist, region) {
     watchTeams,
     tier: watchTeams.length ? "high" : null,
     bettableNow: !!(slot1?.id && slot2?.id && watchTeams.length && !set.winnerId),
-    source: "start.gg live",
+    source: "live",
   };
 }
 
@@ -288,7 +288,7 @@ async function pullLive(region) {
 
   return {
     ok: true,
-    source: poolErrors.length ? "start.gg live partial" : "start.gg live",
+    source: poolErrors.length ? "live partial" : "live",
     cached: false,
     generatedAt: new Date().toISOString(),
     region,
@@ -342,7 +342,7 @@ export default async function handler(req, res) {
   } catch (err) {
     const errorPayload = {
       ok: false,
-      source: "start.gg error",
+      source: "live error",
       cached: false,
       generatedAt: new Date().toISOString(),
       region,
