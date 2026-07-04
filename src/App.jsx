@@ -74,6 +74,8 @@ import { createPortal } from "react-dom";
 // APP127_SAFE_TOPBAR_ECONOMY_SUPABASE_LIGHT_PATCH
 // APP127_REPLAY_VAULT_DEEP_STATS_DROPDOWNS_PATCH
 // APP128_BALLCHASING_AUTO_REFRESH_TIMELINE_SEARCH_PATCH
+// APP129_FILM_ROOM_TWITCH_VOD_WAIT_UPLOAD_STAT_CARD_TOGGLES_PATCH
+// APP130_FILM_ROOM_VOD_PLAYER_DEDUPE_MANUAL_START_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1427,10 +1429,215 @@ async function fetchBallchasingTimelineViaConfig(cfg = {}, replayId = "") {
   }
   throw lastError || new Error("Ballchasing timeline failed");
 }
+function normalizeFilmRoom(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  return {
+    provider: src.provider || "twitch",
+    twitchChannel: normalizeTwitchHandle(src.twitchChannel || src.channel || ""),
+    streamStartedAt: src.streamStartedAt || null,
+    streamEndedAt: src.streamEndedAt || null,
+    liveUrl: String(src.liveUrl || "").slice(0, 320),
+    vodUrl: String(src.vodUrl || "").slice(0, 420),
+    latestVodUrl: String(src.latestVodUrl || src.vodUrl || "").slice(0, 420),
+    title: String(src.title || "").slice(0, 160),
+    isLive: !!src.isLive,
+    syncOffsetSeconds: Number.isFinite(Number(src.syncOffsetSeconds)) ? Math.max(-600, Math.min(600, Number(src.syncOffsetSeconds))) : 0,
+    lastCheckedAt: src.lastCheckedAt || null,
+    source: src.source || "manual",
+  };
+}
+function getTwitchChannelMap(cfg = {}) {
+  const lines = Array.isArray(cfg.twitchChannels) && cfg.twitchChannels.length ? cfg.twitchChannels : DEFAULT_LIVE_SESSION_CONFIG.twitchChannels;
+  const map = {};
+  (lines || []).forEach(line => {
+    const raw = String(line || "").trim();
+    if (!raw) return;
+    const [pidRaw, chRaw] = raw.includes("=") ? raw.split(/=(.*)/).filter(Boolean) : ["", raw];
+    const pid = String(pidRaw || "").trim();
+    const player = PLAYERS.find(p => p.id === pid || p.name.toLowerCase() === pid.toLowerCase());
+    if (!player) return;
+    const ch = normalizeTwitchHandle(chRaw || "");
+    if (ch) map[player.id] = ch;
+  });
+  PLAYERS.forEach(p => {
+    if (!map[p.id] && p.twitch) map[p.id] = normalizeTwitchHandle(p.twitch);
+  });
+  return map;
+}
+function getFilmRoomChannelForPlayer(cfg = {}, playerId = ADMIN_ID) {
+  return getTwitchChannelMap(cfg)[playerId] || "";
+}
+function fmtVodParam(seconds = 0) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${h ? `${h}h` : ""}${m ? `${m}m` : ""}${s || (!h && !m) ? `${s}s` : ""}`;
+}
+function withVodTimestamp(url = "", seconds = 0) {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  const sec = Math.max(0, Math.round(Number(seconds) || 0));
+  if (/twitch\.tv\/videos\//i.test(raw)) {
+    const clean = raw.replace(/[?&]t=[^&#]*/i, "").replace(/#.*$/, "");
+    return `${clean}${clean.includes("?") ? "&" : "?"}t=${fmtVodParam(sec)}`;
+  }
+  if (/youtu\.be\//i.test(raw) || /youtube\.com\//i.test(raw)) {
+    const clean = raw.replace(/[?&]t=\d+s?/i, "").replace(/[?&]start=\d+/i, "");
+    return `${clean}${clean.includes("?") ? "&" : "?"}t=${sec}s`;
+  }
+  return `${raw}${raw.includes("?") ? "&" : "?"}t=${fmtVodParam(sec)}`;
+}
+function getTwitchVideoId(url = "") {
+  const raw = String(url || "").trim();
+  const m = raw.match(/twitch\.tv\/videos\/(\d+)/i) || raw.match(/video=(\d+)/i);
+  return m ? m[1] : "";
+}
+function getTwitchEmbedSrc(url = "", seconds = 0) {
+  const videoId = getTwitchVideoId(url);
+  if (!videoId) return "";
+  const parent = typeof window !== "undefined" && window.location?.hostname ? window.location.hostname : "localhost";
+  const query = new URLSearchParams({ video:videoId, parent, autoplay:"false", time:fmtVodParam(seconds) });
+  return `https://player.twitch.tv/?${query.toString()}`;
+}
+function parseReplayTimeInput(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (/^\d+:\d{1,2}$/.test(raw)) {
+    const [m,s] = raw.split(":").map(Number);
+    return Math.max(0, Math.round((m || 0) * 60 + (s || 0)));
+  }
+  const n = Number(raw);
+  return Number.isFinite(n) ? Math.max(0, Math.round(n)) : null;
+}
+function getReplayVodStartSeconds(replay, filmRoomInput = {}) {
+  const safeReplay = normalizeBallchasingReplay(replay || {});
+  const manual = Number(safeReplay.vodStartSeconds ?? safeReplay.raw?.vodStartSeconds ?? safeReplay.vodStart ?? safeReplay.raw?.vodStart);
+  if (Number.isFinite(manual) && manual >= 0) return Math.round(manual);
+  const film = normalizeFilmRoom(filmRoomInput);
+  const started = new Date(film.streamStartedAt || 0).getTime();
+  const replayDate = new Date(safeReplay.date || 0).getTime();
+  if (!film.streamStartedAt || !Number.isFinite(started) || !Number.isFinite(replayDate)) return null;
+  const seconds = Math.round((replayDate - started) / 1000 + (Number(film.syncOffsetSeconds) || 0));
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+}
+function getReplayVodStartIssue(replay, filmRoomInput = {}) {
+  const safeReplay = normalizeBallchasingReplay(replay || {});
+  const manual = Number(safeReplay.vodStartSeconds ?? safeReplay.raw?.vodStartSeconds ?? safeReplay.vodStart ?? safeReplay.raw?.vodStart);
+  if (Number.isFinite(manual) && manual >= 0) return "";
+  const film = normalizeFilmRoom(filmRoomInput);
+  const started = new Date(film.streamStartedAt || 0).getTime();
+  const replayDate = new Date(safeReplay.date || 0).getTime();
+  if (!film.vodUrl && !film.latestVodUrl) return "Save a Twitch VOD first.";
+  if (!film.streamStartedAt || !Number.isFinite(started)) return "Save/detect stream start first.";
+  if (!Number.isFinite(replayDate)) return "Replay start time is missing.";
+  const seconds = Math.round((replayDate - started) / 1000 + (Number(film.syncOffsetSeconds) || 0));
+  if (seconds < 0) return "Replay time is before the saved stream start. Set this game’s VOD start manually.";
+  return "";
+}
+function getReplayVodMomentUrl(replay, filmRoomInput = {}, eventSeconds = 0) {
+  const film = normalizeFilmRoom(filmRoomInput);
+  const vod = film.vodUrl || film.latestVodUrl;
+  if (!vod) return "";
+  const gameStart = getReplayVodStartSeconds(replay, film);
+  if (gameStart === null) return "";
+  return withVodTimestamp(vod, gameStart + (Number(eventSeconds) || 0));
+}
+async function fetchFilmRoomViaConfig(cfg = {}, channel = "", after = "") {
+  const cleanChannel = normalizeTwitchHandle(channel);
+  if (!cleanChannel) throw new Error("Add a Twitch channel first.");
+  const proxyPath = String(cfg.twitchProxyPath || cfg.replayProxyPath || DEFAULT_LIVE_SESSION_CONFIG.twitchProxyPath || "/api/ballchasing").trim();
+  const query = new URLSearchParams({ twitchChannel:cleanChannel, includeVideos:"1" });
+  if (after) query.set("after", after);
+  const endpoint = `${proxyPath}${proxyPath.includes("?") ? "&" : "?"}${query.toString()}`;
+  const res = await fetch(endpoint, { cache:"no-store" });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || `Twitch lookup failed (${res.status})`);
+  return json;
+}
+
+function FilmRoomPanel({ cfg, safe, currentPlayer, updateSession, addToast, me }) {
+  if (cfg.filmRoomEnabled === false) return null;
+  const film = normalizeFilmRoom(safe.filmRoom);
+  const defaultChannel = film.twitchChannel || getFilmRoomChannelForPlayer(cfg, currentPlayer);
+  const [channel, setChannel] = useState(defaultChannel);
+  const [vodUrl, setVodUrl] = useState(film.vodUrl || film.latestVodUrl || "");
+  const [offset, setOffset] = useState(String(film.syncOffsetSeconds || cfg.filmRoomSyncOffsetSeconds || 0));
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const saveFilm = async (patch, msg = "Film Room updated", icon = "🎥") => {
+    const nextFilm = normalizeFilmRoom({ ...film, ...patch });
+    await updateSession({ filmRoom:nextFilm }, msg, icon);
+  };
+  const manualStart = async () => {
+    const now = new Date().toISOString();
+    await saveFilm({ twitchChannel:normalizeTwitchHandle(channel), streamStartedAt:now, liveUrl:channel ? `https://www.twitch.tv/${normalizeTwitchHandle(channel)}` : film.liveUrl, source:"manual" }, "Film Room started", "🎬");
+  };
+  const detectTwitch = async () => {
+    setLoading(true); setError("");
+    try {
+      const clean = normalizeTwitchHandle(channel || defaultChannel);
+      const data = await fetchFilmRoomViaConfig(cfg, clean, safe.startedAt || film.streamStartedAt || "");
+      const startedAt = data.startedAt || film.streamStartedAt || null;
+      const nextVod = data.latestVodUrl || vodUrl || film.vodUrl || "";
+      setVodUrl(nextVod);
+      await saveFilm({
+        provider:"twitch",
+        twitchChannel:clean,
+        streamStartedAt:startedAt,
+        liveUrl:data.url || `https://www.twitch.tv/${clean}`,
+        vodUrl:nextVod,
+        latestVodUrl:nextVod,
+        title:data.title || data.latestVodTitle || film.title,
+        isLive:!!data.live,
+        lastCheckedAt:new Date().toISOString(),
+        syncOffsetSeconds:Number(offset) || 0,
+        source:"twitch",
+      }, data.live ? "Twitch live stream detected" : nextVod ? "Twitch VOD found" : "Twitch checked", data.live ? "🔴" : "🎥");
+    } catch (err) {
+      setError(err?.message || "Twitch lookup failed. You can still use manual start + pasted VOD URL.");
+    } finally { setLoading(false); }
+  };
+  const saveVodAndOffset = async () => {
+    await saveFilm({ twitchChannel:normalizeTwitchHandle(channel), vodUrl, latestVodUrl:vodUrl, syncOffsetSeconds:Number(offset) || 0 }, "VOD sync saved", "⏱️");
+  };
+  const gameStartHelp = film.streamStartedAt ? `stream start: ${new Date(film.streamStartedAt).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}` : "save a stream start time before timestamping VODs";
+  return (
+    <div style={{background:"linear-gradient(135deg,#130F22,#080A12)",border:"1px solid rgba(167,139,250,.22)",borderRadius:20,padding:14,marginBottom:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
+        <div>
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Film Room · Twitch VOD sync</div>
+          <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>{gameStartHelp}</div>
+        </div>
+        <div style={{fontSize:10,color:film.isLive?"#7CFFB2":"#8B92A8",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{film.isLive ? "live" : film.vodUrl ? "vod ready" : "setup"}</div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 88px",gap:8,marginBottom:8}}>
+        <input value={channel} onChange={e=>setChannel(e.target.value)} placeholder="Twitch channel" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11,color:"#E8ECF4",fontWeight:850,minWidth:0}} />
+        <input value={offset} onChange={e=>setOffset(e.target.value)} type="number" placeholder="offset" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11,color:"#E8ECF4",fontWeight:850,minWidth:0}} />
+      </div>
+      <input value={vodUrl} onChange={e=>setVodUrl(e.target.value)} placeholder="Paste Twitch VOD URL after stream ends" style={{width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11,color:"#E8ECF4",fontWeight:850,marginBottom:8}} />
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+        <button onClick={detectTwitch} disabled={loading} className="bb-pressable" style={{background:"rgba(167,139,250,.14)",border:"1px solid rgba(167,139,250,.32)",borderRadius:12,padding:"10px 6px",fontSize:10.5,fontWeight:950,color:"#A78BFA",cursor:loading?"wait":"pointer"}}>{loading ? "checking…" : "detect Twitch"}</button>
+        <button onClick={manualStart} className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.30)",borderRadius:12,padding:"10px 6px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>start now</button>
+        <button onClick={saveVodAndOffset} className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.30)",borderRadius:12,padding:"10px 6px",fontSize:10.5,fontWeight:950,color:"#B8FF4D",cursor:"pointer"}}>save VOD</button>
+      </div>
+      {film.vodUrl && <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:850,lineHeight:1.35,marginTop:8}}>Replay dropdowns will turn game starts and goal/save/demo times into VOD links.</div>}
+      {(vodUrl || film.vodUrl || film.latestVodUrl) && getTwitchEmbedSrc(vodUrl || film.vodUrl || film.latestVodUrl, 0) && <div style={{marginTop:10,border:"1px solid rgba(167,139,250,.22)",borderRadius:14,overflow:"hidden",background:"#05070D"}}>
+        <iframe title="Twitch VOD player" src={getTwitchEmbedSrc(vodUrl || film.vodUrl || film.latestVodUrl, 0)} allowFullScreen={true} scrolling="no" frameBorder="0" style={{width:"100%",height:220,display:"block",border:0}} />
+      </div>}
+      {(vodUrl || film.vodUrl || film.latestVodUrl) && !getTwitchEmbedSrc(vodUrl || film.vodUrl || film.latestVodUrl, 0) && <div style={{fontSize:9.5,color:"#FFD166",fontWeight:850,lineHeight:1.35,marginTop:8}}>That does not look like a Twitch VOD URL yet. It should look like twitch.tv/videos/1234567890.</div>}
+      {error && <div style={{fontSize:10,color:"#FF5C8A",fontWeight:850,lineHeight:1.35,marginTop:8}}>{error}</div>}
+    </div>
+  );
+}
+
 function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, addToast, me }) {
   const replayVault = normalizeLiveReplayVault(safe.replayVault);
   const [replayInput, setReplayInput] = useState(replayVault.manualUrl || "");
   const [loading, setLoading] = useState(false);
+  const [waitingForUpload, setWaitingForUpload] = useState(false);
+  const [waitStatus, setWaitStatus] = useState("");
+  const waitActiveRef = useRef(false);
   const [error, setError] = useState("");
   const replay = replayVault.latestReplay ? normalizeBallchasingReplay(replayVault.latestReplay) : null;
   const rows = replay ? buildBallchasingPlayerRows(replay, cfg) : [];
@@ -1441,6 +1648,21 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const missingPlayers = PLAYERS.filter(p => participantIds.includes(p.id) && !matchedRows.some(r => r.appPlayerId === p.id));
   const currentMatched = visibleRows.find(r => r.appPlayerId === currentPlayer) || rows.find(r => String(r.name).toLowerCase() === String(me.name).toLowerCase());
   const pasteEnabled = cfg.replayPasteEnabled === true;
+  const fieldVisibility = normalizeReplayStatCardFields(cfg.replayStatCardFields);
+  const showField = (id) => fieldVisibility[id] !== false;
+  const buildLatestReplayParams = () => {
+    const aliases = getBallchasingAliasMap(cfg);
+    const aliasNames = Array.from(new Set([...(aliases[currentPlayer] || [me.name]), me.name].map(v => String(v || "").trim()).filter(Boolean)));
+    return {
+      playerName:aliasNames.join(","),
+      mode:safe.mode,
+      playlist:getBallchasingPlaylistForMode(safe.mode),
+      after:safe.startedAt || "",
+      afterBufferMinutes:45,
+      count:20,
+      fallback:"1",
+    };
+  };
   const saveReplay = async (loaded, manualUrl = replayInput) => {
     let normalized = normalizeBallchasingReplay(loaded);
     if (normalized.id && !normalized.timeline && !normalized.raw?.timeline) {
@@ -1476,25 +1698,64 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const searchLatest = async () => {
     setLoading(true); setError("");
     try {
-      const aliases = getBallchasingAliasMap(cfg);
-      const aliasNames = Array.from(new Set([...(aliases[currentPlayer] || [me.name]), me.name].map(v => String(v || "").trim()).filter(Boolean)));
-      const loaded = await fetchBallchasingViaConfig(cfg, {
-        playerName:aliasNames.join(","),
-        mode:safe.mode,
-        playlist:getBallchasingPlaylistForMode(safe.mode),
-        after:safe.startedAt || "",
-        afterBufferMinutes:45,
-        count:20,
-        fallback:"1",
-      });
+      const loaded = await fetchBallchasingViaConfig(cfg, buildLatestReplayParams());
       await saveReplay(loaded, replayInput);
     } catch (err) {
       setError(err?.message || "Latest replay search failed. Turn paste link on in admin only if you need a manual fallback.");
     } finally { setLoading(false); }
   };
+  const waitForBallchasingUpload = async () => {
+    if (waitingForUpload) {
+      waitActiveRef.current = false;
+      setWaitingForUpload(false);
+      setWaitStatus("stopped waiting");
+      return;
+    }
+    waitActiveRef.current = true;
+    setWaitingForUpload(true);
+    setError("");
+    const maxAttempts = Math.max(3, Math.min(30, Number(cfg.ballchasingWaitAttempts || 18) || 18));
+    const delayMs = Math.max(12000, Math.min(90000, Number(cfg.ballchasingWaitIntervalMs || 30000) || 30000));
+    for (let attempt = 1; attempt <= maxAttempts && waitActiveRef.current; attempt++) {
+      setWaitStatus(`checking Ballchasing ${attempt}/${maxAttempts}…`);
+      try {
+        const loaded = await fetchBallchasingViaConfig(cfg, buildLatestReplayParams());
+        if (!waitActiveRef.current) break;
+        await saveReplay(loaded, replayInput);
+        setWaitStatus("replay found");
+        addToast?.("Ballchasing replay found", "📼");
+        waitActiveRef.current = false;
+        setWaitingForUpload(false);
+        return;
+      } catch (_) {
+        if (attempt >= maxAttempts) break;
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    }
+    setWaitingForUpload(false);
+    waitActiveRef.current = false;
+    setWaitStatus("not found yet — press Upload in Rockpload, then wait again");
+  };
   const clearReplay = async () => {
     await updateSession({ replayVault:normalizeLiveReplayVault({}) }, "Replay Vault cleared", "🧹");
     setReplayInput(""); setError("");
+  };
+  const setReplayVodStart = async (rv) => {
+    const normalized = normalizeBallchasingReplay(rv || {});
+    const current = getReplayVodStartSeconds(normalized, safe.filmRoom);
+    const raw = typeof window !== "undefined" ? window.prompt("Game start inside the Twitch VOD. Use seconds or m:ss. Example: 12:34", current !== null ? fmtReplayTimecode(current) : "0:00") : null;
+    if (raw === null) return;
+    const seconds = parseReplayTimeInput(raw);
+    if (seconds === null) { setError("Use seconds or m:ss for the VOD game start."); return; }
+    const patched = normalizeBallchasingReplay({ ...normalized, vodStartSeconds:seconds, raw:{ ...(normalized.raw || {}), vodStartSeconds:seconds } });
+    const nextReplays = { ...(replayVault.replays || {}), [patched.id || `replay_${Date.now()}`]:patched };
+    const nextVault = normalizeLiveReplayVault({
+      ...replayVault,
+      latestReplay: replay?.id === patched.id ? patched : replayVault.latestReplay,
+      latestId: replay?.id === patched.id ? patched.id : replayVault.latestId,
+      replays: nextReplays,
+    });
+    await updateSession({ replayVault:nextVault }, "VOD game start saved", "⏱️");
   };
   const metricTile = (label, value, accent = "#E8ECF4") => (
     <div style={{background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.055)",borderRadius:11,padding:8,minWidth:0}}>
@@ -1515,29 +1776,48 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const watchButtons = (rv) => {
     const id = rv?.id || extractBallchasingReplayId(rv?.viewUrl || rv?.link || "");
     const downloadHref = getReplayDownloadHref(cfg, id);
+    const vodHref = getReplayVodMomentUrl(rv, safe.filmRoom, 0);
+    const cols = [rv?.viewUrl, downloadHref, vodHref].filter(Boolean).length || 1;
     return (
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(cols,3)},1fr)`,gap:8,marginTop:10}}>
         {rv?.viewUrl && <a href={rv.viewUrl} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#4D9EFF",textDecoration:"none",textAlign:"center"}}>watch 3D</a>}
         {downloadHref && <a href={downloadHref} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#B8FF4D",textDecoration:"none",textAlign:"center"}}>download .replay</a>}
+        {vodHref && <a href={vodHref} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(167,139,250,.14)",border:"1px solid rgba(167,139,250,.30)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",textDecoration:"none",textAlign:"center"}}>watch VOD</a>}
       </div>
     );
   };
   const keyMomentsBox = (sourceReplay = replay) => {
+    if (!showField("keyMoments")) return null;
     const normalized = normalizeBallchasingReplay(sourceReplay || {});
     const playerNames = buildBallchasingPlayerRows(normalized, cfg).filter(r => r.appPlayerId && participantIds.includes(r.appPlayerId)).map(r => r.name);
     const moments = getReplayKeyMoments(normalized, playerNames).slice(0, 18);
     if (!moments.length) return null;
+    const gameVodStart = getReplayVodStartSeconds(normalized, safe.filmRoom);
+    const vodIssue = gameVodStart === null ? getReplayVodStartIssue(normalized, safe.filmRoom) : "";
     const kindColor = (kind) => kind === "goal" ? "#FFD166" : kind === "save" ? "#4D9EFF" : kind === "demo" ? "#FF8C42" : kind === "demoed" ? "#FF5C8A" : "#8B92A8";
     return (
       <div style={{background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:10,marginTop:10}}>
-        <div style={{fontSize:9.5,color:"#FFD166",fontWeight:950,letterSpacing:.9,textTransform:"uppercase",marginBottom:8}}>auto key moments</div>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",marginBottom:6}}>
+          <div style={{fontSize:9.5,color:"#FFD166",fontWeight:950,letterSpacing:.9,textTransform:"uppercase"}}>auto key moments</div>
+          <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+            {gameVodStart !== null && <div style={{fontSize:9,color:"#A78BFA",fontWeight:950}}>VOD {fmtReplayTimecode(gameVodStart)}</div>}
+            {(safe.filmRoom?.vodUrl || safe.filmRoom?.latestVodUrl) && <button onClick={()=>setReplayVodStart(normalized)} className="bb-pressable" style={{background:"rgba(167,139,250,.10)",border:"1px solid rgba(167,139,250,.24)",borderRadius:999,padding:"4px 7px",fontSize:8.5,color:"#A78BFA",fontWeight:950,cursor:"pointer"}}>set VOD start</button>}
+          </div>
+        </div>
+        <div style={{fontSize:9,color:vodIssue?"#FFD166":"#8B92A8",fontWeight:800,lineHeight:1.3,marginBottom:8}}>{vodIssue || "Times shown are replay/VOD elapsed time, not Rocket League scoreboard clock."}</div>
         <div style={{display:"grid",gap:6}}>
-          {moments.map((m, i) => (
-            <div key={`${m.id}_${i}`} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:10,padding:"7px 8px"}}>
-              <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div>
-              <div style={{fontSize:8.5,color:kindColor(m.kind),fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{m.kind}</div>
-            </div>
-          ))}
+          {moments.map((m, i) => {
+            const vodUrl = getReplayVodMomentUrl(normalized, safe.filmRoom, m.time);
+            return (
+              <div key={`${m.id}_${i}`} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:10,padding:"7px 8px"}}>
+                <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                  {vodUrl && <a href={vodUrl} target="_blank" rel="noreferrer" style={{fontSize:8.5,color:"#A78BFA",fontWeight:950,textDecoration:"none",textTransform:"uppercase"}}>vod</a>}
+                  <div style={{fontSize:8.5,color:kindColor(m.kind),fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{m.kind}</div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     );
@@ -1554,47 +1834,47 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
             <div style={{fontSize:15,color:r.color,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.appName || r.name}</div>
             <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:850,marginTop:4,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{carText}{r.mvp ? " · MVP" : ""}</div>
           </div>
-          <div style={{textAlign:"right",flexShrink:0}}>
+          {showField("score") && <div style={{textAlign:"right",flexShrink:0}}>
             <div style={{fontSize:9,color:"#4A5066",fontWeight:950,textTransform:"uppercase"}}>score</div>
             <div style={{fontSize:22,color:r.color,fontWeight:950,lineHeight:1}}>{fmtReplayNumber(r.score)}</div>
-          </div>
+          </div>}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,marginBottom:8}}>
-          {metricTile("goals", fmtReplayNumber(r.goals), r.color)}
-          {metricTile("shots", fmtReplayNumber(r.shots))}
-          {metricTile("shot %", fmtReplayPercent(r.shootingPercentage))}
-          {metricTile("saves", fmtReplayNumber(r.saves))}
-        </div>
-        {section("core", [
+        {showField("topCore") && <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,marginBottom:8}}>
+          {showField("goals") && metricTile("goals", fmtReplayNumber(r.goals), r.color)}
+          {showField("shots") && metricTile("shots", fmtReplayNumber(r.shots))}
+          {showField("shotPct") && metricTile("shot %", fmtReplayPercent(r.shootingPercentage))}
+          {showField("saves") && metricTile("saves", fmtReplayNumber(r.saves))}
+        </div>}
+        {showField("core") && section("core", [
           ["assists", fmtReplayNumber(r.assists)], ["shots against", fmtReplayNumber(r.shotsAgainst)], ["goals against", fmtReplayNumber(r.goalsAgainst)],
           ["goal times", fmtReplayTimeline(goalTimes, r.goals), r.goals ? "#FFD166" : "#8B92A8"], ["save times", fmtReplayTimeline(saveTimes, r.saves)], ["demos", `${fmtReplayNumber(r.demosInflicted)}/${fmtReplayNumber(r.demosTaken)}`],
         ], r.color)}
-        {section("boost", [
+        {showField("boost") && section("boost", [
           ["collected", fmtReplayNumber(r.boostCollected), "#B8FF4D"], ["stolen", fmtReplayNumber(r.boostStolen)], ["BPM", fmtReplayNumber(r.bpm)],
           ["BCPM", fmtReplayNumber(r.bcpm)], ["avg boost", fmtReplayNumber(r.avgBoost)], ["0 boost", `${fmtReplaySeconds(r.zeroBoostTime)} · ${fmtReplayPercent(r.zeroBoostPct)}`],
           ["full boost", `${fmtReplaySeconds(r.fullBoostTime)} · ${fmtReplayPercent(r.fullBoostPct)}`], ["big pads", `${fmtReplayNumber(r.boostCollectedBig)} (${fmtReplayNumber(r.boostCountBig)})`], ["small pads", `${fmtReplayNumber(r.boostCollectedSmall)} (${fmtReplayNumber(r.boostCountSmall)})`],
           ["big stolen", `${fmtReplayNumber(r.boostStolenBig)} (${fmtReplayNumber(r.boostCountStolenBig)})`], ["small stolen", `${fmtReplayNumber(r.boostStolenSmall)} (${fmtReplayNumber(r.boostCountStolenSmall)})`], ["overfill", fmtReplayNumber(r.boostOverfill)],
           ["0-25", `${fmtReplaySeconds(r.boostTime0_25)} · ${fmtReplayPercent(r.boostPct0_25)}`], ["25-50", `${fmtReplaySeconds(r.boostTime25_50)} · ${fmtReplayPercent(r.boostPct25_50)}`], ["75-100", `${fmtReplaySeconds(r.boostTime75_100)} · ${fmtReplayPercent(r.boostPct75_100)}`],
         ], "#B8FF4D")}
-        {section("movement", [
+        {showField("movement") && section("movement", [
           ["avg speed", fmtReplayNumber(r.avgSpeed), "#A78BFA"], ["distance", fmtReplayDistance(r.totalDistance)], ["speed %", fmtReplayPercent(r.avgSpeedPct)],
           ["slow", `${fmtReplaySeconds(r.slowSpeedTime)} · ${fmtReplayPercent(r.percentSlowSpeed)}`], ["boost speed", `${fmtReplaySeconds(r.boostSpeedTime)} · ${fmtReplayPercent(r.percentBoostSpeed)}`], ["supersonic", `${fmtReplaySeconds(r.supersonicTime)} · ${fmtReplayPercent(r.percentSupersonicSpeed)}`],
           ["ground", `${fmtReplaySeconds(r.groundTime)} · ${fmtReplayPercent(r.percentGround)}`], ["low air", `${fmtReplaySeconds(r.lowAirTime)} · ${fmtReplayPercent(r.percentLowAir)}`], ["high air", `${fmtReplaySeconds(r.highAirTime)} · ${fmtReplayPercent(r.percentHighAir)}`],
           ["powerslide", fmtReplaySeconds(r.powerslideTime)], ["slide count", fmtReplayNumber(r.powerslideCount)], ["avg slide", fmtReplaySeconds(r.avgPowerslideDuration)],
         ], "#A78BFA")}
-        {section("positioning", [
+        {showField("positioning") && section("positioning", [
           ["def 3rd", `${fmtReplaySeconds(r.defThird)} · ${fmtReplayPercent(r.percentDefThird)}`], ["neutral 3rd", `${fmtReplaySeconds(r.neutralThird)} · ${fmtReplayPercent(r.percentNeutralThird)}`], ["off 3rd", `${fmtReplaySeconds(r.offThird)} · ${fmtReplayPercent(r.percentOffThird)}`],
           ["def half", `${fmtReplaySeconds(r.defHalf)} · ${fmtReplayPercent(r.percentDefHalf)}`], ["off half", `${fmtReplaySeconds(r.offHalf)} · ${fmtReplayPercent(r.percentOffHalf)}`], ["behind ball", `${fmtReplaySeconds(r.behindBall)} · ${fmtReplayPercent(r.percentBehindBall)}`],
           ["in front", `${fmtReplaySeconds(r.infrontBall)} · ${fmtReplayPercent(r.percentInfrontBall)}`], ["dist ball", fmtReplayDistance(r.avgDistBall)], ["dist mates", fmtReplayDistance(r.avgDistMates)],
           ["closest", fmtReplaySeconds(r.closestToBallTime)], ["farthest", fmtReplaySeconds(r.farthestFromBallTime)], ["last def GA", fmtReplayNumber(r.goalsAgainstLastDefender)],
           ["possession", possession], ["side time", fmtReplaySeconds(r.teamSideTime)], ["most back/forward", `${fmtReplaySeconds(r.mostBackTime)} / ${fmtReplaySeconds(r.mostForwardTime)}`],
         ], "#FFD166")}
-        {section("camera + settings", [
+        {showField("cameraSettings") && section("camera + settings", [
           ["FOV", fmtReplayNumber(r.fov)], ["distance", fmtReplayNumber(r.cameraDistance)], ["height", fmtReplayNumber(r.cameraHeight)],
           ["angle", fmtReplayNumber(r.cameraAngle)], ["stiffness", fmtReplayNumber(r.cameraStiffness, 2)], ["swivel", fmtReplayNumber(r.cameraSwivel, 1)],
           ["transition", fmtReplayNumber(r.cameraTransition, 1)], ["steering", fmtReplayNumber(r.steeringSensitivity, 2)], ["car", carText],
         ], "#4D9EFF")}
-        <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:750,lineHeight:1.35,marginTop:9}}>Goal/save times come from the Ballchasing timeline endpoint when available. Search latest now retries without strict session-time filters, so you should not need to paste links manually.</div>
+        {showField("timelineNote") && <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:750,lineHeight:1.35,marginTop:9}}>Goal/save times are replay/VOD elapsed seconds from Ballchasing, not the Rocket League scoreboard clock. Use set VOD start if the stream/replay times do not line up.</div>}
       </div>
     );
   };
@@ -1632,9 +1912,11 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
           <input value={replayInput} onChange={e=>setReplayInput(e.target.value)} placeholder="https://ballchasing.com/replay/..." style={{width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11.5,color:"#E8ECF4",fontWeight:800,boxSizing:"border-box"}} />
         </label>}
         <div style={{display:"grid",gridTemplateColumns:pasteEnabled?"1fr 1fr":"1fr",gap:8}}>
-          {pasteEnabled && <button onClick={loadReplay} disabled={loading} className="bb-pressable" style={{background:"rgba(77,158,255,.14)",border:"1px solid rgba(77,158,255,.30)",borderRadius:12,padding:"10px",fontSize:11,fontWeight:950,color:"#4D9EFF",cursor:loading?"wait":"pointer"}}>{loading ? "loading…" : cfg.replaySearchButton}</button>}
-          <button onClick={searchLatest} disabled={loading} className="bb-pressable bb-glow-lime" style={{background:"rgba(184,255,77,.14)",border:"1px solid rgba(184,255,77,.30)",borderRadius:12,padding:"11px 10px",fontSize:11.5,fontWeight:950,color:"#B8FF4D",cursor:loading?"wait":"pointer"}}>{loading ? "searching…" : cfg.replaySearchLatestButton}</button>
+          {pasteEnabled && <button onClick={loadReplay} disabled={loading || waitingForUpload} className="bb-pressable" style={{background:"rgba(77,158,255,.14)",border:"1px solid rgba(77,158,255,.30)",borderRadius:12,padding:"10px",fontSize:11,fontWeight:950,color:"#4D9EFF",cursor:loading?"wait":"pointer"}}>{loading ? "loading…" : cfg.replaySearchButton}</button>}
+          <button onClick={searchLatest} disabled={loading || waitingForUpload} className="bb-pressable bb-glow-lime" style={{background:"rgba(184,255,77,.14)",border:"1px solid rgba(184,255,77,.30)",borderRadius:12,padding:"11px 10px",fontSize:11.5,fontWeight:950,color:"#B8FF4D",cursor:loading?"wait":"pointer"}}>{loading ? "searching…" : cfg.replaySearchLatestButton}</button>
         </div>
+        <button onClick={waitForBallchasingUpload} disabled={loading} className="bb-pressable" style={{width:"100%",background:waitingForUpload?"rgba(255,209,102,.14)":"rgba(255,255,255,.045)",border:`1px solid ${waitingForUpload?"rgba(255,209,102,.32)":"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:waitingForUpload?"#FFD166":"#8B92A8",cursor:loading?"wait":"pointer"}}>{waitingForUpload ? "stop waiting" : "wait for Ballchasing upload"}</button>
+        {waitStatus && <div style={{fontSize:9.5,color:waitingForUpload?"#FFD166":"#8B92A8",fontWeight:800,lineHeight:1.35}}>{waitStatus}</div>}
       </div>
       {error && <div style={{fontSize:10.5,color:"#FF5C8A",background:"rgba(255,92,138,.10)",border:"1px solid rgba(255,92,138,.24)",borderRadius:12,padding:9,marginBottom:10,lineHeight:1.35}}>{error}</div>}
       {!replay ? (
@@ -1653,21 +1935,13 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
               {replay.viewUrl && <a href={replay.viewUrl} target="_blank" rel="noreferrer" style={{fontSize:10,fontWeight:950,color:"#B8FF4D",textDecoration:"none",whiteSpace:"nowrap"}}>{cfg.replayOpenButton}</a>}
             </div>
             {watchButtons(replay)}
-            {keyMomentsBox(replay)}
             {expected === 2 && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>2s is filtered to you + the selected teammate for this session.</div>}
             {!!missingPlayers.length && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>Missing from this replay: {missingPlayers.map(p=>p.name).join(", ")}</div>}
+            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:850,lineHeight:1.35,marginTop:8}}>Open the Game dropdown below for key moments and player stat cards. This prevents the same replay from showing twice.</div>
           </div>
-          {!visibleRows.length ? <div style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:12,marginBottom:10}}>
-            <div style={{fontSize:12,color:"#E8ECF4",fontWeight:950}}>no Burton player matched</div>
-            <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>Check Admin → Live Session Controls → Ballchasing player aliases. The replay loaded, but none of the player names matched your app player names.</div>
-          </div> : expected === 3 ? (
-            <div style={{display:"grid",gap:10}}>{visibleRows.map(r => playerCard(r, true))}</div>
-          ) : (
-            <div style={{display:"grid",gap:8}}>{visibleRows.map(r => playerCard(r, false))}</div>
-          )}
           {Object.values(replayVault.replays || {}).length > 0 && <div style={{marginTop:12}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>linked replay dropdowns</div>
-            {Object.values(replayVault.replays || {}).slice().sort((a,b)=>new Date(normalizeBallchasingReplay(b).date || 0)-new Date(normalizeBallchasingReplay(a).date || 0)).map((rv, idx) => renderReplayDropdown(rv, idx))}
+            {Array.from(new Map(Object.values(replayVault.replays || {}).map(rv => [normalizeBallchasingReplay(rv).id || JSON.stringify(rv).slice(0,80), rv])).values()).slice().sort((a,b)=>new Date(normalizeBallchasingReplay(b).date || 0)-new Date(normalizeBallchasingReplay(a).date || 0)).map((rv, idx) => renderReplayDropdown(rv, idx))}
           </div>}
           <button onClick={clearReplay} className="bb-pressable" style={{marginTop:10,width:"100%",background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#8B92A8",cursor:"pointer"}}>{cfg.replayClearButton}</button>
         </>
@@ -1827,11 +2101,11 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
       <div style={{fontSize:18,color,fontWeight:950,marginTop:3}}>{value}</div>
     </div>
   );
+  const { swipeHandlers, swipeStyle } = useSwipeRightToClose(onClose);
   return createPortal(
     <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(3,5,10,.72)",backdropFilter:"blur(16px)",display:"flex",alignItems:"stretch",justifyContent:"center"}}>
-      <div style={{width:"100%",maxWidth:560,height:"100dvh",maxHeight:"100dvh",margin:"0 auto",background:"linear-gradient(180deg,#0B0D17,#06070D)",overflowY:"auto",WebkitOverflowScrolling:"touch",fontFamily:"Inter, sans-serif",boxSizing:"border-box"}}>
-        <FullScreenHeader title={cfg.title} subtitle={safe.active ? `${safe.id} · ${cfg.activeBadge}` : cfg.inactiveTitle} onClose={onClose} accent={me.color}/>
-        <div style={{padding:16,paddingBottom:"max(32px, calc(env(safe-area-inset-bottom) + 26px))"}}>
+      <div {...swipeHandlers} style={{width:"100%",maxWidth:560,height:"100dvh",maxHeight:"100dvh",margin:"0 auto",background:"linear-gradient(180deg,#0B0D17,#06070D)",overflowY:"auto",WebkitOverflowScrolling:"touch",fontFamily:"Inter, sans-serif",boxSizing:"border-box",...swipeStyle}}>
+        <div style={{padding:16,paddingTop:"max(16px, calc(env(safe-area-inset-top) + 10px))",paddingBottom:"max(32px, calc(env(safe-area-inset-bottom) + 26px))"}}>
           {!safe.active ? (
             <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:22,padding:18,textAlign:"center"}}>
               <div style={{fontSize:34,marginBottom:8}}>🎮</div>
@@ -1956,6 +2230,7 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
                 </div> : <EmptyState icon="🏷️" title={cfg.noGamesTitle} body={cfg.noGamesBody} />}
               </div>
 
+              <FilmRoomPanel cfg={cfg} safe={safe} currentPlayer={currentPlayer} updateSession={updateSession} addToast={addToast} me={me} />
               <ReplayVaultPanel cfg={cfg} safe={safe} summary={summary} currentPlayer={currentPlayer} updateSession={updateSession} addToast={addToast} me={me} />
 
               <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
@@ -10734,6 +11009,7 @@ function AdminLiveSessionControls({ appCustomizer, setAppCustomizer, addToast })
           {textField("replayMatchedLabel","matched label")}
           {textField("replayOpenButton","open replay button")}
           {textField("replayProxyPath","Ballchasing API route")}
+          {textField("twitchProxyPath","Twitch/Film Room API route")}
         </div>
         <div style={{marginTop:9}}>
           <div style={{fontSize:9.5,color:"#4A5066",fontWeight:950,letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>inactive body</div>
@@ -10758,11 +11034,27 @@ function AdminLiveSessionControls({ appCustomizer, setAppCustomizer, addToast })
         {listEditor("nextMoves", "next move buttons", "These are the post-game decision buttons.")}
         {listEditor("statusOptions", "player statuses", "These show in the player status dropdown and ready check.")}
         {listEditor("ballchasingAliases", "Ballchasing player aliases", "One line per player, like p1=maglvxx or p2=APcards5,apcards5. This is how Replay Vault matches Ballchasing names to app players.")}
+        {listEditor("twitchChannels", "Twitch channels for Film Room", "One line per player, like p1=maglvxx or p2=apcards5. Used to detect live streams and final VODs.")}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+          <label><div style={{fontSize:9.5,color:"#4A5066",fontWeight:950,letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>wait attempts</div><input type="number" value={live.ballchasingWaitAttempts} onChange={e=>setField("ballchasingWaitAttempts", Number(e.target.value)||18)} style={{width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:11,padding:"9px 10px",fontSize:11.5,color:"#E8ECF4",fontWeight:800}} /></label>
+          <label><div style={{fontSize:9.5,color:"#4A5066",fontWeight:950,letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>wait ms</div><input type="number" value={live.ballchasingWaitIntervalMs} onChange={e=>setField("ballchasingWaitIntervalMs", Number(e.target.value)||30000)} style={{width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:11,padding:"9px 10px",fontSize:11.5,color:"#E8ECF4",fontWeight:800}} /></label>
+          <label><div style={{fontSize:9.5,color:"#4A5066",fontWeight:950,letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>VOD sync offset seconds</div><input type="number" value={live.filmRoomSyncOffsetSeconds} onChange={e=>setField("filmRoomSyncOffsetSeconds", Number(e.target.value)||0)} style={{width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:11,padding:"9px 10px",fontSize:11.5,color:"#E8ECF4",fontWeight:800}} /></label>
+          <button onClick={()=>saveLive({ ...live, filmRoomEnabled:!live.filmRoomEnabled }, live.filmRoomEnabled ? "film room hidden" : "film room enabled")} className="bb-pressable" style={{alignSelf:"end",background:live.filmRoomEnabled?"rgba(167,139,250,.14)":"rgba(255,255,255,.05)",border:`1px solid ${live.filmRoomEnabled?"rgba(167,139,250,.32)":"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"11px 10px",fontSize:11,fontWeight:950,color:live.filmRoomEnabled?"#A78BFA":"#8B92A8",cursor:"pointer"}}>Film Room: {live.filmRoomEnabled ? "on" : "off"}</button>
+        </div>
         <button onClick={()=>saveLive({ ...live, replayVaultEnabled:!live.replayVaultEnabled }, live.replayVaultEnabled ? "replay vault hidden" : "replay vault enabled")} className="bb-pressable" style={{width:"100%",background:live.replayVaultEnabled?"rgba(77,158,255,.14)":"rgba(255,255,255,.05)",border:`1px solid ${live.replayVaultEnabled?"rgba(77,158,255,.32)":"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"11px 10px",fontSize:11,fontWeight:950,color:live.replayVaultEnabled?"#4D9EFF":"#8B92A8",cursor:"pointer",marginBottom:8}}>Replay Vault: {live.replayVaultEnabled ? "on" : "off"}</button>
         <button onClick={()=>saveLive({ ...live, replayPasteEnabled:!live.replayPasteEnabled }, live.replayPasteEnabled ? "paste link hidden" : "paste link enabled")} className="bb-pressable" style={{width:"100%",background:live.replayPasteEnabled?"rgba(255,209,102,.14)":"rgba(255,255,255,.05)",border:`1px solid ${live.replayPasteEnabled?"rgba(255,209,102,.32)":"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"11px 10px",fontSize:11,fontWeight:950,color:live.replayPasteEnabled?"#FFD166":"#8B92A8",cursor:"pointer"}}>Paste replay link: {live.replayPasteEnabled ? "on" : "off"}</button>
       </AdminCollapse>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,padding:12,margin:"10px 0"}}>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Ballchasing player stat card data</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+            {REPLAY_STAT_CARD_FIELD_OPTIONS.map(opt => {
+              const on = live.replayStatCardFields?.[opt.id] !== false;
+              return <button key={opt.id} onClick={()=>saveLive({ ...live, replayStatCardFields:{ ...normalizeReplayStatCardFields(live.replayStatCardFields), [opt.id]:!on } }, `${opt.label} ${on ? "hidden" : "shown"}`)} className="bb-pressable" style={{background:on?"rgba(255,209,102,.14)":"rgba(255,255,255,.045)",border:`1px solid ${on?"rgba(255,209,102,.32)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:"8px",fontSize:9.5,fontWeight:900,color:on?"#FFD166":"#8B92A8",cursor:"pointer",textAlign:"left"}}>{opt.label}: {on ? "on" : "off"}</button>
+            })}
+          </div>
+        </div>
         <button onClick={()=>saveLive(DEFAULT_LIVE_SESSION_CONFIG, "live session defaults restored")} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"11px 10px",fontSize:11,fontWeight:950,color:"#8B92A8",cursor:"pointer"}}>restore defaults</button>
         <button onClick={resetLiveSession} className="bb-pressable" style={{background:"rgba(255,92,138,.12)",border:"1px solid rgba(255,92,138,.30)",borderRadius:12,padding:"11px 10px",fontSize:11,fontWeight:950,color:"#FF5C8A",cursor:"pointer"}}>clear active session</button>
       </div>
@@ -13865,6 +14157,31 @@ function getAppTextColor(customizer, key, fallback = "#4A5066") {
 
 const LIVE_SESSION_KEY = "live_session";
 
+const REPLAY_STAT_CARD_FIELD_OPTIONS = [
+  { id:"score", label:"score number" },
+  { id:"topCore", label:"top goals / shots / saves row" },
+  { id:"goals", label:"goals tile" },
+  { id:"shots", label:"shots tile" },
+  { id:"shotPct", label:"shooting % tile" },
+  { id:"saves", label:"saves tile" },
+  { id:"core", label:"core dropdown" },
+  { id:"boost", label:"boost dropdown" },
+  { id:"movement", label:"movement dropdown" },
+  { id:"positioning", label:"positioning dropdown" },
+  { id:"cameraSettings", label:"camera + settings dropdown" },
+  { id:"keyMoments", label:"auto key moments" },
+  { id:"timelineNote", label:"timeline helper note" },
+];
+const DEFAULT_REPLAY_STAT_CARD_FIELDS = Object.fromEntries(REPLAY_STAT_CARD_FIELD_OPTIONS.map(f => [f.id, true]));
+function normalizeReplayStatCardFields(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const out = { ...DEFAULT_REPLAY_STAT_CARD_FIELDS };
+  REPLAY_STAT_CARD_FIELD_OPTIONS.forEach(f => {
+    if (Object.prototype.hasOwnProperty.call(src, f.id)) out[f.id] = src[f.id] !== false;
+  });
+  return out;
+}
+
 const DEFAULT_LIVE_SESSION_CONFIG = {
   enabled: true,
   title: "live session",
@@ -13931,6 +14248,14 @@ const DEFAULT_LIVE_SESSION_CONFIG = {
   replayMatchedLabel: "matched",
   replayOpenButton: "open replay",
   replayProxyPath: "/api/ballchasing",
+  ballchasingWaitAttempts: 18,
+  ballchasingWaitIntervalMs: 30000,
+  filmRoomEnabled: true,
+  twitchAutoDetectEnabled: true,
+  twitchProxyPath: "/api/ballchasing",
+  filmRoomSyncOffsetSeconds: 0,
+  twitchChannels: ["p1=maglvxx", "p2=", "p3="],
+  replayStatCardFields: DEFAULT_REPLAY_STAT_CARD_FIELDS,
   defaultMode: "Ranked 1v1",
   modes: ["Ranked 1v1", "Ranked 2v2", "Ranked 3v3", "Casual 1v1", "Casual 2v2", "Casual 3v3", "Tournament", "Freeplay/Warmup"],
   focusRules: [
@@ -13961,12 +14286,18 @@ function normalizeLiveSessionConfig(input = {}) {
     "currentFocusLabel","focusQuestion","personalStatsLabel","teamStatsLabel","comparisonLabel","nextMoveLabel",
     "quickTagsLabel","sessionGamesLabel","recapTitle","startButton","openButton","endButton","copyButton",
     "readyButton","notReadyButton","tiltButton","breakButton","lastGameButton","noGamesTitle","noGamesBody","idleLabel","gamesStatLabel","recordStatLabel","goalsStatLabel","assistsStatLabel","savesStatLabel","shotsStatLabel","winRateStatLabel","streakStatLabel","yesLabel","noLabel","winLabel","lossLabel","focusYesLabel","focusNoLabel","unmarkedLabel",
-    "replayVaultLabel","replayVaultBody","replayPasteLabel","replaySearchButton","replaySearchLatestButton","replay3sCardsLabel","replayClearButton","replayFoundLabel","replayMissingLabel","replayMatchedLabel","replayOpenButton","replayProxyPath","defaultMode"
+    "replayVaultLabel","replayVaultBody","replayPasteLabel","replaySearchButton","replaySearchLatestButton","replay3sCardsLabel","replayClearButton","replayFoundLabel","replayMissingLabel","replayMatchedLabel","replayOpenButton","replayProxyPath","twitchProxyPath","defaultMode"
   ];
   const out = { ...DEFAULT_LIVE_SESSION_CONFIG, ...src };
   out.enabled = src.enabled !== false;
   out.replayVaultEnabled = src.replayVaultEnabled !== false;
   out.replayPasteEnabled = src.replayPasteEnabled === true;
+  out.filmRoomEnabled = src.filmRoomEnabled !== false;
+  out.twitchAutoDetectEnabled = src.twitchAutoDetectEnabled !== false;
+  out.ballchasingWaitAttempts = Math.max(3, Math.min(30, Number(src.ballchasingWaitAttempts ?? DEFAULT_LIVE_SESSION_CONFIG.ballchasingWaitAttempts) || 18));
+  out.ballchasingWaitIntervalMs = Math.max(12000, Math.min(90000, Number(src.ballchasingWaitIntervalMs ?? DEFAULT_LIVE_SESSION_CONFIG.ballchasingWaitIntervalMs) || 30000));
+  out.filmRoomSyncOffsetSeconds = Math.max(-600, Math.min(600, Number(src.filmRoomSyncOffsetSeconds ?? DEFAULT_LIVE_SESSION_CONFIG.filmRoomSyncOffsetSeconds) || 0));
+  out.replayStatCardFields = normalizeReplayStatCardFields(src.replayStatCardFields || DEFAULT_LIVE_SESSION_CONFIG.replayStatCardFields);
   stringKeys.forEach(k => { out[k] = String(src[k] ?? DEFAULT_LIVE_SESSION_CONFIG[k] ?? "").slice(0, 220); });
   out.modes = cleanLiveSessionLines(src.modes, DEFAULT_LIVE_SESSION_CONFIG.modes);
   out.modes = Array.from(new Set([...out.modes, ...DEFAULT_LIVE_SESSION_CONFIG.modes])).slice(0, 40);
@@ -13975,6 +14306,7 @@ function normalizeLiveSessionConfig(input = {}) {
   out.nextMoves = cleanLiveSessionLines(src.nextMoves, DEFAULT_LIVE_SESSION_CONFIG.nextMoves);
   out.statusOptions = cleanLiveSessionLines(src.statusOptions, DEFAULT_LIVE_SESSION_CONFIG.statusOptions);
   out.ballchasingAliases = cleanLiveSessionLines(src.ballchasingAliases, DEFAULT_LIVE_SESSION_CONFIG.ballchasingAliases);
+  out.twitchChannels = cleanLiveSessionLines(src.twitchChannels, DEFAULT_LIVE_SESSION_CONFIG.twitchChannels);
   if (!out.modes.includes(out.defaultMode)) out.modes = [out.defaultMode, ...out.modes].filter(Boolean);
   return out;
 }
@@ -14001,6 +14333,7 @@ function normalizeLiveSession(input = {}) {
     nextMoveVotes: src.nextMoveVotes && typeof src.nextMoveVotes === "object" && !Array.isArray(src.nextMoveVotes) ? src.nextMoveVotes : {},
     gameNotes: src.gameNotes && typeof src.gameNotes === "object" && !Array.isArray(src.gameNotes) ? src.gameNotes : {},
     replayVault: normalizeLiveReplayVault(src.replayVault),
+    filmRoom: normalizeFilmRoom(src.filmRoom),
     history: Array.isArray(src.history) ? src.history.filter(Boolean).slice(0, 20) : [],
   };
 }
@@ -14022,7 +14355,16 @@ function getLiveSessionWindowGames(session, stats = []) {
 }
 
 function buildLiveSessionStats(session, stats = []) {
-  const games = getLiveSessionWindowGames(session, stats);
+  const rawGames = getLiveSessionWindowGames(session, stats);
+  const seenGames = new Set();
+  const games = rawGames.filter((g, idx) => {
+    const ts = new Date(g?.ts || g?.date || 0).getTime();
+    const bucket = Number.isFinite(ts) ? Math.round(ts / 180000) : idx;
+    const sig = [g?.playerId || "", g?.mode || "", g?.matchId || g?.gameId || g?.sessionCode || "", bucket, g?.ourScore ?? "", g?.theirScore ?? "", g?.goals ?? "", g?.shots ?? "", g?.saves ?? "", g?.score ?? ""].join("|");
+    if (seenGames.has(sig)) return false;
+    seenGames.add(sig);
+    return true;
+  });
   const grouped = {};
   games.forEach((g, idx) => {
     const key = String(g.sessionCode || g.matchId || g.gameId || g.id || `${g.ts || idx}_${g.mode || ""}`);
