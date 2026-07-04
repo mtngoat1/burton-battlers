@@ -1,4 +1,5 @@
 // APP114_RLCS_CLEAN_BETS_BRACKET_UI_FIX
+// APP115_GEEKAY_EU_BET_TEAM_PATCH
 // Drop this in: api/rlcs-lcq.js
 // Supports ?region=na and ?region=eu. Bets are filtered to known teams only; bracket can show all pulled pools.
 
@@ -18,7 +19,7 @@ const REGION_CONFIGS = {
     label: "Europe",
     eventSlug: "tournament/rlcs-2026-europe-last-chance-qualifier/event/3v3-bracket",
     // Small default EU known-team board. Override with RLCS_EU_BET_TEAMS if you want a different list.
-    watchlist: ["Novo Esports", "Magnolia", "Kaydop Corp"],
+    watchlist: ["Novo Esports", "Magnolia", "Kaydop Corp", "Geekay Esports"],
     // Day 1 EU pools appear to use this phase/pool range on start.gg. Day 2 is discovered from event phases when available.
     day1CorePoolIds: [3325158, 3325159, 3325160, 3325161, 3325162, 3325163, 3325164, 3325165],
     fallbackDay2PhaseId: 2297130,

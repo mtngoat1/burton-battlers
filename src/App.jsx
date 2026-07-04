@@ -4459,7 +4459,8 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
       {showPicker && (
         <div style={{ display: "flex", gap: 6, background: "#1A1D2E", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 22, padding: "6px 10px", marginBottom: 6, flexWrap: "wrap", maxWidth: 260, boxShadow: "0 4px 20px rgba(0,0,0,0.4)", zIndex: 10 }}>
           {shuffledEmojis.map(emoji => (
-            <button key={emoji} onClick={() => { onReact(msg.id, emoji); setShowPicker(false); }}
+            <button key={emoji} onClick={(e) => { e.preventDefault(); e.stopPropagation(); clearTimeout(pressTimer.current); setShowPicker(false); onReact?.(msg.id, emoji); }}
+              onTouchEnd={(e) => { e.stopPropagation(); }}
               style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", padding: "2px 3px", borderRadius: 8, lineHeight: 1 }}>
               {emoji}
             </button>
@@ -4499,7 +4500,7 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
       {existingReactions.length > 0 && (
         <div style={{ display: "flex", gap: 4, marginTop: 4, flexWrap: "wrap" }}>
           {existingReactions.map(emoji => (
-            <button key={emoji} onClick={() => onReact(msg.id, emoji)}
+            <button key={emoji} onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowPicker(false); onReact?.(msg.id, emoji); }}
               style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 99, padding: "2px 8px", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: "#E8ECF4" }}>
               {emoji} <span style={{ fontSize: 11, color: "#8B92A8" }}>{reactionCounts[emoji]}</span>
             </button>
@@ -6340,6 +6341,9 @@ function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus,
   const cfg = normalizeAppCustomizer(appCustomizer || {});
   const chatAnimationStyle = cfg.chatAnimationStyle || "slide";
   const [text, setText] = useState("");
+  const [editingMsg, setEditingMsg] = useState(null);
+  const [editingText, setEditingText] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
   const [replyTo,setReplyTo]=useState(null);
   const [mediaFile,setMediaFile]=useState(null);
   const [mediaPreview,setMediaPreview]=useState(null);
@@ -6455,15 +6459,39 @@ useEffect(() => {
     setMessages(upd); await storeSetWithPush("chat", upd);
   };
 
-  const onEdit = async (msg) => {
+  const onEdit = (msg) => {
     if (!msg || msg.playerId !== currentPlayer) return;
-    const nextText = window.prompt("edit message", msg.text || "");
-    if (nextText === null) return;
-    const clean = nextText.trim();
-    if (!clean && !msg.mediaUrl) return;
-    const upd = (messages || []).map(m => m.id === msg.id ? { ...m, text:clean, editedAt:new Date().toISOString() } : m);
-    setMessages(upd);
-    await storeSetWithPush("chat", upd);
+    setReplyTo(null);
+    setEditingMsg(msg);
+    setEditingText(String(msg.text || ""));
+    setTimeout(() => document.getElementById("bb-team-chat-edit-input")?.focus(), 40);
+  };
+
+  const cancelEdit = () => {
+    setEditingMsg(null);
+    setEditingText("");
+    setEditSaving(false);
+  };
+
+  const saveEdit = async () => {
+    if (!editingMsg || editingMsg.playerId !== currentPlayer || editSaving) return;
+    const clean = editingText.trim();
+    if (!clean && !editingMsg.mediaUrl) return;
+    setEditSaving(true);
+    try {
+      const fresh = await storeGet("chat").catch(() => null);
+      const base = Array.isArray(fresh) ? fresh : (Array.isArray(messages) ? messages : []);
+      const editedAt = new Date().toISOString();
+      const upd = base.map(m => m.id === editingMsg.id ? { ...m, text: clean, editedAt } : m);
+      setMessages(upd);
+      await storeSetWithPush("chat", upd);
+      cancelEdit();
+      addToast?.("message edited", "✏️");
+    } catch (err) {
+      console.error("chat edit failed", err);
+      addToast?.("edit failed — try again", "⚠️");
+      setEditSaving(false);
+    }
   };
 
 return (
@@ -6508,7 +6536,19 @@ return (
         <div ref={scrollRef} />
       </div>
       <div style={{display:"flex",flexDirection:"column",background:"rgba(6,7,13,0.96)",borderTop:"1px solid rgba(255,255,255,0.08)",paddingBottom:"max(12px, env(safe-area-inset-bottom))",flexShrink:0,position:"relative",zIndex:5}}>
-        {mediaPreview && (
+        {editingMsg && (
+          <div style={{margin:"10px 16px 0",background:"rgba(255,255,255,0.055)",border:"1px solid rgba(184,255,77,0.22)",borderRadius:14,padding:10,display:"grid",gap:8,animation:"chatFadeIn .16s ease"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+              <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:.8,textTransform:"uppercase"}}>editing message</div>
+              <button onClick={cancelEdit} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",fontWeight:900,fontSize:15}}>×</button>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <input id="bb-team-chat-edit-input" value={editingText} onChange={(e)=>setEditingText(e.target.value)} onKeyDown={(e)=>{ if(e.key==="Enter") saveEdit(); if(e.key==="Escape") cancelEdit(); }} placeholder="edit your message..." style={{...s.chatInput,flex:1,minWidth:0}} />
+              <button onClick={saveEdit} disabled={editSaving || (!editingText.trim() && !editingMsg.mediaUrl)} className="bb-pressable bb-glow-lime" style={{...s.chatSendBtn,width:46,flexShrink:0}}>{editSaving ? "…" : <Check size={16}/>}</button>
+            </div>
+          </div>
+        )}
+        {!editingMsg && mediaPreview && (
           <div style={{margin:"10px 16px 0",background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,padding:8,display:"flex",alignItems:"center",gap:10,animation:"chatFadeIn .16s ease"}}>
             <div style={{width:54,height:54,borderRadius:11,overflow:"hidden",background:"#000",flexShrink:0}}>
               {String(mediaFile?.type||"").startsWith("video/") ? <video src={mediaPreview} muted playsInline style={{width:"100%",height:"100%",objectFit:"cover"}}/> : <img src={mediaPreview} alt="chat upload" style={{width:"100%",height:"100%",objectFit:"cover"}}/>}
@@ -6517,7 +6557,7 @@ return (
             <button onClick={clearChatMedia} className="bb-pressable" style={{background:"none",border:"none",color:"#4A5066",cursor:"pointer",fontWeight:900}}>×</button>
           </div>
         )}
-        {replyTo && (
+        {!editingMsg && replyTo && (
           <div style={{margin:"10px 16px 0",background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"8px 10px",display:"flex",alignItems:"center",gap:8}}>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:10,color:PLAYERS.find(p=>p.id===replyTo.playerId)?.color || "#8B92A8",fontWeight:900}}>replying to {PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player"}</div>
@@ -6526,12 +6566,14 @@ return (
             <button onClick={()=>setReplyTo(null)} className="bb-pressable" style={{background:"none",border:"none",color:"#4A5066",cursor:"pointer",fontWeight:900}}>×</button>
           </div>
         )}
-        <div style={{...s.chatInputRow,borderTop:"none",paddingBottom:0}}>
-          <input ref={mediaInputRef} type="file" accept={CHAT_MEDIA_ACCEPT} onChange={(e)=>pickChatMedia(e.target.files?.[0])} style={{display:"none"}} />
-          <button onClick={()=>mediaInputRef.current?.click()} className="bb-pressable" style={{width:42,height:42,borderRadius:14,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.05)",color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}} title="attach image or video"><ImageIcon size={17}/></button>
-          <input id="bb-team-chat-input" value={text} onFocus={() => { setChatKeyboardOpen(true); [60, 220, 420].forEach(ms => setTimeout(() => scrollChatToBottom("smooth"), ms)); }} onBlur={() => setTimeout(() => setChatKeyboardOpen(false), 140)} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder={replyTo ? `reply to ${PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player"}...` : "message the team..."} style={s.chatInput} />
-          <button onClick={send} disabled={mediaUploading || (!text.trim() && !mediaFile)} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}>{mediaUploading ? <div style={{width:15,height:15,borderRadius:"50%",border:"2px solid rgba(6,7,13,.25)",borderTopColor:"#06070D",animation:"spin .7s linear infinite"}}/> : <Send size={16} />}</button>
-        </div>
+        {!editingMsg && (
+          <div style={{...s.chatInputRow,borderTop:"none",paddingBottom:0}}>
+            <input ref={mediaInputRef} type="file" accept={CHAT_MEDIA_ACCEPT} onChange={(e)=>pickChatMedia(e.target.files?.[0])} style={{display:"none"}} />
+            <button onClick={()=>mediaInputRef.current?.click()} className="bb-pressable" style={{width:42,height:42,borderRadius:14,border:"1px solid rgba(255,255,255,0.08)",background:"rgba(255,255,255,0.05)",color:"#8B92A8",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}} title="attach image or video"><ImageIcon size={17}/></button>
+            <input id="bb-team-chat-input" value={text} onFocus={() => { setChatKeyboardOpen(true); [60, 220, 420].forEach(ms => setTimeout(() => scrollChatToBottom("smooth"), ms)); }} onBlur={() => setTimeout(() => setChatKeyboardOpen(false), 140)} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder={replyTo ? `reply to ${PLAYERS.find(p=>p.id===replyTo.playerId)?.name || "player"}...` : "message the team..."} style={s.chatInput} />
+            <button onClick={send} disabled={mediaUploading || (!text.trim() && !mediaFile)} className="bb-pressable bb-glow-lime" style={s.chatSendBtn}>{mediaUploading ? <div style={{width:15,height:15,borderRadius:"50%",border:"2px solid rgba(6,7,13,.25)",borderTopColor:"#06070D",animation:"spin .7s linear infinite"}}/> : <Send size={16} />}</button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -18220,10 +18262,11 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 // APP112_RLCS_DAY2_ALL_POOLS_BRACKET_PATCH
 // APP113_RLCS_NA_EU_REGION_TABS_PATCH
 // APP114_RLCS_CLEAN_BETS_BRACKET_UI_FIX
+// APP115_GEEKAY_CHAT_EDIT_REACTION_CLOSE_PATCH
 // Bets stay locked to your known teams only. Player props are removed for now.
 const RLCS_REGION_BET_TEAMS = {
   na: ["M80", "FUT Esports", "Gen.G Mobil1 Racing", "Dignitas"],
-  eu: ["Novo Esports", "Magnolia", "Kaydop Corp"],
+  eu: ["Novo Esports", "Magnolia", "Kaydop Corp", "Geekay Esports"],
 };
 const RLCS_HIGH_TIER_TEAMS = Array.from(new Set([...(RLCS_REGION_BET_TEAMS.na || []), ...(RLCS_REGION_BET_TEAMS.eu || [])]));
 const RLCS_LOW_TIER_TEAMS = [];
@@ -18234,9 +18277,9 @@ const RLCS_PRESENCE_KEY = "rlcs_live_presence";
 const RLCS_PRESENCE_TTL_MS = 2 * 60 * 1000;
 const RLCS_ACTIVITY_LIMIT = 8;
 const RLCS_TIER_META = {
-  high: { id:"high", label:"Major-team room", short:"major", color:"#FF61C1", payMult:1.35, cardLimit:8, desc:"M80 · FUT · DIG · Gen.G" },
-  low: { id:"low", label:"major-team room", short:"major", color:"#4D9EFF", payMult:1.35, cardLimit:6, desc:"M80 · FUT · DIG · Gen.G" },
-  all: { id:"all", label:"major-team board", short:"major", color:"#B8FF4D", payMult:1.35, cardLimit:8, desc:"M80 · FUT · DIG · Gen.G" },
+  high: { id:"high", label:"Major-team room", short:"major", color:"#FF61C1", payMult:1.35, cardLimit:8, desc:"M80 · FUT · DIG · Gen.G · Geekay" },
+  low: { id:"low", label:"major-team room", short:"major", color:"#4D9EFF", payMult:1.35, cardLimit:6, desc:"M80 · FUT · DIG · Gen.G · Geekay" },
+  all: { id:"all", label:"major-team board", short:"major", color:"#B8FF4D", payMult:1.35, cardLimit:8, desc:"M80 · FUT · DIG · Gen.G · Geekay" },
 };
 const RLCS_UPSET_MULT = 2.1;
 const RLCS_MAX_BET = 500;
