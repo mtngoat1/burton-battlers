@@ -69,6 +69,7 @@ import { createPortal } from "react-dom";
 // APP122_SHOP_PASS_STYLE_LAYOUT_TOGGLE_PATCH
 // APP123_BALLCHASING_LIVE_SESSION_REPLAY_VAULT_PATCH
 // APP124_REPLAY_VAULT_TEAM_FILTER_PLAYER_CARDS_SAFEAREA_PATCH
+// APP125_LIVE_SESSION_SOLO_DUO_SAFEAREA_FIX_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -805,7 +806,7 @@ function EmptyState({ icon = "○", title, body, actionLabel, onAction }) {
 
 function FullScreenHeader({ title, subtitle, onClose, accent = "#B8FF4D" }) {
   return (
-    <div className="bb-floating-fullscreen-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"12px 16px",paddingTop:"max(30px, calc(env(safe-area-inset-top) + 18px))",paddingBottom:12,minHeight:74,boxSizing:"border-box",position:"sticky",top:0,zIndex:5,borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.72)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",flexShrink:0}}>
+    <div className="bb-floating-fullscreen-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"12px 16px",paddingTop:"max(62px, calc(env(safe-area-inset-top) + 24px))",paddingBottom:12,minHeight:108,boxSizing:"border-box",position:"sticky",top:0,zIndex:5,borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",flexShrink:0}}>
       <button onClick={onClose} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:38,height:38}}>
         <ChevronLeft size={18}/>
       </button>
@@ -928,6 +929,26 @@ function getLiveModeSize(mode = "") {
   if (m.includes("2v2") || m.includes("double") || m.includes("2s")) return 2;
   if (m.includes("3v3") || m.includes("standard") || m.includes("3s") || m.includes("tournament")) return 3;
   return 3;
+}
+function getDefaultDuoPartnerId(currentPlayer = ADMIN_ID) {
+  return PLAYERS.find(p => p.id !== currentPlayer)?.id || PLAYERS[0]?.id || currentPlayer;
+}
+function getLiveSessionDuoPartnerId(session = {}, currentPlayer = ADMIN_ID) {
+  const raw = String(session?.duoPartnerId || session?.twoVTwoPartnerId || "").trim();
+  if (raw && raw !== currentPlayer && PLAYERS.some(p => p.id === raw)) return raw;
+  return getDefaultDuoPartnerId(currentPlayer);
+}
+function getLiveSessionParticipantIds(session = {}, currentPlayer = ADMIN_ID) {
+  const size = getLiveModeSize(session?.mode);
+  if (size <= 1) return [currentPlayer];
+  if (size === 2) {
+    return Array.from(new Set([currentPlayer, getLiveSessionDuoPartnerId(session, currentPlayer)])).filter(Boolean).slice(0, 2);
+  }
+  return PLAYERS.map(p => p.id);
+}
+function getLiveSessionParticipants(session = {}, currentPlayer = ADMIN_ID) {
+  const ids = new Set(getLiveSessionParticipantIds(session, currentPlayer));
+  return PLAYERS.filter(p => ids.has(p.id));
 }
 function getBallchasingPlaylistForMode(mode = "") {
   const m = String(mode || "").toLowerCase();
@@ -1191,9 +1212,10 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const replay = replayVault.latestReplay ? normalizeBallchasingReplay(replayVault.latestReplay) : null;
   const rows = replay ? buildBallchasingPlayerRows(replay, cfg) : [];
   const expected = getLiveModeSize(safe.mode);
-  const visibleRows = getVisibleReplayRowsForMode(rows, safe.mode, currentPlayer);
+  const participantIds = getLiveSessionParticipantIds(safe, currentPlayer);
+  const visibleRows = rows.filter(r => r.appPlayerId && participantIds.includes(r.appPlayerId));
   const matchedRows = visibleRows.filter(r => !!r.appPlayerId);
-  const missingPlayers = getMissingReplayPlayersForMode(visibleRows, safe.mode, currentPlayer);
+  const missingPlayers = PLAYERS.filter(p => participantIds.includes(p.id) && !matchedRows.some(r => r.appPlayerId === p.id));
   const currentMatched = visibleRows.find(r => r.appPlayerId === currentPlayer) || rows.find(r => String(r.name).toLowerCase() === String(me.name).toLowerCase());
   const pasteEnabled = cfg.replayPasteEnabled === true;
   const saveReplay = async (loaded, manualUrl = replayInput) => {
@@ -1319,13 +1341,13 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
           <div style={{background:"rgba(77,158,255,.08)",border:"1px solid rgba(77,158,255,.18)",borderRadius:15,padding:12,marginBottom:10}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
               <div style={{minWidth:0}}>
-                <div style={{fontSize:12,color:"#4D9EFF",fontWeight:950}}>{cfg.replayFoundLabel} · {matchedRows.length}/{expected} shown</div>
+                <div style={{fontSize:12,color:"#4D9EFF",fontWeight:950}}>{cfg.replayFoundLabel} · {matchedRows.length}/{participantIds.length} shown</div>
                 <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{replay.playlistName} · {replay.mapName} · {getReplayScoreboardText(replay)}</div>
               </div>
               {replay.viewUrl && <a href={replay.viewUrl} target="_blank" rel="noreferrer" style={{fontSize:10,fontWeight:950,color:"#B8FF4D",textDecoration:"none",whiteSpace:"nowrap"}}>{cfg.replayOpenButton}</a>}
             </div>
-            {expected === 2 && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>2s auto-detects whoever from Burton Battlers is actually inside this replay.</div>}
-            {!!missingPlayers.length && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>Missing from this 3s replay: {missingPlayers.map(p=>p.name).join(", ")}</div>}
+            {expected === 2 && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>2s is filtered to you + the selected teammate for this session.</div>}
+            {!!missingPlayers.length && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>Missing from this replay: {missingPlayers.map(p=>p.name).join(", ")}</div>}
           </div>
           {!visibleRows.length ? <div style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:12,marginBottom:10}}>
             <div style={{fontSize:12,color:"#E8ECF4",fontWeight:950}}>no Burton player matched</div>
@@ -1373,7 +1395,8 @@ function LiveSessionHomeCard({ currentPlayer, stats = [], appCustomizer, addToas
   if (!cfg.enabled) return null;
   const summary = buildLiveSessionStats(safe, stats);
   const player = PLAYERS.find(p => p.id === currentPlayer) || PLAYERS[0];
-  const readyPlayers = PLAYERS.filter(p => safe.players?.[p.id]?.status === "ready" || safe.players?.[p.id]?.status === "in game").length;
+  const participantPlayers = safe.active ? getLiveSessionParticipants(safe, currentPlayer) : [player];
+  const readyPlayers = participantPlayers.filter(p => safe.players?.[p.id]?.status === "ready" || safe.players?.[p.id]?.status === "in game").length;
   const startSession = async () => {
     const now = new Date().toISOString();
     const next = normalizeLiveSession({
@@ -1403,7 +1426,7 @@ function LiveSessionHomeCard({ currentPlayer, stats = [], appCustomizer, addToas
           <div style={{textAlign:"right",flexShrink:0}}>
             <div style={{fontSize:10,color:safe.active?"#7CFFB2":"#4A5066",fontWeight:950,textTransform:"uppercase"}}>{safe.active ? cfg.activeBadge : cfg.idleLabel}</div>
             <div style={{fontSize:18,color:player.color,fontWeight:950,marginTop:6}}>{statusText}</div>
-            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:900,marginTop:3}}>{readyPlayers}/{PLAYERS.length} ready</div>
+            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:900,marginTop:3}}>{readyPlayers}/{participantPlayers.length} ready</div>
           </div>
         </div>
         <div style={{marginTop:13,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
@@ -1431,7 +1454,22 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
   const summary = buildLiveSessionStats(safe, stats);
   const me = PLAYERS.find(p => p.id === currentPlayer) || PLAYERS[0];
   const myStats = summary.playerRows.find(p => p.id === currentPlayer) || { games:0,wins:0,losses:0,goals:0,assists:0,saves:0,shots:0,demos:0,score:0,winRate:0 };
-  const allReady = PLAYERS.every(p => ["ready","in game"].includes(String(safe.players?.[p.id]?.status || "")));
+  const modeSize = getLiveModeSize(safe.mode);
+  const participantPlayers = getLiveSessionParticipants(safe, currentPlayer);
+  const participantIds = participantPlayers.map(p => p.id);
+  const participantSet = new Set(participantIds);
+  const visiblePlayerRows = summary.playerRows.filter(p => participantSet.has(p.id));
+  const allReady = participantPlayers.every(p => ["ready","in game"].includes(String(safe.players?.[p.id]?.status || "")));
+  const waitingPlayers = participantPlayers.filter(p => !["ready","in game"].includes(String(safe.players?.[p.id]?.status || "")));
+  const visibleTeam = {
+    games: summary.team.games,
+    wins: summary.team.wins,
+    losses: summary.team.losses,
+    goals: visiblePlayerRows.reduce((sum,p)=>sum+(Number(p.goals)||0),0),
+    assists: visiblePlayerRows.reduce((sum,p)=>sum+(Number(p.assists)||0),0),
+    saves: visiblePlayerRows.reduce((sum,p)=>sum+(Number(p.saves)||0),0),
+    shots: visiblePlayerRows.reduce((sum,p)=>sum+(Number(p.shots)||0),0),
+  };
   const latestGroup = summary.gameGroups[0];
   const latestKey = latestGroup?.key;
   const latestNote = latestKey ? (safe.gameNotes?.[latestKey] || {}) : {};
@@ -1449,7 +1487,13 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
     const recap = { id:`recap_${Date.now()}`, sessionId:safe.id, startedAt:safe.startedAt, endedAt, team:{ ...summary.team }, mostRecentIssue:Object.entries(safe.gameNotes || {}).flatMap(([_,n])=>n?.tags||[])[0] || "none" };
     await saveSession(normalizeLiveSession({ ...safe, active:false, endedAt, history:[recap, ...(safe.history || [])].slice(0,20) }), "session ended", addToast, "🏁");
   };
-  const setMode = (mode) => updateSession({ mode }, "session mode updated", "🎮");
+  const setMode = (mode) => {
+    const nextSize = getLiveModeSize(mode);
+    const patch = { mode };
+    if (nextSize === 2) patch.duoPartnerId = getLiveSessionDuoPartnerId(safe, currentPlayer);
+    updateSession(patch, "session mode updated", "🎮");
+  };
+  const setDuoPartner = (duoPartnerId) => updateSession({ duoPartnerId }, "2v2 teammate updated", "🤝");
   const setFocus = (focusRule) => updateSession({ focusRule }, "focus updated", "🎯");
   const voteNextMove = (move) => updateSession({ nextMoveVotes:{ ...(safe.nextMoveVotes || {}), [currentPlayer]:move } }, `next move: ${move}`, "➡️");
   const setLatestFocus = (followed) => {
@@ -1507,16 +1551,22 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
                       {cfg.statusOptions.map(st => <option key={st} value={st}>{st}</option>)}
                     </select>
                   </div>
+                  {modeSize === 2 && <div style={{gridColumn:"1 / -1"}}>
+                    <div style={{fontSize:9,color:"#4A5066",fontWeight:950,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>2v2 teammate</div>
+                    <select value={getLiveSessionDuoPartnerId(safe, currentPlayer)} onChange={e=>setDuoPartner(e.target.value)} style={{width:"100%",background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:12,padding:"10px",color:"#E8ECF4",fontWeight:850}}>
+                      {PLAYERS.filter(p => p.id !== currentPlayer).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  </div>}
                 </div>
               </div>
 
               <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                   <div style={{fontSize:10,color:allReady?"#7CFFB2":"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>{cfg.readyCheckLabel}</div>
-                  <div style={{fontSize:10,color:allReady?"#7CFFB2":"#FFD166",fontWeight:950}}>{allReady ? cfg.queueUnlockedLabel : `${cfg.queueLockedLabel} ${PLAYERS.filter(p=>!["ready","in game"].includes(String(safe.players?.[p.id]?.status||""))).map(p=>p.name).join(", ")}`}</div>
+                  <div style={{fontSize:10,color:allReady?"#7CFFB2":"#FFD166",fontWeight:950}}>{allReady ? cfg.queueUnlockedLabel : `${cfg.queueLockedLabel} ${waitingPlayers.map(p=>p.name).join(", ")}`}</div>
                 </div>
                 <div style={{display:"grid",gap:8}}>
-                  {PLAYERS.map(p => {
+                  {participantPlayers.map(p => {
                     const st = safe.players?.[p.id]?.status || "not ready";
                     return <div key={p.id} style={{display:"flex",alignItems:"center",gap:9,background:"rgba(255,255,255,.04)",borderRadius:12,padding:"9px 10px"}}>
                       <div style={{width:9,height:9,borderRadius:99,background:["ready","in game"].includes(st)?p.color:"#4A5066",boxShadow:["ready","in game"].includes(st)?`0 0 12px ${p.color}`:"none"}}/>
@@ -1543,7 +1593,7 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
                 </div>}
               </div>
 
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+              <div style={{display:"grid",gridTemplateColumns:modeSize <= 1 ? "1fr" : "1fr 1fr",gap:10,marginBottom:14}}>
                 <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:13}}>
                   <div style={{fontSize:10,color:me.color,fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.personalStatsLabel}</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
@@ -1553,35 +1603,35 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
                     {statTile(cfg.savesStatLabel, myStats.saves)}
                   </div>
                 </div>
-                <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:13}}>
-                  <div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.teamStatsLabel}</div>
+                {modeSize > 1 && <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:13}}>
+                  <div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{modeSize === 2 ? "duo night" : cfg.teamStatsLabel}</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
-                    {statTile(cfg.gamesStatLabel, summary.team.games, "#FFD166")}
-                    {statTile(cfg.recordStatLabel, `${summary.team.wins}-${summary.team.losses}`, "#FFD166")}
-                    {statTile(cfg.goalsStatLabel, summary.team.goals)}
-                    {statTile(cfg.savesStatLabel, summary.team.saves)}
+                    {statTile(cfg.gamesStatLabel, visibleTeam.games, "#FFD166")}
+                    {statTile(cfg.recordStatLabel, `${visibleTeam.wins}-${visibleTeam.losses}`, "#FFD166")}
+                    {statTile(cfg.goalsStatLabel, visibleTeam.goals)}
+                    {statTile(cfg.savesStatLabel, visibleTeam.saves)}
                   </div>
-                </div>
+                </div>}
               </div>
 
-              <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
-                <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.comparisonLabel}</div>
+              {modeSize > 1 && <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
+                <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{modeSize === 2 ? "duo comparison" : cfg.comparisonLabel}</div>
                 <div style={{display:"grid",gridTemplateColumns:"76px repeat(5,1fr)",gap:5,marginBottom:6}}>
                   <div/>
                   {[cfg.goalsStatLabel, cfg.assistsStatLabel, cfg.savesStatLabel, cfg.shotsStatLabel, cfg.winRateStatLabel].map(h=><div key={h} style={{fontSize:9,color:"#4A5066",fontWeight:950,textAlign:"center"}}>{h}</div>)}
                 </div>
-                {summary.playerRows.map(p => <div key={p.id} style={{display:"grid",gridTemplateColumns:"76px repeat(5,1fr)",gap:5,alignItems:"center",marginBottom:7}}>
+                {visiblePlayerRows.map(p => <div key={p.id} style={{display:"grid",gridTemplateColumns:"76px repeat(5,1fr)",gap:5,alignItems:"center",marginBottom:7}}>
                   <div style={{fontSize:10.5,color:p.id===currentPlayer?p.color:"#E8ECF4",fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
                   {[p.goals,p.assists,p.saves,p.shots,`${p.winRate}%`].map((v,i)=><div key={i} style={{fontSize:11,color:p.color,fontWeight:950,textAlign:"center"}}>{v}</div>)}
                 </div>)}
-              </div>
+              </div>}
 
               <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
                 <div style={{fontSize:10,color:"#A78BFA",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.nextMoveLabel}</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   {cfg.nextMoves.map(move => <button key={move} onClick={()=>voteNextMove(move)} className="bb-pressable" style={{background:safe.nextMoveVotes?.[currentPlayer]===move?"rgba(167,139,250,.18)":"rgba(255,255,255,.05)",border:`1px solid ${safe.nextMoveVotes?.[currentPlayer]===move?"rgba(167,139,250,.36)":"rgba(255,255,255,.08)"}`,borderRadius:12,padding:"10px",fontSize:11,fontWeight:950,color:safe.nextMoveVotes?.[currentPlayer]===move?"#A78BFA":"#8B92A8",cursor:"pointer"}}>{move}</button>)}
                 </div>
-                <div style={{marginTop:9,display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(safe.nextMoveVotes||{}).map(([pid, move]) => <span key={pid} style={{fontSize:9.5,color:"#8B92A8",background:"rgba(255,255,255,.05)",borderRadius:999,padding:"5px 7px"}}>{PLAYERS.find(p=>p.id===pid)?.name}: {move}</span>)}</div>
+                <div style={{marginTop:9,display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(safe.nextMoveVotes||{}).filter(([pid])=>participantSet.has(pid)).map(([pid, move]) => <span key={pid} style={{fontSize:9.5,color:"#8B92A8",background:"rgba(255,255,255,.05)",borderRadius:999,padding:"5px 7px"}}>{PLAYERS.find(p=>p.id===pid)?.name}: {move}</span>)}</div>
               </div>
 
               <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
@@ -13631,6 +13681,7 @@ function normalizeLiveSession(input = {}) {
     mode: src.mode || DEFAULT_LIVE_SESSION_CONFIG.defaultMode,
     focusRule: src.focusRule || DEFAULT_LIVE_SESSION_CONFIG.focusRules[0],
     createdBy: src.createdBy || null,
+    duoPartnerId: (src.duoPartnerId && PLAYERS.some(p => p.id === src.duoPartnerId)) ? src.duoPartnerId : null,
     players: src.players && typeof src.players === "object" && !Array.isArray(src.players) ? src.players : {},
     nextMoveVotes: src.nextMoveVotes && typeof src.nextMoveVotes === "object" && !Array.isArray(src.nextMoveVotes) ? src.nextMoveVotes : {},
     gameNotes: src.gameNotes && typeof src.gameNotes === "object" && !Array.isArray(src.gameNotes) ? src.gameNotes : {},
