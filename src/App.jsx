@@ -63,6 +63,7 @@ import { createPortal } from "react-dom";
 // APP101_RLCS_LIVE_STARTGG_BACKEND_PATCH
 // APP117_JOB_RANDOMIZER_TIME_LIMIT_RLCS_ACTIVITY_REMOVE_PATCH
 // APP118_FAST_BOOT_CLICK_RESPONSIVENESS_PATCH
+// APP119_PARSE_SYNC_FAST_BOOT_RECOVERY_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -9747,6 +9748,22 @@ function bbSleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function getFreshStatsForWrite(fallback = []) {
+  try {
+    const fresh = await storeGet("stats").catch(() => null);
+    if (Array.isArray(fresh) && isMeaningfulStatsSnapshot(fresh)) return sanitizeStatsForRender(fresh);
+  } catch (_) {}
+  return sanitizeStatsForRender(Array.isArray(fallback) ? fallback : []);
+}
+
+async function saveStatsEverywhere(nextStats, setStatsFn) {
+  const clean = sanitizeStatsForRender(nextStats);
+  if (typeof setStatsFn === "function") setStatsFn(clean);
+  await storeSet("stats", clean);
+  if (isMeaningfulStatsSnapshot(clean)) storeSet("stats_backup", clean).catch(() => {});
+  return clean;
+}
+
 function normalizeParsePlaylistName(value) {
   return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -10347,6 +10364,7 @@ const syncRoomFromParse = async () => {
   setRoomSyncMsg("checking tracker…");
 
   try {
+    const freshRoomStats = await getFreshStatsForWrite(stats);
     const pulled = await Promise.all(
       PLAYERS
   .filter(p => teamRoom.players.includes(p.id))
@@ -10407,7 +10425,7 @@ console.log("RESULTS:", results);
     }
 
     const alreadyImported = pulled.some(x =>
-      stats.some(g => g.parseMatchId === x.match.id && g.playerId === x.player.id)
+      freshRoomStats.some(g => g.parseMatchId === x.match.id && g.playerId === x.player.id)
     );
 
     if (alreadyImported) {
@@ -10421,7 +10439,7 @@ console.log("RESULTS:", results);
     
     console.log("STARTING IMPORT");
 
-    const autoSessionCode = getNextAutoGameSessionCode(stats);
+    const autoSessionCode = getNextAutoGameSessionCode(freshRoomStats);
     let importedGames = pulled.map(({ player, match }) => parseGameToStatEntry({
       sessionCode: autoSessionCode,
       player,
@@ -10431,13 +10449,12 @@ console.log("RESULTS:", results);
     }));
     importedGames = applySyncedTeamScores(importedGames, result);
 
-    const updStats = [...importedGames, ...stats];
+    const updStats = [...importedGames, ...freshRoomStats];
     
     console.log("SUCCESS!");
 console.log(updStats);
     
-    setStats(updStats);
-    await storeSet("stats", updStats);
+    await saveStatsEverywhere(updStats, setStats);
 
     setTeamRoom(null);
     await storeSet("team_room", { closed: true, closedAt: new Date().toISOString() });
@@ -10702,7 +10719,8 @@ useEffect(() => {
 }, [jumpDate]);
 
 const saveGame=async(entry)=>{
-  const upd=[entry,...stats]; setStats(upd); await storeSet("stats",upd);
+  const baseStats = await getFreshStatsForWrite(stats);
+  const upd=[entry,...baseStats]; await saveStatsEverywhere(upd, setStats);
   const pts=await storeGet("points")||{};
   let cur=pts[currentPlayer]||0;
   const pointsMult = isEventActive("double_points") ? 2 : 1;
@@ -10732,16 +10750,16 @@ const updXP={...pxp,[currentPlayer]:(pxp[currentPlayer]||0)+2*finalMult};
 const updateOpponentScore = async (game, theirScoreValue) => {
   const val = Number(theirScoreValue);
   if (!Number.isFinite(val)) return;
+  const baseStats = await getFreshStatsForWrite(stats);
   const gameSession = game?.roomId || game?.sessionCode;
-  const upd = stats.map(g => {
+  const upd = baseStats.map(g => {
     const thisSession = g?.roomId || g?.sessionCode;
     const sameGroupedGame = !!gameSession && !!thisSession && thisSession === gameSession && g.mode === game.mode;
     const sameSingleGame = !!game?.id && g.id === game.id;
     if (!sameGroupedGame && !sameSingleGame) return g;
     return { ...g, theirScore: val, opponentScoreManual: true };
   });
-  setStats(upd);
-  await storeSet("stats", upd);
+  await saveStatsEverywhere(upd, setStats);
   addToast?.("opponent score saved", "✅");
 };
   const modeGames=stats.filter(g=>g.mode===mode);
@@ -10827,6 +10845,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     addToast?.(`syncing latest ${requestedMode} match…`, "🔄");
 
     try {
+      const freshSyncStats = await getFreshStatsForWrite(stats);
       const pulled = await Promise.all(
         playersToSync.map(async (p) => ({
           player: p,
@@ -10866,18 +10885,18 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       }
 
       const alreadyImported = pulled.some(x =>
-        stats.some(g => g.parseMatchId === x.match.id && g.playerId === x.player.id)
+        freshSyncStats.some(g => g.parseMatchId === x.match.id && g.playerId === x.player.id)
       );
 
       if (alreadyImported) {
         const refreshResult = pulled[0].match.metadata.result;
-        const existingSession = stats.find(g => pulled.some(x => g.parseMatchId === x.match.id && g.playerId === x.player.id))?.sessionCode || getNextAutoGameSessionCode(stats);
+        const existingSession = freshSyncStats.find(g => pulled.some(x => g.parseMatchId === x.match.id && g.playerId === x.player.id))?.sessionCode || getNextAutoGameSessionCode(freshSyncStats);
         let refreshedGames = pulled.map(({ player, match }) =>
           parseGameToStatEntry({ sessionCode: existingSession, player, match, mode: requestedMode, result: refreshResult })
         );
         refreshedGames = applySyncedTeamScores(refreshedGames, refreshResult);
         let refreshed = false;
-        const updStats = stats.map(g => {
+        const updStats = freshSyncStats.map(g => {
           const fresh = refreshedGames.find(f => f.parseMatchId === g.parseMatchId && f.playerId === g.playerId);
           if (!fresh) return g;
           refreshed = true;
@@ -10891,8 +10910,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           };
         });
         if (refreshed) {
-          setStats(updStats);
-          await storeSet("stats", updStats);
+          await saveStatsEverywhere(updStats, setStats);
           const freshBetsForRefresh = await storeGet("bets").catch(() => []);
           const freshPointsForRefresh = await storeGet("points").catch(() => points) || points;
           await settleDueBetsNow({
@@ -10920,15 +10938,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       }
 
       const result = pulled[0].match.metadata.result;
-      const sessionCode = getNextAutoGameSessionCode(stats);
+      const sessionCode = getNextAutoGameSessionCode(freshSyncStats);
       let importedGames = pulled.map(({ player, match }) =>
         parseGameToStatEntry({ sessionCode, player, match, mode: requestedMode, result })
       );
       importedGames = applySyncedTeamScores(importedGames, result);
 
-      const updStats = [...importedGames, ...stats];
-      setStats(updStats);
-      await storeSet("stats", updStats);
+      const updStats = [...importedGames, ...freshSyncStats];
+      await saveStatsEverywhere(updStats, setStats);
       // APP56: settle any matching prop immediately after the next synced game is written.
       await settleDueBetsNow({
         bets: await storeGet("bets").catch(() => []),
@@ -14393,16 +14410,16 @@ const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "commen
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
 const RT_KEYS_LIVE = [
-  // APP118: keep realtime tiny during normal app use. Heavy keys like stats/points/posts/bets
-  // hydrate in the background and update when user actions save them, instead of live-subscribing
-  // every phone to every large shared record.
-  "chat", "presence", "pings", "team_room", "team_sessions", "typing",
-  "activity_feed", "soundboard_events", ADMIN_LIVE_SYNC_KEY
+  // APP119: keep realtime lean, but keep gameplay-critical keys live.
+  // Removing stats/parse_credits made Parse sync look broken across devices and before hydration finished.
+  "chat", "stats", "points", "bets", "parse_credits", "presence", "pings",
+  "team_room", "team_sessions", "typing", "activity_feed", "soundboard_events",
+  ADMIN_LIVE_SYNC_KEY
 ];
-const BOOT_LIVE_DELAY_MS = 4500;
-const BOOT_SECONDARY_HYDRATE_DELAY_MS = 5500;
-const BOOT_MMR_HYDRATE_DELAY_MS = 15000;
-const BOOT_BACKGROUND_EFFECT_DELAY_MS = 6500;
+const BOOT_LIVE_DELAY_MS = 2500;
+const BOOT_SECONDARY_HYDRATE_DELAY_MS = 3200;
+const BOOT_MMR_HYDRATE_DELAY_MS = 9000;
+const BOOT_BACKGROUND_EFFECT_DELAY_MS = 3500;
 
 // ===================== One-time manual restore =====================
 const MANUAL_RESTORE_PATCH_ID = "manual_restore_20260630_points_pass_v1";
@@ -20920,17 +20937,18 @@ const loadSharedData = (pid) => {
 
   const hydrateCritical = async () => {
     try {
-      const [sched, training, comp, sts, pts, pxp, asi, customizer, floatMode, bos] = await Promise.all([
-        safeGet("schedule"),
-        safeGet("training"),
-        safeGet("completions"),
-        safeGet("stats"),
-        safeGet("points"),
-        safeGet("pass_xp"),
-        safeGet(ADMIN_SHOP_ITEMS_KEY),
-        safeGet(APP_CUSTOMIZER_KEY),
-        safeGet("full_screen_float_mode"),
-        safeGet(BURTON_OS_KEY),
+      const [sched, training, comp, sts, pts, pxp, parseCreditSnap, asi, customizer, floatMode, bos] = await Promise.all([
+        safeGet("schedule", null, 900),
+        safeGet("training", null, 900),
+        safeGet("completions", null, 900),
+        safeGet("stats", null, 1200),
+        safeGet("points", null, 1200),
+        safeGet("pass_xp", null, 900),
+        safeGet("parse_credits", {}, 900),
+        safeGet(ADMIN_SHOP_ITEMS_KEY, null, 900),
+        safeGet(APP_CUSTOMIZER_KEY, null, 900),
+        safeGet("full_screen_float_mode", null, 900),
+        safeGet(BURTON_OS_KEY, null, 900),
       ]);
 
       if (sched && typeof sched === "object") setSchedule(sched);
@@ -20953,6 +20971,7 @@ const loadSharedData = (pid) => {
         setStats(statsCurrent);
         statsRef.current = statsCurrent;
       }
+      if (parseCreditSnap && typeof parseCreditSnap === "object" && !Array.isArray(parseCreditSnap)) setParseCredits(parseCreditSnap);
       if (customizer && typeof customizer === "object") setAppCustomizer(normalizeAppCustomizer(customizer));
       if (floatMode !== undefined && floatMode !== null) setFullScreenFloatMode(floatMode === "sheet" || floatMode === false ? false : true);
       if (bos && typeof bos === "object") { const safeBos = normalizeBurtonOS(bos); setBurtonOS(safeBos); burtonOSRef.current = safeBos; }
@@ -21115,12 +21134,16 @@ const loadSharedData = (pid) => {
 };
 
 const useParseCredit = async (playerId) => {
-  const current = parseCredits?.[playerId] ?? PARSE_CREDITS_DEFAULT;
+  const freshCredits = await storeGet("parse_credits").catch(() => null);
+  const sourceCredits = freshCredits && typeof freshCredits === "object" && !Array.isArray(freshCredits)
+    ? freshCredits
+    : (parseCredits && typeof parseCredits === "object" ? parseCredits : {});
+  const current = sourceCredits?.[playerId] ?? PARSE_CREDITS_DEFAULT;
   if (current <= 0) {
     addToast("out of parse credits — request more in the squad tab", "❌");
     return false;
   }
-  const upd = { ...parseCredits, [playerId]: current - 1 };
+  const upd = { ...sourceCredits, [playerId]: current - 1 };
   setParseCredits(upd);
   await storeSet("parse_credits", upd);
   return true;
