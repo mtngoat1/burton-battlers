@@ -12426,6 +12426,7 @@ const DEFAULT_PREMIUM_FEEL_SETTINGS = {
   shopItemTilt:false,
   profileShowcaseGlow:false,
   rankedStatCards:false,
+  passRocketLayout:false,
   passRocketTrack:false,
   passTierCards:false,
   passPremiumRibbon:false,
@@ -12465,6 +12466,7 @@ const PREMIUM_FEEL_CONTROLS = [
   { id:"shopItemTilt", label:"shop item tilt", emoji:"🛒", desc:"shop cards gain tiny perspective/tilt motion on hover" },
   { id:"profileShowcaseGlow", label:"profile showcase glow", emoji:"👤", desc:"profile/player showcase cards get a soft identity aura" },
   { id:"rankedStatCards", label:"ranked stat cards", emoji:"📈", desc:"stats/rank cards get a cleaner competitive scoreboard feel" },
+  { id:"passRocketLayout", label:"Rocket Pass layout switch", emoji:"🚗", desc:"swaps the Pass tab between the current list view and a Rocket Pass-style two-lane reward track; this toggle works by itself for testing" },
   { id:"passRocketTrack", label:"rocket-pass track polish", emoji:"🏁", desc:"pass rows/cards get a more Rocket Pass-style lane and tier feel" },
   { id:"passTierCards", label:"premium pass tier cards", emoji:"🎟️", desc:"pass rewards read more like collectible tier tiles" },
   { id:"passPremiumRibbon", label:"premium pass ribbon", emoji:"🏷️", desc:"premium/locked pass areas get ribbon/glow treatment" },
@@ -12504,6 +12506,7 @@ const PREMIUM_FEEL_BODY_CLASS_BY_KEY = {
   shopItemTilt:"bb-premium-shop-tilt",
   profileShowcaseGlow:"bb-premium-profile-glow",
   rankedStatCards:"bb-premium-ranked-cards",
+  passRocketLayout:"bb-premium-pass-layout",
   passRocketTrack:"bb-premium-pass-track",
   passTierCards:"bb-premium-pass-tier-cards",
   passPremiumRibbon:"bb-premium-pass-ribbon",
@@ -14717,11 +14720,13 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
   const claimKey = (t, tier) => `${currentPlayer}_${t}_${tier}`;
   const isClaimed = (t, tier) => !!(passClaimed?.[claimKey(t, tier)]);
 
-  const claimReward = async (tier, reward) => {
-    const t = track;
+  const claimReward = async (tier, reward, rewardTrack = track) => {
+    const t = rewardTrack;
+    const progressForReward = t === "free" ? freeProgress : premiumProgress;
+    if (t === "premium" && !isPremium) return;
     const key = claimKey(t, tier);
     if (isClaimed(t, tier)) return;
-    if (currentProgress.tier < tier) return;
+    if (progressForReward.tier < tier) return;
 
     const updClaimed = { ...passClaimed, [key]: true };
     setPassClaimed(updClaimed);
@@ -14759,6 +14764,57 @@ const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ ti
 const [tiersExpanded, setTiersExpanded] = useState(false);
 const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
   const myTokens = passTokens?.[currentPlayer] || [];
+  const premiumFeelCfg = normalizePremiumFeelSettings(appCustomizer?.premiumFeel);
+  const useRocketPassLayout = !!premiumFeelCfg.passRocketLayout;
+  const rocketCenterTier = Math.max(1, Math.min(Math.max(freeProgress.tier, premiumProgress.tier || 1), FREE_TIER_COUNT));
+  const rocketStartTier = Math.max(1, Math.min(rocketCenterTier - 2, FREE_TIER_COUNT - 4));
+  const rocketTiers = Array.from({ length: 5 }, (_, i) => rocketStartTier + i).filter(tier => tier >= 1 && tier <= FREE_TIER_COUNT);
+  const rewardEmojiFor = (reward) => reward?.type === "coins" ? "🪙" : reward?.type === "token" ? "🎟" : (reward?.type === "color" || reward?.type === "text_color") ? "🎨" : reward?.type === "icon" ? (reward.value || "✨") : reward?.type === "title" ? "📝" : reward?.type === "car" ? "🏎️" : "🎁";
+  const renderRocketPassTile = (rewardTrack, tier) => {
+    const rewardMap = rewardTrack === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
+    const reward = rewardMap?.[tier];
+    const progress = rewardTrack === "free" ? freeProgress : premiumProgress;
+    const accent = rewardTrack === "free" ? playerColor : "#A78BFA";
+    const lockedPremium = rewardTrack === "premium" && !isPremium;
+    const unlocked = !lockedPremium && progress.tier >= tier;
+    const claimed = isClaimed(rewardTrack, tier);
+    const current = !lockedPremium && progress.tier === tier;
+    const label = reward?.label || reward?.value || "reward";
+    return (
+      <div key={`${rewardTrack}_${tier}`} className="bb-pass-rocket-tile" style={{
+        minWidth:132,
+        scrollSnapAlign:"center",
+        borderRadius:18,
+        padding:12,
+        position:"relative",
+        overflow:"hidden",
+        background:claimed ? `linear-gradient(145deg,${bbAlpha(accent,.16)},rgba(255,255,255,.04))` : current ? `linear-gradient(145deg,${bbAlpha(accent,.22)},rgba(255,255,255,.055))` : unlocked ? "linear-gradient(145deg,rgba(255,255,255,.07),rgba(255,255,255,.03))" : "linear-gradient(145deg,rgba(255,255,255,.035),rgba(255,255,255,.015))",
+        border:`1px solid ${claimed || current ? bbAlpha(accent,.48) : unlocked ? "rgba(255,255,255,.12)" : "rgba(255,255,255,.055)"}`,
+        boxShadow:current ? `0 18px 48px ${bbAlpha(accent,.18)}, inset 0 1px 0 rgba(255,255,255,.16)` : "0 12px 26px rgba(0,0,0,.22)",
+        opacity:lockedPremium ? .45 : 1,
+      }}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:10}}>
+          <div style={{fontSize:9,color:accent,fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>{rewardTrack}</div>
+          <div style={{fontSize:10,color:claimed ? "#7CFFB2" : unlocked ? accent : "#4A5066",fontWeight:1000}}>{claimed ? "✓" : lockedPremium ? "🔒" : unlocked ? "open" : `T${tier}`}</div>
+        </div>
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,color:unlocked || current ? "#E8ECF4" : "#4A5066",fontWeight:700,lineHeight:1}}>TIER {tier}</div>
+        <div style={{height:72,borderRadius:15,margin:"12px 0 10px",display:"flex",alignItems:"center",justifyContent:"center",background:`radial-gradient(circle at 50% 35%,${bbAlpha(accent,.22)},rgba(255,255,255,.035) 62%,rgba(0,0,0,.12))`,border:`1px solid ${bbAlpha(accent,.18)}`,fontSize:34,filter:lockedPremium?"grayscale(.8)":"none"}}>
+          {rewardEmojiFor(reward)}
+        </div>
+        <div style={{fontSize:12,color:unlocked || current ? "#E8ECF4" : "#6D7488",fontWeight:1000,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div>
+        <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase",letterSpacing:.7,marginTop:3}}>{reward?.type || "reward"}{reward?.type === "coins" ? ` · +${reward.value}` : ""}</div>
+        <div style={{marginTop:11,minHeight:28,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {claimed ? (
+            <div style={{fontSize:10.5,color:"#7CFFB2",fontWeight:1000,textTransform:"uppercase",letterSpacing:.7}}>claimed</div>
+          ) : unlocked ? (
+            <button onClick={()=>claimReward(tier, reward, rewardTrack)} className="bb-pressable bb-glow-lime" style={{width:"100%",background:accent,border:"none",borderRadius:10,padding:"8px 0",fontSize:11,fontWeight:1000,color:"#06070D",cursor:"pointer"}}>claim</button>
+          ) : (
+            <div style={{fontSize:10,color:"#4A5066",fontWeight:900}}>{lockedPremium ? "premium locked" : `${Math.max(1, tier - progress.tier)} tier${tier - progress.tier !== 1 ? "s" : ""} away`}</div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div ref={garageTopRef} className="bb-tab-content" style={s.tabContent} onTouchStart={handleTrackTouchStart} onTouchMove={handleTrackTouchMove} onTouchEnd={handleTrackTouchEnd}>
@@ -14830,6 +14886,76 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
         )}
       </div>
 
+      {useRocketPassLayout ? (
+        <div style={{marginBottom:18}}>
+          <div style={{background:"linear-gradient(135deg,rgba(167,139,250,.16),rgba(77,158,255,.07),rgba(184,255,77,.06))",border:"1px solid rgba(167,139,250,.28)",borderRadius:20,padding:14,marginBottom:12,boxShadow:"0 18px 46px rgba(0,0,0,.26)",position:"relative",overflow:"hidden"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+              <div>
+                <div style={{fontSize:10,color:"#A78BFA",fontWeight:1000,letterSpacing:1.1,textTransform:"uppercase",marginBottom:4}}>Rocket Pass-style preview</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,color:"#E8ECF4",lineHeight:1,fontWeight:700}}>Burton Pass Track</div>
+                <div style={{fontSize:11,color:"#8B92A8",marginTop:6,lineHeight:1.35}}>Admin toggle is on. Free and Premium rewards display as two horizontal lanes.</div>
+              </div>
+              <div style={{textAlign:"right",minWidth:80}}>
+                <div style={{fontSize:9,color:"#4A5066",fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>current tier</div>
+                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:30,color:playerColor,fontWeight:700,lineHeight:1}}>{freeProgress.tier}</div>
+              </div>
+            </div>
+            <div style={{height:8,background:"rgba(255,255,255,.08)",borderRadius:99,overflow:"hidden",marginTop:14}}>
+              <div style={{height:"100%",width:`${Math.min(100,(freeProgress.xpIntoTier / freeProgress.xpForNext) * 100)}%`,background:`linear-gradient(90deg,${playerColor},#A78BFA)`,borderRadius:99}} />
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#8B92A8",fontWeight:800,marginTop:6}}>
+              <span>{freeProgress.xpIntoTier}/{freeProgress.xpForNext} XP to next tier</span>
+              <span>{isPremium ? "premium active" : "premium locked"}</span>
+            </div>
+          </div>
+
+          <div style={{display:"grid",gap:12}}>
+            {[{id:"premium",label:"premium lane",color:"#A78BFA",progress:premiumProgress},{id:"free",label:"free lane",color:playerColor,progress:freeProgress}].map(lane => (
+              <div key={lane.id} className="bb-pass-rocket-lane" style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${bbAlpha(lane.color,.24)}`,borderRadius:18,padding:12,overflow:"hidden"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
+                  <div>
+                    <div style={{fontSize:10,color:lane.color,fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>{lane.label}</div>
+                    <div style={{fontSize:11,color:"#4A5066",fontWeight:800,marginTop:2}}>tier {lane.progress.tier} · swipe sideways</div>
+                  </div>
+                  {lane.id === "premium" && !isPremium && <div style={{fontSize:10,color:"#FFD166",fontWeight:1000,textTransform:"uppercase"}}>locked</div>}
+                </div>
+                <div style={{display:"flex",gap:10,overflowX:"auto",paddingBottom:4,scrollSnapType:"x mandatory",WebkitOverflowScrolling:"touch"}}>
+                  {rocketTiers.map(tier => renderRocketPassTile(lane.id, tier))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button onClick={()=>setTiersExpanded(v => !v)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer",marginTop:12}}>
+            {tiersExpanded ? "show focused 5-tier lane" : "show classic full tier list instead"}
+          </button>
+          {tiersExpanded && (
+            <div style={{marginTop:12}}>
+              <div style={{...s.sectionLabel,marginBottom:10,color:getAppTextColor(appCustomizer,"passTierRewardsTitle")}}>classic full tier list</div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {rewardTiers.map(({tier,reward}) => {
+                  const unlocked = currentProgress.tier >= tier;
+                  const claimed = isClaimed(track, tier);
+                  return (
+                    <div key={`classic_${tier}`} style={{background:claimed ? `${playerColor}0D` : unlocked ? "#11131F" : "rgba(255,255,255,0.02)",borderRadius:13,padding:"12px 14px",border:`1px solid ${claimed ? `${playerColor}33` : unlocked ? "rgba(255,255,255,0.08)" : "rgba(255,255,255,0.03)"}`,display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{width:38,textAlign:"center",flexShrink:0}}>
+                        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:700,color:unlocked ? (track === "free" ? playerColor : "#A78BFA") : "#4A5066"}}>{tier}</div>
+                        <div style={{fontSize:9,color:"#4A5066",fontWeight:700}}>TIER</div>
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:16}}>{rewardEmojiFor(reward)}</span><span style={{fontSize:13,fontWeight:700,color:unlocked ? "#E8ECF4" : "#4A5066",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{reward.label || reward.value}</span></div>
+                        <div style={{fontSize:10,color:"#4A5066",marginTop:2,textTransform:"uppercase",letterSpacing:.5}}>{reward.type}{reward.type === "coins" ? ` · +${reward.value} pts` : ""}</div>
+                      </div>
+                      {claimed ? <div style={{fontSize:11,color:"#7CFFB2",fontWeight:700}}>✓ claimed</div> : unlocked ? <button onClick={()=>claimReward(tier,reward)} className="bb-pressable bb-glow-lime" style={{background:track === "free" ? playerColor : "#A78BFA",border:"none",borderRadius:9,padding:"7px 14px",fontSize:11.5,fontWeight:700,color:"#06070D",cursor:"pointer"}}>claim</button> : <div style={{fontSize:10,color:"#4A5066",fontWeight:700}}>{tier - currentProgress.tier} away</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
       {/* Track selector */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <button onClick={() => switchTrack("free")} className="bb-pressable"
@@ -14892,6 +15018,9 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
 </button>
       </div>
       </div>
+
+      </>
+      )}
 
 {/* Token inventory */}
       {myTokens.length > 0 && (
