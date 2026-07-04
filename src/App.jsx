@@ -62,6 +62,7 @@ import { createPortal } from "react-dom";
 // APP100_CHAT_MEDIA_STOCK_GRAPH_UI_DEEPLINK_PATCH
 // APP101_RLCS_LIVE_STARTGG_BACKEND_PATCH
 // APP117_JOB_RANDOMIZER_TIME_LIMIT_RLCS_ACTIVITY_REMOVE_PATCH
+// APP118_FAST_BOOT_CLICK_RESPONSIVENESS_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -14392,12 +14393,16 @@ const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "commen
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
 const RT_KEYS_LIVE = [
-  // Keep realtime lean: only keys that need to feel instant stay subscribed.
-  // Slow stores still hydrate on boot and update when a user action writes them.
-  "chat", "posts", "comments", "stats", "presence", "pings", "points", "bets",
-  "team_room", "team_sessions", "typing", "activity_feed", "soundboard_events",
-  "admin_shop_items", "app_customizer", "burton_os", ADMIN_LIVE_SYNC_KEY
+  // APP118: keep realtime tiny during normal app use. Heavy keys like stats/points/posts/bets
+  // hydrate in the background and update when user actions save them, instead of live-subscribing
+  // every phone to every large shared record.
+  "chat", "presence", "pings", "team_room", "team_sessions", "typing",
+  "activity_feed", "soundboard_events", ADMIN_LIVE_SYNC_KEY
 ];
+const BOOT_LIVE_DELAY_MS = 4500;
+const BOOT_SECONDARY_HYDRATE_DELAY_MS = 5500;
+const BOOT_MMR_HYDRATE_DELAY_MS = 15000;
+const BOOT_BACKGROUND_EFFECT_DELAY_MS = 6500;
 
 // ===================== One-time manual restore =====================
 const MANUAL_RESTORE_PATCH_ID = "manual_restore_20260630_points_pass_v1";
@@ -19583,6 +19588,8 @@ function UnderConstructionPage({ tabId, appCustomizer }) {
 function AppInner() {
   const [authStage,setAuthStage]=useState("select");
   const [selectedPlayerId,setSelectedPlayerId]=useState(null);
+  const selectedPlayerIdRef = useRef(null);
+  useEffect(() => { selectedPlayerIdRef.current = selectedPlayerId; }, [selectedPlayerId]);
   const [currentPlayer,setCurrentPlayer]=useState(null);
 const [toasts, setToasts] = useState([]);
   const [loading,setLoading]=useState(false);
@@ -20001,6 +20008,8 @@ const addNotificationToast = useCallback((text, icon = "🔔") => {
 
 
 useEffect(() => {
+  // APP118: old one-time restore migration disabled on boot; it caused many reads/writes.
+  return;
   if (!currentPlayer || authStage !== "app" || !sharedDataReady) return;
   let cancelled = false;
   (async () => {
@@ -20059,6 +20068,8 @@ useEffect(() => {
 }, [currentPlayer, authStage, sharedDataReady]);
 
 useEffect(() => {
+  // APP118: old inventory restore migration disabled on boot; it can be run manually later if needed.
+  return;
   if (!currentPlayer || authStage !== "app" || !sharedDataReady) return;
   let cancelled = false;
   (async () => {
@@ -20326,9 +20337,9 @@ useEffect(() => {
     lastVoicePresenceRef.current = cleaned;
   };
 
-  pollVoicePresence();
-  const timer = setInterval(pollVoicePresence, 45000);
-  return () => { alive = false; clearInterval(timer); };
+  const startTimer = setTimeout(pollVoicePresence, BOOT_BACKGROUND_EFFECT_DELAY_MS);
+  const timer = setInterval(pollVoicePresence, 60000);
+  return () => { alive = false; clearTimeout(startTimer); clearInterval(timer); };
 }, [currentPlayer]);
 
 useEffect(() => {
@@ -20403,28 +20414,31 @@ useEffect(() => {
   if (!currentPlayer) return;
   let stopped = false;
   const run = () => {
-    if (stopped) return;
+    if (stopped || document.hidden) return;
     settleDueBetsNow({ bets, stats, points, setBets, setPoints }).catch(e => console.warn("bet settle failed", e));
   };
-  run();
-  const timer = setInterval(run, 60 * 1000);
-  return () => { stopped = true; clearInterval(timer); };
+  const startTimer = setTimeout(run, BOOT_BACKGROUND_EFFECT_DELAY_MS + 1500);
+  const timer = setInterval(run, 2 * 60 * 1000);
+  return () => { stopped = true; clearTimeout(startTimer); clearInterval(timer); };
 }, [currentPlayer, sharedDataReady, bets, stats, points]);
 
 useEffect(() => {
   if (!currentPlayer) return;
-  const run = () => maybeSendScheduledPromoPush(currentPlayer).catch(() => {});
-  run();
-  const timer = setInterval(run, 5 * 60 * 1000);
-  return () => clearInterval(timer);
+  const run = () => { if (!document.hidden) maybeSendScheduledPromoPush(currentPlayer).catch(() => {}); };
+  const startTimer = setTimeout(run, BOOT_BACKGROUND_EFFECT_DELAY_MS + 2500);
+  const timer = setInterval(run, 10 * 60 * 1000);
+  return () => { clearTimeout(startTimer); clearInterval(timer); };
 }, [currentPlayer]);                      
 
 useEffect(() => {
   if (!currentPlayer) return;
-  const run = () => maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurtonOS, pings, setPings, appCustomizer, addToast }).catch(e => console.warn("job shift reminder failed", e));
-  run();
+  const run = () => {
+    if (document.hidden) return;
+    maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurtonOS, pings, setPings, appCustomizer, addToast }).catch(e => console.warn("job shift reminder failed", e));
+  };
+  const startTimer = setTimeout(run, BOOT_BACKGROUND_EFFECT_DELAY_MS + 3500);
   const timer = setInterval(run, 60 * 1000);
-  return () => clearInterval(timer);
+  return () => { clearTimeout(startTimer); clearInterval(timer); };
 }, [currentPlayer, burtonOS, pings, appCustomizer]);
 
   // ── Real-time: subscribe to all shared KV keys once logged in ──
@@ -20458,8 +20472,8 @@ const heartbeat = async (force = false) => {
         storeSet("presence", localUpd).catch(() => {});
       }
     };
-heartbeat(true);
-setTimeout(() => heartbeat(false), 650);
+const bootHeartbeatTimer = setTimeout(() => heartbeat(true), BOOT_LIVE_DELAY_MS);
+setTimeout(() => heartbeat(false), BOOT_LIVE_DELAY_MS + 650);
 let lastLocalPresencePulse = 0;
 let lastForcedPresencePulse = 0;
 const updateActive = () => {
@@ -20733,11 +20747,12 @@ if (key === "activity_feed") {
 }
 });
 return () => {
+    clearTimeout(bootHeartbeatTimer);
     clearInterval(hbInterval);
     unsub?.();
     document.removeEventListener("touchstart", updateActive);
     document.removeEventListener("visibilitychange", onVisibilityChange);
-    window.removeEventListener("focus", updateActive);
+    window.removeEventListener("focus", updateActiveForce);
   };
   }, [currentPlayer, addNotificationToast]);
 
@@ -20774,8 +20789,8 @@ return () => {
       } catch (_) {}
     };
     // Two light catch-up reads after opening. Realtime subscriptions handle live updates after that.
-    const t1 = setTimeout(applyCritical, 350);
-    const t2 = setTimeout(applyCritical, 2500);
+    const t1 = setTimeout(applyCritical, BOOT_BACKGROUND_EFFECT_DELAY_MS);
+    const t2 = setTimeout(applyCritical, BOOT_BACKGROUND_EFFECT_DELAY_MS + 6000);
     return () => { stopped = true; clearTimeout(t1); clearTimeout(t2); };
   }, [currentPlayer, authStage]);
 
@@ -20831,15 +20846,18 @@ return () => {
 
 
   const selectName=(pid)=>{
+    selectedPlayerIdRef.current = pid;
     setSelectedPlayerId(pid);
     setAuthStage("enter");
     // Never let auth lookup freeze the login flow. If no passcode exists and storage answers quickly,
     // then show create-passcode. Otherwise keep the keypad usable.
     Promise.race([
       Promise.resolve(storeGet(`auth:${pid}`)).catch(() => ({ passcode:"" })),
-      new Promise(resolve => setTimeout(() => resolve({ passcode:"" }), 650))
+      new Promise(resolve => setTimeout(() => resolve({ passcode:"__timeout__" }), 500))
     ]).then(auth => {
-      if (!auth && selectedPlayerId === pid) setAuthStage("create");
+      if (selectedPlayerIdRef.current !== pid) return;
+      if (auth && auth.passcode === "__timeout__") return;
+      if (!auth || !auth.passcode) setAuthStage("create");
     }).catch(() => {});
   };
 
@@ -20859,14 +20877,18 @@ const loadSharedData = (pid) => {
     presenceRef.current = upd;
     return upd;
   });
-  Promise.resolve(storeGet("presence")).then(fresh => {
-    const upd = { ...((fresh && typeof fresh === "object" && !Array.isArray(fresh)) ? fresh : {}), [pid]: loginPresenceTs };
-    presenceRef.current = upd;
-    setPresence(upd);
-    return storeSet("presence", upd);
-  }).catch(() => {});
+  // APP118: do not block the login tap with a presence read/write.
+  // Mark online locally now and sync it after the first screen is already interactive.
+  setTimeout(() => {
+    Promise.resolve(storeGet("presence")).then(fresh => {
+      const upd = { ...((fresh && typeof fresh === "object" && !Array.isArray(fresh)) ? fresh : {}), [pid]: new Date().toISOString() };
+      presenceRef.current = upd;
+      setPresence(upd);
+      return storeSet("presence", upd);
+    }).catch(() => {});
+  }, BOOT_BACKGROUND_EFFECT_DELAY_MS);
 
-  const safeGet = async (key, fallback = null, timeoutMs = 420) => {
+  const safeGet = async (key, fallback = null, timeoutMs = 260) => {
     try {
       let finished = false;
       const work = Promise.resolve(storeGet(key)).then(v => {
@@ -20984,12 +21006,12 @@ const loadSharedData = (pid) => {
   const hydrateSecondary = async () => {
     try {
       const [chat,cmts,pst,strm,prs,pngs,tr,tsess,bts,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
-        safeGet("chat", [], 1000), safeGet("comments", {}, 1000), safeGet("posts", [], 1000), safeGet("stream_profiles", {}, 1000),
-        safeGet("presence", {}, 1000), safeGet("pings", [], 1000), safeGet("team_room", null, 1000), safeGet("team_sessions", [], 1000),
-        safeGet("bets", [], 1000), safeGet("pass_premium", {}, 1000), safeGet("pass_claimed", {}, 1000), safeGet("pass_tokens", {}, 1000),
-        safeGet("pass_active_boosts", {}, 1000), safeGet("time_logs", [], 1000), safeGet("stocks", {}, 1000), safeGet("coin_flips", [], 1000),
-        safeGet("active_race", null, 1000), safeGet("chemistry", {}, 1000), safeGet("flip_challenges", [], 1000), safeGet("activity_feed", [], 1000),
-        safeGet("parse_credits", {}, 1000), safeGet("credit_requests", [], 1000),
+        safeGet("chat", [], 420), safeGet("comments", {}, 420), safeGet("posts", [], 420), safeGet("stream_profiles", {}, 420),
+        safeGet("presence", {}, 420), safeGet("pings", [], 420), safeGet("team_room", null, 420), safeGet("team_sessions", [], 420),
+        safeGet("bets", [], 420), safeGet("pass_premium", {}, 420), safeGet("pass_claimed", {}, 420), safeGet("pass_tokens", {}, 420),
+        safeGet("pass_active_boosts", {}, 420), safeGet("time_logs", [], 420), safeGet("stocks", {}, 420), safeGet("coin_flips", [], 420),
+        safeGet("active_race", null, 420), safeGet("chemistry", {}, 420), safeGet("flip_challenges", [], 420), safeGet("activity_feed", [], 420),
+        safeGet("parse_credits", {}, 420), safeGet("credit_requests", [], 420),
       ]);
       if (Array.isArray(chat)) setMessages(chat);
       if (cmts && typeof cmts === "object") setComments(cmts);
@@ -21086,9 +21108,9 @@ const loadSharedData = (pid) => {
     } catch (_) {}
   };
 
-  hydrateCritical();
-  setTimeout(hydrateSecondary, 250);
-  setTimeout(hydrateMmr, 1200);
+  setTimeout(hydrateCritical, 150);
+  setTimeout(hydrateSecondary, BOOT_SECONDARY_HYDRATE_DELAY_MS);
+  setTimeout(hydrateMmr, BOOT_MMR_HYDRATE_DELAY_MS);
   return Promise.resolve(true);
 };
 
