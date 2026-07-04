@@ -806,15 +806,33 @@ function EmptyState({ icon = "○", title, body, actionLabel, onAction }) {
 
 function FullScreenHeader({ title, subtitle, onClose, accent = "#B8FF4D" }) {
   return (
-    <div className="bb-floating-fullscreen-header" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"12px 16px",paddingTop:"max(62px, calc(env(safe-area-inset-top) + 24px))",paddingBottom:12,minHeight:108,boxSizing:"border-box",position:"sticky",top:0,zIndex:5,borderBottom:"1px solid rgba(255,255,255,0.07)",background:"rgba(4,8,24,0.82)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)",flexShrink:0}}>
-      <button onClick={onClose} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:12,color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:38,height:38}}>
-        <ChevronLeft size={18}/>
-      </button>
-      <div style={{flex:1,minWidth:0}}>
-        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:16,fontWeight:700,textTransform:"lowercase",color:"#E8ECF4",letterSpacing:.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>
-        {subtitle && <div style={{fontSize:10.5,color:accent,fontWeight:800,letterSpacing:.8,marginTop:2,textTransform:"uppercase"}}>{subtitle}</div>}
+    <div
+      className="bb-floating-fullscreen-header"
+      style={{
+        position:"sticky",
+        top:0,
+        zIndex:5,
+        background:"rgba(4,8,24,0.92)",
+        backdropFilter:"blur(14px)",
+        WebkitBackdropFilter:"blur(14px)",
+        borderBottom:"1px solid rgba(255,255,255,0.06)",
+        flexShrink:0,
+        boxSizing:"border-box",
+        paddingTop:"max(72px, calc(env(safe-area-inset-top) + 34px))",
+        paddingBottom:16,
+        paddingLeft:16,
+        paddingRight:16,
+      }}
+    >
+      <div style={{width:"100%",maxWidth:520,margin:"0 auto",display:"flex",alignItems:"center",gap:14}}>
+        <button onClick={onClose} className="bb-pressable" style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:14,color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",width:46,height:46,flexShrink:0}}>
+          <ChevronLeft size={20}/>
+        </button>
+        <div style={{flex:1,minWidth:0,paddingRight:4}}>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:18,fontWeight:700,textTransform:"lowercase",color:"#E8ECF4",letterSpacing:.2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",lineHeight:1.05}}>{title}</div>
+          {subtitle && <div style={{fontSize:10.5,color:accent,fontWeight:800,letterSpacing:.9,marginTop:6,textTransform:"uppercase"}}>{subtitle}</div>}
+        </div>
       </div>
-      <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:.7,textTransform:"uppercase"}}>swipe →</div>
     </div>
   );
 }
@@ -1517,7 +1535,7 @@ function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addTo
   );
   return createPortal(
     <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(3,5,10,.72)",backdropFilter:"blur(16px)",display:"flex",alignItems:"stretch",justifyContent:"center"}}>
-      <div style={{width:"100%",maxWidth:520,height:"100dvh",maxHeight:"100dvh",background:"linear-gradient(180deg,#0B0D17,#06070D)",borderLeft:"1px solid rgba(255,255,255,.08)",borderRight:"1px solid rgba(255,255,255,.08)",overflowY:"auto",WebkitOverflowScrolling:"touch",fontFamily:"Inter, sans-serif",boxSizing:"border-box"}}>
+      <div style={{width:"100%",maxWidth:560,height:"100dvh",maxHeight:"100dvh",margin:"0 auto",background:"linear-gradient(180deg,#0B0D17,#06070D)",overflowY:"auto",WebkitOverflowScrolling:"touch",fontFamily:"Inter, sans-serif",boxSizing:"border-box"}}>
         <FullScreenHeader title={cfg.title} subtitle={safe.active ? `${safe.id} · ${cfg.activeBadge}` : cfg.inactiveTitle} onClose={onClose} accent={me.color}/>
         <div style={{padding:16,paddingBottom:"max(32px, calc(env(safe-area-inset-bottom) + 26px))"}}>
           {!safe.active ? (
