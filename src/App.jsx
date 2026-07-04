@@ -14072,14 +14072,14 @@ function SeasonalTextKitFx({ kitValue }) {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
-const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests", "push_subscriptions", "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", ADMIN_LIVE_SYNC_KEY];
+const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests", "push_subscriptions", "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", RLCS_ACTIVITY_FEED_KEY, RLCS_PRESENCE_KEY, ADMIN_LIVE_SYNC_KEY];
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
 const RT_KEYS_LIVE = [
   "chat", "posts", "comments", "completions", "training", "schedule", "stats", "presence", "pings",
   "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts",
   "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests",
-  "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", ADMIN_LIVE_SYNC_KEY
+  "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", RLCS_ACTIVITY_FEED_KEY, RLCS_PRESENCE_KEY, ADMIN_LIVE_SYNC_KEY
 ];
 
 // ===================== One-time manual restore =====================
@@ -18263,6 +18263,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 // APP113_RLCS_NA_EU_REGION_TABS_PATCH
 // APP114_RLCS_CLEAN_BETS_BRACKET_UI_FIX
 // APP115_GEEKAY_CHAT_EDIT_REACTION_CLOSE_PATCH
+// APP116_RLCS_REALTIME_EVENTSUB_DISCORD_PRESETS_PATCH
 // Bets stay locked to your known teams only. Player props are removed for now.
 const RLCS_REGION_BET_TEAMS = {
   na: ["M80", "FUT Esports", "Gen.G Mobil1 Racing", "Dignitas"],
@@ -18274,6 +18275,7 @@ const RLCS_KNOWN_TEAM_WATCHLIST = Array.from(new Set([...RLCS_HIGH_TIER_TEAMS, .
 const RLCS_LCQ_STORAGE_KEY = "rlcs_lcq_live_matches";
 const RLCS_LCQ_REFRESH_MS = 75 * 1000;
 const RLCS_PRESENCE_KEY = "rlcs_live_presence";
+const RLCS_ACTIVITY_FEED_KEY = "rlcs_activity_feed";
 const RLCS_PRESENCE_TTL_MS = 2 * 60 * 1000;
 const RLCS_ACTIVITY_LIMIT = 8;
 const RLCS_TIER_META = {
@@ -18590,6 +18592,49 @@ async function fetchRlcsLcqLive({ force = false, region = "na" } = {}) {
     matches: (Array.isArray(json.matches) ? json.matches : []).map(normalizeRlcsMatch),
   };
 }
+async function postRlcsDiscordEvent(event = {}) {
+  try {
+    await fetch("/api/discord-webhook", {
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body:JSON.stringify({ source:"rlcs", ...event }),
+    });
+  } catch (_) {}
+}
+
+async function appendRlcsActivity(event = {}) {
+  const item = {
+    id:event.id || `rlcs_act_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    ts:event.ts || new Date().toISOString(),
+    icon:event.icon || "●",
+    color:event.color || "#B8FF4D",
+    text:String(event.text || "rlcs update").slice(0, 140),
+    sub:String(event.sub || "").slice(0, 180),
+    region:event.region || "",
+    playerId:event.playerId || null,
+    type:event.type || "rlcs",
+  };
+  try {
+    const fresh = await storeGet(RLCS_ACTIVITY_FEED_KEY).catch(() => null);
+    const base = Array.isArray(fresh) ? fresh : [];
+    const next = [item, ...base.filter(x => x?.id !== item.id)].slice(0, 80);
+    await storeSetWithPush(RLCS_ACTIVITY_FEED_KEY, next).catch(() => storeSet(RLCS_ACTIVITY_FEED_KEY, next));
+  } catch (_) {}
+  postRlcsDiscordEvent(item).catch(() => {});
+  return item;
+}
+
+function mergeRlcsActivityItems(liveItems = [], feedItems = [], limit = RLCS_ACTIVITY_LIMIT) {
+  const byId = new Map();
+  [...(feedItems || []), ...(liveItems || [])].filter(Boolean).forEach(item => {
+    const id = item.id || `${item.text}_${item.ts}`;
+    if (!byId.has(id)) byId.set(id, item);
+  });
+  return Array.from(byId.values())
+    .sort((a,b)=>new Date(b.ts || 0).getTime() - new Date(a.ts || 0).getTime())
+    .slice(0, limit);
+}
+
 
 async function resolveOpenRlcsBetsFromMatches({ matches = [], bets = [], points = {}, setBets, setPoints, currentPlayer, pings = [], setPings, addToast }) {
   const matchMap = new Map((matches || []).map(m => [String(m.setId || m.id), m]));
@@ -18639,6 +18684,15 @@ async function resolveOpenRlcsBetsFromMatches({ matches = [], bets = [], points 
       await storeSetWithPush("pings", nextPings).catch(() => storeSet("pings", nextPings));
       const mine = settlementPings.find(p => p.to === currentPlayer);
       if (mine) addToast?.(mine.text, mine.icon || "🔔");
+      await Promise.allSettled(settlementPings.map(p => appendRlcsActivity({
+        id:`act_${p.id}`,
+        icon:p.icon || "🔔",
+        color:p.icon === "💰" ? "#7CFFB2" : "#FF5C8A",
+        text:p.text,
+        sub:"bet settled",
+        playerId:p.to,
+        type:"rlcs_settlement",
+      })));
     }
   }
   return changed;
@@ -18675,6 +18729,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const [performanceMode,setPerformanceMode]=useState(() => { try { return localStorage.getItem("bb_rlcs_perf_mode") === "1"; } catch (_) { return false; } });
   const [liveData,setLiveData]=useState({ matches:[], bracket:null, updatedAt:null, source:"live", cached:false, error:null, loading:true });
   const [rlcsPresence,setRlcsPresence]=useState({});
+  const [rlcsActivityFeed,setRlcsActivityFeed]=useState([]);
   const [twitchLive,setTwitchLive]=useState({ connected:false, channels:{}, loading:false });
   const active = streams.find(s=>s.id===activeId) || streams[0] || null;
   const myPoints = Number(points?.[currentPlayer]) || 0;
@@ -18702,7 +18757,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const visibleMatches = statusBaseMatches.slice(0, 8);
   const sourceLabel = liveData.error ? "last saved" : liveData.cached ? "saved" : "live";
   const onlineRlcsUsers = Object.values(rlcsPresence || {}).filter(v => v && Date.now() - new Date(v.ts || 0).getTime() < RLCS_PRESENCE_TTL_MS);
-  const liveActivity = buildRlcsActivityItems({ matches:liveMatches, bets, playerId:currentPlayer, accent:playerColor });
+  const liveActivity = mergeRlcsActivityItems(buildRlcsActivityItems({ matches:liveMatches, bets, playerId:currentPlayer, accent:playerColor }), rlcsActivityFeed, RLCS_ACTIVITY_LIMIT);
   const activeTwitchChannel = extractTwitchChannel(active?.url || "");
   const activeTwitchInfo = activeTwitchChannel ? twitchLive.channels?.[activeTwitchChannel.toLowerCase()] : null;
 
@@ -18724,6 +18779,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
       };
       setLiveData(next);
       try { storeSet(RLCS_LCQ_STORAGE_KEY, next); } catch (_) {}
+      if (force) appendRlcsActivity({ icon:"↻", color:playerColor, text:`${String(region).toUpperCase()} refresh complete`, sub:`${(next.matches || []).length} tracked matches · ${(next.stats?.pools || 0)} pools`, region, type:"rlcs_refresh" }).catch(()=>{});
     } catch (err) {
       const saved = await storeGet(RLCS_LCQ_STORAGE_KEY).catch(() => null);
       if (saved?.matches?.length) {
@@ -18785,6 +18841,17 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   }, [currentPlayer, hubTab, playerColor, performanceMode]);
 
   useEffect(() => {
+    let alive = true;
+    storeGet(RLCS_ACTIVITY_FEED_KEY).then(v => { if (alive) setRlcsActivityFeed(Array.isArray(v) ? v : []); }).catch(() => {});
+    const unsub = subscribeKVMulti([RLCS_ACTIVITY_FEED_KEY, RLCS_PRESENCE_KEY], ({ key, value }) => {
+      if (!alive) return;
+      if (key === RLCS_ACTIVITY_FEED_KEY) setRlcsActivityFeed(Array.isArray(value) ? value : []);
+      if (key === RLCS_PRESENCE_KEY) setRlcsPresence(value && typeof value === "object" && !Array.isArray(value) ? value : {});
+    });
+    return () => { alive = false; try { unsub?.(); } catch (_) {} };
+  }, []);
+
+  useEffect(() => {
     const channels = Array.from(new Set((streams || []).map(st => extractTwitchChannel(st.url)).filter(Boolean).map(s => s.toLowerCase())));
     if (hubTab !== "streams" || !channels.length) return;
     let alive = true;
@@ -18797,6 +18864,9 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
         const map = {};
         (json.streams || []).forEach(st => { if (st?.user_login) map[String(st.user_login).toLowerCase()] = st; });
         setTwitchLive({ connected:!!json.connected, channels:map, loading:false, error:json.error || null });
+        Object.values(map).slice(0, 3).forEach(st => {
+          if (st?.live) appendRlcsActivity({ id:`tw_live_${String(st.user_login).toLowerCase()}`, icon:"📺", color:"#A78BFA", text:`${st.user_name || st.user_login} is live`, sub:st.title || "stream live", type:"twitch_live" }).catch(()=>{});
+        });
       } catch (err) {
         if (alive) setTwitchLive(prev => ({ ...prev, connected:false, loading:false, error:"twitch status unavailable" }));
       }
@@ -18878,6 +18948,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
     setBets?.(nextBets);
     await storeSetWithPush("points", nextPoints).catch(() => storeSet("points", nextPoints));
     await storeSetWithPush("bets", nextBets).catch(() => storeSet("bets", nextBets));
+    appendRlcsActivity({ icon:"🎟️", color:playerColor, text:`${PLAYERS.find(p=>p.id===currentPlayer)?.name || "player"} placed ${amount.toLocaleString()} on ${pickTeam}`, sub:`pays ${payout.toLocaleString()} · ${getRlcsMatchLabel(match)}`, region, playerId:currentPlayer, type:"rlcs_bet_placed" }).catch(()=>{});
     addToast?.(`RLCS bet placed: ${pickTeam} pays ${payout.toLocaleString()}`, "🎟️");
     bbHaptic(18);
   };
@@ -18951,6 +19022,9 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
       <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) 86px",gap:8,alignItems:"center",marginTop:9}}>
         <div style={{minWidth:0,fontSize:10.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>wager <b style={{color:"#E8ECF4"}}>{Number(wager).toLocaleString()}</b> · balance <b style={{color:"#FFD166"}}>{myPoints.toLocaleString()}</b> · open {openRlcsBets.length}</div>
         <input type="text" value={wager} inputMode="numeric" onChange={e=>setWager(String(e.target.value || "").replace(/[^0-9]/g, "").slice(0,5))} style={{minWidth:0,width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:`1px solid ${playerColor}33`,borderRadius:10,padding:"8px 8px",color:"#E8ECF4",fontSize:11,fontWeight:900}}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:7,marginTop:8}}>
+        {[100,250,500].map(v => <button key={v} onClick={()=>setWager(String(v))} className="bb-pressable" style={{minWidth:0,background:Number(wager)===v?playerColor:"rgba(255,255,255,.055)",border:`1px solid ${Number(wager)===v?playerColor:"rgba(255,255,255,.09)"}`,borderRadius:10,padding:"8px 6px",color:Number(wager)===v?"#06070D":"#E8ECF4",fontSize:10.5,fontWeight:1000,textTransform:"lowercase"}}>{v}</button>)}
       </div>
     </div>
 

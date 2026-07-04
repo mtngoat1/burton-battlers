@@ -1,5 +1,6 @@
 // APP114_RLCS_CLEAN_BETS_BRACKET_UI_FIX
 // APP115_GEEKAY_EU_BET_TEAM_PATCH
+// APP116_RLCS_CRON_CACHE_DISCORD_READY_PATCH
 // Drop this in: api/rlcs-lcq.js
 // Supports ?region=na and ?region=eu. Bets are filtered to known teams only; bracket can show all pulled pools.
 
