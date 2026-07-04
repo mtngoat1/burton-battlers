@@ -80,6 +80,7 @@ import { createPortal } from "react-dom";
 // APP132_FACE_ID_LOGIN_PASSCODE_FALLBACK_PATCH
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
+// APP135_AUTO_SESSION_SYNC_STATUS_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -942,6 +943,13 @@ function normalizeLiveReplayVault(input = {}) {
     lastSearchAt: src.lastSearchAt || null,
     lastMode: src.lastMode || null,
     replays,
+    autoSyncEnabled: src.autoSyncEnabled !== false,
+    autoSyncStartedAt: src.autoSyncStartedAt || null,
+    lastAutoSyncAt: src.lastAutoSyncAt || null,
+    lastAutoSyncStatus: String(src.lastAutoSyncStatus || "").slice(0, 180),
+    autoSyncedCount: Number.isFinite(Number(src.autoSyncedCount)) ? Math.max(0, Number(src.autoSyncedCount)) : 0,
+    lastReplayFoundAt: src.lastReplayFoundAt || null,
+    expectedUploadDelayMinutes: Number.isFinite(Number(src.expectedUploadDelayMinutes)) ? Math.max(1, Math.min(30, Number(src.expectedUploadDelayMinutes))) : 10,
   };
 }
 function extractBallchasingReplayId(value = "") {
@@ -1406,6 +1414,37 @@ async function fetchBallchasingViaConfig(cfg = {}, params = {}) {
   }
   throw lastError || new Error("Ballchasing request failed");
 }
+async function fetchBallchasingSearchRawViaConfig(cfg = {}, params = {}) {
+  const proxyPath = String(cfg.replayProxyPath || DEFAULT_LIVE_SESSION_CONFIG.replayProxyPath || "/api/ballchasing").trim();
+  const query = new URLSearchParams();
+  Object.entries(params || {}).forEach(([k,v]) => { if (v !== undefined && v !== null && v !== "") query.set(k, String(v)); });
+  const endpoint = proxyPath ? `${proxyPath}${proxyPath.includes("?") ? "&" : "?"}${query.toString()}` : "";
+  if (!endpoint) throw new Error("Ballchasing proxy path is missing");
+  const res = await fetch(endpoint);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json?.error || `Ballchasing proxy failed (${res.status})`);
+  return json;
+}
+function getBallchasingSearchCandidates(json = {}) {
+  const out = [];
+  const add = (item) => {
+    if (!item || typeof item !== "object") return;
+    const id = item.id || extractBallchasingReplayId(item.link || item.viewUrl || "");
+    if (!id) return;
+    out.push({ ...item, id });
+  };
+  if (Array.isArray(json.list)) json.list.forEach(add);
+  add(json.replay || json.data || null);
+  const seen = new Set();
+  return out.filter(item => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+function sortReplaysByDateAsc(list = []) {
+  return list.slice().sort((a,b) => new Date(normalizeBallchasingReplay(a).date || 0) - new Date(normalizeBallchasingReplay(b).date || 0));
+}
 async function fetchBallchasingTimelineViaConfig(cfg = {}, replayId = "") {
   const id = String(replayId || "").trim();
   if (!id) return null;
@@ -1754,6 +1793,11 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const waitActiveRef = useRef(false);
   const [error, setError] = useState("");
   const [replayTabs, setReplayTabs] = useState({});
+  const [autoSyncOn, setAutoSyncOn] = useState(replayVault.autoSyncEnabled !== false);
+  const [autoSyncStatus, setAutoSyncStatus] = useState(replayVault.lastAutoSyncStatus || "waiting for Rockpload uploads…");
+  const [autoSyncBusy, setAutoSyncBusy] = useState(false);
+  const replayVaultRef = useRef(replayVault);
+  const autoSyncBusyRef = useRef(false);
   const replay = replayVault.latestReplay ? normalizeBallchasingReplay(replayVault.latestReplay) : null;
   const rows = replay ? buildBallchasingPlayerRows(replay, cfg) : [];
   const expected = getLiveModeSize(safe.mode);
@@ -1765,6 +1809,7 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const pasteEnabled = cfg.replayPasteEnabled === true;
   const fieldVisibility = normalizeReplayStatCardFields(cfg.replayStatCardFields);
   const showField = (id) => fieldVisibility[id] !== false;
+  useEffect(() => { replayVaultRef.current = replayVault; }, [replayVault]);
   const buildLatestReplayParams = () => {
     const aliases = getBallchasingAliasMap(cfg);
     const aliasNames = Array.from(new Set([...(aliases[currentPlayer] || [me.name]), me.name].map(v => String(v || "").trim()).filter(Boolean)));
@@ -1798,6 +1843,100 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
       replays:{ ...(replayVault.replays || {}), [normalized.id || `replay_${Date.now()}`]:normalized },
     });
     await updateSession({ replayVault:nextVault }, "Ballchasing replay linked", "📼");
+  };
+  const hydrateReplayForVault = async (loaded) => {
+    let normalized = normalizeBallchasingReplay(loaded);
+    if (normalized.id && !normalized.timeline && !normalized.raw?.timeline) {
+      try {
+        const timeline = await fetchBallchasingTimelineViaConfig(cfg, normalized.id);
+        normalized = normalizeBallchasingReplay({ ...normalized, timeline, raw:{ ...(normalized.raw || {}), timeline } });
+      } catch (_) {}
+    }
+    return normalized;
+  };
+  const runAutoSessionSync = useCallback(async (manual = false) => {
+    if (!cfg.replayAutoSessionSync || autoSyncBusyRef.current) return;
+    if (!safe.active && !manual) return;
+    autoSyncBusyRef.current = true;
+    setAutoSyncBusy(true);
+    setError("");
+    const now = new Date();
+    const existingVault = normalizeLiveReplayVault(replayVaultRef.current || {});
+    const existingIds = new Set(Object.values(existingVault.replays || {}).map(rv => normalizeBallchasingReplay(rv).id).filter(Boolean));
+    try {
+      setAutoSyncStatus("checking Ballchasing for session replays…");
+      const raw = await fetchBallchasingSearchRawViaConfig(cfg, { ...buildLatestReplayParams(), count:cfg.replayAutoSessionCount || 20 });
+      const candidates = sortReplaysByDateAsc(getBallchasingSearchCandidates(raw));
+      const fresh = candidates.filter(item => item.id && !existingIds.has(item.id));
+      if (!fresh.length) {
+        const status = `no new replay yet · Rockpload usually takes ${cfg.replayAutoSessionDelayMinutes || 10} min · checked ${now.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`;
+        setAutoSyncStatus(status);
+        const nextVault = normalizeLiveReplayVault({ ...existingVault, autoSyncEnabled:autoSyncOn, lastAutoSyncAt:now.toISOString(), lastAutoSyncStatus:status, expectedUploadDelayMinutes:cfg.replayAutoSessionDelayMinutes || 10 });
+        replayVaultRef.current = nextVault;
+        await updateSession({ replayVault:nextVault }, manual ? "No new Ballchasing replays yet" : null, "⏳");
+        return;
+      }
+      const nextReplays = { ...(existingVault.replays || {}) };
+      let newest = existingVault.latestReplay ? normalizeBallchasingReplay(existingVault.latestReplay) : null;
+      let added = 0;
+      for (const item of fresh.slice(0, cfg.replayAutoSessionCount || 20)) {
+        try {
+          const detailed = await fetchBallchasingViaConfig(cfg, { replayId:item.id });
+          const hydrated = await hydrateReplayForVault(detailed);
+          if (!hydrated.id || nextReplays[hydrated.id]) continue;
+          nextReplays[hydrated.id] = hydrated;
+          added += 1;
+          if (!newest || new Date(hydrated.date || 0) > new Date(newest.date || 0)) newest = hydrated;
+        } catch (_) {}
+      }
+      const total = Object.keys(nextReplays).length;
+      const status = added
+        ? `synced ${added} new · ${total} total · checked ${now.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`
+        : `found candidates but no new details loaded · checked ${now.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`;
+      setAutoSyncStatus(status);
+      const nextVault = normalizeLiveReplayVault({
+        ...existingVault,
+        latestId:newest?.id || existingVault.latestId,
+        latestReplay:newest || existingVault.latestReplay,
+        lastSearchAt:now.toISOString(),
+        lastMode:safe.mode,
+        replays:nextReplays,
+        autoSyncEnabled:autoSyncOn,
+        autoSyncStartedAt:existingVault.autoSyncStartedAt || safe.startedAt || now.toISOString(),
+        lastAutoSyncAt:now.toISOString(),
+        lastAutoSyncStatus:status,
+        autoSyncedCount:total,
+        lastReplayFoundAt:added ? now.toISOString() : existingVault.lastReplayFoundAt,
+        expectedUploadDelayMinutes:cfg.replayAutoSessionDelayMinutes || 10,
+      });
+      replayVaultRef.current = nextVault;
+      await updateSession({ replayVault:nextVault }, added ? `Auto synced ${added} Ballchasing replay${added === 1 ? "" : "s"}` : null, "📼");
+    } catch (err) {
+      const status = `sync check failed · ${err?.message || "try again"}`;
+      setAutoSyncStatus(status);
+      if (manual) setError(err?.message || "Auto Session Sync failed.");
+    } finally {
+      autoSyncBusyRef.current = false;
+      setAutoSyncBusy(false);
+    }
+  }, [cfg, safe.active, safe.startedAt, safe.mode, currentPlayer, me.name, autoSyncOn, updateSession]);
+  useEffect(() => {
+    if (!cfg.replayAutoSessionSync || !autoSyncOn || !safe.active) return;
+    runAutoSessionSync(false);
+    const intervalMs = Math.max(30000, Math.min(180000, Number(cfg.replayAutoSessionIntervalMs || 60000) || 60000));
+    const id = setInterval(() => runAutoSessionSync(false), intervalMs);
+    return () => clearInterval(id);
+  }, [cfg.replayAutoSessionSync, cfg.replayAutoSessionIntervalMs, autoSyncOn, safe.active, safe.startedAt, safe.mode]);
+  const toggleAutoSessionSync = async () => {
+    const nextEnabled = !autoSyncOn;
+    setAutoSyncOn(nextEnabled);
+    const existingVault = normalizeLiveReplayVault(replayVaultRef.current || {});
+    const status = nextEnabled ? "auto session sync on · waiting for Rockpload uploads…" : "auto session sync off";
+    setAutoSyncStatus(status);
+    const nextVault = normalizeLiveReplayVault({ ...existingVault, autoSyncEnabled:nextEnabled, lastAutoSyncStatus:status });
+    replayVaultRef.current = nextVault;
+    await updateSession({ replayVault:nextVault }, nextEnabled ? "Auto Session Sync on" : "Auto Session Sync off", nextEnabled ? "🔁" : "⏸️");
+    if (nextEnabled) setTimeout(() => runAutoSessionSync(true), 120);
   };
   const loadReplay = async () => {
     const replayId = extractBallchasingReplayId(replayInput);
@@ -1849,7 +1988,7 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
     }
     setWaitingForUpload(false);
     waitActiveRef.current = false;
-    setWaitStatus("not found yet — press Upload in Rockpload, then wait again");
+    setWaitStatus(`not found yet — Rockpload usually takes ${cfg.replayAutoSessionDelayMinutes || 10} min; keep auto sync on`);
   };
   const clearReplay = async () => {
     await updateSession({ replayVault:normalizeLiveReplayVault({}) }, "Replay Vault cleared", "🧹");
@@ -2067,18 +2206,31 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
         </div>
         <button onClick={waitForBallchasingUpload} disabled={loading} className="bb-pressable" style={{width:"100%",background:waitingForUpload?"rgba(255,209,102,.14)":"rgba(255,255,255,.045)",border:`1px solid ${waitingForUpload?"rgba(255,209,102,.32)":"rgba(255,255,255,.09)"}`,borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:waitingForUpload?"#FFD166":"#8B92A8",cursor:loading?"wait":"pointer"}}>{waitingForUpload ? "stop waiting" : "wait for Ballchasing upload"}</button>
         {waitStatus && <div style={{fontSize:9.5,color:waitingForUpload?"#FFD166":"#8B92A8",fontWeight:800,lineHeight:1.35}}>{waitStatus}</div>}
+        <div style={{background:"rgba(184,255,77,.055)",border:"1px solid rgba(184,255,77,.16)",borderRadius:14,padding:10,marginTop:2}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:9.5,color:"#B8FF4D",fontWeight:950,letterSpacing:.9,textTransform:"uppercase"}}>auto session sync</div>
+              <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,marginTop:3}}>{autoSyncStatus || replayVault.lastAutoSyncStatus || "waiting for Rockpload uploads…"}</div>
+            </div>
+            <button onClick={toggleAutoSessionSync} className="bb-pressable" style={{background:autoSyncOn?"rgba(184,255,77,.16)":"rgba(255,255,255,.05)",border:`1px solid ${autoSyncOn?"rgba(184,255,77,.35)":"rgba(255,255,255,.09)"}`,borderRadius:999,padding:"8px 10px",fontSize:9.5,fontWeight:950,color:autoSyncOn?"#B8FF4D":"#8B92A8",cursor:"pointer",whiteSpace:"nowrap"}}>{autoSyncOn ? "on" : "off"}</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:8}}>
+            <button onClick={()=>runAutoSessionSync(true)} disabled={autoSyncBusy} className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.26)",borderRadius:11,padding:"8px",fontSize:9.5,fontWeight:950,color:"#4D9EFF",cursor:autoSyncBusy?"wait":"pointer"}}>{autoSyncBusy ? "checking…" : "sync now"}</button>
+            <div style={{background:"rgba(0,0,0,.14)",border:"1px solid rgba(255,255,255,.055)",borderRadius:11,padding:"8px",fontSize:9.5,fontWeight:900,color:"#8B92A8",textAlign:"center"}}>delay: {cfg.replayAutoSessionDelayMinutes || 10} min</div>
+          </div>
+        </div>
       </div>
       {error && <div style={{fontSize:10.5,color:"#FF5C8A",background:"rgba(255,92,138,.10)",border:"1px solid rgba(255,92,138,.24)",borderRadius:12,padding:9,marginBottom:10,lineHeight:1.35}}>{error}</div>}
       {!replay ? (
         <div style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:12}}>
           <div style={{fontSize:12,color:"#E8ECF4",fontWeight:950}}>{cfg.replayMissingLabel}</div>
-          <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>Start Live Session, play the match, upload in Rockpload, then tap wait/search. Replays will appear as game dropdowns.</div>
+          <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>Start Live Session and play normally. Auto Session Sync checks Ballchasing every minute; Rockpload usually needs 7–10 minutes before each replay appears.</div>
         </div>
       ) : (
         <>
           {Object.values(replayVault.replays || {}).length > 0 && <div style={{marginTop:4}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>linked replay dropdowns</div>
-            {Array.from(new Map(Object.values(replayVault.replays || {}).map(rv => [normalizeBallchasingReplay(rv).id || JSON.stringify(rv).slice(0,80), rv])).values()).slice().sort((a,b)=>new Date(normalizeBallchasingReplay(b).date || 0)-new Date(normalizeBallchasingReplay(a).date || 0)).map((rv, idx) => renderReplayDropdown(rv, idx))}
+            {sortReplaysByDateAsc(Array.from(new Map(Object.values(replayVault.replays || {}).map(rv => [normalizeBallchasingReplay(rv).id || JSON.stringify(rv).slice(0,80), rv])).values())).map((rv, idx) => renderReplayDropdown(rv, idx))}
           </div>}
           <button onClick={clearReplay} className="bb-pressable" style={{marginTop:10,width:"100%",background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#8B92A8",cursor:"pointer"}}>{cfg.replayClearButton}</button>
         </>
@@ -14587,6 +14739,10 @@ const DEFAULT_LIVE_SESSION_CONFIG = {
   replayProxyPath: "/api/ballchasing",
   ballchasingWaitAttempts: 18,
   ballchasingWaitIntervalMs: 30000,
+  replayAutoSessionSync: true,
+  replayAutoSessionIntervalMs: 60000,
+  replayAutoSessionCount: 20,
+  replayAutoSessionDelayMinutes: 10,
   filmRoomEnabled: true,
   twitchAutoDetectEnabled: true,
   twitchProxyPath: "/api/ballchasing",
@@ -14633,6 +14789,10 @@ function normalizeLiveSessionConfig(input = {}) {
   out.twitchAutoDetectEnabled = src.twitchAutoDetectEnabled !== false;
   out.ballchasingWaitAttempts = Math.max(3, Math.min(30, Number(src.ballchasingWaitAttempts ?? DEFAULT_LIVE_SESSION_CONFIG.ballchasingWaitAttempts) || 18));
   out.ballchasingWaitIntervalMs = Math.max(12000, Math.min(90000, Number(src.ballchasingWaitIntervalMs ?? DEFAULT_LIVE_SESSION_CONFIG.ballchasingWaitIntervalMs) || 30000));
+  out.replayAutoSessionSync = src.replayAutoSessionSync !== false;
+  out.replayAutoSessionIntervalMs = Math.max(30000, Math.min(180000, Number(src.replayAutoSessionIntervalMs ?? DEFAULT_LIVE_SESSION_CONFIG.replayAutoSessionIntervalMs) || 60000));
+  out.replayAutoSessionCount = Math.max(5, Math.min(20, Number(src.replayAutoSessionCount ?? DEFAULT_LIVE_SESSION_CONFIG.replayAutoSessionCount) || 20));
+  out.replayAutoSessionDelayMinutes = Math.max(1, Math.min(30, Number(src.replayAutoSessionDelayMinutes ?? DEFAULT_LIVE_SESSION_CONFIG.replayAutoSessionDelayMinutes) || 10));
   out.filmRoomSyncOffsetSeconds = Math.max(-600, Math.min(600, Number(src.filmRoomSyncOffsetSeconds ?? DEFAULT_LIVE_SESSION_CONFIG.filmRoomSyncOffsetSeconds) || 0));
   out.replayStatCardFields = normalizeReplayStatCardFields(src.replayStatCardFields || DEFAULT_LIVE_SESSION_CONFIG.replayStatCardFields);
   stringKeys.forEach(k => { out[k] = String(src[k] ?? DEFAULT_LIVE_SESSION_CONFIG[k] ?? "").slice(0, 220); });
