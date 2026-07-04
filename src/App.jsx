@@ -14072,6 +14072,10 @@ function SeasonalTextKitFx({ kitValue }) {
 }
 // ===================== Main App =====================
 // Keys to subscribe to for real-time updates
+// RLCS realtime keys must be declared before RT_KEYS so local dev does not crash.
+const RLCS_ACTIVITY_FEED_KEY = "rlcs_activity_feed";
+const RLCS_PRESENCE_KEY = "rlcs_live_presence";
+
 const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "comments", "stream_profiles", "stats", "presence", "pings", "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts", "time_logs", "stocks", "coin_flips", "active_race", "flowers","flip_challenges", "chemistry", "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests", "push_subscriptions", "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", RLCS_ACTIVITY_FEED_KEY, RLCS_PRESENCE_KEY, ADMIN_LIVE_SYNC_KEY];
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
@@ -18264,6 +18268,7 @@ const getSharedGames = (pid1, pid2, allTime = false) => {
 // APP114_RLCS_CLEAN_BETS_BRACKET_UI_FIX
 // APP115_GEEKAY_CHAT_EDIT_REACTION_CLOSE_PATCH
 // APP116_RLCS_REALTIME_EVENTSUB_DISCORD_PRESETS_PATCH
+// APP116B_LOCALHOST_RLCS_KEY_INIT_FIX
 // Bets stay locked to your known teams only. Player props are removed for now.
 const RLCS_REGION_BET_TEAMS = {
   na: ["M80", "FUT Esports", "Gen.G Mobil1 Racing", "Dignitas"],
@@ -18274,8 +18279,6 @@ const RLCS_LOW_TIER_TEAMS = [];
 const RLCS_KNOWN_TEAM_WATCHLIST = Array.from(new Set([...RLCS_HIGH_TIER_TEAMS, ...RLCS_LOW_TIER_TEAMS]));
 const RLCS_LCQ_STORAGE_KEY = "rlcs_lcq_live_matches";
 const RLCS_LCQ_REFRESH_MS = 75 * 1000;
-const RLCS_PRESENCE_KEY = "rlcs_live_presence";
-const RLCS_ACTIVITY_FEED_KEY = "rlcs_activity_feed";
 const RLCS_PRESENCE_TTL_MS = 2 * 60 * 1000;
 const RLCS_ACTIVITY_LIMIT = 8;
 const RLCS_TIER_META = {
