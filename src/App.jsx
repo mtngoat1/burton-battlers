@@ -3261,7 +3261,7 @@ const claimXP = async (claimKey, grantsWheelSpin, grantsPassTier, grantsSlotSpin
         />
       )}
       <div style={s.sectionRowHeader}>
-        <div style={s.sectionLabel}>weekly challenges</div>
+        <div style={{...s.sectionLabel,color:getAppTextColor(appCustomizer,"weeklyChallengeTitle")}}>{getAppCopy(appCustomizer,"weeklyChallengeTitle","weekly challenges")}</div>
         <button onClick={()=>setShowAllModal(true)} className="bb-pressable" style={s.viewAllBtn}>
           view all 18 <ChevronRight size={12}/>
         </button>
@@ -4120,7 +4120,7 @@ return (
       </div></div>}
 
       {isManagedBoxVisible(appCustomizer, "homeOverview", "trainingPreview") && <div style={getTabBoxStyle(appCustomizer, "homeOverview", "trainingPreview")}><div style={s.sectionRowHeader}>
-        <div style={s.sectionLabel}>next 5 days · your training</div>
+        <div style={{...s.sectionLabel,color:getAppTextColor(appCustomizer,"trainingNextTitle")}}>{getAppCopy(appCustomizer,"trainingNextTitle","next 5 days · your training")}</div>
         <button onClick={onGotoTraining} className="bb-pressable" style={s.viewAllBtn}>view all <ChevronRight size={12}/></button>
       </div>
       <div style={s.dashTrainingScroll}>
@@ -4578,7 +4578,7 @@ function TwitchLiveDot({ handle, size = 8 }) {
   return <span className="bb-live-dot" title={`${cleanHandle} is live on Twitch`} aria-label="live on Twitch" style={{display:"inline-block",width:size,height:size,minWidth:size,minHeight:size,borderRadius:99,background:"#FF2D55",boxShadow:"0 0 8px rgba(255,45,85,0.8), 0 0 18px rgba(255,45,85,0.35)",flexShrink:0,verticalAlign:"middle",animation:"livePulse 1.15s ease-in-out infinite"}}/>;
 }
 
-function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded = false }) {
+function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded = false, appCustomizer }) {
   const [editingTwitch,setEditingTwitch]=useState(false);
   const [draft,setDraft]=useState(streamProfiles[currentPlayer]?.twitch||"");
   const [activeStream,setActiveStream]=useState(null);
@@ -4619,7 +4619,7 @@ function StreamTab({ streamProfiles, setStreamProfiles, currentPlayer, embedded 
       ) : (
         <>
           <div style={s.sectionRowHeader}>
-            <div style={s.sectionLabel}>team streams</div>
+            <div style={{...s.sectionLabel,color:getAppTextColor(appCustomizer,"squadTeamStreamsTitle")}}>team streams</div>
             <button onClick={()=>setEditingTwitch(true)} className="bb-pressable" style={s.newPostBtn}><Edit3 size={13}/> my twitch</button>
           </div>
           {editingTwitch && (
@@ -7268,7 +7268,7 @@ function PostCommentsModal({ post, onAddComment, onHeartComment, currentPlayer, 
   );
   return typeof document !== "undefined" ? createPortal(modal, document.body) : modal;
 }
-function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats, deepLink, onDeepLinkHandled }) {
+function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats, deepLink, onDeepLinkHandled, appCustomizer }) {
   const userColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
   const [composing, setComposing] = useState(false);
   const [commentingOn, setCommentingOn] = useState(null);
@@ -7623,7 +7623,7 @@ const addComment = async (postId, text, replyTo = null) => {
       {subTab === "feed" && (
         <>
           <div style={s.sectionRowHeader}>
-            <div style={s.sectionLabel}>team feed</div>
+            <div style={{...s.sectionLabel,color:getAppTextColor(appCustomizer,"socialFeedTitle")}}>team feed</div>
             <button onClick={() => setComposing(true)} className="bb-pressable bb-glow-violet" style={s.newPostBtn}><Plus size={14} /> post</button>
           </div>
           {posts.length === 0 && <div style={s.emptyQueue}>no posts yet — share a clip or a funny moment.</div>}
@@ -7635,7 +7635,7 @@ const addComment = async (postId, text, replyTo = null) => {
         <>
   <div style={{marginBottom:16}}>
     <div style={s.sectionRowHeader}>
-      <div style={s.sectionLabel}>your bets</div>
+      <div style={{...s.sectionLabel,color:getAppTextColor(appCustomizer,"socialBetsTitle")}}>{getAppCopy(appCustomizer,"socialBetsTitle","your bets")}</div>
       <button onClick={clearOwnBets} className="bb-pressable" style={{...s.newPostBtn,background:"rgba(255,92,138,0.10)",borderColor:"rgba(255,92,138,0.25)",color:"#FF5C8A"}}>clear all</button>
     </div>
     <div style={{display:"flex",gap:7,margin:"0 0 10px",flexWrap:"wrap"}}>
@@ -8648,6 +8648,20 @@ function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
     ["vaultLabel", "vault label"],
     ["cursesBlessingsLabel", "curses/blessings label"],
   ];
+  const textColorFields = [
+    ["trainingNextTitle", "Home · your training next 5 days"],
+    ["weeklyChallengeTitle", "Home · weekly challenges"],
+    ["socialFeedTitle", "Social · team feed"],
+    ["socialBetsTitle", "Social · your bets"],
+    ["statsTrackerTitle", "Stats · stats tracker"],
+    ["squadOnlineNowTitle", "Squad · online now"],
+    ["squadTeamStreamsTitle", "Squad · team streams"],
+    ["squadPointsLeaderboardTitle", "Squad · points leaderboard"],
+    ["passTierRewardsTitle", "Pass · tier rewards"],
+    ["passYourTokensTitle", "Pass · your tokens"],
+    ["coinCancelChallengeText", "Coin flip · cancel challenge button"],
+    ["coinRecentFlipsTitle", "Coin flip · recent flips"],
+  ];
   const save = (patch, message) => saveAppCustomizer({ ...cfg, ...patch }, setAppCustomizer, addToast, message);
   const saveNested = (key, value, message) => save({ [key]: value }, message);
   const moveTab = (id, dir) => {
@@ -8665,6 +8679,10 @@ function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
     saveNested("hiddenTabs", hiddenTabs, hiddenTabs[id] ? `${id} hidden` : `${id} shown`);
   };
   const updateCopy = (key, value) => saveNested("pageCopy", { ...cfg.pageCopy, [key]: value }, "text updated live");
+  const updateTextColor = (key, value) => {
+    const clean = /^#[0-9a-f]{6}$/i.test(String(value || "").trim()) ? String(value).trim() : DEFAULT_APP_TEXT_COLORS[key];
+    saveNested("textColors", { ...cfg.textColors, [key]: clean }, "text color saved");
+  };
   const toggleCopy = (key) => {
     const hiddenCopy = { ...cfg.hiddenCopy, [key]: !cfg.hiddenCopy?.[key] };
     if (!hiddenCopy[key]) delete hiddenCopy[key];
@@ -8727,6 +8745,19 @@ function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
                 <button onClick={()=>toggleCopy(key)} style={{background:cfg.hiddenCopy?.[key]?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.05)",border:`1px solid ${cfg.hiddenCopy?.[key]?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:10,color:cfg.hiddenCopy?.[key]?"#FF5C8A":"#8B92A8",height:36,fontSize:10,fontWeight:900}}>{cfg.hiddenCopy?.[key]?"removed":"visible"}</button>
               </div>
             ))}
+          </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>section text colors</div>
+          <div style={{display:"grid",gap:8,marginBottom:13,maxHeight:300,overflowY:"auto",paddingRight:2}}>
+            {textColorFields.map(([key,label])=>{
+              const val = cfg.textColors?.[key] || DEFAULT_APP_TEXT_COLORS[key] || "#4A5066";
+              return (
+                <div key={key} style={{display:"grid",gridTemplateColumns:"48px 1fr 92px",gap:7,alignItems:"center",background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:7}}>
+                  <input type="color" value={val} onChange={(e)=>updateTextColor(key, e.target.value)} style={{width:"100%",height:34,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:9,padding:2,cursor:"pointer"}}/>
+                  <div style={{minWidth:0}}><div style={{fontSize:10,color:val,fontWeight:900,letterSpacing:.7,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div><div style={{fontSize:9,color:"#4A5066",marginTop:2}}>targets that title only</div></div>
+                  <input value={val} onChange={(e)=>updateTextColor(key, e.target.value)} placeholder="#4A5066" style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:9,padding:"8px 7px",fontSize:10,fontWeight:900,color:"#E8ECF4",minWidth:0}}/>
+                </div>
+              );
+            })}
           </div>
           <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>shop price boxes</div>
           <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:12,padding:9,marginBottom:13}}>
@@ -10950,7 +10981,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
 }
 
 
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit, points, setPoints, bets, setBets, chemistry, setChemistry }) {
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit, points, setPoints, bets, setBets, chemistry, setChemistry, appCustomizer }) {
   stats = sanitizeStatsForRender(stats);
   const [mode,setMode]=useState("2v2");
   const [logging,setLogging]=useState(false);
@@ -11339,7 +11370,7 @@ return (
     <div className="bb-tab-content" style={s.tabContent}>
       {logging&&<LogGameModal mode={mode} currentPlayer={currentPlayer} onSave={saveGame} onClose={()=>setLogging(false)}/>}
 <div style={s.sectionRowHeader}>
-        <div style={s.sectionLabel}>stats tracker</div>
+        <div style={{...s.sectionLabel,color:getAppTextColor(appCustomizer,"statsTrackerTitle")}}>stats tracker</div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
           {currentPlayer === ADMIN_ID && (
           <button onClick={syncAllRanksFromTracker} disabled={rankSyncing} className="bb-pressable bb-glow-lime" style={{...s.newPostBtn, opacity:rankSyncing?0.6:1}}>
@@ -11480,7 +11511,7 @@ return (
 ) : statsSubTab==="teamlink" ? (
   <TeamLinkTab stats={stats} onUpdateOpponentScore={updateOpponentScore} />
 ) : statsSubTab==="chem" ? (
-  <TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>
+  <TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry} appCustomizer={appCustomizer}/>
 ) : (
       <div {...trackerModeSwipeHandlers} style={{touchAction:"pan-y"}}>
       <div style={{display:"flex",gap:8,marginBottom:18}}>
@@ -12320,6 +12351,35 @@ function premiumFeelIsActive(settings, key) {
   return !!cfg.enabled && !!cfg[key];
 }
 
+const DEFAULT_APP_TEXT_COLORS = {
+  trainingNextTitle: "#4A5066",
+  weeklyChallengeTitle: "#4A5066",
+  socialFeedTitle: "#4A5066",
+  socialBetsTitle: "#4A5066",
+  statsTrackerTitle: "#4A5066",
+  squadOnlineNowTitle: "#4A5066",
+  squadTeamStreamsTitle: "#4A5066",
+  squadPointsLeaderboardTitle: "#4A5066",
+  passTierRewardsTitle: "#4A5066",
+  passYourTokensTitle: "#4A5066",
+  coinCancelChallengeText: "#E8ECF4",
+  coinRecentFlipsTitle: "#4A5066",
+};
+function normalizeAppTextColors(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const out = { ...DEFAULT_APP_TEXT_COLORS };
+  Object.keys(DEFAULT_APP_TEXT_COLORS).forEach(key => {
+    const v = String(src[key] || "").trim();
+    if (/^#[0-9a-f]{6}$/i.test(v)) out[key] = v;
+  });
+  return out;
+}
+function getAppTextColor(customizer, key, fallback = "#4A5066") {
+  const cfg = normalizeAppCustomizer(customizer || {});
+  const v = cfg.textColors?.[key];
+  return /^#[0-9a-f]{6}$/i.test(String(v || "")) ? v : fallback;
+}
+
 const DEFAULT_APP_CUSTOMIZER = {
   hiddenTabs: {},
   tabOrder: DEFAULT_APP_TAB_ORDER,
@@ -12357,6 +12417,7 @@ const DEFAULT_APP_CUSTOMIZER = {
   underConstruction:{},
   weeklyAdmin:{ library:[], weeks:{} },
   streamDirectory:{ multiview:true, streams:[{ id:"rlcs_main", enabled:true, label:"RLCS Main", type:"youtube", url:"https://www.youtube.com/watch?v=hzs2x4irAD0", info:"main Rocket League live hub" }] },
+  textColors: DEFAULT_APP_TEXT_COLORS,
   pageCopy: {
     homeCommandEyebrow: "today's command center",
     homeCommandTitle: "what matters now",
@@ -12854,6 +12915,7 @@ function normalizeAppCustomizer(cfg = {}) {
   const hiddenTabs = src.hiddenTabs && typeof src.hiddenTabs === "object" ? src.hiddenTabs : {};
   const hiddenCopy = src.hiddenCopy && typeof src.hiddenCopy === "object" ? src.hiddenCopy : {};
   const pageCopy = { ...DEFAULT_APP_CUSTOMIZER.pageCopy, ...(src.pageCopy && typeof src.pageCopy === "object" ? src.pageCopy : {}) };
+  const textColors = normalizeAppTextColors(src.textColors);
   const enabledBoxes = { ...DEFAULT_BURTON_BOXES, ...(src.enabledBoxes && typeof src.enabledBoxes === "object" ? src.enabledBoxes : {}) };
   const tabBoxLayout = normalizeTabBoxLayout(src.tabBoxLayout || src.boxLayout || {});
   const courtPunishments = normalizeCourtPunishments(src.courtPunishments || {});
@@ -12872,6 +12934,7 @@ function normalizeAppCustomizer(cfg = {}) {
     hiddenTabs,
     hiddenCopy,
     pageCopy,
+    textColors,
     enabledBoxes,
     tabBoxLayout,
     courtPunishments,
@@ -13760,7 +13823,7 @@ function SquadTabFallback({ currentPlayer, presence, voicePresence, points, setT
         🎙️ open voice room
       </button>
 
-      <div style={{...s.sectionLabel,marginBottom:10}}>online now</div>
+      <div style={{...s.sectionLabel,marginBottom:10,color:getAppTextColor(appCustomizer,"squadOnlineNowTitle")}}>online now</div>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:18}}>
         {PLAYERS.map(p => {
           const online = isOnline(safePresence?.[p.id]);
@@ -14356,7 +14419,7 @@ await storeSetWithPush("pings", pingUpd2);
 </div>
 
       {/* Online now */}
-      <div style={{...s.sectionLabel,marginBottom:10}}>online now</div>
+      <div style={{...s.sectionLabel,marginBottom:10,color:getAppTextColor(appCustomizer,"squadOnlineNowTitle")}}>online now</div>
       <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
    {PLAYERS.map(p=>{
   const online = isOnline(safePresence?.[p.id]);
@@ -14383,11 +14446,11 @@ await storeSetWithPush("pings", pingUpd2);
 </div>
       {/* squad streams section inside squad */}
       <div style={{marginBottom:18}}>
-        <StreamTab streamProfiles={streamProfiles || {}} setStreamProfiles={setStreamProfiles || (()=>{})} currentPlayer={currentPlayer} embedded/>
+        <StreamTab streamProfiles={streamProfiles || {}} setStreamProfiles={setStreamProfiles || (()=>{})} currentPlayer={currentPlayer} embedded appCustomizer={appCustomizer}/>
       </div>
 
       {/* Team points leaderboard */}
-      <div style={{...s.sectionLabel,marginBottom:10}}>points leaderboard</div>
+      <div style={{...s.sectionLabel,marginBottom:10,color:getAppTextColor(appCustomizer,"squadPointsLeaderboardTitle")}}>points leaderboard</div>
       <div style={{background:"#11131F",borderRadius:13,padding:14,border:"1px solid rgba(255,255,255,0.05)",marginBottom:18}}>
         {[...PLAYERS].sort((a,b)=>(points?.[b.id]||0)-(points?.[a.id]||0)).map((p,i)=>(
           <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,marginBottom:i<PLAYERS.length-1?10:0,paddingBottom:i<PLAYERS.length-1?10:0,borderBottom:i<PLAYERS.length-1?"1px solid rgba(255,255,255,0.04)":"none"}}>
@@ -14438,7 +14501,7 @@ function getPassRewardForOwnedId(ownedId) {   // ← NEW LOCATION
   return rewards[tier] || null;
 }
 // ===================== Pass Tab =====================
-function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed, passActiveBoosts, addToast }) {
+function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, passTokens, setPassTokens, passClaimed, setPassClaimed, passActiveBoosts, addToast, appCustomizer }) {
   const [track, setTrack] = useState("free");
   const [claimResult, setClaimResult] = useState(null);
   const [selectedToken, setSelectedToken] = useState(null);
@@ -14614,7 +14677,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
       </div>
 
       {/* Tier reward list */}
-      <div style={{ ...s.sectionLabel, marginBottom: 12 }}>tier rewards</div>
+      <div style={{ ...s.sectionLabel, marginBottom: 12, color:getAppTextColor(appCustomizer,"passTierRewardsTitle") }}>tier rewards</div>
       <div style={{ transform:`translateX(${trackSwipeOffset}px)`, transition:trackSwipeOffset===0?"transform .22s ease":"none" }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {visibleTiers.map(({ tier, reward }) => {
@@ -14667,7 +14730,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
 {/* Token inventory */}
       {myTokens.length > 0 && (
         <div style={{ marginTop: 24 }}>
-          <div style={{ ...s.sectionLabel, marginBottom: 10 }}>your tokens</div>
+          <div style={{ ...s.sectionLabel, marginBottom: 10, color:getAppTextColor(appCustomizer,"passYourTokensTitle") }}>your tokens</div>
           <div style={{ background: "#11131F", borderRadius: 14, padding: 14, border: "1px solid rgba(255,255,255,0.05)" }}>
             {myTokens.map((tok, i) => (
               <button key={tok.id} onClick={()=>setSelectedToken(tok)} className="bb-pressable" style={{ width:"100%", background:"none", border:"none", textAlign:"left", cursor:"pointer", display: "flex", alignItems: "center", gap: 10, marginBottom: i < myTokens.length - 1 ? 10 : 0, paddingBottom: i < myTokens.length - 1 ? 10 : 0, borderBottom: i < myTokens.length - 1 ? "1px solid rgba(255,255,255,0.04)" : "none" }}>
@@ -18142,7 +18205,7 @@ const noBettingWeek = isEventActive("no_betting");
 }
                   
 // ===================== Coin Flip Duel =====================
-function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips, flipChallenges, setFlipChallenges, pings, setPings, addToast }) {
+function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips, flipChallenges, setFlipChallenges, pings, setPings, addToast, appCustomizer }) {
   const [selectedOpponent, setSelectedOpponent] = useState(null);
   const [wager, setWager] = useState(10);
   const [flipping, setFlipping] = useState(false);
@@ -18313,7 +18376,7 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
             you challenged <span style={{color:"#E8ECF4",fontWeight:700}}>{PLAYERS.find(p => p.id === outgoingChallenge.to)?.name}</span> for <span style={{color:"#FFD166",fontWeight:700}}>{outgoingChallenge.wager} pts</span>
           </div>
           <button onClick={cancelOutgoing} className="bb-pressable"
-            style={{background:"none",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"6px 14px",fontSize:11,color:"#4A5066",cursor:"pointer"}}>
+            style={{background:"none",border:"1px solid rgba(255,255,255,0.1)",borderRadius:8,padding:"6px 14px",fontSize:11,color:getAppTextColor(appCustomizer,"coinCancelChallengeText","#4A5066"),cursor:"pointer"}}>
             cancel challenge
           </button>
         </div>
@@ -18417,7 +18480,7 @@ function CoinFlipTab({ currentPlayer, points, setPoints, coinFlips, setCoinFlips
       {/* History */}
       {myHistory.length > 0 && (
         <>
-          <div style={{...s.sectionLabel,marginBottom:10,marginTop:24}}>recent flips</div>
+          <div style={{...s.sectionLabel,marginBottom:10,marginTop:24,color:getAppTextColor(appCustomizer,"coinRecentFlipsTitle")}}>recent flips</div>
           {(showAllFlipHistory ? myHistory : myHistory.slice(0,5)).map(f => {
             const iWon = f.winner === currentPlayer;
             const otherId = f.challenger === currentPlayer ? f.opponent : f.challenger;
@@ -22070,8 +22133,8 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
 {tab==="jobs"&&<JobsTab key={tab} burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stats={stats} appCustomizer={appCustomizer} addToast={addToast} setTab={setTab}/>}
 {tab==="court"&&<CourtTab key={tab} burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} pings={pings} setPings={setPings} appCustomizer={appCustomizer} addToast={addToast}/>}
         {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-      <div style={{display:tab==="social"?"block":"none",height:"100%",minHeight:"100%"}} aria-hidden={tab!=="social"}><SocialTab key="social-mounted" posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)}/></div>
-        {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer}/>}
+      <div style={{display:tab==="social"?"block":"none",height:"100%",minHeight:"100%"}} aria-hidden={tab!=="social"}><SocialTab key="social-mounted" posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)} appCustomizer={appCustomizer}/></div>
+        {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer} appCustomizer={appCustomizer}/>}
           
 {tab==="room"&&(
 <div style={{display:"flex",flexDirection:"column",alignItems:"center",minHeight:"100%",padding:"20px 20px max(36px, env(safe-area-inset-bottom))",overflow:"visible"}}>
@@ -22083,14 +22146,14 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
   </div>
 )}    
           
-{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit} points={points} setPoints={setPoints} bets={bets} setBets={setBets} chemistry={chemistry} setChemistry={setChemistry}/>}
+{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit} points={points} setPoints={setPoints} bets={bets} setBets={setBets} chemistry={chemistry} setChemistry={setChemistry} appCustomizer={appCustomizer}/>}
  {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} streamProfiles={streamProfiles} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer}/>} 
-{tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>}
+{tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer}/>}
 
 {tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks} passXP={passXP}/>}
 {(tab==="presence" || tab==="squad")&&<SquadTabErrorBoundary resetKey={`${currentPlayer}-${tab}`} currentPlayer={currentPlayer} presence={presence} points={points} setTab={setTab}><PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} adminShopItems={adminShopItems} appCustomizer={appCustomizer}/></SquadTabErrorBoundary>}
-{tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts} addToast={addToast}/>}
-{tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry}/>}
+{tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts} addToast={addToast} appCustomizer={appCustomizer}/>}
+{tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry} appCustomizer={appCustomizer}/>}
 {tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer} pings={pings} setPings={setPings} addToast={addToast}/>}
  {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition} points={points} setPoints={setPoints} passPremium={passPremium} setPassPremium={setPassPremium} adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} tabAnimationStyle={tabAnimationStyle} setTabAnimationStyle={setTabAnimationStyle} fullScreenFloatMode={fullScreenFloatMode} setFullScreenFloatMode={setFullScreenFloatMode} appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} comments={comments} setComments={setComments} currentPlayer={currentPlayer} burtonOS={burtonOS} setBurtonOS={setBurtonOS}/>}
 </>}
