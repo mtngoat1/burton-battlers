@@ -76,12 +76,14 @@ import { createPortal } from "react-dom";
 // APP128_BALLCHASING_AUTO_REFRESH_TIMELINE_SEARCH_PATCH
 // APP129_FILM_ROOM_TWITCH_VOD_WAIT_UPLOAD_STAT_CARD_TOGGLES_PATCH
 // APP130_FILM_ROOM_VOD_PLAYER_DEDUPE_MANUAL_START_PATCH
+// APP131_FILM_ROOM_VOD_VAULT_TABS_CLEAN_LINKS_PATCH
+// APP132_FACE_ID_LOGIN_PASSCODE_FALLBACK_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
-  { id: "p1", name: "maglvxx",  color: "#B8FF4D", twitch: "", platform: "psn" },
-  { id: "p2", name: "apcards5", color: "#4D9EFF", twitch: "", platform: "xbl" },
-  { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "", platform: "xbl" },
+  { id: "p1", name: "maglvxx",  color: "#B8FF4D", twitch: "maglvxxgoat", platform: "psn" },
+  { id: "p2", name: "apcards5", color: "#4D9EFF", twitch: "Aaronperks05", platform: "xbl" },
+  { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "therealtqrt1e", platform: "xbl" },
 ];
 const TRAINING_START = new Date("2026-07-01T00:00:00");
 const LEAGUE_START   = new Date("2026-07-20T00:00:00");
@@ -1431,6 +1433,7 @@ async function fetchBallchasingTimelineViaConfig(cfg = {}, replayId = "") {
 }
 function normalizeFilmRoom(input = {}) {
   const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const vodVault = Array.isArray(src.vodVault) ? src.vodVault : [];
   return {
     provider: src.provider || "twitch",
     twitchChannel: normalizeTwitchHandle(src.twitchChannel || src.channel || ""),
@@ -1439,6 +1442,15 @@ function normalizeFilmRoom(input = {}) {
     liveUrl: String(src.liveUrl || "").slice(0, 320),
     vodUrl: String(src.vodUrl || "").slice(0, 420),
     latestVodUrl: String(src.latestVodUrl || src.vodUrl || "").slice(0, 420),
+    vodVault: vodVault.map(v => ({
+      id: String(v?.id || getTwitchVideoId(v?.url || v?.vodUrl || "") || `vod_${Date.now()}`).slice(0,80),
+      url: String(v?.url || v?.vodUrl || "").slice(0,420),
+      title: String(v?.title || "").slice(0,160),
+      channel: normalizeTwitchHandle(v?.channel || src.twitchChannel || src.channel || ""),
+      addedAt: v?.addedAt || new Date().toISOString(),
+      streamStartedAt: v?.streamStartedAt || src.streamStartedAt || null,
+      syncOffsetSeconds: Number.isFinite(Number(v?.syncOffsetSeconds)) ? Math.max(-600, Math.min(600, Number(v.syncOffsetSeconds))) : (Number.isFinite(Number(src.syncOffsetSeconds)) ? Number(src.syncOffsetSeconds) : 0),
+    })).filter(v => v.url).slice(0, 40),
     title: String(src.title || "").slice(0, 160),
     isLive: !!src.isLive,
     syncOffsetSeconds: Number.isFinite(Number(src.syncOffsetSeconds)) ? Math.max(-600, Math.min(600, Number(src.syncOffsetSeconds))) : 0,
@@ -1543,6 +1555,27 @@ function getReplayVodMomentUrl(replay, filmRoomInput = {}, eventSeconds = 0) {
   if (gameStart === null) return "";
   return withVodTimestamp(vod, gameStart + (Number(eventSeconds) || 0));
 }
+function upsertFilmRoomVod(vodVault = [], vodUrl = "", patch = {}) {
+  const url = String(vodUrl || "").trim();
+  if (!url) return Array.isArray(vodVault) ? vodVault : [];
+  const id = getTwitchVideoId(url) || url;
+  const clean = (Array.isArray(vodVault) ? vodVault : []).filter(v => (getTwitchVideoId(v?.url || v?.vodUrl || "") || v?.url) !== id);
+  return [{
+    id:String(id).slice(0,80),
+    url:url.slice(0,420),
+    title:String(patch.title || "").slice(0,160),
+    channel:normalizeTwitchHandle(patch.channel || ""),
+    streamStartedAt:patch.streamStartedAt || null,
+    syncOffsetSeconds:Number.isFinite(Number(patch.syncOffsetSeconds)) ? Number(patch.syncOffsetSeconds) : 0,
+    addedAt:new Date().toISOString(),
+  }, ...clean].slice(0,40);
+}
+function getVodVaultLabel(vod = {}, idx = 0) {
+  const title = String(vod.title || "").trim();
+  if (title) return title;
+  const id = getTwitchVideoId(vod.url || "");
+  return id ? `Twitch VOD ${id}` : `Session VOD ${idx + 1}`;
+}
 async function fetchFilmRoomViaConfig(cfg = {}, channel = "", after = "") {
   const cleanChannel = normalizeTwitchHandle(channel);
   if (!cleanChannel) throw new Error("Add a Twitch channel first.");
@@ -1580,6 +1613,12 @@ function FilmRoomPanel({ cfg, safe, currentPlayer, updateSession, addToast, me }
       const data = await fetchFilmRoomViaConfig(cfg, clean, safe.startedAt || film.streamStartedAt || "");
       const startedAt = data.startedAt || film.streamStartedAt || null;
       const nextVod = data.latestVodUrl || vodUrl || film.vodUrl || "";
+      const nextVault = nextVod ? upsertFilmRoomVod(film.vodVault, nextVod, {
+        title:data.latestVodTitle || data.title || film.title,
+        channel:clean,
+        streamStartedAt:startedAt,
+        syncOffsetSeconds:Number(offset) || 0,
+      }) : film.vodVault;
       setVodUrl(nextVod);
       await saveFilm({
         provider:"twitch",
@@ -1588,44 +1627,82 @@ function FilmRoomPanel({ cfg, safe, currentPlayer, updateSession, addToast, me }
         liveUrl:data.url || `https://www.twitch.tv/${clean}`,
         vodUrl:nextVod,
         latestVodUrl:nextVod,
+        vodVault:nextVault,
         title:data.title || data.latestVodTitle || film.title,
         isLive:!!data.live,
         lastCheckedAt:new Date().toISOString(),
         syncOffsetSeconds:Number(offset) || 0,
         source:"twitch",
-      }, data.live ? "Twitch live stream detected" : nextVod ? "Twitch VOD found" : "Twitch checked", data.live ? "🔴" : "🎥");
+      }, data.live ? "Twitch live stream detected" : nextVod ? "Twitch VOD saved" : "Twitch checked", data.live ? "🔴" : "🎥");
     } catch (err) {
       setError(err?.message || "Twitch lookup failed. You can still use manual start + pasted VOD URL.");
     } finally { setLoading(false); }
   };
   const saveVodAndOffset = async () => {
-    await saveFilm({ twitchChannel:normalizeTwitchHandle(channel), vodUrl, latestVodUrl:vodUrl, syncOffsetSeconds:Number(offset) || 0 }, "VOD sync saved", "⏱️");
+    const clean = normalizeTwitchHandle(channel || defaultChannel);
+    const url = String(vodUrl || "").trim();
+    if (!url) { setError("Paste a Twitch VOD URL first."); return; }
+    const nextVault = upsertFilmRoomVod(film.vodVault, url, {
+      title:film.title,
+      channel:clean,
+      streamStartedAt:film.streamStartedAt,
+      syncOffsetSeconds:Number(offset) || 0,
+    });
+    await saveFilm({
+      twitchChannel:clean,
+      vodUrl:url,
+      latestVodUrl:url,
+      vodVault:nextVault,
+      syncOffsetSeconds:Number(offset) || 0,
+    }, "VOD saved to vault", "⏱️");
   };
   const gameStartHelp = film.streamStartedAt ? `stream start: ${new Date(film.streamStartedAt).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}` : "save a stream start time before timestamping VODs";
+  const activeVod = vodUrl || film.vodUrl || film.latestVodUrl;
   return (
     <div style={{background:"linear-gradient(135deg,#130F22,#080A12)",border:"1px solid rgba(167,139,250,.22)",borderRadius:20,padding:14,marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
         <div>
-          <div style={{fontSize:10,color:"#A78BFA",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Film Room · Twitch VOD sync</div>
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Film Room · VOD vault</div>
           <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>{gameStartHelp}</div>
         </div>
-        <div style={{fontSize:10,color:film.isLive?"#7CFFB2":"#8B92A8",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{film.isLive ? "live" : film.vodUrl ? "vod ready" : "setup"}</div>
+        <div style={{fontSize:10,color:film.isLive?"#7CFFB2":film.vodUrl?"#B8FF4D":"#8B92A8",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{film.isLive ? "live" : film.vodUrl ? "vod saved" : "setup"}</div>
       </div>
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 88px",gap:8,marginBottom:8}}>
         <input value={channel} onChange={e=>setChannel(e.target.value)} placeholder="Twitch channel" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11,color:"#E8ECF4",fontWeight:850,minWidth:0}} />
         <input value={offset} onChange={e=>setOffset(e.target.value)} type="number" placeholder="offset" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11,color:"#E8ECF4",fontWeight:850,minWidth:0}} />
       </div>
+
       <input value={vodUrl} onChange={e=>setVodUrl(e.target.value)} placeholder="Paste Twitch VOD URL after stream ends" style={{width:"100%",boxSizing:"border-box",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11,color:"#E8ECF4",fontWeight:850,marginBottom:8}} />
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
         <button onClick={detectTwitch} disabled={loading} className="bb-pressable" style={{background:"rgba(167,139,250,.14)",border:"1px solid rgba(167,139,250,.32)",borderRadius:12,padding:"10px 6px",fontSize:10.5,fontWeight:950,color:"#A78BFA",cursor:loading?"wait":"pointer"}}>{loading ? "checking…" : "detect Twitch"}</button>
         <button onClick={manualStart} className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.30)",borderRadius:12,padding:"10px 6px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>start now</button>
         <button onClick={saveVodAndOffset} className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.30)",borderRadius:12,padding:"10px 6px",fontSize:10.5,fontWeight:950,color:"#B8FF4D",cursor:"pointer"}}>save VOD</button>
       </div>
-      {film.vodUrl && <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:850,lineHeight:1.35,marginTop:8}}>Replay dropdowns will turn game starts and goal/save/demo times into VOD links.</div>}
-      {(vodUrl || film.vodUrl || film.latestVodUrl) && getTwitchEmbedSrc(vodUrl || film.vodUrl || film.latestVodUrl, 0) && <div style={{marginTop:10,border:"1px solid rgba(167,139,250,.22)",borderRadius:14,overflow:"hidden",background:"#05070D"}}>
-        <iframe title="Twitch VOD player" src={getTwitchEmbedSrc(vodUrl || film.vodUrl || film.latestVodUrl, 0)} allowFullScreen={true} scrolling="no" frameBorder="0" style={{width:"100%",height:220,display:"block",border:0}} />
+
+      <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:850,lineHeight:1.35,marginTop:9}}>
+        Clean-link mode is on: the app opens Twitch timestamps externally instead of loading the buggy in-app Twitch player.
+      </div>
+
+      {activeVod && <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginTop:10}}>
+        <a href={activeVod} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(167,139,250,.12)",border:"1px solid rgba(167,139,250,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",textDecoration:"none",textAlign:"center"}}>open saved VOD</a>
       </div>}
-      {(vodUrl || film.vodUrl || film.latestVodUrl) && !getTwitchEmbedSrc(vodUrl || film.vodUrl || film.latestVodUrl, 0) && <div style={{fontSize:9.5,color:"#FFD166",fontWeight:850,lineHeight:1.35,marginTop:8}}>That does not look like a Twitch VOD URL yet. It should look like twitch.tv/videos/1234567890.</div>}
+
+      {!!film.vodVault?.length && (
+        <div style={{marginTop:12,background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:10}}>
+          <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:950,letterSpacing:.9,textTransform:"uppercase",marginBottom:8}}>session VOD vault</div>
+          <div style={{display:"grid",gap:7}}>
+            {film.vodVault.slice(0,6).map((v, idx) => (
+              <a key={`${v.id}_${idx}`} href={v.url} target="_blank" rel="noreferrer" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:10,padding:"8px",textDecoration:"none"}}>
+                <span style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getVodVaultLabel(v, idx)}</span>
+                <span style={{fontSize:8.5,color:"#A78BFA",fontWeight:950,textTransform:"uppercase"}}>open</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
       {error && <div style={{fontSize:10,color:"#FF5C8A",fontWeight:850,lineHeight:1.35,marginTop:8}}>{error}</div>}
     </div>
   );
@@ -1639,6 +1716,7 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const [waitStatus, setWaitStatus] = useState("");
   const waitActiveRef = useRef(false);
   const [error, setError] = useState("");
+  const [replayTabs, setReplayTabs] = useState({});
   const replay = replayVault.latestReplay ? normalizeBallchasingReplay(replayVault.latestReplay) : null;
   const rows = replay ? buildBallchasingPlayerRows(replay, cfg) : [];
   const expected = getLiveModeSize(safe.mode);
@@ -1774,15 +1852,17 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
     </details>
   );
   const watchButtons = (rv) => {
-    const id = rv?.id || extractBallchasingReplayId(rv?.viewUrl || rv?.link || "");
-    const downloadHref = getReplayDownloadHref(cfg, id);
-    const vodHref = getReplayVodMomentUrl(rv, safe.filmRoom, 0);
-    const cols = [rv?.viewUrl, downloadHref, vodHref].filter(Boolean).length || 1;
+    const normalized = normalizeBallchasingReplay(rv || {});
+    const vodHref = getReplayVodMomentUrl(normalized, safe.filmRoom, 0);
+    const hasVod = !!(safe.filmRoom?.vodUrl || safe.filmRoom?.latestVodUrl);
     return (
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(cols,3)},1fr)`,gap:8,marginTop:10}}>
-        {rv?.viewUrl && <a href={rv.viewUrl} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#4D9EFF",textDecoration:"none",textAlign:"center"}}>watch 3D</a>}
-        {downloadHref && <a href={downloadHref} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#B8FF4D",textDecoration:"none",textAlign:"center"}}>download .replay</a>}
-        {vodHref && <a href={vodHref} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(167,139,250,.14)",border:"1px solid rgba(167,139,250,.30)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",textDecoration:"none",textAlign:"center"}}>watch VOD</a>}
+      <div style={{display:"grid",gridTemplateColumns:vodHref && hasVod ? "1fr 1fr" : "1fr",gap:8,marginTop:10}}>
+        {vodHref ? (
+          <a href={vodHref} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(167,139,250,.14)",border:"1px solid rgba(167,139,250,.30)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",textDecoration:"none",textAlign:"center"}}>watch VOD start</a>
+        ) : (
+          <button onClick={()=>setReplayVodStart(normalized)} disabled={!hasVod} className="bb-pressable" style={{background:hasVod?"rgba(167,139,250,.12)":"rgba(255,255,255,.035)",border:`1px solid ${hasVod?"rgba(167,139,250,.28)":"rgba(255,255,255,.06)"}`,borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:hasVod?"#A78BFA":"#4A5066",cursor:hasVod?"pointer":"default"}}>{hasVod ? "set VOD start" : "save VOD first"}</button>
+        )}
+        {vodHref && hasVod && <button onClick={()=>setReplayVodStart(normalized)} className="bb-pressable" style={{background:"rgba(255,209,102,.10)",border:"1px solid rgba(255,209,102,.25)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>adjust start</button>}
       </div>
     );
   };
@@ -1881,8 +1961,14 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const renderReplayDropdown = (rv, idx) => {
     const normalized = normalizeBallchasingReplay(rv);
     const rvRows = buildBallchasingPlayerRows(normalized, cfg).filter(r => r.appPlayerId && participantIds.includes(r.appPlayerId));
+    const replayKey = normalized.id || `replay_${idx}`;
+    const activeTab = replayTabs[replayKey] || "moments";
+    const setTab = (tab) => setReplayTabs(prev => ({ ...prev, [replayKey]:tab }));
+    const tabButton = (id, label, accent = "#8B92A8") => (
+      <button onClick={(e)=>{ e.preventDefault(); setTab(id); }} className="bb-pressable" style={{background:activeTab===id ? `${accent}1f` : "rgba(255,255,255,.035)",border:`1px solid ${activeTab===id ? `${accent}55` : "rgba(255,255,255,.06)"}`,borderRadius:999,padding:"7px 9px",fontSize:9.5,fontWeight:950,color:activeTab===id ? accent : "#8B92A8",textTransform:"uppercase",cursor:"pointer"}}>{label}</button>
+    );
     return (
-      <details key={normalized.id || idx} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:16,padding:12,marginTop:10}}>
+      <details key={replayKey} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:16,padding:12,marginTop:10}}>
         <summary style={{cursor:"pointer",listStyle:"none",display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
           <div style={{minWidth:0}}>
             <div style={{fontSize:12,color:"#E8ECF4",fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>Game {idx + 1}</div>
@@ -1890,9 +1976,27 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
           </div>
           <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>open</div>
         </summary>
-        {watchButtons(normalized)}
-        {keyMomentsBox(normalized)}
-        <div style={{display:"grid",gap:10,marginTop:10}}>{rvRows.length ? rvRows.map(r => playerCard(r, expected === 3, normalized)) : <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4}}>No selected Burton player matched this replay.</div>}</div>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap",marginTop:10}}>
+          {tabButton("moments", "moments", "#FFD166")}
+          {tabButton("stats", "stats", "#B8FF4D")}
+          {tabButton("vod", "vod", "#A78BFA")}
+        </div>
+        {activeTab === "moments" && (
+          <>
+            {watchButtons(normalized)}
+            {keyMomentsBox(normalized)}
+          </>
+        )}
+        {activeTab === "stats" && (
+          <div style={{display:"grid",gap:10,marginTop:10}}>{rvRows.length ? rvRows.map(r => playerCard(r, expected === 3, normalized)) : <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4}}>No selected Burton player matched this replay.</div>}</div>
+        )}
+        {activeTab === "vod" && (
+          <div style={{background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:10,marginTop:10}}>
+            <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:950,letterSpacing:.9,textTransform:"uppercase",marginBottom:8}}>VOD links</div>
+            {watchButtons(normalized)}
+            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,marginTop:8}}>This uses clean external Twitch timestamp links. Set the VOD start once, then all key moments line up from Ballchasing replay time.</div>
+          </div>
+        )}
       </details>
     );
   };
@@ -1922,24 +2026,11 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
       {!replay ? (
         <div style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:12}}>
           <div style={{fontSize:12,color:"#E8ECF4",fontWeight:950}}>{cfg.replayMissingLabel}</div>
-          <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>Start Live Session, choose 1v1/2v2/3v3, play the match, let Rockpload upload, then tap search latest. Paste link stays hidden unless admin turns it on.</div>
+          <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>Start Live Session, play the match, upload in Rockpload, then tap wait/search. Replays will appear as game dropdowns.</div>
         </div>
       ) : (
         <>
-          <div style={{background:"rgba(77,158,255,.08)",border:"1px solid rgba(77,158,255,.18)",borderRadius:15,padding:12,marginBottom:10}}>
-            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
-              <div style={{minWidth:0}}>
-                <div style={{fontSize:12,color:"#4D9EFF",fontWeight:950}}>{cfg.replayFoundLabel} · {matchedRows.length}/{participantIds.length} shown</div>
-                <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{replay.playlistName} · {replay.mapName} · {getReplayScoreboardText(replay)}</div>
-              </div>
-              {replay.viewUrl && <a href={replay.viewUrl} target="_blank" rel="noreferrer" style={{fontSize:10,fontWeight:950,color:"#B8FF4D",textDecoration:"none",whiteSpace:"nowrap"}}>{cfg.replayOpenButton}</a>}
-            </div>
-            {watchButtons(replay)}
-            {expected === 2 && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>2s is filtered to you + the selected teammate for this session.</div>}
-            {!!missingPlayers.length && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>Missing from this replay: {missingPlayers.map(p=>p.name).join(", ")}</div>}
-            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:850,lineHeight:1.35,marginTop:8}}>Open the Game dropdown below for key moments and player stat cards. This prevents the same replay from showing twice.</div>
-          </div>
-          {Object.values(replayVault.replays || {}).length > 0 && <div style={{marginTop:12}}>
+          {Object.values(replayVault.replays || {}).length > 0 && <div style={{marginTop:4}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>linked replay dropdowns</div>
             {Array.from(new Map(Object.values(replayVault.replays || {}).map(rv => [normalizeBallchasingReplay(rv).id || JSON.stringify(rv).slice(0,80), rv])).values()).slice().sort((a,b)=>new Date(normalizeBallchasingReplay(b).date || 0)-new Date(normalizeBallchasingReplay(a).date || 0)).map((rv, idx) => renderReplayDropdown(rv, idx))}
           </div>}
@@ -4200,6 +4291,99 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
   );
 }
 
+
+// ===================== Face ID / Touch ID login helpers =====================
+function bbBase64UrlEncode(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer || []);
+  let str = "";
+  bytes.forEach(b => { str += String.fromCharCode(b); });
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function bbBase64UrlDecode(value = "") {
+  const input = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = input + "=".repeat((4 - input.length % 4) % 4);
+  const raw = atob(padded);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+function bbRandomChallenge(bytes = 32) {
+  const arr = new Uint8Array(bytes);
+  try { crypto.getRandomValues(arr); }
+  catch (_) { for (let i=0;i<bytes;i++) arr[i] = Math.floor(Math.random()*255); }
+  return arr;
+}
+function bbPlayerUserId(playerId = "") {
+  const src = `burton-battlers:${playerId || "player"}`;
+  const arr = new Uint8Array(32);
+  for (let i = 0; i < src.length; i++) arr[i % 32] = (arr[i % 32] + src.charCodeAt(i) + i) % 255;
+  return arr;
+}
+function biometricLabel() {
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+  if (/iPhone|iPad|Mac/i.test(ua)) return "Face ID";
+  if (/Android/i.test(ua)) return "biometric unlock";
+  return "device unlock";
+}
+function canUseBiometricLogin() {
+  try {
+    return typeof window !== "undefined" &&
+      !!window.PublicKeyCredential &&
+      !!navigator?.credentials &&
+      (window.isSecureContext || location.hostname === "localhost");
+  } catch (_) {
+    return false;
+  }
+}
+async function enrollBiometricLoginForPlayer(player = {}) {
+  if (!canUseBiometricLogin()) throw new Error(`${biometricLabel()} is not available in this browser.`);
+  const credential = await navigator.credentials.create({
+    publicKey: {
+      challenge: bbRandomChallenge(),
+      rp: { name: "Burton Battlers" },
+      user: {
+        id: bbPlayerUserId(player.id),
+        name: player.name || player.id || "player",
+        displayName: player.name || "Burton Battler",
+      },
+      pubKeyCredParams: [
+        { type:"public-key", alg:-7 },
+        { type:"public-key", alg:-257 },
+      ],
+      authenticatorSelection: {
+        authenticatorAttachment: "platform",
+        userVerification: "required",
+        residentKey: "preferred",
+      },
+      timeout: 60000,
+      attestation: "none",
+    }
+  });
+  if (!credential?.rawId) throw new Error(`${biometricLabel()} setup was cancelled.`);
+  return {
+    enabled:true,
+    credentialId: bbBase64UrlEncode(credential.rawId),
+    credentialType: credential.type || "public-key",
+    setupAt: new Date().toISOString(),
+  };
+}
+async function unlockWithBiometricForPlayer(player = {}, auth = {}) {
+  const credentialId = auth?.biometricCredentialId || auth?.biometric?.credentialId;
+  if (!credentialId) throw new Error(`${biometricLabel()} is not set up for ${player?.name || "this user"}.`);
+  if (!canUseBiometricLogin()) throw new Error(`${biometricLabel()} is not available in this browser.`);
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge: bbRandomChallenge(),
+      allowCredentials: [{ type:"public-key", id: bbBase64UrlDecode(credentialId) }],
+      userVerification: "required",
+      timeout: 60000,
+    }
+  });
+  if (!assertion) throw new Error(`${biometricLabel()} unlock was cancelled.`);
+  return true;
+}
+
+
 // ===================== Auth screens =====================
 function NameSelectScreen({ onSelect }) {
   return (
@@ -4227,7 +4411,17 @@ function CreatePasscodeScreen({ player, onCreated }) {
   const submit = async () => {
     if (code.length < 4) return setError("Use at least 4 digits.");
     if (code !== confirm) return setError("Codes don't match.");
-    await storeSet(`auth:${player.id}`, { passcode: code });
+    const nextAuth = { passcode: code };
+    await storeSet(`auth:${player.id}`, nextAuth);
+    if (canUseBiometricLogin()) {
+      try {
+        setError(`Setting up ${biometricLabel()}…`);
+        const bio = await enrollBiometricLoginForPlayer(player);
+        await storeSet(`auth:${player.id}`, { ...nextAuth, biometricCredentialId:bio.credentialId, biometricEnabled:true, biometricSetupAt:bio.setupAt });
+      } catch (_) {
+        // Passcode remains the fallback if biometric setup is cancelled or unavailable.
+      }
+    }
     onCreated();
   };
   return (
@@ -4249,29 +4443,81 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
   const [error, setError] = useState("");
   const [shaking, setShaking] = useState(false);
   const [adminMode, setAdminMode] = useState(false);
+  const [bioStatus, setBioStatus] = useState("");
+  const [bioBusy, setBioBusy] = useState(false);
   const cachedAuth = useRef(null);
+  const bioTried = useRef(false);
+  const unlockStarted = useRef(false);
+
+  const setupBiometricAfterPasscode = async (authObj = {}) => {
+    if (adminMode || authObj?.biometricCredentialId || authObj?.biometricEnabled === false || !canUseBiometricLogin()) return;
+    try {
+      setBioStatus(`Setting up ${biometricLabel()}…`);
+      const bio = await enrollBiometricLoginForPlayer(player);
+      const nextAuth = { ...(authObj || {}), passcode:authObj?.passcode || code, biometricCredentialId:bio.credentialId, biometricEnabled:true, biometricSetupAt:bio.setupAt };
+      await storeSet(`auth:${player.id}`, nextAuth);
+      cachedAuth.current = nextAuth;
+      setBioStatus(`${biometricLabel()} ready for next login`);
+    } catch (_) {
+      setBioStatus(`${biometricLabel()} skipped. Passcode still works.`);
+    }
+  };
+
+  const finishUnlock = (finalCode = "") => {
+    if (unlockStarted.current) return;
+    unlockStarted.current = true;
+    setError("");
+    setCode(finalCode);
+    setTimeout(() => {
+      if (adminMode && onAdmin) onAdmin();
+      else onSuccess();
+    }, 0);
+  };
+
+  const tryBiometricUnlock = async (authObj = cachedAuth.current, manual = false) => {
+    if (adminMode) return;
+    if (!authObj?.biometricCredentialId) {
+      if (manual) setBioStatus(`${biometricLabel()} is not set up yet. Enter passcode once to add it.`);
+      return;
+    }
+    if (bioBusy || unlockStarted.current) return;
+    setBioBusy(true);
+    setBioStatus(`Use ${biometricLabel()} to unlock`);
+    try {
+      await unlockWithBiometricForPlayer(player, authObj);
+      setBioStatus(`${biometricLabel()} accepted`);
+      finishUnlock("");
+    } catch (_) {
+      setBioStatus(`${biometricLabel()} failed or was cancelled. Passcode is ready below.`);
+      if (manual) setError(`${biometricLabel()} failed. Use passcode.`);
+    } finally {
+      setBioBusy(false);
+    }
+  };
 
   useEffect(() => {
     let alive = true;
+    bioTried.current = false;
+    unlockStarted.current = false;
+    setBioStatus("");
     // Do not let auth storage decide whether the keypad can continue.
     // It is only used as an optional fast local check if it returns in time.
     Promise.resolve(storeGet(`auth:${player.id}`))
-      .then(a => { if (alive) cachedAuth.current = a; })
+      .then(a => {
+        if (!alive) return;
+        cachedAuth.current = a;
+        if (a?.biometricCredentialId && !bioTried.current) {
+          bioTried.current = true;
+          setTimeout(() => tryBiometricUnlock(a, false), 180);
+        } else if (!a?.biometricCredentialId && canUseBiometricLogin()) {
+          setBioStatus(`Enter passcode once to set up ${biometricLabel()}.`);
+        }
+      })
       .catch(() => {});
     return () => { alive = false; };
   }, [player.id]);
 
   const submit = (finalCode) => {
-    const unlock = () => {
-      setError("");
-      setCode(finalCode);
-      // Hard login bypass: open immediately. No async storage call can freeze this screen.
-      setTimeout(() => {
-        if (adminMode && onAdmin) onAdmin();
-        else onSuccess();
-      }, 0);
-    };
-
     const cached = cachedAuth.current;
     if (cached?.passcode && cached.passcode !== finalCode) {
       setShaking(true);
@@ -4281,12 +4527,20 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
       return;
     }
 
-    unlock();
-
-    // Best-effort auth warmup only. Never block or reverse a successful login.
+    // Best-effort auth warmup + Face ID setup. Never block passcode fallback.
     Promise.resolve(storeGet(`auth:${player.id}`))
-      .then(a => { cachedAuth.current = a || cachedAuth.current; })
-      .catch(() => {});
+      .then(async a => {
+        const authObj = a || cached || { passcode:finalCode };
+        cachedAuth.current = authObj;
+        if (!authObj?.passcode) {
+          const next = { ...authObj, passcode:finalCode };
+          cachedAuth.current = next;
+          await storeSet(`auth:${player.id}`, next).catch(() => {});
+        }
+        await setupBiometricAfterPasscode(cachedAuth.current).catch(() => {});
+      })
+      .catch(() => {})
+      .finally(() => finishUnlock(finalCode));
   };
 
   const pressNum = (num) => {
@@ -4308,7 +4562,14 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
         <button onClick={onBack} className="bb-pressable" style={s.backBtn}><ChevronLeft size={16}/> back</button>
         <div style={{ ...s.loginPlayerDot, background:player.color, margin:"0 auto 18px", width:14, height:14 }} />
         <div style={s.loginTitle}>{player.name}</div>
-        <div style={s.loginSub}>{adminMode ? "admin passcode" : "enter your passcode"}</div>
+        <div style={s.loginSub}>{adminMode ? "admin passcode" : `unlock with ${biometricLabel()}`}</div>
+        {!adminMode && (
+          <button onClick={()=>tryBiometricUnlock(cachedAuth.current, true)} disabled={bioBusy} className="bb-pressable bb-glow-lime" style={{...s.loginSubmit,margin:"12px auto 18px",maxWidth:260,justifyContent:"center",opacity:bioBusy?.7:1}}>
+            {bioBusy ? "checking…" : `use ${biometricLabel()}`}
+          </button>
+        )}
+        {bioStatus && !adminMode && <div style={{fontSize:10.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,textAlign:"center",margin:"-8px 0 16px"}}>{bioStatus}</div>}
+        <div style={s.loginSub}>{adminMode ? "admin passcode" : "passcode fallback"}</div>
         <div style={{display:"flex",justifyContent:"center",gap:16,marginBottom:32,marginTop:8}}>
           {[0,1,2,3].map(i => (
             <div key={i} style={{width:14,height:14,borderRadius:"50%",background:code.length>i?player.color:"rgba(255,255,255,0.15)",transition:"background .15s ease",boxShadow:code.length>i?`0 0 8px ${player.color}99`:""}}/>
@@ -4330,7 +4591,7 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
           ))}
         </div>
         {player?.id === ADMIN_ID && onAdmin && (
-          <button onClick={()=>{ setAdminMode(true); setCode(""); setError(""); }} className="bb-pressable" style={{marginTop:18,background:adminMode?"rgba(255,92,138,0.18)":"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.28)",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>
+          <button onClick={()=>{ setAdminMode(true); setCode(""); setError(""); setBioStatus(""); }} className="bb-pressable" style={{marginTop:18,background:adminMode?"rgba(255,92,138,0.18)":"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.28)",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>
             {adminMode ? "type passcode for admin" : "admin controls"}
           </button>
         )}
@@ -14237,7 +14498,7 @@ const DEFAULT_LIVE_SESSION_CONFIG = {
   replayVaultEnabled: true,
   replayPasteEnabled: false,
   replayVaultLabel: "replay vault",
-  replayVaultBody: "Pull Ballchasing replay data from Rockpload uploads and compare the current 1s, 2s, or 3s session.",
+  replayVaultBody: "Pull Rockpload/Ballchasing games into dropdowns, then line key moments up with the session VOD.",
   replayPasteLabel: "Ballchasing replay link or id",
   replaySearchButton: "load replay",
   replaySearchLatestButton: "search latest",
@@ -14254,7 +14515,7 @@ const DEFAULT_LIVE_SESSION_CONFIG = {
   twitchAutoDetectEnabled: true,
   twitchProxyPath: "/api/ballchasing",
   filmRoomSyncOffsetSeconds: 0,
-  twitchChannels: ["p1=maglvxx", "p2=", "p3="],
+  twitchChannels: ["p1=maglvxxgoat", "p2=Aaronperks05", "p3=therealtqrt1e"],
   replayStatCardFields: DEFAULT_REPLAY_STAT_CARD_FIELDS,
   defaultMode: "Ranked 1v1",
   modes: ["Ranked 1v1", "Ranked 2v2", "Ranked 3v3", "Casual 1v1", "Casual 2v2", "Casual 3v3", "Tournament", "Freeplay/Warmup"],
