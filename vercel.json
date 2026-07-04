@@ -1,6 +1,0 @@
-{
-  "crons": [
-    { "path": "/api/rlcs-lcq?region=na&cron=1", "schedule": "*/5 * * * *" },
-    { "path": "/api/rlcs-lcq?region=eu&cron=1", "schedule": "*/5 * * * *" }
-  ]
-}
