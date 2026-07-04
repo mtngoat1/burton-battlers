@@ -5,10 +5,84 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'GET only' });
 
+  const q = req.query || {};
+  const twitchChannel = String(q.twitchChannel || q.channel || '').replace(/^@/, '').trim();
+  const includeVideos = String(q.includeVideos || q.videos || '').toLowerCase() === '1' || String(q.includeVideos || q.videos || '').toLowerCase() === 'true';
+
+  const getTwitchAppToken = async () => {
+    const clientId = process.env.TWITCH_CLIENT_ID;
+    const clientSecret = process.env.TWITCH_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      const err = new Error('Missing TWITCH_CLIENT_ID or TWITCH_CLIENT_SECRET env var. Use manual Film Room start/pasted VOD until Twitch env is set.');
+      err.status = 500;
+      throw err;
+    }
+    const tokenRes = await fetch('https://id.twitch.tv/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+    });
+    const tokenJson = await tokenRes.json().catch(() => ({}));
+    if (!tokenRes.ok || !tokenJson.access_token) {
+      const err = new Error(tokenJson?.message || `Twitch token failed (${tokenRes.status})`);
+      err.status = tokenRes.status || 500;
+      throw err;
+    }
+    return { token: tokenJson.access_token, clientId };
+  };
+
+  const twitchFetchJson = async (url, auth) => {
+    const r = await fetch(url, { headers: { 'Client-ID': auth.clientId, Authorization: `Bearer ${auth.token}` } });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const err = new Error(data?.message || `Twitch request failed (${r.status})`);
+      err.status = r.status;
+      throw err;
+    }
+    return data;
+  };
+
+  try {
+    if (twitchChannel) {
+      const auth = await getTwitchAppToken();
+      const userData = await twitchFetchJson(`https://api.twitch.tv/helix/users?login=${encodeURIComponent(twitchChannel)}`, auth);
+      const user = Array.isArray(userData?.data) ? userData.data[0] : null;
+      if (!user?.id) return res.status(404).json({ error: `Twitch channel not found: ${twitchChannel}` });
+      const streamData = await twitchFetchJson(`https://api.twitch.tv/helix/streams?user_login=${encodeURIComponent(twitchChannel)}`, auth);
+      const stream = Array.isArray(streamData?.data) ? streamData.data[0] : null;
+      let latestVod = null;
+      if (includeVideos) {
+        const videos = await twitchFetchJson(`https://api.twitch.tv/helix/videos?user_id=${encodeURIComponent(user.id)}&type=archive&first=5`, auth);
+        const after = q.after ? new Date(String(q.after)).getTime() : 0;
+        const list = Array.isArray(videos?.data) ? videos.data : [];
+        latestVod = list.find(v => {
+          if (!after) return true;
+          const created = new Date(v.created_at || 0).getTime();
+          return Number.isFinite(created) && created >= after - 6 * 60 * 60 * 1000;
+        }) || list[0] || null;
+      }
+      return res.status(200).json({
+        provider:'twitch',
+        channel:twitchChannel,
+        userId:user.id,
+        displayName:user.display_name || twitchChannel,
+        live:!!stream,
+        startedAt:stream?.started_at || null,
+        title:stream?.title || null,
+        gameName:stream?.game_name || null,
+        url:`https://www.twitch.tv/${encodeURIComponent(twitchChannel)}`,
+        latestVodUrl:latestVod?.url || null,
+        latestVodCreatedAt:latestVod?.created_at || null,
+        latestVodTitle:latestVod?.title || null,
+      });
+    }
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message || 'Twitch API error' });
+  }
+
   const token = process.env.BALLCHASING_TOKEN;
   if (!token) return res.status(500).json({ error: 'Missing BALLCHASING_TOKEN env var' });
 
-  const q = req.query || {};
   const replayId = String(q.replayId || q.id || '').trim();
   const shouldDownload = String(q.download || q.file || '').toLowerCase() === '1' || String(q.download || q.file || '').toLowerCase() === 'true';
   const shouldTimeline = String(q.timeline || q.events || '').toLowerCase() === '1' || String(q.timeline || q.events || '').toLowerCase() === 'true';
@@ -49,18 +123,39 @@ export default async function handler(req, res) {
 
   const ballFetchTimeline = async (id) => {
     const url = `https://ballchasing.com/dyn/replay/${encodeURIComponent(id)}/timeline`;
-    let r = await fetch(url, { headers: { Authorization: token, Accept: 'application/json' } });
-    if (r.status === 401 || r.status === 403) {
-      r = await fetch(url, { headers: { Accept: 'application/json' } });
+
+    // The /dyn timeline endpoint is the same public browser endpoint that powers
+    // Ballchasing's visual timeline. It can return 404 when called with the API
+    // Authorization header, even though the exact URL works in normal/incognito Chrome.
+    // Fetch it like a browser first, then retry with auth only as a backup.
+    const browserHeaders = {
+      Accept: 'application/json,text/plain,*/*',
+      'User-Agent': 'Mozilla/5.0 BurtonBattlersFilmRoom/1.0',
+      Referer: `https://ballchasing.com/replay/${encodeURIComponent(id)}`,
+      'Cache-Control': 'no-cache',
+    };
+
+    const attempts = [
+      { label: 'public-browser', headers: browserHeaders },
+      { label: 'api-token-backup', headers: { ...browserHeaders, Authorization: token } },
+    ];
+
+    let lastStatus = 0;
+    let lastBody = null;
+    for (const attempt of attempts) {
+      const r = await fetch(url, { headers: attempt.headers });
+      lastStatus = r.status;
+      const text = await r.text().catch(() => '');
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch (_) { data = null; }
+      if (r.ok && data && typeof data === 'object') return data;
+      lastBody = data || text || null;
     }
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const msg = data?.error || `Ballchasing timeline failed (${r.status})`;
-      const err = new Error(msg);
-      err.status = r.status;
-      throw err;
-    }
-    return data;
+
+    const err = new Error(`Ballchasing timeline failed (${lastStatus})`);
+    err.status = lastStatus || 502;
+    err.details = lastBody;
+    throw err;
   };
 
   const searchList = async ({ name, playlist, afterValue, label }) => {
@@ -101,7 +196,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ replay });
     }
 
-    if (!playerNameRaw) return res.status(400).json({ error: 'Provide replayId or playerName' });
+    if (!playerNameRaw) return res.status(400).json({ error: 'Provide replayId, playerName, or twitchChannel' });
 
     const names = Array.from(new Set(playerNameRaw.split(',').map(v => v.trim()).filter(Boolean)));
     const playlist = playlistForMode(mode);
@@ -141,6 +236,6 @@ export default async function handler(req, res) {
       attempts,
     });
   } catch (err) {
-    return res.status(err.status || 500).json({ error: err.message || 'Ballchasing API error' });
+    return res.status(err.status || 500).json({ error: err.message || 'Ballchasing API error', details: err.details || undefined });
   }
 }
