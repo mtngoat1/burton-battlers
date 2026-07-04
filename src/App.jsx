@@ -64,6 +64,7 @@ import { createPortal } from "react-dom";
 // APP117_JOB_RANDOMIZER_TIME_LIMIT_RLCS_ACTIVITY_REMOVE_PATCH
 // APP118_FAST_BOOT_CLICK_RESPONSIVENESS_PATCH
 // APP119_PARSE_SYNC_FAST_BOOT_RECOVERY_PATCH
+// APP120_NO_IN_APP_NOTIFICATIONS_FAST_PATH_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -14410,16 +14411,18 @@ const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "commen
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
 const RT_KEYS_LIVE = [
-  // APP119: keep realtime lean, but keep gameplay-critical keys live.
-  // Removing stats/parse_credits made Parse sync look broken across devices and before hydration finished.
-  "chat", "stats", "points", "bets", "parse_credits", "presence", "pings",
-  "team_room", "team_sessions", "typing", "activity_feed", "soundboard_events",
+  // APP120: keep gameplay + chat live, but remove in-app notification feeds from realtime.
+  // Phone/native push still sends from writes; the app no longer subscribes to pings/activity_feed.
+  "chat", "stats", "points", "bets", "parse_credits", "presence",
+  "team_room", "team_sessions", "typing", "soundboard_events",
   ADMIN_LIVE_SYNC_KEY
 ];
 const BOOT_LIVE_DELAY_MS = 2500;
 const BOOT_SECONDARY_HYDRATE_DELAY_MS = 3200;
 const BOOT_MMR_HYDRATE_DELAY_MS = 9000;
 const BOOT_BACKGROUND_EFFECT_DELAY_MS = 3500;
+// APP120: disable in-app notification/toast UI and dropdown hydration. Phone/native push paths still run through storeSetWithPush/showLocalNotification.
+const APP_IN_APP_NOTIFICATIONS_ENABLED = false;
 
 // ===================== One-time manual restore =====================
 const MANUAL_RESTORE_PATCH_ID = "manual_restore_20260630_points_pass_v1";
@@ -19945,6 +19948,7 @@ const sessionPingSeenRef = useRef(new Set());
 const sessionPingInitializedRef = useRef(false);
 const appIsVisible = () => (typeof document === "undefined" || !document.hidden);
 const addToast = useCallback((text, icon = "🔔") => {
+  if (!APP_IN_APP_NOTIFICATIONS_ENABLED) return;
   if (toastDismissedAll.current) return;
   if (!appIsVisible()) return;
   const cleanText = String(text || "").trim();
@@ -19961,6 +19965,7 @@ const addToast = useCallback((text, icon = "🔔") => {
 }, []);
 
 const addNotificationToast = useCallback((text, icon = "🔔") => {
+  if (!APP_IN_APP_NOTIFICATIONS_ENABLED) return;
   // If phone notifications are enabled, do not also show the same push-style alert as an in-app dropdown.
   // Normal app feedback still uses addToast directly.
   if (pushStatusRef.current === "on") return;
@@ -19981,7 +19986,7 @@ const addNotificationToast = useCallback((text, icon = "🔔") => {
   }, [authStage, currentPlayer, sharedDataReady, points, addToast]);
 
   useEffect(() => {
-    if (authStage !== "app" || !currentPlayer) return;
+    if (authStage !== "app" || !currentPlayer || !APP_IN_APP_NOTIFICATIONS_ENABLED) return;
     let alreadyScheduled = false;
     try {
       const key = `bb_test_squad_checkin_${currentPlayer}_${dateKey(new Date())}`;
@@ -20232,7 +20237,7 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
     if (link.action === "ping") {
       setChatOpen(false);
       setTab("squad");
-      setShowTopNotifs(true);
+      if (APP_IN_APP_NOTIFICATIONS_ENABLED) setShowTopNotifs(true);
       done();
       return;
     }
@@ -20319,7 +20324,7 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
   }, [currentPlayer, addToast]);
 
 useEffect(() => {
-  if (!currentPlayer) return;
+  if (!currentPlayer || !APP_IN_APP_NOTIFICATIONS_ENABLED) return;
   let alive = true;
 
   const pollVoicePresence = async () => {
@@ -20373,7 +20378,7 @@ useEffect(() => {
 }, [currentPlayer]);
 
 useEffect(() => {
-  if (!currentPlayer) return;
+  if (!currentPlayer || !APP_IN_APP_NOTIFICATIONS_ENABLED) return;
   const mySessionPings = (pings || [])
     .filter(p => p.to === currentPlayer && p.type === "session")
     .sort((a,b) => new Date(b.ts) - new Date(a.ts));
@@ -20404,7 +20409,7 @@ useEffect(() => {
 }, [pings, currentPlayer]);
 
 useEffect(() => {
-  if (catchupStopped || catchupQueue.length === 0) return;
+  if (!APP_IN_APP_NOTIFICATIONS_ENABLED || catchupStopped || catchupQueue.length === 0) return;
   const [next, ...rest] = catchupQueue;
  addNotificationToast(
   `${next.fromName} ${next.text}${next.message ? ` — "${next.message}"` : ""}`,
@@ -20416,6 +20421,10 @@ useEffect(() => {
                       
 
 useEffect(() => {
+  if (!APP_IN_APP_NOTIFICATIONS_ENABLED) {
+    if (pendingActivityToasts.length) setPendingActivityToasts([]);
+    return;
+  }
   if (pendingActivityToasts.length === 0) return;
   // catch-up notifications stay in the notification hub only
   setPendingActivityToasts([]);
@@ -20616,7 +20625,7 @@ if (key === "active_race") {
         presenceRef.current = merged;
         setPresence(merged);
       }
-      if (key === "pings")           setPings(Array.isArray(value) ? value : []);
+      if (key === "pings" && APP_IN_APP_NOTIFICATIONS_ENABLED) setPings(Array.isArray(value) ? value : []);
       if (key === "points") {
         const incomingPoints = value && typeof value === "object" && !Array.isArray(value) ? value : {};
         const currentPoints = pointsRef.current || {};
@@ -20751,7 +20760,7 @@ if (key === ADMIN_LIVE_SYNC_KEY) {
 }
 if (key === "parse_credits") setParseCredits(value || {});
 if (key === "credit_requests") setCreditRequests(Array.isArray(value) ? value : []);
-if (key === "activity_feed") {
+if (key === "activity_feed" && APP_IN_APP_NOTIFICATIONS_ENABLED) {
   const myFeed = (Array.isArray(value)?value:[]).filter(e=>e.to===currentPlayer);
   const prev = activityFeed || [];
   const newEntries = myFeed.filter(e=>!prev.find(p=>p.id===e.id)&&!e.seen);
@@ -21026,10 +21035,10 @@ const loadSharedData = (pid) => {
     try {
       const [chat,cmts,pst,strm,prs,pngs,tr,tsess,bts,ppm,pcl,ptk,pab,tlogs,stks,cf,ar,chem,fc,af,pc,cr] = await Promise.all([
         safeGet("chat", [], 420), safeGet("comments", {}, 420), safeGet("posts", [], 420), safeGet("stream_profiles", {}, 420),
-        safeGet("presence", {}, 420), safeGet("pings", [], 420), safeGet("team_room", null, 420), safeGet("team_sessions", [], 420),
+        safeGet("presence", {}, 420), Promise.resolve([]), safeGet("team_room", null, 420), safeGet("team_sessions", [], 420),
         safeGet("bets", [], 420), safeGet("pass_premium", {}, 420), safeGet("pass_claimed", {}, 420), safeGet("pass_tokens", {}, 420),
         safeGet("pass_active_boosts", {}, 420), safeGet("time_logs", [], 420), safeGet("stocks", {}, 420), safeGet("coin_flips", [], 420),
-        safeGet("active_race", null, 420), safeGet("chemistry", {}, 420), safeGet("flip_challenges", [], 420), safeGet("activity_feed", [], 420),
+        safeGet("active_race", null, 420), safeGet("chemistry", {}, 420), safeGet("flip_challenges", [], 420), Promise.resolve([]),
         safeGet("parse_credits", {}, 420), safeGet("credit_requests", [], 420),
       ]);
       if (Array.isArray(chat)) setMessages(chat);
@@ -21043,7 +21052,7 @@ const loadSharedData = (pid) => {
         setPresence(mergedPresence);
         setMyMode(mergedPresence[pid+"_mode"] || null);
       }
-      if (Array.isArray(pngs)) setPings(pngs);
+      if (APP_IN_APP_NOTIFICATIONS_ENABLED && Array.isArray(pngs)) setPings(pngs);
       setTeamRoom(tr && !tr.closed ? tr : null);
       if (Array.isArray(tsess)) setTeamSessions(tsess);
       if (Array.isArray(bts)) setBets(bts);
@@ -21090,7 +21099,7 @@ const loadSharedData = (pid) => {
       if (savedLastSeen) setLastSeen({ social: savedLastSeen.social ?? postCountForSeen, chat: savedLastSeen.chat ?? chatCountForSeen, training: savedLastSeen.training ?? 0 });
       else setLastSeen({ social: postCountForSeen, chat: chatCountForSeen, training: 0 });
 
-      if (Array.isArray(af)) {
+      if (APP_IN_APP_NOTIFICATIONS_ENABLED && Array.isArray(af)) {
         const myFeed = af.filter(e => e.to === pid);
         setActivityFeed(myFeed);
         const lastLoginAt = await safeGet(`lastLoginAt:${pid}`, null, 650);
@@ -21277,7 +21286,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
   };
   const pageUnderConstruction = currentPlayer !== ADMIN_ID && !!normalizeAppCustomizer(appCustomizer).underConstruction?.[tab]?.enabled;
   const navAtBottom = navPosition === "bottom";
-  const hidePushMirroredInAppNotifs = false;
+  const hidePushMirroredInAppNotifs = !APP_IN_APP_NOTIFICATIONS_ENABLED;
   const topActivityNotifs = hidePushMirroredInAppNotifs ? [] : (activityFeed||[]).filter(e => e.to === currentPlayer).map(e => ({
     id: e.id,
     ts: e.ts,
@@ -21347,7 +21356,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
       {(points?.[currentPlayer+"_showStars"] !== false) && <StarfieldBg/>}
       <SeasonalTextKitFx kitValue={equippedTextKitMeta?.value}/>
 
-{toasts.length > 0 && (
+{APP_IN_APP_NOTIFICATIONS_ENABLED && toasts.length > 0 && (
   <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:999,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto"}}>
     <SwipeToast
       key={toasts[0].id}
@@ -21363,7 +21372,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
     />
   </div>
 )}
-{voiceJoinBanner && pushStatus !== "on" && (
+{APP_IN_APP_NOTIFICATIONS_ENABLED && voiceJoinBanner && pushStatus !== "on" && (
   <div style={{position:"fixed",top:"max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1000,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto",animation:"dropDown .22s cubic-bezier(.2,.8,.2,1)"}}>
     <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${voiceJoinBanner.color}55`,borderRadius:18,padding:"13px 14px",boxShadow:"0 16px 44px rgba(0,0,0,0.42)",display:"flex",alignItems:"center",gap:12}}>
       <div style={{width:34,height:34,borderRadius:12,background:`${voiceJoinBanner.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>🎙️</div>
@@ -21380,7 +21389,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
     </div>
   </div>
 )}
-{sessionPingBanner && pushStatus !== "on" && (
+{APP_IN_APP_NOTIFICATIONS_ENABLED && sessionPingBanner && pushStatus !== "on" && (
   <div style={{position:"fixed",top:voiceJoinBanner ? "calc(env(safe-area-inset-top) + 122px)" : "max(60px,env(safe-area-inset-top))",left:"50%",transform:"translateX(-50%)",zIndex:1001,width:"calc(100% - 32px)",maxWidth:440,pointerEvents:"auto",animation:"dropDown .22s cubic-bezier(.2,.8,.2,1)"}}>
     <div style={{background:"linear-gradient(135deg,#141225,#0B0D17)",border:`1px solid ${sessionPingBanner.color}55`,borderRadius:18,padding:"13px 14px",boxShadow:"0 16px 44px rgba(0,0,0,0.42)",display:"flex",alignItems:"center",gap:12}}>
       <div style={{width:34,height:34,borderRadius:12,background:`${sessionPingBanner.color}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,flexShrink:0}}>⏱️</div>
@@ -21420,7 +21429,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
   </div>
 <div style={s.topBarRight}>
   <button onClick={async()=>{ const upd={...points,[currentPlayer+"_showStars"]: points?.[currentPlayer+"_showStars"] === false}; setPoints(upd); await storeSet("points",upd); }} className="bb-pressable" style={s.logoutBtn}>{points?.[currentPlayer+"_showStars"] === false ? "☀️" : "🌙"}</button>
-  <button onClick={(e)=>{ e.stopPropagation(); setShowTopNotifs(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}><Bell size={15}/>{topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}</button>
+  {APP_IN_APP_NOTIFICATIONS_ENABLED && <button onClick={(e)=>{ e.stopPropagation(); setShowTopNotifs(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}><Bell size={15}/>{topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}</button>}
   <button onClick={(e)=>{ e.stopPropagation(); setChatOpen(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
     <MessageCircle size={16}/>
     {lastSeen.chat > 0 && Math.max(0, messages.length - lastSeen.chat) > 0 && (
@@ -21500,7 +21509,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
           })}
         </div>
       )}
-      {showTopNotifs && (
+      {APP_IN_APP_NOTIFICATIONS_ENABLED && showTopNotifs && (
         <div style={{position:"fixed",inset:0,zIndex:950,background:"rgba(4,8,24,0.88)",display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"74px 18px 18px",animation:"chatFadeIn .18s ease"}} onClick={()=>setShowTopNotifs(false)}>
           <div onClick={(e)=>e.stopPropagation()} style={{width:"100%",maxWidth:420,maxHeight:"78vh",overflowY:"auto",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(167,139,250,0.28)",borderRadius:22,padding:16,boxShadow:"0 24px 70px rgba(0,0,0,0.45)",animation:"dropDown .24s cubic-bezier(.2,.8,.2,1)"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
