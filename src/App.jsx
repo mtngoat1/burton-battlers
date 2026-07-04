@@ -66,6 +66,7 @@ import { createPortal } from "react-dom";
 // APP119_PARSE_SYNC_FAST_BOOT_RECOVERY_PATCH
 // APP120_NO_IN_APP_NOTIFICATIONS_FAST_PATH_PATCH
 // APP121_ADMIN_SHOP_TEXT_KITS_JULY4_BETS_UI_PATCH
+// APP122_SHOP_PASS_STYLE_LAYOUT_TOGGLE_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1637,7 +1638,6 @@ function PlayerStocksBox({ burtonOS, points, setPoints, stats, appCustomizer, pa
     await storeSetWithPush("points", nextPts);
     await storeSetWithPush("stocks", nextStocks);
     addToast?.(`bought 1 ${row.player.name} share`, "📈");
-    setTab?.("stocks");
   };
   const open = rows.find(r=>r.player.id===openId);
   return <div className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,209,102,.22)",borderRadius:18,padding:14,marginBottom:12}}>
@@ -1859,7 +1859,7 @@ function OpenLoopsTicker({ burtonOS, stats, points, passXP, appCustomizer, setTa
   }
 
   if (normalizeAppCustomizer(appCustomizer).stockMarketConfig.enabled) {
-    addLoop("stocks", "📈", "player stocks live", "buy shares from wins + XP movement", "#FFD166", { tab:"stocks", box:"bb-box-stocks" });
+    addLoop("stocks", "📈", "player stocks live", "buy shares from wins + XP movement", "#FFD166", { tab:"home", box:"bb-box-stocks" });
   }
   const activeChaos = getActiveChaosInfo(os);
   if (activeChaos) addLoop("chaos", activeChaos.chaos.emoji || "🌀", activeChaos.chaos.title || "chaos active", `${activeChaos.chaos.desc || "temporary rule active"} · ${fmtShortDuration(activeChaos.remaining)} left`, activeChaos.chaos.color || "#FF61C1", { tab:"home", box:"bb-box-chaos" });
@@ -2337,10 +2337,50 @@ function BurtonOSPanel({ burtonOS, setBurtonOS, currentPlayer, points, setPoints
 // ===================== Global CSS =====================
 
 function GlobalStyles() {
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return;
+    const seen = new WeakSet();
+    const isProgressFill = (el) => {
+      if (!el || el.nodeType !== 1 || el.dataset?.bbProgressSeen === "1") return false;
+      const inline = String(el.getAttribute("style") || "").toLowerCase();
+      if (!inline.includes("width") || !inline.includes("%")) return false;
+      const cs = window.getComputedStyle(el);
+      const parent = el.parentElement ? window.getComputedStyle(el.parentElement) : null;
+      const h = parseFloat(cs.height || "0");
+      const ph = parent ? parseFloat(parent.height || "0") : 0;
+      const hasColor = cs.backgroundColor !== "rgba(0, 0, 0, 0)" || cs.backgroundImage !== "none";
+      const progressSized = h <= 18 || ph <= 22 || inline.includes("height: 100%") || inline.includes('height:"100%');
+      const clippedParent = parent && (parent.overflow === "hidden" || parent.borderRadius !== "0px");
+      return hasColor && progressSized && clippedParent;
+    };
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target;
+        el.dataset.bbProgressSeen = "1";
+        io.unobserve(el);
+      });
+    }, { threshold: 0.35, rootMargin: "0px 0px -8% 0px" });
+    const scan = () => {
+      document.querySelectorAll('[data-bb-progress-fill], div[style*="width"][style*="%"]').forEach(el => {
+        if (seen.has(el) || !isProgressFill(el)) return;
+        seen.add(el);
+        el.classList.add("bb-progress-fill-once");
+        io.observe(el);
+      });
+    };
+    scan();
+    const mo = new MutationObserver(() => window.requestAnimationFrame(scan));
+    mo.observe(document.body, { childList:true, subtree:true, attributes:true, attributeFilter:["style", "data-bb-progress-fill"] });
+    window.addEventListener("bb:scan-progress-bars", scan);
+    return () => { mo.disconnect(); io.disconnect(); window.removeEventListener("bb:scan-progress-bars", scan); };
+  }, []);
   return (
     <style>{`
       @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600&family=Inter:wght@400;600;700&display=swap');
       @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes bbProgressFillOnce { 0% { transform:scaleX(0); filter:saturate(1.18) brightness(1.08); } 68% { transform:scaleX(1.025); filter:saturate(1.18) brightness(1.08); } 100% { transform:scaleX(1); filter:none; } }
+      @keyframes bbPassMeshSweep { 0% { background-position:0% 50%; } 100% { background-position:100% 50%; } }
       @keyframes wheelTickerFlicker { 0%,100%{ transform:translateY(-50%) rotate(0deg); } 25%{ transform:translateY(-50%) rotate(-9deg); } 50%{ transform:translateY(-50%) rotate(6deg); } 75%{ transform:translateY(-50%) rotate(-4deg); } }
       @keyframes wheelOuterLights { 0%{ transform:rotate(0deg) scale(1); filter:blur(.2px) drop-shadow(0 0 10px rgba(184,255,77,.38)); } 50%{ transform:rotate(180deg) scale(1.018); filter:blur(.2px) drop-shadow(0 0 20px rgba(255,209,102,.52)); } 100%{ transform:rotate(360deg) scale(1); filter:blur(.2px) drop-shadow(0 0 10px rgba(184,255,77,.38)); } }
       @keyframes coinFlipReal { 0%{ transform:translate3d(0,0,0) rotateX(0deg) rotateZ(-4deg); } 18%{ transform:translate3d(0,-16px,0) rotateX(360deg) rotateZ(4deg); } 40%{ transform:translate3d(0,-27px,0) rotateX(720deg) rotateZ(-3deg); } 62%{ transform:translate3d(0,-20px,0) rotateX(1080deg) rotateZ(3deg); } 82%{ transform:translate3d(0,-8px,0) rotateX(1440deg) rotateZ(-2deg); } 100%{ transform:translate3d(0,0,0) rotateX(1800deg) rotateZ(0deg); } }
@@ -2389,6 +2429,12 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
       input,textarea,button { font-family:inherit; }
       ::-webkit-scrollbar { width:0; background:transparent; }
       * { scrollbar-width:none; -ms-overflow-style:none; }
+
+
+      .bb-progress-fill-once { transform-origin:left center; will-change:transform; }
+      .bb-progress-fill-once:not([data-bb-progress-seen="1"]) { transform:scaleX(0); }
+      .bb-progress-fill-once[data-bb-progress-seen="1"] { animation:bbProgressFillOnce .82s cubic-bezier(.16,1,.3,1) both; }
+      .bb-pass-mesh-fill { background-size:220% 100% !important; animation:bbPassMeshSweep 3.4s ease-in-out infinite alternate, bbProgressFillOnce .82s cubic-bezier(.16,1,.3,1) both; transform-origin:left center; }
 
       button, .bb-pressable { transition:transform .08s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, border-color .22s ease, background .22s ease, opacity .18s ease; outline:none; -webkit-tap-highlight-color:transparent; }
       button:active, .bb-pressable:active { transform:scale(0.975); }
@@ -3972,7 +4018,7 @@ function LiveMMRFeed({ mmrProfiles }) {
           
           
 
-function ProfileHomeTab({ currentPlayer, points, setPoints }) {
+function ProfileHomeTab({ currentPlayer, points, setPoints, stats = [], passXP = {}, appCustomizer, addToast, setTab }) {
   const owned = points?.[currentPlayer + "_owned"] || [];
   const equipped = points?.[currentPlayer + "_equipped"] || {};
   const myPoints = points?.[currentPlayer] || 0;
@@ -4073,6 +4119,17 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
           <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,color:"#B8FF4D",fontWeight:700}}>{myPoints}</div>
         </div>
       </div>
+      <PlayerStocksBox
+        burtonOS={null}
+        points={points}
+        setPoints={setPoints}
+        stats={stats}
+        appCustomizer={appCustomizer}
+        passXP={passXP}
+        currentPlayer={currentPlayer}
+        addToast={addToast}
+        setTab={setTab}
+      />
       <div style={{display:"flex",gap:8,marginBottom:10}}>
         {[{id:"pass",label:"owned from pass"},{id:"shop",label:"owned from shop"}].map(t=>(
           <button key={t.id} onClick={()=>setSourceTab(t.id)} className="bb-pressable" style={{flex:1,background:sourceTab===t.id?"#B8FF4D":"rgba(255,255,255,0.05)",border:"none",borderRadius:10,padding:"9px 0",fontSize:11,fontWeight:900,color:sourceTab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{t.label}</button>
@@ -4179,7 +4236,7 @@ return (
       </button>
     </div>
 
-    {homeSubTab==="profile" && <ProfileHomeTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} />}
+    {homeSubTab==="profile" && <ProfileHomeTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} stats={stats} passXP={passXP} appCustomizer={appCustomizer} addToast={addToast} setTab={setTab} />}
 
     {homeSubTab==="overview" && <div style={getTabLayoutContainerStyle(appCustomizer, "homeOverview")}>
       {homeOpenLoopsDetached && (
@@ -7359,7 +7416,7 @@ function PostCommentsModal({ post, onAddComment, onHeartComment, currentPlayer, 
   );
   return typeof document !== "undefined" ? createPortal(modal, document.body) : modal;
 }
-function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats, deepLink, onDeepLinkHandled, appCustomizer }) {
+function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, points, setPoints, stats, deepLink, onDeepLinkHandled, appCustomizer, burtonOS, setBurtonOS, pings, setPings }) {
   const userColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
   const [composing, setComposing] = useState(false);
   const [commentingOn, setCommentingOn] = useState(null);
@@ -7393,7 +7450,10 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
       const dx = t.clientX - socialSwipeRef.current.x;
       const dy = t.clientY - socialSwipeRef.current.y;
       if (Math.abs(dx) > 70 && Math.abs(dx) > Math.abs(dy) * 1.35) {
-        setSubTab(dx < 0 ? "bets" : "feed");
+        const order = ["feed", "bets", "court"];
+        const idx = Math.max(0, order.indexOf(subTab));
+        const nextIdx = dx < 0 ? Math.min(order.length - 1, idx + 1) : Math.max(0, idx - 1);
+        setSubTab(order[nextIdx]);
       }
     },
   };
@@ -7701,14 +7761,16 @@ const addComment = async (postId, text, replyTo = null) => {
 
 {/* Sub tab switcher */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button onClick={() => setSubTab("feed")} className="bb-pressable"
-          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === "feed" ? userColor : "rgba(255,255,255,0.05)", color: subTab === "feed" ? "#06070D" : "#8B92A8" }}>
-          📸 feed
-        </button>
-        <button onClick={() => setSubTab("bets")} className="bb-pressable"
-          style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === "bets" ? userColor : "rgba(255,255,255,0.05)", color: subTab === "bets" ? "#06070D" : "#8B92A8" }}>
-          🎰 bets
-        </button>
+        {[
+          { id:"feed", label:"📸 feed" },
+          { id:"bets", label:"🎰 bets" },
+          { id:"court", label:"🛡️ court" },
+        ].map(st => (
+          <button key={st.id} onClick={() => setSubTab(st.id)} className="bb-pressable"
+            style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: subTab === st.id ? userColor : "rgba(255,255,255,0.05)", color: subTab === st.id ? "#06070D" : "#8B92A8" }}>
+            {st.label}
+          </button>
+        ))}
       </div>
 
       {subTab === "feed" && (
@@ -7832,6 +7894,10 @@ const addComment = async (postId, text, replyTo = null) => {
 
           {/* teammate bets section removed per request; parlay/bet history stays under your bets only. */}
         </>
+      )}
+
+      {subTab === "court" && (
+        <CourtTab burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} pings={pings} setPings={setPings} appCustomizer={appCustomizer} addToast={addToast}/>
       )}
     </div>
   );
@@ -8623,9 +8689,9 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
       <button onClick={grantPremium} className="bb-pressable" style={{width:"100%",background:"rgba(255,209,102,0.12)",border:"1px solid rgba(255,209,102,0.32)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:900,color:"#FFD166",cursor:"pointer",marginBottom:10}}>grant premium pass access</button>
       <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:10,marginBottom:14}}>
         <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>manual pass controls</div>
-        <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>Set the selected player's free track and premium track separately. Premium buttons also unlock premium access.</div>
+        <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>Set the selected player's free pass and premium pass separately. Premium buttons also unlock premium access.</div>
         <div style={{background:"rgba(184,255,77,0.05)",border:"1px solid rgba(184,255,77,0.12)",borderRadius:12,padding:9,marginBottom:10}}>
-          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>free track</div>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>free pass</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <div><div style={s.modalLabel}>free level</div><input type="number" value={manualFreeLevel} onChange={e=>setManualFreeLevel(e.target.value)} style={inputStyle}/></div>
             <div><div style={s.modalLabel}>free xp</div><input type="number" value={manualFreeXP} onChange={e=>setManualFreeXP(e.target.value)} style={inputStyle}/></div>
@@ -8636,7 +8702,7 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
           </div>
         </div>
         <div style={{background:"rgba(167,139,250,0.06)",border:"1px solid rgba(167,139,250,0.16)",borderRadius:12,padding:9}}>
-          <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>premium track</div>
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>premium pass</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
             <div><div style={s.modalLabel}>premium level</div><input type="number" value={manualPremiumLevel} onChange={e=>setManualPremiumLevel(e.target.value)} style={inputStyle}/></div>
             <div><div style={s.modalLabel}>premium xp</div><input type="number" value={manualPremiumXP} onChange={e=>setManualPremiumXP(e.target.value)} style={inputStyle}/></div>
@@ -9211,7 +9277,7 @@ function AdminCourtPunishmentEditor({ appCustomizer, setAppCustomizer, addToast 
 
 function AdminUnderConstructionControls({ appCustomizer, setAppCustomizer, addToast }) {
   const cfg = normalizeAppCustomizer(appCustomizer);
-  const tabs = ["home","jobs","court","room","social","stats","presence","boost","coinflip","garage","stocks"];
+  const tabs = ["home","jobs","room","social","presence","boost","garage"];
   const save = async (next) => saveAppCustomizer(normalizeAppCustomizer(next), setAppCustomizer, addToast, "construction settings saved");
   return <AdminCollapse title="page under construction toggles" subtitle="hide pages for non-admin while you work" accent="#FFD166">
     <div style={{display:"grid",gap:8}}>{tabs.map(id=>{ const row=safeObj(cfg.underConstruction?.[id]); return <div key={id} style={{display:"grid",gridTemplateColumns:"72px 1fr 54px",gap:7,alignItems:"center"}}><div style={{fontSize:10,color:"#E8ECF4",fontWeight:900,textTransform:"uppercase"}}>{id}</div><input defaultValue={row.message || "this page is being worked on right now."} onBlur={e=>save({...cfg,underConstruction:{...cfg.underConstruction,[id]:{...row,message:e.target.value}}})} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:10,padding:"8px",color:"#E8ECF4",fontSize:10}}/><button onClick={()=>save({...cfg,underConstruction:{...cfg.underConstruction,[id]:{...row,enabled:!row.enabled}}})} style={{background:row.enabled?"rgba(255,209,102,.15)":"rgba(255,255,255,.05)",border:`1px solid ${row.enabled?"rgba(255,209,102,.32)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:row.enabled?"#FFD166":"#8B92A8",fontWeight:900,fontSize:10}}>{row.enabled?"on":"off"}</button></div>})}</div>
@@ -12262,7 +12328,7 @@ const SHOP_ITEMS_RAW = [
 const SHOP_ITEMS = SHOP_ITEMS_RAW.map(withNormalizedShopPrice);
 const ADMIN_SHOP_ITEMS_KEY = "admin_shop_items";
 const APP_CUSTOMIZER_KEY = "app_customizer";
-const DEFAULT_APP_TAB_ORDER = ["home", "jobs", "court", "room", "social", "stats", "presence", "games", "stocks", "boost", "coinflip", "garage"];
+const DEFAULT_APP_TAB_ORDER = ["home", "jobs", "room", "social", "presence", "boost", "garage"];
 const DEFAULT_TAB_BOX_DEFS = {
   homeOverview: [
     { id:"openLoops", label:"Open loops", desc:"rotating things that need attention", size:"full" },
@@ -12424,6 +12490,7 @@ const DEFAULT_PREMIUM_FEEL_SETTINGS = {
   reducedNoise:false,
   strongDepth:false,
   shopItemTilt:false,
+  shopPassLayout:false,
   profileShowcaseGlow:false,
   rankedStatCards:false,
   passRocketLayout:false,
@@ -12464,10 +12531,11 @@ const PREMIUM_FEEL_CONTROLS = [
   { id:"reducedNoise", label:"reduced noise mode", emoji:"◐", desc:"mutes heavy borders/shadows for a cleaner Apple-like read" },
   { id:"strongDepth", label:"strong depth mode", emoji:"▣", desc:"pushes cards forward with stronger shadows and contrast" },
   { id:"shopItemTilt", label:"shop item tilt", emoji:"🛒", desc:"shop cards gain tiny perspective/tilt motion on hover" },
+  { id:"shopPassLayout", label:"shop pass-style layout", emoji:"🛍️", desc:"swaps the daily shop into pass-style horizontal lanes while keeping the old shop when off" },
   { id:"profileShowcaseGlow", label:"profile showcase glow", emoji:"👤", desc:"profile/player showcase cards get a soft identity aura" },
   { id:"rankedStatCards", label:"ranked stat cards", emoji:"📈", desc:"stats/rank cards get a cleaner competitive scoreboard feel" },
-  { id:"passRocketLayout", label:"Rocket Pass layout switch", emoji:"🚗", desc:"swaps the Pass tab between the current list view and a Rocket Pass-style two-lane reward track; this toggle works by itself for testing" },
-  { id:"passRocketTrack", label:"rocket-pass track polish", emoji:"🏁", desc:"pass rows/cards get a more Rocket Pass-style lane and tier feel" },
+  { id:"passRocketLayout", label:"Rocket Pass layout switch", emoji:"🚗", desc:"swaps the Pass tab between the current list view and a Rocket Pass-style two-pass reward view; this toggle works by itself for testing" },
+  { id:"passRocketTrack", label:"rocket-pass row polish", emoji:"🏁", desc:"pass rows/cards get a more Rocket Pass-style row and tier feel" },
   { id:"passTierCards", label:"premium pass tier cards", emoji:"🎟️", desc:"pass rewards read more like collectible tier tiles" },
   { id:"passPremiumRibbon", label:"premium pass ribbon", emoji:"🏷️", desc:"premium/locked pass areas get ribbon/glow treatment" },
 ];
@@ -12504,6 +12572,7 @@ const PREMIUM_FEEL_BODY_CLASS_BY_KEY = {
   reducedNoise:"bb-premium-reduced-noise",
   strongDepth:"bb-premium-strong-depth",
   shopItemTilt:"bb-premium-shop-tilt",
+  shopPassLayout:"bb-premium-shop-pass-layout",
   profileShowcaseGlow:"bb-premium-profile-glow",
   rankedStatCards:"bb-premium-ranked-cards",
   passRocketLayout:"bb-premium-pass-layout",
@@ -13425,7 +13494,7 @@ const FREE_PASS_REWARDS = {
   47: { type:"title",  value:"almost there", label:"almost there" },
   48: { type:"icon",   value:"👾", label:"alien icon" },
   49: { type:"coins",  value:60,  label:"+60 pts" },
-  50: { type:"title",  value:"", label:"" },
+  50: { type:"title",  value:"season one regular", label:"season one regular" },
 };
 
 const PREMIUM_PASS_REWARDS = {
@@ -14190,6 +14259,8 @@ const toggleEquip = async (itemId) => {
     const ownedCount = items.filter(item => ownedTitleIds.has(item.id)).length;
     return { ...getTitleRarityMeta(r), ownedCount, total:items.length };
   });
+  const premiumFeelCfg = normalizePremiumFeelSettings(appCustomizer?.premiumFeel);
+  const useShopPassLayout = !!premiumFeelCfg.shopPassLayout;
   const renderShopItemCard = (item) => {
     const isOwned = owned.includes(item.id);
     const isEquipped = !!equipped[item.id];
@@ -14268,6 +14339,55 @@ const toggleEquip = async (itemId) => {
             </button>
           )}
         </div>
+      </div>
+    );
+  };
+
+  const renderShopPassStyle = () => {
+    const featuredPool = dailyShopItems.filter(item => item && (item.type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(item.id)));
+    const featured = featuredPool.find(item => item?.onSale) || featuredPool[0];
+    const laneDefs = [
+      { id:"featured", label:"featured", items:featuredPool.slice(0, 12), accent:"#FFD166" },
+      ...shopTabDefs.map((def, idx) => ({
+        ...def,
+        items:dailyShopItems.filter(item => def.types.includes(item.type) && (item.type !== "sound" || !DEFAULT_SOUNDBOARD_IDS.includes(item.id))),
+        accent:["#B8FF4D","#4D9EFF","#FFD166","#A78BFA","#FF61C1","#7CFFB2","#FF8C42"][idx % 7],
+      })),
+    ].filter(lane => Array.isArray(lane.items) && lane.items.length > 0);
+    const rowStyle = {display:"flex",gap:10,overflowX:"auto",padding:"2px 2px 10px",margin:"0 -2px 12px",WebkitOverflowScrolling:"touch",scrollSnapType:"x mandatory",overscrollBehaviorX:"contain",touchAction:"pan-x"};
+    const stopSideSwipe = (e) => e.stopPropagation?.();
+    return (
+      <div className="bb-shop-pass-layout">
+        {featured && (
+          <div style={{background:"linear-gradient(135deg,rgba(255,209,102,0.16),rgba(167,139,250,0.08),rgba(77,158,255,0.06))",border:"1px solid rgba(255,209,102,0.28)",borderRadius:18,padding:12,marginBottom:13,boxShadow:"0 18px 38px rgba(0,0,0,0.24)",overflow:"hidden"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:10}}>
+              <div>
+                <div style={{fontSize:10,color:"#FFD166",fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>featured shop pass</div>
+                <div style={{fontSize:18,color:"#E8ECF4",fontWeight:1000,lineHeight:1.05,marginTop:2}}>daily drop</div>
+              </div>
+              <div style={{fontSize:10,color:"#8B92A8",fontWeight:900,textAlign:"right"}}>{myPoints} pts</div>
+            </div>
+            <div style={{maxWidth:260}}>{renderShopItemCard(featured)}</div>
+          </div>
+        )}
+        {laneDefs.map((lane) => (
+          <div key={lane.id} style={{marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{fontSize:10,color:lane.accent || playerColor,fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>{lane.label}</div>
+              <div style={{fontSize:10,color:"#4A5066",fontWeight:900}}>{lane.items.length} items</div>
+            </div>
+            <div onTouchStart={stopSideSwipe} onTouchMove={stopSideSwipe} onWheel={stopSideSwipe} style={rowStyle}>
+              {lane.items.map(item => (
+                <div key={`${lane.id}_${item.id}`} style={{minWidth:item.type === "background" ? 238 : 162,maxWidth:item.type === "background" ? 238 : 162,scrollSnapAlign:"start"}}>
+                  {renderShopItemCard(item)}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        {!laneDefs.length && (
+          <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:14,fontSize:12,color:"#8B92A8"}}>nothing in the daily shop right now.</div>
+        )}
       </div>
     );
   };
@@ -14467,7 +14587,7 @@ await storeSetWithPush("pings", pingUpd2);
               <>
                 <div style={{marginBottom:14}}>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
-                    <span>free track</span>
+                    <span>free pass</span>
                     <span style={{color:"#B8FF4D",fontWeight:700}}>tier {freeProgress.tier} / {FREE_TIER_COUNT}</span>
                   </div>
                   <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
@@ -14478,7 +14598,7 @@ await storeSetWithPush("pings", pingUpd2);
                 {isPremium ? (
                   <div style={{marginBottom:6}}>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:"#8B92A8",marginBottom:6}}>
-                      <span>premium track</span>
+                      <span>premium pass</span>
                       <span style={{color:"#A78BFA",fontWeight:700}}>tier {premiumProgress.tier} / {PREMIUM_TIER_COUNT}</span>
                     </div>
                     <div style={{height:8,background:"rgba(255,255,255,0.08)",borderRadius:99,overflow:"hidden"}}>
@@ -14517,14 +14637,16 @@ await storeSetWithPush("pings", pingUpd2);
     🕐 resets in {String(Math.floor(shopCountdown / 3600000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 3600000) / 60000)).padStart(2,"0")}:{String(Math.floor((shopCountdown % 60000) / 1000)).padStart(2,"0")}
   </div>
 </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
-            {shopTabDefs.map(t => (
-              <button key={t.id} onClick={()=>setShopTab(t.id)} className="bb-pressable" style={{background:shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.045)",border:`1px solid ${shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:shopTab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
-                {t.label}
-              </button>
-            ))}
-          </div>
-          {shopTab === "title" && (
+          {!useShopPassLayout && (
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
+              {shopTabDefs.map(t => (
+                <button key={t.id} onClick={()=>setShopTab(t.id)} className="bb-pressable" style={{background:shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.045)",border:`1px solid ${shopTab===t.id?"#B8FF4D":"rgba(255,255,255,0.07)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:shopTab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {!useShopPassLayout && shopTab === "title" && (
             <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:12,marginBottom:12}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
                 <div>
@@ -14544,13 +14666,17 @@ await storeSetWithPush("pings", pingUpd2);
               </div>
             </div>
           )}
-          <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>{currentShopTab.label} · {shopDisplayItems.length}/10 today</div>
-          {shopDisplayItems.length === 0 ? (
-            <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:14,fontSize:12,color:"#8B92A8"}}>nothing in this shop category today.</div>
-          ) : (
-            <div style={{display:"grid",gridTemplateColumns:shopTab==="background"?"1fr":"1fr 1fr",gap:8,marginBottom:4}}>
-              {shopDisplayItems.map(renderShopItemCard)}
-            </div>
+          {useShopPassLayout ? renderShopPassStyle() : (
+            <>
+              <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:8,textTransform:"uppercase"}}>{currentShopTab.label} · {shopDisplayItems.length}/10 today</div>
+              {shopDisplayItems.length === 0 ? (
+                <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:14,padding:14,fontSize:12,color:"#8B92A8"}}>nothing in this shop category today.</div>
+              ) : (
+                <div style={{display:"grid",gridTemplateColumns:shopTab==="background"?"1fr":"1fr 1fr",gap:8,marginBottom:4}}>
+                  {shopDisplayItems.map(renderShopItemCard)}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -14677,6 +14803,7 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
   const garageTopRef = useRef(null);
   const swipeStartX = useRef(0);
   const swipeStartY = useRef(0);
+  const rocketLaneRefs = useRef({});
   const [trackSwipeOffset, setTrackSwipeOffset] = useState(0);
   const passActiveBoostsLocal = passActiveBoosts;
 
@@ -14697,21 +14824,23 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
     setTrack(nextTrack);
     setTiersExpanded(false);
     setTrackSwipeOffset(0);
-    setTimeout(() => garageTopRef.current?.scrollIntoView({ behavior:"smooth", block:"start" }), 0);
   };
 
   const handleTrackTouchStart = (e) => {
+    if (useRocketPassLayout) return;
     swipeStartX.current = e.touches[0].clientX;
     swipeStartY.current = e.touches[0].clientY;
   };
 
   const handleTrackTouchMove = (e) => {
+    if (useRocketPassLayout) return;
     const dx = e.touches[0].clientX - swipeStartX.current;
     const dy = Math.abs(e.touches[0].clientY - swipeStartY.current);
     if (Math.abs(dx) > dy && Math.abs(dx) > 12) setTrackSwipeOffset(Math.max(-70, Math.min(70, dx)));
   };
 
   const handleTrackTouchEnd = () => {
+    if (useRocketPassLayout) return;
     if (trackSwipeOffset < -55 && track === "free" && isPremium) switchTrack("premium");
     else if (trackSwipeOffset > 55 && track === "premium") switchTrack("free");
     else setTrackSwipeOffset(0);
@@ -14760,19 +14889,29 @@ function GarageTab({ currentPlayer, points, setPoints, passXP, passPremium, pass
     addToast?.(`tier ${tier} claimed`, reward.type === "coins" ? "🪙" : reward.type === "title" ? "📝" : reward.type === "icon" ? (reward.value || "✨") : "🎁");
   };
 
-const rewardTiers = Object.entries(currentRewards).map(([tier, reward]) => ({ tier: Number(tier), reward })).sort((a, b) => a.tier - b.tier);
+const buildPassFallbackReward = (rewardTrack, tier) => {
+  const premium = rewardTrack === "premium";
+  if (tier % 25 === 0) return { type:"coins", value:premium ? 200 : 75, label:`+${premium ? 200 : 75} pts` };
+  if (tier % 20 === 0) return { type:"token", value:premium ? "double_xp" : "training_skip", label:premium ? "double xp token" : "training skip token" };
+  if (tier % 10 === 0) return { type:"title", value:premium ? `premium tier ${tier}` : `pass tier ${tier}`, label:premium ? `premium tier ${tier}` : `pass tier ${tier}` };
+  if (tier % 5 === 0) return { type:"color", value:premium ? "#A78BFA" : playerColor, label:premium ? "violet glow" : "team glow" };
+  if (tier % 2 === 0) return { type:"icon", value:premium ? "✨" : "⚡", label:premium ? "premium icon" : "boost icon" };
+  const amount = premium ? 75 : 25;
+  return { type:"coins", value:amount, label:`+${amount} pts` };
+};
+const getPassReward = (rewardTrack, tier) => (rewardTrack === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS)?.[tier] || buildPassFallbackReward(rewardTrack, tier);
+const rewardTiers = Array.from({ length: currentCap }, (_, i) => { const tier = i + 1; return { tier, reward:getPassReward(track, tier) }; });
 const [tiersExpanded, setTiersExpanded] = useState(false);
 const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
   const myTokens = passTokens?.[currentPlayer] || [];
   const premiumFeelCfg = normalizePremiumFeelSettings(appCustomizer?.premiumFeel);
   const useRocketPassLayout = !!premiumFeelCfg.passRocketLayout;
-  const rocketCenterTier = Math.max(1, Math.min(Math.max(freeProgress.tier, premiumProgress.tier || 1), FREE_TIER_COUNT));
-  const rocketStartTier = Math.max(1, Math.min(rocketCenterTier - 2, FREE_TIER_COUNT - 4));
-  const rocketTiers = Array.from({ length: 5 }, (_, i) => rocketStartTier + i).filter(tier => tier >= 1 && tier <= FREE_TIER_COUNT);
+  const freeRocketTiers = Array.from({ length: FREE_TIER_COUNT }, (_, i) => i + 1);
+  const premiumRocketTiers = Array.from({ length: PREMIUM_TIER_COUNT }, (_, i) => i + 1);
+  const passMeshGradient = `linear-gradient(90deg, ${playerColor} 0%, #A78BFA 48%, #4D9EFF 100%)`;
   const rewardEmojiFor = (reward) => reward?.type === "coins" ? "🪙" : reward?.type === "token" ? "🎟" : (reward?.type === "color" || reward?.type === "text_color") ? "🎨" : reward?.type === "icon" ? (reward.value || "✨") : reward?.type === "title" ? "📝" : reward?.type === "car" ? "🏎️" : "🎁";
   const renderRocketPassTile = (rewardTrack, tier) => {
-    const rewardMap = rewardTrack === "free" ? FREE_PASS_REWARDS : PREMIUM_PASS_REWARDS;
-    const reward = rewardMap?.[tier];
+    const reward = getPassReward(rewardTrack, tier);
     const progress = rewardTrack === "free" ? freeProgress : premiumProgress;
     const accent = rewardTrack === "free" ? playerColor : "#A78BFA";
     const lockedPremium = rewardTrack === "premium" && !isPremium;
@@ -14781,7 +14920,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
     const current = !lockedPremium && progress.tier === tier;
     const label = reward?.label || reward?.value || "reward";
     return (
-      <div key={`${rewardTrack}_${tier}`} className="bb-pass-rocket-tile" style={{
+      <div key={`${rewardTrack}_${tier}`} data-pass-tier={tier} data-pass-kind={rewardTrack} className={`bb-pass-rocket-tile${current ? " bb-pass-rocket-current" : ""}`} style={{
         minWidth:132,
         scrollSnapAlign:"center",
         borderRadius:18,
@@ -14794,7 +14933,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
         opacity:lockedPremium ? .45 : 1,
       }}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:10}}>
-          <div style={{fontSize:9,color:accent,fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>{rewardTrack}</div>
+          <div style={{fontSize:9,color:accent,fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>pass</div>
           <div style={{fontSize:10,color:claimed ? "#7CFFB2" : unlocked ? accent : "#4A5066",fontWeight:1000}}>{claimed ? "✓" : lockedPremium ? "🔒" : unlocked ? "open" : `T${tier}`}</div>
         </div>
         <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,color:unlocked || current ? "#E8ECF4" : "#4A5066",fontWeight:700,lineHeight:1}}>TIER {tier}</div>
@@ -14815,6 +14954,27 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
       </div>
     );
   };
+
+  useEffect(() => {
+    if (!useRocketPassLayout) return;
+    const scrollLane = (laneId, tier) => {
+      const el = rocketLaneRefs.current?.[laneId];
+      if (!el) return;
+      const safeTier = Math.max(1, Math.min(Number(tier) || 1, laneId === "free" ? FREE_TIER_COUNT : PREMIUM_TIER_COUNT));
+      window.requestAnimationFrame(() => {
+        const tile = el.querySelector(`[data-pass-tier=\"${safeTier}\"]`);
+        if (tile) {
+          const left = tile.offsetLeft - (el.clientWidth / 2) + (tile.clientWidth / 2);
+          el.scrollTo({ left:Math.max(0, left), behavior:"auto" });
+        } else {
+          el.scrollLeft = Math.max(0, (safeTier - 1) * 142 - el.clientWidth / 2);
+        }
+        window.dispatchEvent(new Event("bb:scan-progress-bars"));
+      });
+    };
+    scrollLane("free", freeProgress.tier || 1);
+    scrollLane("premium", premiumProgress.tier || 1);
+  }, [useRocketPassLayout, freeProgress.tier, premiumProgress.tier, currentPlayer]);
 
   return (
     <div ref={garageTopRef} className="bb-tab-content" style={s.tabContent} onTouchStart={handleTrackTouchStart} onTouchMove={handleTrackTouchMove} onTouchEnd={handleTrackTouchEnd}>
@@ -14849,30 +15009,30 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
           </div>
           {!isPremium && (
             <div style={{ fontSize: 11, color: "#4A5066", textAlign: "right" }}>
-              <div style={{ color: "#A78BFA", fontWeight: 700 }}>free track</div>
+              <div style={{ color: "#A78BFA", fontWeight: 700 }}>free pass</div>
               <div>premium locked</div>
             </div>
           )}
           {isPremium && (
             <div style={{ fontSize: 11, color: "#A78BFA", fontWeight: 700, textAlign: "right" }}>
               <div>✓ premium</div>
-              <div style={{ color: "#4A5066", fontWeight: 400 }}>both tracks active</div>
+              <div style={{ color: "#4A5066", fontWeight: 400 }}>both passes active</div>
             </div>
           )}
         </div>
 
-        {/* Free track bar */}
+        {/* Free pass bar */}
         <div style={{ marginBottom: isPremium ? 10 : 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8B92A8", marginBottom: 4 }}>
             <span>free · tier {freeProgress.tier}/{FREE_TIER_COUNT}</span>
             <span style={{ color: playerColor }}>{freeProgress.xpIntoTier}/{freeProgress.xpForNext} xp</span>
           </div>
           <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 99, overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${(freeProgress.xpIntoTier / freeProgress.xpForNext) * 100}%`, background: playerColor, borderRadius: 99 }} />
+            <div data-bb-progress-fill="1" className="bb-pass-mesh-fill" style={{ height: "100%", width: `${(freeProgress.xpIntoTier / freeProgress.xpForNext) * 100}%`, background: passMeshGradient, borderRadius: 99 }} />
           </div>
         </div>
 
-        {/* Premium track bar */}
+        {/* Premium pass bar */}
         {isPremium && (
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8B92A8", marginBottom: 4 }}>
@@ -14880,7 +15040,7 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
               <span style={{ color: "#A78BFA" }}>{premiumProgress.xpIntoTier}/{premiumProgress.xpForNext} xp</span>
             </div>
             <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 99, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${(premiumProgress.xpIntoTier / premiumProgress.xpForNext) * 100}%`, background: "#A78BFA", borderRadius: 99 }} />
+              <div data-bb-progress-fill="1" className="bb-pass-mesh-fill" style={{ height: "100%", width: `${(premiumProgress.xpIntoTier / premiumProgress.xpForNext) * 100}%`, background: passMeshGradient, borderRadius: 99 }} />
             </div>
           </div>
         )}
@@ -14888,50 +15048,29 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
 
       {useRocketPassLayout ? (
         <div style={{marginBottom:18}}>
-          <div style={{background:"linear-gradient(135deg,rgba(167,139,250,.16),rgba(77,158,255,.07),rgba(184,255,77,.06))",border:"1px solid rgba(167,139,250,.28)",borderRadius:20,padding:14,marginBottom:12,boxShadow:"0 18px 46px rgba(0,0,0,.26)",position:"relative",overflow:"hidden"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
-              <div>
-                <div style={{fontSize:10,color:"#A78BFA",fontWeight:1000,letterSpacing:1.1,textTransform:"uppercase",marginBottom:4}}>Rocket Pass-style preview</div>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,color:"#E8ECF4",lineHeight:1,fontWeight:700}}>Burton Pass Track</div>
-                <div style={{fontSize:11,color:"#8B92A8",marginTop:6,lineHeight:1.35}}>Admin toggle is on. Free and Premium rewards display as two horizontal lanes.</div>
-              </div>
-              <div style={{textAlign:"right",minWidth:80}}>
-                <div style={{fontSize:9,color:"#4A5066",fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>current tier</div>
-                <div style={{fontFamily:"'Oswald',sans-serif",fontSize:30,color:playerColor,fontWeight:700,lineHeight:1}}>{freeProgress.tier}</div>
-              </div>
-            </div>
-            <div style={{height:8,background:"rgba(255,255,255,.08)",borderRadius:99,overflow:"hidden",marginTop:14}}>
-              <div style={{height:"100%",width:`${Math.min(100,(freeProgress.xpIntoTier / freeProgress.xpForNext) * 100)}%`,background:`linear-gradient(90deg,${playerColor},#A78BFA)`,borderRadius:99}} />
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#8B92A8",fontWeight:800,marginTop:6}}>
-              <span>{freeProgress.xpIntoTier}/{freeProgress.xpForNext} XP to next tier</span>
-              <span>{isPremium ? "premium active" : "premium locked"}</span>
-            </div>
-          </div>
-
           <div style={{display:"grid",gap:12}}>
-            {[{id:"premium",label:"premium lane",color:"#A78BFA",progress:premiumProgress},{id:"free",label:"free lane",color:playerColor,progress:freeProgress}].map(lane => (
+            {[{id:"premium",label:"pass",color:"#A78BFA",progress:premiumProgress,tiers:premiumRocketTiers},{id:"free",label:"pass",color:playerColor,progress:freeProgress,tiers:freeRocketTiers}].map(lane => (
               <div key={lane.id} className="bb-pass-rocket-lane" style={{background:"linear-gradient(135deg,#11131F,#0C0E18)",border:`1px solid ${bbAlpha(lane.color,.24)}`,borderRadius:18,padding:12,overflow:"hidden"}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}>
                   <div>
                     <div style={{fontSize:10,color:lane.color,fontWeight:1000,letterSpacing:1,textTransform:"uppercase"}}>{lane.label}</div>
-                    <div style={{fontSize:11,color:"#4A5066",fontWeight:800,marginTop:2}}>tier {lane.progress.tier} · swipe sideways</div>
+                    <div style={{fontSize:11,color:"#4A5066",fontWeight:800,marginTop:2}}>tier {lane.progress.tier}</div>
                   </div>
                   {lane.id === "premium" && !isPremium && <div style={{fontSize:10,color:"#FFD166",fontWeight:1000,textTransform:"uppercase"}}>locked</div>}
                 </div>
-                <div style={{display:"flex",gap:10,overflowX:"auto",paddingBottom:4,scrollSnapType:"x mandatory",WebkitOverflowScrolling:"touch"}}>
-                  {rocketTiers.map(tier => renderRocketPassTile(lane.id, tier))}
+                <div ref={(el)=>{ if (el) rocketLaneRefs.current[lane.id] = el; }} style={{display:"flex",gap:10,overflowX:"auto",overflowY:"hidden",paddingBottom:4,scrollSnapType:"x mandatory",WebkitOverflowScrolling:"touch",overscrollBehaviorX:"contain",overscrollBehaviorY:"contain",touchAction:"pan-x",scrollBehavior:"smooth"}}>
+                  {lane.tiers.map(tier => renderRocketPassTile(lane.id, tier))}
                 </div>
               </div>
             ))}
           </div>
 
           <button onClick={()=>setTiersExpanded(v => !v)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:12,padding:"11px 0",fontSize:12,fontWeight:700,color:"#8B92A8",cursor:"pointer",marginTop:12}}>
-            {tiersExpanded ? "show focused 5-tier lane" : "show classic full tier list instead"}
+            {tiersExpanded ? "show focused pass row" : "show classic full pass list instead"}
           </button>
           {tiersExpanded && (
             <div style={{marginTop:12}}>
-              <div style={{...s.sectionLabel,marginBottom:10,color:getAppTextColor(appCustomizer,"passTierRewardsTitle")}}>classic full tier list</div>
+              <div style={{...s.sectionLabel,marginBottom:10,color:getAppTextColor(appCustomizer,"passTierRewardsTitle")}}>classic full pass list</div>
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {rewardTiers.map(({tier,reward}) => {
                   const unlocked = currentProgress.tier >= tier;
@@ -14956,15 +15095,15 @@ const visibleTiers = tiersExpanded ? rewardTiers : rewardTiers.slice(0, 5);
         </div>
       ) : (
         <>
-      {/* Track selector */}
+      {/* Pass selector */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <button onClick={() => switchTrack("free")} className="bb-pressable"
           style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: "pointer", background: track === "free" ? playerColor : "rgba(255,255,255,0.05)", color: track === "free" ? "#06070D" : "#8B92A8" }}>
-          free track
+          free pass
         </button>
         <button onClick={() => switchTrack("premium")} className="bb-pressable"
           style={{ flex: 1, border: "none", borderRadius: 10, padding: "9px 0", fontSize: 12, fontWeight: 700, cursor: isPremium ? "pointer" : "default", background: track === "premium" ? "#A78BFA" : "rgba(255,255,255,0.05)", color: track === "premium" ? "#06070D" : isPremium ? "#A78BFA" : "#4A5066", opacity: isPremium ? 1 : 0.5 }}>
-          {isPremium ? "premium track" : "🔒 premium"}
+          {isPremium ? "premium pass" : "🔒 premium"}
         </button>
       </div>
 
@@ -17035,11 +17174,18 @@ function WeeklyRecapTrivia({ stats, currentPlayer, points, setPoints }) {
 }          
           
           
-function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets, streamProfiles = {}, activeRace, setActiveRace, raceStart, setRaceStart, appCustomizer }) {
-const [section, setSection] = useState("wheel");
+function BoostTab({ stats, currentPlayer, points, setPoints, bets, setBets, streamProfiles = {}, activeRace, setActiveRace, raceStart, setRaceStart, appCustomizer, coinFlips = [], setCoinFlips, flipChallenges = [], setFlipChallenges, pings = [], setPings, addToast }) {
+const [section, setSection] = useState(() => {
+  try {
+    const requested = localStorage.getItem("bb_open_boost_section") || localStorage.getItem("bb_open_games_active");
+    if (requested === "race") return "race";
+    if (requested === "rlcs" || requested === "rlcsbets") return "rlcs";
+    if (requested === "coinflip" || requested === "flip") return "flip";
+  } catch (_) {}
+  return "wheel";
+});
 useEffect(() => {
-  // Games now has its own top nav tab, so Boost no longer opens the old embedded Games panel.
-  try { localStorage.removeItem("bb_open_games_active"); } catch (_) {}
+  try { localStorage.removeItem("bb_open_boost_section"); localStorage.removeItem("bb_open_games_active"); } catch (_) {}
 }, []);
 const [parlayLegs, setParlayLegs] = useState([]);
 const [parlayWager, setParlayWager] = useState(50);
@@ -17097,7 +17243,7 @@ const [predSide, setPredSide] = useState(null);
   const playerColor = PLAYERS.find(p => p.id === currentPlayer)?.color || "#B8FF4D";
   const customProps = Array.isArray(points?.__customProps) ? points.__customProps : [];
   const PROPS_PARLAY_WAGER_PRESETS = [50, 100, 250, 500];
-  useEffect(() => { if (section === "predict" || section === "parlay") setSection("props"); }, [section]);
+  useEffect(() => { if (section === "predict" || section === "parlay") setSection("props"); if (section === "rlcsbets") setSection("rlcs"); if (section === "coinflip") setSection("flip"); }, [section]);
 
   // Build player props from stats across 1v1 / 2v2 / 3v3.
   const PROP_FIELD_CONFIG = {
@@ -17879,10 +18025,10 @@ const noBettingWeek = isEventActive("no_betting");
       </div>
 
       {/* Section tabs */}
-      <div style={{display:"flex",gap:8,marginBottom:18}}>
-     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"history",label:"history"}].map(sec=>(
+      <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+     {[{id:"wheel",label:"wheel"},{id:"slots",label:"slots"},{id:"props",label:"props"},{id:"flip",label:"flip"},{id:"rlcs",label:"rlcs live"},{id:"race",label:"race"},{id:"history",label:"history"}].map(sec=>(
           <button key={sec.id} onClick={()=>setSection(sec.id)} className="bb-pressable"
-            style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?playerColor:"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
+            style={{flex:"1 1 72px",border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:section===sec.id?playerColor:"rgba(255,255,255,0.05)",color:section===sec.id?"#06070D":"#8B92A8"}}>
             {sec.label}
           </button>
         ))}
@@ -18196,6 +18342,15 @@ const noBettingWeek = isEventActive("no_betting");
 
       {/* HISTORY */}
       {section==="history"&&renderBetHistorySection()}
+
+      {/* FLIP */}
+      {section==="flip"&&<CoinFlipTab currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer}/>}
+
+      {/* RLCS LIVE */}
+      {section==="rlcs"&&<RLCSBets currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} appCustomizer={appCustomizer} pings={pings} setPings={setPings} addToast={addToast}/>}
+
+      {/* RACE MODE */}
+      {section==="race"&&<RaceModeTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart}/>}
 
      {/* SLOTS */}
       {section==="slots"&&(()=>{
@@ -20357,11 +20512,8 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
 }
 
 const GAME_CARDS = [
-  { id:"trivia",   label:"RLCS Trivia",     desc:"5 questions · up to 3x your wager",       color:"#4D9EFF" },
-  { id:"race",     label:"Race Mode",        desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
-  { id:"boostgrab",label:"Boost Grab",       desc:"tap pads, avoid bombs, cash out anytime",  color:"#FF8C42" },
-  { id:"recap",    label:"Recap Trivia",     desc:"questions based on THIS week's real stats", color:"#FFD166" },
-  { id:"rlcsbets", label:"RLCS Live",        desc:"live brackets · bets",    color:"#FF61C1" },
+  { id:"rlcsbets", label:"RLCS Live", desc:"live brackets · bets", color:"#FF61C1" },
+  { id:"race", label:"Race Mode", desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
 ];
 
 function TeamLinkTab({ stats, onUpdateOpponentScore }) {
@@ -20451,6 +20603,25 @@ function UnderConstructionPage({ tabId, appCustomizer }) {
   const label = (tabId || "page").replace(/([A-Z])/g," $1");
   const msg = appCustomizer?.underConstruction?.[tabId]?.message || "this page is being worked on right now. check back soon.";
   return <div className="bb-tab-content" style={s.tabContent}><div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,209,102,.24)",borderRadius:22,padding:22,textAlign:"center",marginTop:20}}><div style={{fontSize:34,marginBottom:10}}>🚧</div><div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>under construction</div><div style={{fontSize:22,color:"#E8ECF4",fontWeight:900,marginTop:6,textTransform:"lowercase"}}>{label}</div><div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginTop:8}}>{msg}</div></div></div>;
+}
+
+function SquadHubTab(props) {
+  const [subTab, setSubTab] = useState("squad");
+  const playerColor = PLAYERS.find(p => p.id === props.currentPlayer)?.color || "#B8FF4D";
+  return (
+    <div className="bb-tab-content" style={s.tabContent}>
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        {[{id:"squad",label:"squad"},{id:"stats",label:"stats"}].map(st => (
+          <button key={st.id} onClick={()=>setSubTab(st.id)} className="bb-pressable" style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:900,cursor:"pointer",background:subTab===st.id?playerColor:"rgba(255,255,255,0.05)",color:subTab===st.id?"#06070D":"#8B92A8"}}>
+            {st.label}
+          </button>
+        ))}
+      </div>
+      {subTab === "squad" ? <PresenceTab {...props}/> : (
+        <StatsTab stats={props.stats} setStats={props.setStats} currentPlayer={props.currentPlayer} passXP={props.passXP} setPassXP={props.setPassXP} jumpDate={props.statsJumpDate} onJumpHandled={props.onStatsJumpHandled} schedule={props.schedule} setSchedule={props.setSchedule} teamRoom={props.teamRoom} setTeamRoom={props.setTeamRoom} mmrProfiles={props.mmrProfiles} setMmrProfiles={props.setMmrProfiles} addToast={props.addToast} useParseCredit={props.useParseCredit} points={props.points} setPoints={props.setPoints} bets={props.bets} setBets={props.setBets} chemistry={props.chemistry} setChemistry={props.setChemistry} appCustomizer={props.appCustomizer}/>
+      )}
+    </div>
+  );
 }
 
 function AppInner() {
@@ -20580,6 +20751,13 @@ const [toasts, setToasts] = useState([]);
     });
   }, [appCustomizer]);
   useEffect(() => {
+    const legacyRedirects = { court:"social", stats:"presence", games:"boost", stocks:"home", coinflip:"boost" };
+    if (legacyRedirects[tab]) {
+      if (tab === "coinflip") { try { localStorage.setItem("bb_open_boost_section", "flip"); } catch (_) {} }
+      if (tab === "games") { try { localStorage.setItem("bb_open_boost_section", "rlcs"); } catch (_) {} }
+      setTab(legacyRedirects[tab]);
+      return;
+    }
     if (appCustomizer?.hiddenTabs?.[tab] && tab !== "home") setTab("home");
   }, [appCustomizer, tab]);
   useEffect(() => {
@@ -21119,14 +21297,14 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
     }
     if (link.action === "stocks") {
       setChatOpen(false);
-      setTab("stocks");
+      setTab("home");
       done();
       return;
     }
     if (link.action === "boost") {
       setChatOpen(false);
       if (link.type === "race" || link.open === "race" || link.game === "race") {
-        try { localStorage.setItem("bb_open_games_active", "race"); } catch (_) {}
+        try { localStorage.setItem("bb_open_boost_section", "race"); localStorage.setItem("bb_open_games_active", "race"); } catch (_) {}
       }
       setTab("boost");
       done();
@@ -22119,15 +22297,10 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
 const BASE_TABS=[
     {id:"home",     icon:Home,       label:"home"},
     {id:"jobs",     icon:ClipboardCheck, label:"jobs"},
-    {id:"court",    icon:Shield,     label:"court"},
     {id:"room",     icon:MessageCircle, label:"room"},
     {id:"social",   icon:ImageIcon,  label:"social"},
-    {id:"stats",    icon:BarChart2,  label:"stats"},
     {id:"presence", icon:Circle,     label:"squad"},
-    {id:"games",    icon:Tv,         label:"games"},
-    {id:"stocks",   icon:BarChart2,  label:"stocks"},
     {id:"boost",    icon:Dice5,      label:"boost"},
-    {id:"coinflip", icon:Dice5,      label:"flip"},
     {id:"garage",   icon:Trophy,     label:"pass"},
 ];
 const tabById = Object.fromEntries(BASE_TABS.map(t => [t.id, t]));
@@ -22424,11 +22597,10 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
       {!bannerDismissed&&<ReminderBanner incompleteDays={incompleteDays} onJump={(key)=>{ setJumpKey(key); setShowTrainingFull(true); setBannerDismissed(true); }} onDismiss={()=>setBannerDismissed(true)}/>}
       <div ref={scrollContainerRef} style={{...s.tabBody, position:"relative", zIndex:1, paddingBottom: navAtBottom ? "calc(96px + env(safe-area-inset-bottom, 0px))" : 0}} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
 <AppSectionBoundary resetKey={`${currentPlayer}-${tab}`} label={tab} accent={userColor} onGoHome={()=>setTab("home")}>{pageUnderConstruction ? <UnderConstructionPage tabId={tab} appCustomizer={appCustomizer}/> : <>
-{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("stats")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)} burtonOS={burtonOS} setBurtonOS={setBurtonOS} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer} setTab={setTab}/>}
+{tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("presence")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)} burtonOS={burtonOS} setBurtonOS={setBurtonOS} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer} setTab={setTab}/>}
 {tab==="jobs"&&<JobsTab key={tab} burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stats={stats} appCustomizer={appCustomizer} addToast={addToast} setTab={setTab}/>}
-{tab==="court"&&<CourtTab key={tab} burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} pings={pings} setPings={setPings} appCustomizer={appCustomizer} addToast={addToast}/>}
-        {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-      <div style={{display:tab==="social"?"block":"none",height:"100%",minHeight:"100%"}} aria-hidden={tab!=="social"}><SocialTab key="social-mounted" posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)} appCustomizer={appCustomizer}/></div>
+{tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
+      <div style={{display:tab==="social"?"block":"none",height:"100%",minHeight:"100%"}} aria-hidden={tab!=="social"}><SocialTab key="social-mounted" posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)} appCustomizer={appCustomizer} burtonOS={burtonOS} setBurtonOS={setBurtonOS} pings={pings} setPings={setPings}/></div>
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer} appCustomizer={appCustomizer}/>}
           
 {tab==="room"&&(
@@ -22441,16 +22613,11 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
   </div>
 )}    
           
-{tab==="stats"&&<StatsTab key={tab} stats={stats} setStats={setStats} currentPlayer={currentPlayer} passXP={passXP} setPassXP={setPassXP} jumpDate={statsJumpDate} onJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} useParseCredit={useParseCredit} points={points} setPoints={setPoints} bets={bets} setBets={setBets} chemistry={chemistry} setChemistry={setChemistry} appCustomizer={appCustomizer}/>}
- {tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} streamProfiles={streamProfiles} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer}/>} 
-{tab==="coinflip"&&<CoinFlipTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer}/>}
-
-{tab==="stocks"&&<StockMarketTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stocks={stocks} setStocks={setStocks} passXP={passXP}/>}
-{(tab==="presence" || tab==="squad")&&<SquadTabErrorBoundary resetKey={`${currentPlayer}-${tab}`} currentPlayer={currentPlayer} presence={presence} points={points} setTab={setTab}><PresenceTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} adminShopItems={adminShopItems} appCustomizer={appCustomizer}/></SquadTabErrorBoundary>}
+{tab==="boost"&&<BoostTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} streamProfiles={streamProfiles} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer} coinFlips={coinFlips} setCoinFlips={setCoinFlips} flipChallenges={flipChallenges} setFlipChallenges={setFlipChallenges} pings={pings} setPings={setPings} addToast={addToast}/>} 
+{(tab==="presence" || tab==="squad")&&<SquadTabErrorBoundary resetKey={`${currentPlayer}-${tab}`} currentPlayer={currentPlayer} presence={presence} points={points} setTab={setTab}><SquadHubTab key={tab} presence={presence} setPresence={setPresence} pings={pings} setPings={setPings} currentPlayer={currentPlayer} points={points} setPoints={setPoints} completions={completions} stats={stats} setStats={setStats} passXP={passXP} setPassXP={setPassXP} passPremium={passPremium} setPassPremium={setPassPremium} passTokens={passTokens} setPassTokens={setPassTokens} setTab={setTab} flowers={flowers} setFlowers={setFlowers} addToast={addToast} activityFeed={activityFeed} setActivityFeed={setActivityFeed} parseCredits={parseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} adminShopItems={adminShopItems} appCustomizer={appCustomizer} statsJumpDate={statsJumpDate} onStatsJumpHandled={()=>setStatsJumpDate(null)} schedule={schedule} setSchedule={setSchedule} teamRoom={teamRoom} setTeamRoom={setTeamRoom} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} useParseCredit={useParseCredit} bets={bets} setBets={setBets} chemistry={chemistry} setChemistry={setChemistry}/></SquadTabErrorBoundary>}
 {tab==="garage"&&<GarageTab key={tab} currentPlayer={currentPlayer} points={points} setPoints={setPoints} passXP={passXP} passPremium={passPremium} passTokens={passTokens} setPassTokens={setPassTokens} passClaimed={passClaimed} setPassClaimed={setPassClaimed} passActiveBoosts={passActiveBoosts} addToast={addToast} appCustomizer={appCustomizer}/>}
 {tab==="chemistry"&&<TeamChemistryTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry} appCustomizer={appCustomizer}/>}
-{tab==="games"&&<GamesTab key={tab} stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} bets={bets} setBets={setBets} activeRace={activeRace} setActiveRace={setActiveRace} raceStart={raceStart} setRaceStart={setRaceStart} appCustomizer={appCustomizer} pings={pings} setPings={setPings} addToast={addToast}/>}
- {tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition} points={points} setPoints={setPoints} passPremium={passPremium} setPassPremium={setPassPremium} adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} tabAnimationStyle={tabAnimationStyle} setTabAnimationStyle={setTabAnimationStyle} fullScreenFloatMode={fullScreenFloatMode} setFullScreenFloatMode={setFullScreenFloatMode} appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} comments={comments} setComments={setComments} currentPlayer={currentPlayer} burtonOS={burtonOS} setBurtonOS={setBurtonOS}/>}
+{tab==="admin"&&isAdmin&&<AdminTab key={tab} trainingData={trainingData} setTrainingData={setTrainingData} mmrProfiles={mmrProfiles} setMmrProfiles={setMmrProfiles} addToast={addToast} completions={completions} setCompletions={setCompletions} passXP={passXP} setPassXP={setPassXP} parseCredits={parseCredits} setParseCredits={setParseCredits} creditRequests={creditRequests} setCreditRequests={setCreditRequests} navPosition={navPosition} setNavPosition={setNavPosition} points={points} setPoints={setPoints} passPremium={passPremium} setPassPremium={setPassPremium} adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} tabAnimationStyle={tabAnimationStyle} setTabAnimationStyle={setTabAnimationStyle} fullScreenFloatMode={fullScreenFloatMode} setFullScreenFloatMode={setFullScreenFloatMode} appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} comments={comments} setComments={setComments} currentPlayer={currentPlayer} burtonOS={burtonOS} setBurtonOS={setBurtonOS}/>}
 </>}
 </AppSectionBoundary>
       </div>
