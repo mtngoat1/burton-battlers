@@ -11,11 +11,13 @@ export default async function handler(req, res) {
   const q = req.query || {};
   const replayId = String(q.replayId || q.id || '').trim();
   const shouldDownload = String(q.download || q.file || '').toLowerCase() === '1' || String(q.download || q.file || '').toLowerCase() === 'true';
+  const shouldTimeline = String(q.timeline || q.events || '').toLowerCase() === '1' || String(q.timeline || q.events || '').toLowerCase() === 'true';
   const mode = String(q.mode || '').toLowerCase();
   const playlistFromQuery = String(q.playlist || '').trim();
-  const playerName = String(q.playerName || q['player-name'] || '').trim();
+  const playerNameRaw = String(q.playerName || q['player-name'] || '').trim();
   const after = String(q.after || q.startedAt || '').trim();
-  const count = Math.max(1, Math.min(10, Number(q.count || 5) || 5));
+  const afterBufferMinutes = Math.max(0, Math.min(180, Number(q.afterBufferMinutes || q.afterBuffer || 45) || 0));
+  const count = Math.max(1, Math.min(20, Number(q.count || 10) || 10));
 
   const playlistForMode = (m) => {
     if (playlistFromQuery) return playlistFromQuery;
@@ -26,8 +28,15 @@ export default async function handler(req, res) {
     return '';
   };
 
+  const bufferedAfter = (value) => {
+    if (!value) return '';
+    const d = new Date(value);
+    if (!Number.isFinite(d.getTime())) return value;
+    return new Date(d.getTime() - afterBufferMinutes * 60000).toISOString();
+  };
+
   const ballFetchJson = async (url) => {
-    const r = await fetch(url, { headers: { Authorization: token } });
+    const r = await fetch(url, { headers: { Authorization: token, Accept: 'application/json' } });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) {
       const msg = data?.error || `Ballchasing request failed (${r.status})`;
@@ -38,7 +47,41 @@ export default async function handler(req, res) {
     return data;
   };
 
+  const ballFetchTimeline = async (id) => {
+    const url = `https://ballchasing.com/dyn/replay/${encodeURIComponent(id)}/timeline`;
+    let r = await fetch(url, { headers: { Authorization: token, Accept: 'application/json' } });
+    if (r.status === 401 || r.status === 403) {
+      r = await fetch(url, { headers: { Accept: 'application/json' } });
+    }
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = data?.error || `Ballchasing timeline failed (${r.status})`;
+      const err = new Error(msg);
+      err.status = r.status;
+      throw err;
+    }
+    return data;
+  };
+
+  const searchList = async ({ name, playlist, afterValue, label }) => {
+    const search = new URLSearchParams();
+    search.append('player-name', name);
+    if (playlist) search.append('playlist', playlist);
+    if (afterValue) search.append('replay-date-after', afterValue);
+    search.append('count', String(count));
+    search.append('sort-by', 'replay-date');
+    search.append('sort-dir', 'desc');
+    const url = `https://ballchasing.com/api/replays?${search.toString()}`;
+    const data = await ballFetchJson(url);
+    return { label, url, list:Array.isArray(data?.list) ? data.list : [] };
+  };
+
   try {
+    if (replayId && shouldTimeline) {
+      const timeline = await ballFetchTimeline(replayId);
+      return res.status(200).json({ timeline });
+    }
+
     if (replayId && shouldDownload) {
       const r = await fetch(`https://ballchasing.com/api/replays/${encodeURIComponent(replayId)}/file`, {
         headers: { Authorization: token },
@@ -58,21 +101,45 @@ export default async function handler(req, res) {
       return res.status(200).json({ replay });
     }
 
-    if (!playerName) return res.status(400).json({ error: 'Provide replayId or playerName' });
-    const search = new URLSearchParams();
-    search.append('player-name', playerName);
-    const playlist = playlistForMode(mode);
-    if (playlist) search.append('playlist', playlist);
-    if (after) search.append('replay-date-after', after);
-    search.append('count', String(count));
-    search.append('sort-by', 'replay-date');
-    search.append('sort-dir', 'desc');
+    if (!playerNameRaw) return res.status(400).json({ error: 'Provide replayId or playerName' });
 
-    const listData = await ballFetchJson(`https://ballchasing.com/api/replays?${search.toString()}`);
-    const first = Array.isArray(listData?.list) ? listData.list[0] : null;
-    if (!first?.id) return res.status(404).json({ error: 'No Ballchasing replay found', list: listData?.list || [] });
-    const replay = await ballFetchJson(`https://ballchasing.com/api/replays/${encodeURIComponent(first.id)}`);
-    return res.status(200).json({ replay, list: listData.list || [] });
+    const names = Array.from(new Set(playerNameRaw.split(',').map(v => v.trim()).filter(Boolean)));
+    const playlist = playlistForMode(mode);
+    const afterBuffered = bufferedAfter(after);
+    const strategies = [
+      { label:'exact playlist + session time', playlist, afterValue:afterBuffered || after },
+      { label:'exact playlist latest', playlist, afterValue:'' },
+      { label:'any playlist + session time', playlist:'', afterValue:afterBuffered || after },
+      { label:'any playlist latest', playlist:'', afterValue:'' },
+    ];
+
+    const attempts = [];
+    for (const name of names) {
+      for (const strategy of strategies) {
+        const result = await searchList({ name, ...strategy });
+        attempts.push({ name, label:result.label, count:result.list.length });
+        const first = result.list[0];
+        if (first?.id) {
+          const replay = await ballFetchJson(`https://ballchasing.com/api/replays/${encodeURIComponent(first.id)}`);
+          return res.status(200).json({
+            replay,
+            list:result.list,
+            searchMeta:{
+              matchedName:name,
+              strategy:result.label,
+              playlist:strategy.playlist || 'any',
+              after:strategy.afterValue || '',
+              attempts,
+            },
+          });
+        }
+      }
+    }
+
+    return res.status(404).json({
+      error:'No Ballchasing replay found after broad search',
+      attempts,
+    });
   } catch (err) {
     return res.status(err.status || 500).json({ error: err.message || 'Ballchasing API error' });
   }

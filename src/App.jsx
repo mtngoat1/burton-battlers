@@ -73,6 +73,7 @@ import { createPortal } from "react-dom";
 // APP126_BALLCHASING_NORMALIZED_REPLAY_FIX_PATCH
 // APP127_SAFE_TOPBAR_ECONOMY_SUPABASE_LIGHT_PATCH
 // APP127_REPLAY_VAULT_DEEP_STATS_DROPDOWNS_PATCH
+// APP128_BALLCHASING_AUTO_REFRESH_TIMELINE_SEARCH_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1128,13 +1129,54 @@ function getReplayScoreboardText(replay) {
   const orange = safe.teams?.[1]?.goals ?? 0;
   return `${blue}-${orange}`;
 }
+function flattenBallchasingTimelineEvents(timeline = {}) {
+  const safe = liveReplaySafeObj(timeline);
+  const out = [];
+  const fields = [
+    ["goals", "goal"],
+    ["shots", "shot"],
+    ["saves", "save"],
+    ["assists", "assist"],
+    ["kills", "demo"],
+    ["deaths", "demoed"],
+  ];
+  ["blue", "orange"].forEach(team => {
+    const players = Array.isArray(safe?.[team]) ? safe[team] : [];
+    players.forEach(player => {
+      fields.forEach(([field, type]) => {
+        const list = Array.isArray(player?.[field]) ? player[field] : [];
+        list.forEach(ev => {
+          if (!ev || typeof ev !== "object") return;
+          out.push({
+            ...ev,
+            type,
+            event:type,
+            kind:type,
+            player:player.player || player.name || "",
+            player_name:player.player || player.name || "",
+            team,
+            time:ev.time,
+            extra:ev.extra,
+            shift:ev.shift,
+          });
+        });
+      });
+    });
+  });
+  return out.sort((a,b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+}
 function getReplayEvents(replay) {
-  const raw = normalizeBallchasingReplay(replay || {}).raw || {};
+  const safe = normalizeBallchasingReplay(replay || {});
+  const raw = safe.raw || {};
+  const timelineEvents = flattenBallchasingTimelineEvents(safe.timeline || raw.timeline || raw.keyMoments || raw.eventsTimeline);
   const buckets = [
-    raw.events, raw.timeline, raw.goals, raw.saves, raw.stats?.events, raw.stats?.timeline,
+    raw.events, raw.goals, raw.saves, raw.stats?.events, raw.stats?.timeline,
     raw.game?.events, raw.game?.goals, raw.game?.saves, raw.replay?.events, raw.replay?.goals,
   ];
-  return buckets.flatMap(v => Array.isArray(v) ? v : []).filter(v => v && typeof v === "object");
+  return [
+    ...buckets.flatMap(v => Array.isArray(v) ? v : []),
+    ...timelineEvents,
+  ].filter(v => v && typeof v === "object");
 }
 function getReplayEventType(event = {}) {
   return replayLower(event.type || event.event || event.kind || event.name || event.action || event.stat || event.category);
@@ -1172,7 +1214,40 @@ function getReplayTimelineForPlayer(replay, row, kind = "goal") {
 }
 function fmtReplayTimeline(events, count = 0) {
   if (events?.length) return events.join(", ");
-  return Number(count) > 0 ? "open replay timeline" : "none";
+  return Number(count) > 0 ? "fetching timeline…" : "none";
+}
+function getReplayKeyMoments(replay, playerNames = []) {
+  const allowed = new Set((playerNames || []).map(replayLower).filter(Boolean));
+  return getReplayEvents(replay)
+    .map(ev => {
+      const type = getReplayEventType(ev);
+      const player = String(ev.player || ev.player_name || ev.name || "").trim();
+      const playerLower = replayLower(player);
+      const rawTime = getReplayEventTime(ev);
+      const n = Number(rawTime);
+      if (!Number.isFinite(n)) return null;
+      if (allowed.size && playerLower && !allowed.has(playerLower)) return null;
+      let kind = "";
+      if (type.includes("goal")) kind = "goal";
+      else if (type.includes("save")) kind = "save";
+      else if (type.includes("assist")) kind = "assist";
+      else if (type.includes("shot")) kind = "shot";
+      else if (type.includes("demoed") || type.includes("death")) kind = "demoed";
+      else if (type.includes("demo") || type.includes("kill")) kind = "demo";
+      if (!kind) return null;
+      const extra = Array.isArray(ev.extra) ? ev.extra : [];
+      const scoreText = kind === "goal" && extra.length >= 2 ? ` · ${extra[0]}-${extra[1]}` : "";
+      const targetText = (kind === "demo" || kind === "demoed") && extra?.[0] ? ` · ${kind === "demo" ? "on" : "by"} ${extra[0]}` : "";
+      return {
+        id:`${kind}_${player}_${n}_${scoreText}_${targetText}`,
+        kind,
+        player,
+        time:n,
+        label:`${fmtReplayTimecode(n)} · ${player || "player"} ${kind}${scoreText}${targetText}`,
+      };
+    })
+    .filter(Boolean)
+    .sort((a,b) => a.time - b.time);
 }
 function getReplayDownloadHref(cfg = {}, replayId = "") {
   const id = String(replayId || "").trim();
@@ -1325,6 +1400,33 @@ async function fetchBallchasingViaConfig(cfg = {}, params = {}) {
   }
   throw lastError || new Error("Ballchasing request failed");
 }
+async function fetchBallchasingTimelineViaConfig(cfg = {}, replayId = "") {
+  const id = String(replayId || "").trim();
+  if (!id) return null;
+  const proxyPath = String(cfg.replayProxyPath || DEFAULT_LIVE_SESSION_CONFIG.replayProxyPath || "/api/ballchasing").trim();
+  const query = new URLSearchParams({ replayId:id, timeline:"1" });
+  const endpoint = proxyPath ? `${proxyPath}${proxyPath.includes("?") ? "&" : "?"}${query.toString()}` : "";
+  let lastError = null;
+  if (endpoint) {
+    try {
+      const res = await fetch(endpoint);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || `Ballchasing timeline proxy failed (${res.status})`);
+      return json.timeline || json;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  try {
+    const res = await fetch(`https://ballchasing.com/dyn/replay/${encodeURIComponent(id)}/timeline`);
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error || `Ballchasing timeline failed (${res.status})`);
+    return json;
+  } catch (err) {
+    lastError = err;
+  }
+  throw lastError || new Error("Ballchasing timeline failed");
+}
 function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, addToast, me }) {
   const replayVault = normalizeLiveReplayVault(safe.replayVault);
   const [replayInput, setReplayInput] = useState(replayVault.manualUrl || "");
@@ -1340,7 +1442,15 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
   const currentMatched = visibleRows.find(r => r.appPlayerId === currentPlayer) || rows.find(r => String(r.name).toLowerCase() === String(me.name).toLowerCase());
   const pasteEnabled = cfg.replayPasteEnabled === true;
   const saveReplay = async (loaded, manualUrl = replayInput) => {
-    const normalized = normalizeBallchasingReplay(loaded);
+    let normalized = normalizeBallchasingReplay(loaded);
+    if (normalized.id && !normalized.timeline && !normalized.raw?.timeline) {
+      try {
+        const timeline = await fetchBallchasingTimelineViaConfig(cfg, normalized.id);
+        normalized = normalizeBallchasingReplay({ ...normalized, timeline, raw:{ ...(normalized.raw || {}), timeline } });
+      } catch (_) {
+        // Timeline is a bonus. Keep the replay/stat link even if Ballchasing's dyn timeline is slow or unavailable.
+      }
+    }
     const nextVault = normalizeLiveReplayVault({
       ...replayVault,
       manualUrl: pasteEnabled ? manualUrl : "",
@@ -1367,8 +1477,16 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
     setLoading(true); setError("");
     try {
       const aliases = getBallchasingAliasMap(cfg);
-      const playerName = (aliases[currentPlayer] || [me.name])[0] || me.name;
-      const loaded = await fetchBallchasingViaConfig(cfg, { playerName, mode:safe.mode, playlist:getBallchasingPlaylistForMode(safe.mode), after:safe.startedAt || "", count:8 });
+      const aliasNames = Array.from(new Set([...(aliases[currentPlayer] || [me.name]), me.name].map(v => String(v || "").trim()).filter(Boolean)));
+      const loaded = await fetchBallchasingViaConfig(cfg, {
+        playerName:aliasNames.join(","),
+        mode:safe.mode,
+        playlist:getBallchasingPlaylistForMode(safe.mode),
+        after:safe.startedAt || "",
+        afterBufferMinutes:45,
+        count:20,
+        fallback:"1",
+      });
       await saveReplay(loaded, replayInput);
     } catch (err) {
       setError(err?.message || "Latest replay search failed. Turn paste link on in admin only if you need a manual fallback.");
@@ -1401,6 +1519,26 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:10}}>
         {rv?.viewUrl && <a href={rv.viewUrl} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#4D9EFF",textDecoration:"none",textAlign:"center"}}>watch 3D</a>}
         {downloadHref && <a href={downloadHref} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#B8FF4D",textDecoration:"none",textAlign:"center"}}>download .replay</a>}
+      </div>
+    );
+  };
+  const keyMomentsBox = (sourceReplay = replay) => {
+    const normalized = normalizeBallchasingReplay(sourceReplay || {});
+    const playerNames = buildBallchasingPlayerRows(normalized, cfg).filter(r => r.appPlayerId && participantIds.includes(r.appPlayerId)).map(r => r.name);
+    const moments = getReplayKeyMoments(normalized, playerNames).slice(0, 18);
+    if (!moments.length) return null;
+    const kindColor = (kind) => kind === "goal" ? "#FFD166" : kind === "save" ? "#4D9EFF" : kind === "demo" ? "#FF8C42" : kind === "demoed" ? "#FF5C8A" : "#8B92A8";
+    return (
+      <div style={{background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:10,marginTop:10}}>
+        <div style={{fontSize:9.5,color:"#FFD166",fontWeight:950,letterSpacing:.9,textTransform:"uppercase",marginBottom:8}}>auto key moments</div>
+        <div style={{display:"grid",gap:6}}>
+          {moments.map((m, i) => (
+            <div key={`${m.id}_${i}`} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:10,padding:"7px 8px"}}>
+              <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div>
+              <div style={{fontSize:8.5,color:kindColor(m.kind),fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{m.kind}</div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   };
@@ -1456,7 +1594,7 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
           ["angle", fmtReplayNumber(r.cameraAngle)], ["stiffness", fmtReplayNumber(r.cameraStiffness, 2)], ["swivel", fmtReplayNumber(r.cameraSwivel, 1)],
           ["transition", fmtReplayNumber(r.cameraTransition, 1)], ["steering", fmtReplayNumber(r.steeringSensitivity, 2)], ["car", carText],
         ], "#4D9EFF")}
-        <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:750,lineHeight:1.35,marginTop:9}}>Goal/save times come from replay event data when it is present. If this says open replay timeline, Ballchasing has the visual timeline on the replay page but the JSON response did not include exact event timestamps.</div>
+        <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:750,lineHeight:1.35,marginTop:9}}>Goal/save times come from the Ballchasing timeline endpoint when available. Search latest now retries without strict session-time filters, so you should not need to paste links manually.</div>
       </div>
     );
   };
@@ -1473,6 +1611,7 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
           <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>open</div>
         </summary>
         {watchButtons(normalized)}
+        {keyMomentsBox(normalized)}
         <div style={{display:"grid",gap:10,marginTop:10}}>{rvRows.length ? rvRows.map(r => playerCard(r, expected === 3, normalized)) : <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4}}>No selected Burton player matched this replay.</div>}</div>
       </details>
     );
@@ -1514,6 +1653,7 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
               {replay.viewUrl && <a href={replay.viewUrl} target="_blank" rel="noreferrer" style={{fontSize:10,fontWeight:950,color:"#B8FF4D",textDecoration:"none",whiteSpace:"nowrap"}}>{cfg.replayOpenButton}</a>}
             </div>
             {watchButtons(replay)}
+            {keyMomentsBox(replay)}
             {expected === 2 && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>2s is filtered to you + the selected teammate for this session.</div>}
             {!!missingPlayers.length && <div style={{fontSize:9.5,color:"#FFD166",marginTop:7,fontWeight:850}}>Missing from this replay: {missingPlayers.map(p=>p.name).join(", ")}</div>}
           </div>
