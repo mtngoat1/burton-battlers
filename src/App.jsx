@@ -79,6 +79,7 @@ import { createPortal } from "react-dom";
 // APP131_FILM_ROOM_VOD_VAULT_TABS_CLEAN_LINKS_PATCH
 // APP132_FACE_ID_LOGIN_PASSCODE_FALLBACK_PATCH
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
+// APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1443,6 +1444,9 @@ function normalizeFilmRoom(input = {}) {
     liveUrl: String(src.liveUrl || "").slice(0, 320),
     vodUrl: String(src.vodUrl || "").slice(0, 420),
     latestVodUrl: String(src.latestVodUrl || src.vodUrl || "").slice(0, 420),
+    activeVodUrl: String(src.activeVodUrl || src.vodUrl || src.latestVodUrl || "").slice(0, 420),
+    activeVodSeconds: Number.isFinite(Number(src.activeVodSeconds)) ? Math.max(0, Math.round(Number(src.activeVodSeconds))) : 0,
+    activeVodLabel: String(src.activeVodLabel || "").slice(0, 160),
     vodVault: vodVault.map(v => ({
       id: String(v?.id || getTwitchVideoId(v?.url || v?.vodUrl || "") || `vod_${Date.now()}`).slice(0,80),
       url: String(v?.url || v?.vodUrl || "").slice(0,420),
@@ -1556,6 +1560,17 @@ function getReplayVodMomentUrl(replay, filmRoomInput = {}, eventSeconds = 0) {
   if (gameStart === null) return "";
   return withVodTimestamp(vod, gameStart + (Number(eventSeconds) || 0));
 }
+function getReplayVodMomentSeconds(replay, filmRoomInput = {}, eventSeconds = 0) {
+  const film = normalizeFilmRoom(filmRoomInput);
+  const gameStart = getReplayVodStartSeconds(replay, film);
+  if (gameStart === null) return null;
+  const seconds = gameStart + (Number(eventSeconds) || 0);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.round(seconds) : null;
+}
+function getFilmRoomVodUrl(filmRoomInput = {}) {
+  const film = normalizeFilmRoom(filmRoomInput);
+  return film.activeVodUrl || film.vodUrl || film.latestVodUrl || "";
+}
 function upsertFilmRoomVod(vodVault = [], vodUrl = "", patch = {}) {
   const url = String(vodUrl || "").trim();
   if (!url) return Array.isArray(vodVault) ? vodVault : [];
@@ -1628,13 +1643,16 @@ function FilmRoomPanel({ cfg, safe, currentPlayer, updateSession, addToast, me }
         liveUrl:data.url || `https://www.twitch.tv/${clean}`,
         vodUrl:nextVod,
         latestVodUrl:nextVod,
+        activeVodUrl:nextVod || film.activeVodUrl,
+        activeVodSeconds:film.activeVodSeconds || 0,
+        activeVodLabel:data.latestVodTitle || data.title || film.activeVodLabel || "saved VOD",
         vodVault:nextVault,
         title:data.title || data.latestVodTitle || film.title,
         isLive:!!data.live,
         lastCheckedAt:new Date().toISOString(),
         syncOffsetSeconds:Number(offset) || 0,
         source:"twitch",
-      }, data.live ? "Twitch live stream detected" : nextVod ? "Twitch VOD saved" : "Twitch checked", data.live ? "🔴" : "🎥");
+      }, data.live ? "Twitch live stream detected" : nextVod ? "Twitch VOD loaded in app" : "Twitch checked", data.live ? "🔴" : "🎥");
     } catch (err) {
       setError(err?.message || "Twitch lookup failed. You can still use manual start + pasted VOD URL.");
     } finally { setLoading(false); }
@@ -1653,20 +1671,29 @@ function FilmRoomPanel({ cfg, safe, currentPlayer, updateSession, addToast, me }
       twitchChannel:clean,
       vodUrl:url,
       latestVodUrl:url,
+      activeVodUrl:url,
+      activeVodSeconds:film.activeVodSeconds || 0,
+      activeVodLabel:film.activeVodLabel || "saved VOD",
       vodVault:nextVault,
       syncOffsetSeconds:Number(offset) || 0,
-    }, "VOD saved to vault", "⏱️");
+    }, "VOD loaded in Film Room", "⏱️");
+  };
+  const loadVaultVod = async (v, idx) => {
+    await saveFilm({ activeVodUrl:v.url, activeVodSeconds:0, activeVodLabel:getVodVaultLabel(v, idx), vodUrl:v.url, latestVodUrl:v.url }, "VOD loaded in player", "🎞️");
   };
   const gameStartHelp = film.streamStartedAt ? `stream start: ${new Date(film.streamStartedAt).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}` : "save a stream start time before timestamping VODs";
-  const activeVod = vodUrl || film.vodUrl || film.latestVodUrl;
+  const activeVod = getFilmRoomVodUrl(film) || vodUrl;
+  const activeSeconds = Number(film.activeVodSeconds) || 0;
+  const embedSrc = getTwitchEmbedSrc(activeVod, activeSeconds);
+  const playerLabel = film.activeVodLabel || (activeSeconds ? `VOD ${fmtReplayTimecode(activeSeconds)}` : "saved VOD");
   return (
     <div style={{background:"linear-gradient(135deg,#130F22,#080A12)",border:"1px solid rgba(167,139,250,.22)",borderRadius:20,padding:14,marginBottom:14}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
         <div>
-          <div style={{fontSize:10,color:"#A78BFA",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Film Room · VOD vault</div>
+          <div style={{fontSize:10,color:"#A78BFA",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Film Room · in-app VOD</div>
           <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginTop:4}}>{gameStartHelp}</div>
         </div>
-        <div style={{fontSize:10,color:film.isLive?"#7CFFB2":film.vodUrl?"#B8FF4D":"#8B92A8",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{film.isLive ? "live" : film.vodUrl ? "vod saved" : "setup"}</div>
+        <div style={{fontSize:10,color:film.isLive?"#7CFFB2":activeVod?"#B8FF4D":"#8B92A8",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{film.isLive ? "live" : activeVod ? "in app" : "setup"}</div>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 88px",gap:8,marginBottom:8}}>
@@ -1682,23 +1709,32 @@ function FilmRoomPanel({ cfg, safe, currentPlayer, updateSession, addToast, me }
         <button onClick={saveVodAndOffset} className="bb-pressable" style={{background:"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.30)",borderRadius:12,padding:"10px 6px",fontSize:10.5,fontWeight:950,color:"#B8FF4D",cursor:"pointer"}}>save VOD</button>
       </div>
 
-      <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:850,lineHeight:1.35,marginTop:9}}>
-        Clean-link mode is on: the app opens Twitch timestamps externally instead of loading the buggy in-app Twitch player.
-      </div>
-
-      {activeVod && <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginTop:10}}>
-        <a href={activeVod} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(167,139,250,.12)",border:"1px solid rgba(167,139,250,.28)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",textDecoration:"none",textAlign:"center"}}>open saved VOD</a>
-      </div>}
+      {embedSrc ? (
+        <div style={{marginTop:12,background:"#000",border:"1px solid rgba(167,139,250,.25)",borderRadius:16,overflow:"hidden",boxShadow:"0 14px 36px rgba(0,0,0,.30)"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,padding:"8px 10px",background:"rgba(167,139,250,.08)",borderBottom:"1px solid rgba(255,255,255,.06)"}}>
+            <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{playerLabel}</div>
+            <div style={{fontSize:9,color:"#8B92A8",fontWeight:900}}>at {fmtReplayTimecode(activeSeconds)}</div>
+          </div>
+          <div style={{position:"relative",width:"100%",paddingTop:"56.25%",background:"#000"}}>
+            <iframe key={`${getTwitchVideoId(activeVod)}_${activeSeconds}`} title="Burton Film Room Twitch VOD" src={embedSrc} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen style={{position:"absolute",inset:0,width:"100%",height:"100%",border:0,background:"#000"}} />
+          </div>
+        </div>
+      ) : (
+        <div style={{marginTop:12,background:"rgba(0,0,0,.20)",border:"1px solid rgba(255,255,255,.06)",borderRadius:16,padding:14,textAlign:"center"}}>
+          <div style={{fontSize:11,color:"#E8ECF4",fontWeight:950}}>No VOD loaded yet</div>
+          <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,marginTop:5}}>Paste a Twitch VOD link and tap save VOD. The video stays inside Burton; it streams from Twitch, but does not open a new tab.</div>
+        </div>
+      )}
 
       {!!film.vodVault?.length && (
         <div style={{marginTop:12,background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:10}}>
           <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:950,letterSpacing:.9,textTransform:"uppercase",marginBottom:8}}>session VOD vault</div>
           <div style={{display:"grid",gap:7}}>
             {film.vodVault.slice(0,6).map((v, idx) => (
-              <a key={`${v.id}_${idx}`} href={v.url} target="_blank" rel="noreferrer" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:10,padding:"8px",textDecoration:"none"}}>
+              <button key={`${v.id}_${idx}`} onClick={()=>loadVaultVod(v, idx)} className="bb-pressable" style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:10,padding:"8px",cursor:"pointer",textAlign:"left"}}>
                 <span style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{getVodVaultLabel(v, idx)}</span>
-                <span style={{fontSize:8.5,color:"#A78BFA",fontWeight:950,textTransform:"uppercase"}}>open</span>
-              </a>
+                <span style={{fontSize:8.5,color:"#A78BFA",fontWeight:950,textTransform:"uppercase"}}>load</span>
+              </button>
             ))}
           </div>
         </div>
@@ -1852,18 +1888,27 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
       </div>
     </details>
   );
+  const loadVodMomentInApp = async (rv, eventSeconds = 0, label = "VOD moment") => {
+    const normalized = normalizeBallchasingReplay(rv || {});
+    const film = normalizeFilmRoom(safe.filmRoom);
+    const vod = getFilmRoomVodUrl(film);
+    if (!vod) { setError("Save a Twitch VOD first."); return; }
+    const seconds = getReplayVodMomentSeconds(normalized, film, eventSeconds);
+    if (seconds === null) { await setReplayVodStart(normalized); return; }
+    await updateSession({ filmRoom:normalizeFilmRoom({ ...film, activeVodUrl:vod, activeVodSeconds:seconds, activeVodLabel:label }) }, "VOD loaded in Film Room", "🎥");
+  };
   const watchButtons = (rv) => {
     const normalized = normalizeBallchasingReplay(rv || {});
-    const vodHref = getReplayVodMomentUrl(normalized, safe.filmRoom, 0);
-    const hasVod = !!(safe.filmRoom?.vodUrl || safe.filmRoom?.latestVodUrl);
+    const vodSeconds = getReplayVodMomentSeconds(normalized, safe.filmRoom, 0);
+    const hasVod = !!getFilmRoomVodUrl(safe.filmRoom);
     return (
-      <div style={{display:"grid",gridTemplateColumns:vodHref && hasVod ? "1fr 1fr" : "1fr",gap:8,marginTop:10}}>
-        {vodHref ? (
-          <a href={vodHref} target="_blank" rel="noreferrer" className="bb-pressable" style={{background:"rgba(167,139,250,.14)",border:"1px solid rgba(167,139,250,.30)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",textDecoration:"none",textAlign:"center"}}>watch VOD start</a>
+      <div style={{display:"grid",gridTemplateColumns:vodSeconds !== null && hasVod ? "1fr 1fr" : "1fr",gap:8,marginTop:10}}>
+        {vodSeconds !== null ? (
+          <button onClick={()=>loadVodMomentInApp(normalized, 0, `Game start · ${getReplayDisplayTitle(normalized)}`)} className="bb-pressable" style={{background:"rgba(167,139,250,.14)",border:"1px solid rgba(167,139,250,.30)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",cursor:"pointer"}}>load VOD start</button>
         ) : (
           <button onClick={()=>setReplayVodStart(normalized)} disabled={!hasVod} className="bb-pressable" style={{background:hasVod?"rgba(167,139,250,.12)":"rgba(255,255,255,.035)",border:`1px solid ${hasVod?"rgba(167,139,250,.28)":"rgba(255,255,255,.06)"}`,borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:hasVod?"#A78BFA":"#4A5066",cursor:hasVod?"pointer":"default"}}>{hasVod ? "set VOD start" : "save VOD first"}</button>
         )}
-        {vodHref && hasVod && <button onClick={()=>setReplayVodStart(normalized)} className="bb-pressable" style={{background:"rgba(255,209,102,.10)",border:"1px solid rgba(255,209,102,.25)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>adjust start</button>}
+        {vodSeconds !== null && hasVod && <button onClick={()=>setReplayVodStart(normalized)} className="bb-pressable" style={{background:"rgba(255,209,102,.10)",border:"1px solid rgba(255,209,102,.25)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>adjust start</button>}
       </div>
     );
   };
@@ -1888,12 +1933,12 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
         <div style={{fontSize:9,color:vodIssue?"#FFD166":"#8B92A8",fontWeight:800,lineHeight:1.3,marginBottom:8}}>{vodIssue || "Times shown are replay/VOD elapsed time, not Rocket League scoreboard clock."}</div>
         <div style={{display:"grid",gap:6}}>
           {moments.map((m, i) => {
-            const vodUrl = getReplayVodMomentUrl(normalized, safe.filmRoom, m.time);
+            const vodSeconds = getReplayVodMomentSeconds(normalized, safe.filmRoom, m.time);
             return (
               <div key={`${m.id}_${i}`} style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:10,padding:"7px 8px"}}>
                 <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div>
                 <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
-                  {vodUrl && <a href={vodUrl} target="_blank" rel="noreferrer" style={{fontSize:8.5,color:"#A78BFA",fontWeight:950,textDecoration:"none",textTransform:"uppercase"}}>vod</a>}
+                  {vodSeconds !== null && <button onClick={()=>loadVodMomentInApp(normalized, m.time, m.label)} className="bb-pressable" style={{background:"rgba(167,139,250,.10)",border:"1px solid rgba(167,139,250,.22)",borderRadius:999,padding:"4px 7px",fontSize:8.5,color:"#A78BFA",fontWeight:950,textTransform:"uppercase",cursor:"pointer"}}>load</button>}
                   <div style={{fontSize:8.5,color:kindColor(m.kind),fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{m.kind}</div>
                 </div>
               </div>
@@ -1995,7 +2040,7 @@ function ReplayVaultPanel({ cfg, safe, summary, currentPlayer, updateSession, ad
           <div style={{background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:10,marginTop:10}}>
             <div style={{fontSize:9.5,color:"#A78BFA",fontWeight:950,letterSpacing:.9,textTransform:"uppercase",marginBottom:8}}>VOD links</div>
             {watchButtons(normalized)}
-            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,marginTop:8}}>This uses clean external Twitch timestamp links. Set the VOD start once, then all key moments line up from Ballchasing replay time.</div>
+            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,marginTop:8}}>This loads Twitch timestamps inside the Film Room player. Set the VOD start once, then all key moments line up from Ballchasing replay time.</div>
           </div>
         )}
       </details>
