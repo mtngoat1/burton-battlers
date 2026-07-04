@@ -896,6 +896,288 @@ function RecentActivityFeed({ stats, completions, trainingData, currentPlayer, o
 }
 
 
+
+function useLiveSessionStore() {
+  const [session, setSession] = useState(() => normalizeLiveSession({}));
+  useEffect(() => {
+    let alive = true;
+    storeGet(LIVE_SESSION_KEY).then(v => { if (alive) setSession(normalizeLiveSession(v)); }).catch(() => {});
+    let unsub = null;
+    try {
+      unsub = subscribeKVMulti([LIVE_SESSION_KEY], ({ value }) => {
+        setSession(normalizeLiveSession(value));
+      });
+    } catch (_) {}
+    return () => { alive = false; try { unsub?.(); } catch (_) {} };
+  }, []);
+  const saveSession = async (next, msg, addToast, icon = "🎮") => {
+    const safe = normalizeLiveSession(next);
+    setSession(safe);
+    await storeSet(LIVE_SESSION_KEY, safe);
+    addToast?.(msg, icon);
+    return safe;
+  };
+  return { session, setSession, saveSession };
+}
+
+function LiveSessionHomeCard({ currentPlayer, stats = [], appCustomizer, addToast }) {
+  const cfg = normalizeLiveSessionConfig(normalizeAppCustomizer(appCustomizer).liveSessionConfig);
+  const { session, saveSession } = useLiveSessionStore();
+  const safe = normalizeLiveSession(session);
+  const [open, setOpen] = useState(false);
+  if (!cfg.enabled) return null;
+  const summary = buildLiveSessionStats(safe, stats);
+  const player = PLAYERS.find(p => p.id === currentPlayer) || PLAYERS[0];
+  const readyPlayers = PLAYERS.filter(p => safe.players?.[p.id]?.status === "ready" || safe.players?.[p.id]?.status === "in game").length;
+  const startSession = async () => {
+    const now = new Date().toISOString();
+    const next = normalizeLiveSession({
+      id: makeLiveSessionCode(),
+      active: true,
+      startedAt: now,
+      mode: cfg.defaultMode || cfg.modes[0],
+      focusRule: cfg.focusRules[0],
+      createdBy: currentPlayer,
+      players: { ...(safe.players || {}), [currentPlayer]:{ status:"ready", updatedAt:now } },
+      history: safe.history || [],
+    });
+    await saveSession(next, "live session started", addToast, "🎮");
+    setOpen(true);
+  };
+  const statusText = safe.active ? `${summary.team.wins}-${summary.team.losses} · ${summary.team.games} games` : cfg.inactiveTitle;
+  return (
+    <>
+      {open && <LiveSessionFullScreen currentPlayer={currentPlayer} stats={stats} appCustomizer={appCustomizer} addToast={addToast} onClose={()=>setOpen(false)} />}
+      <div className="bb-live-session-card" style={{background:safe.active?`linear-gradient(135deg,${bbAlpha(player.color,.20)},#0B0D17)`:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${safe.active?bbAlpha(player.color,.34):"rgba(255,255,255,.08)"}`,borderRadius:22,padding:16,marginBottom:16,boxShadow:"0 18px 44px rgba(0,0,0,.30)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:10,color:player.color,fontWeight:950,letterSpacing:1.2,textTransform:"uppercase",marginBottom:5}}>{cfg.title}</div>
+            <div style={{fontFamily:"'Oswald',sans-serif",fontSize:24,fontWeight:800,color:"#E8ECF4",lineHeight:1}}>{safe.active ? safe.id : cfg.inactiveTitle}</div>
+            <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginTop:7}}>{safe.active ? `${cfg.modeLabel}: ${safe.mode} · ${cfg.durationLabel}: ${fmtLiveDuration(safe.startedAt)}` : cfg.inactiveBody}</div>
+          </div>
+          <div style={{textAlign:"right",flexShrink:0}}>
+            <div style={{fontSize:10,color:safe.active?"#7CFFB2":"#4A5066",fontWeight:950,textTransform:"uppercase"}}>{safe.active ? cfg.activeBadge : cfg.idleLabel}</div>
+            <div style={{fontSize:18,color:player.color,fontWeight:950,marginTop:6}}>{statusText}</div>
+            <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:900,marginTop:3}}>{readyPlayers}/{PLAYERS.length} ready</div>
+          </div>
+        </div>
+        <div style={{marginTop:13,display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+          <div style={{background:"rgba(255,255,255,.045)",borderRadius:13,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:950}}>{cfg.goalsStatLabel}</div><div style={{fontSize:17,color:"#E8ECF4",fontWeight:950}}>{summary.team.goals}</div></div>
+          <div style={{background:"rgba(255,255,255,.045)",borderRadius:13,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:950}}>{cfg.savesStatLabel}</div><div style={{fontSize:17,color:"#E8ECF4",fontWeight:950}}>{summary.team.saves}</div></div>
+          <div style={{background:"rgba(255,255,255,.045)",borderRadius:13,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:950}}>{cfg.streakStatLabel}</div><div style={{fontSize:17,color:"#E8ECF4",fontWeight:950}}>{summary.gameGroups[0] ? (summary.gameGroups[0].won ? "W" : "L") : "—"}</div></div>
+        </div>
+        {safe.active && <div style={{marginTop:12,background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:10}}>
+          <div style={{fontSize:9.5,color:player.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{cfg.currentFocusLabel}</div>
+          <div style={{fontSize:12.5,color:"#E8ECF4",fontWeight:850,marginTop:3}}>{safe.focusRule}</div>
+        </div>}
+        <div style={{display:"flex",gap:8,marginTop:13}}>
+          {!safe.active && <button onClick={startSession} className="bb-pressable bb-glow-lime" style={{flex:1,background:player.color,border:"none",borderRadius:13,padding:"11px 10px",fontSize:12,fontWeight:950,color:"#06070D",cursor:"pointer"}}>{cfg.startButton}</button>}
+          <button onClick={()=>setOpen(true)} className="bb-pressable" style={{flex:1,background:safe.active?"rgba(255,255,255,.09)":"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:13,padding:"11px 10px",fontSize:12,fontWeight:950,color:safe.active?"#E8ECF4":"#8B92A8",cursor:"pointer"}}>{cfg.openButton}</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function LiveSessionFullScreen({ currentPlayer, stats = [], appCustomizer, addToast, onClose }) {
+  const cfg = normalizeLiveSessionConfig(normalizeAppCustomizer(appCustomizer).liveSessionConfig);
+  const { session, saveSession } = useLiveSessionStore();
+  const safe = normalizeLiveSession(session);
+  const summary = buildLiveSessionStats(safe, stats);
+  const me = PLAYERS.find(p => p.id === currentPlayer) || PLAYERS[0];
+  const myStats = summary.playerRows.find(p => p.id === currentPlayer) || { games:0,wins:0,losses:0,goals:0,assists:0,saves:0,shots:0,demos:0,score:0,winRate:0 };
+  const allReady = PLAYERS.every(p => ["ready","in game"].includes(String(safe.players?.[p.id]?.status || "")));
+  const latestGroup = summary.gameGroups[0];
+  const latestKey = latestGroup?.key;
+  const latestNote = latestKey ? (safe.gameNotes?.[latestKey] || {}) : {};
+  const updateSession = (patch, msg = null, icon = "🎮") => saveSession({ ...safe, ...patch }, msg, addToast, icon);
+  const updatePlayerStatus = async (status) => {
+    const now = new Date().toISOString();
+    await updateSession({ players:{ ...(safe.players || {}), [currentPlayer]:{ ...(safe.players?.[currentPlayer] || {}), status, updatedAt:now } } }, `${me.name} · ${status}`, "✅");
+  };
+  const startSession = async () => {
+    const now = new Date().toISOString();
+    await saveSession(normalizeLiveSession({ id:makeLiveSessionCode(), active:true, startedAt:now, mode:cfg.defaultMode || cfg.modes[0], focusRule:cfg.focusRules[0], createdBy:currentPlayer, players:{ [currentPlayer]:{ status:"ready", updatedAt:now } }, history:safe.history || [] }), "live session started", addToast, "🎮");
+  };
+  const endSession = async () => {
+    const endedAt = new Date().toISOString();
+    const recap = { id:`recap_${Date.now()}`, sessionId:safe.id, startedAt:safe.startedAt, endedAt, team:{ ...summary.team }, mostRecentIssue:Object.entries(safe.gameNotes || {}).flatMap(([_,n])=>n?.tags||[])[0] || "none" };
+    await saveSession(normalizeLiveSession({ ...safe, active:false, endedAt, history:[recap, ...(safe.history || [])].slice(0,20) }), "session ended", addToast, "🏁");
+  };
+  const setMode = (mode) => updateSession({ mode }, "session mode updated", "🎮");
+  const setFocus = (focusRule) => updateSession({ focusRule }, "focus updated", "🎯");
+  const voteNextMove = (move) => updateSession({ nextMoveVotes:{ ...(safe.nextMoveVotes || {}), [currentPlayer]:move } }, `next move: ${move}`, "➡️");
+  const setLatestFocus = (followed) => {
+    if (!latestKey) return;
+    updateSession({ gameNotes:{ ...(safe.gameNotes || {}), [latestKey]:{ ...latestNote, focusFollowed:followed } } }, followed ? "focus marked followed" : "focus marked missed", followed ? "✅" : "⚠️");
+  };
+  const toggleLatestTag = (tag) => {
+    if (!latestKey) return;
+    const tags = Array.isArray(latestNote.tags) ? latestNote.tags : [];
+    const nextTags = tags.includes(tag) ? tags.filter(t => t !== tag) : [...tags, tag].slice(0, 10);
+    updateSession({ gameNotes:{ ...(safe.gameNotes || {}), [latestKey]:{ ...latestNote, tags:nextTags } } }, nextTags.includes(tag) ? `tagged ${tag}` : `removed ${tag}`, "🏷️");
+  };
+  const copyCode = async () => {
+    try { await navigator.clipboard?.writeText?.(safe.id || ""); addToast?.("session code copied", "📋"); } catch (_) { addToast?.("copy failed", "⚠️"); }
+  };
+  const statTile = (label, value, color = "#E8ECF4") => (
+    <div style={{background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:11}}>
+      <div style={{fontSize:9,color:"#4A5066",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{label}</div>
+      <div style={{fontSize:18,color,fontWeight:950,marginTop:3}}>{value}</div>
+    </div>
+  );
+  return createPortal(
+    <div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(3,5,10,.72)",backdropFilter:"blur(16px)",display:"flex",alignItems:"stretch",justifyContent:"center"}}>
+      <div style={{width:"100%",maxWidth:520,background:"linear-gradient(180deg,#0B0D17,#06070D)",borderLeft:"1px solid rgba(255,255,255,.08)",borderRight:"1px solid rgba(255,255,255,.08)",overflowY:"auto",fontFamily:"Inter, sans-serif"}}>
+        <FullScreenHeader title={cfg.title} subtitle={safe.active ? `${safe.id} · ${cfg.activeBadge}` : cfg.inactiveTitle} onClose={onClose} accent={me.color}/>
+        <div style={{padding:16,paddingBottom:32}}>
+          {!safe.active ? (
+            <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:22,padding:18,textAlign:"center"}}>
+              <div style={{fontSize:34,marginBottom:8}}>🎮</div>
+              <div style={{fontSize:20,color:"#E8ECF4",fontWeight:950}}>{cfg.inactiveTitle}</div>
+              <div style={{fontSize:12,color:"#8B92A8",lineHeight:1.45,marginTop:7}}>{cfg.inactiveBody}</div>
+              <button onClick={startSession} className="bb-pressable bb-glow-lime" style={{marginTop:16,width:"100%",background:me.color,border:"none",borderRadius:14,padding:"12px 10px",fontSize:13,fontWeight:950,color:"#06070D",cursor:"pointer"}}>{cfg.startButton}</button>
+            </div>
+          ) : (
+            <>
+              <div style={{background:`linear-gradient(135deg,${bbAlpha(me.color,.18)},#090B14)`,border:`1px solid ${bbAlpha(me.color,.30)}`,borderRadius:22,padding:16,marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:12,alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontSize:10,color:me.color,fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>{cfg.codeLabel}</div>
+                    <div style={{fontFamily:"'Oswald',sans-serif",fontSize:28,color:"#E8ECF4",fontWeight:800,lineHeight:1,marginTop:4}}>{safe.id}</div>
+                    <div style={{fontSize:11,color:"#8B92A8",marginTop:7}}>{cfg.startedLabel}: {safe.startedAt ? new Date(safe.startedAt).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "—"} · {cfg.durationLabel}: {fmtLiveDuration(safe.startedAt)}</div>
+                  </div>
+                  <button onClick={copyCode} className="bb-pressable" style={{background:"rgba(255,255,255,.07)",border:"1px solid rgba(255,255,255,.10)",borderRadius:12,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#E8ECF4",cursor:"pointer"}}>{cfg.copyButton}</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:13}}>
+                  <div>
+                    <div style={{fontSize:9,color:"#4A5066",fontWeight:950,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>{cfg.modeLabel}</div>
+                    <select value={safe.mode} onChange={e=>setMode(e.target.value)} style={{width:"100%",background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:12,padding:"10px",color:"#E8ECF4",fontWeight:850}}>
+                      {cfg.modes.map(m => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:"#4A5066",fontWeight:950,letterSpacing:.8,textTransform:"uppercase",marginBottom:5}}>{cfg.statusLabel}</div>
+                    <select value={safe.players?.[currentPlayer]?.status || "not ready"} onChange={e=>updatePlayerStatus(e.target.value)} style={{width:"100%",background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:12,padding:"10px",color:"#E8ECF4",fontWeight:850}}>
+                      {cfg.statusOptions.map(st => <option key={st} value={st}>{st}</option>)}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{fontSize:10,color:allReady?"#7CFFB2":"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>{cfg.readyCheckLabel}</div>
+                  <div style={{fontSize:10,color:allReady?"#7CFFB2":"#FFD166",fontWeight:950}}>{allReady ? cfg.queueUnlockedLabel : `${cfg.queueLockedLabel} ${PLAYERS.filter(p=>!["ready","in game"].includes(String(safe.players?.[p.id]?.status||""))).map(p=>p.name).join(", ")}`}</div>
+                </div>
+                <div style={{display:"grid",gap:8}}>
+                  {PLAYERS.map(p => {
+                    const st = safe.players?.[p.id]?.status || "not ready";
+                    return <div key={p.id} style={{display:"flex",alignItems:"center",gap:9,background:"rgba(255,255,255,.04)",borderRadius:12,padding:"9px 10px"}}>
+                      <div style={{width:9,height:9,borderRadius:99,background:["ready","in game"].includes(st)?p.color:"#4A5066",boxShadow:["ready","in game"].includes(st)?`0 0 12px ${p.color}`:"none"}}/>
+                      <div style={{flex:1,fontSize:12,color:p.id===currentPlayer?p.color:"#E8ECF4",fontWeight:950}}>{p.name}</div>
+                      <div style={{fontSize:10,color:["ready","in game"].includes(st)?"#7CFFB2":st==="tilted"?"#FF5C8A":"#8B92A8",fontWeight:950,textTransform:"uppercase"}}>{st}</div>
+                    </div>
+                  })}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,marginTop:10}}>
+                  {[[cfg.readyButton,"ready"],[cfg.notReadyButton,"not ready"],[cfg.breakButton,"need 2 min"],[cfg.tiltButton,"tilted"]].map(([label, status]) => (
+                    <button key={status} onClick={()=>updatePlayerStatus(status)} className="bb-pressable" style={{background:status==="ready"?bbAlpha(me.color,.18):"rgba(255,255,255,.05)",border:`1px solid ${status==="ready"?bbAlpha(me.color,.34):"rgba(255,255,255,.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:9.5,fontWeight:950,color:status==="ready"?me.color:"#8B92A8",cursor:"pointer"}}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${bbAlpha(me.color,.24)}`,borderRadius:20,padding:14,marginBottom:14}}>
+                <div style={{fontSize:10,color:me.color,fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>{cfg.currentFocusLabel}</div>
+                <select value={safe.focusRule} onChange={e=>setFocus(e.target.value)} style={{width:"100%",background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:12,padding:"10px",color:"#E8ECF4",fontWeight:850}}>
+                  {cfg.focusRules.map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+                {latestGroup && <div style={{marginTop:10,display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  <button onClick={()=>setLatestFocus(true)} className="bb-pressable" style={{background:latestNote.focusFollowed===true?"rgba(124,255,178,.16)":"rgba(255,255,255,.05)",border:`1px solid ${latestNote.focusFollowed===true?"rgba(124,255,178,.34)":"rgba(255,255,255,.08)"}`,borderRadius:11,padding:"10px",fontSize:11,fontWeight:950,color:latestNote.focusFollowed===true?"#7CFFB2":"#8B92A8",cursor:"pointer"}}>{cfg.yesLabel}</button>
+                  <button onClick={()=>setLatestFocus(false)} className="bb-pressable" style={{background:latestNote.focusFollowed===false?"rgba(255,92,138,.14)":"rgba(255,255,255,.05)",border:`1px solid ${latestNote.focusFollowed===false?"rgba(255,92,138,.34)":"rgba(255,255,255,.08)"}`,borderRadius:11,padding:"10px",fontSize:11,fontWeight:950,color:latestNote.focusFollowed===false?"#FF5C8A":"#8B92A8",cursor:"pointer"}}>{cfg.noLabel}</button>
+                </div>}
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+                <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:13}}>
+                  <div style={{fontSize:10,color:me.color,fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.personalStatsLabel}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                    {statTile(cfg.gamesStatLabel, myStats.games, me.color)}
+                    {statTile(cfg.recordStatLabel, `${myStats.wins}-${myStats.losses}`, me.color)}
+                    {statTile(cfg.goalsStatLabel, myStats.goals)}
+                    {statTile(cfg.savesStatLabel, myStats.saves)}
+                  </div>
+                </div>
+                <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:13}}>
+                  <div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.teamStatsLabel}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+                    {statTile(cfg.gamesStatLabel, summary.team.games, "#FFD166")}
+                    {statTile(cfg.recordStatLabel, `${summary.team.wins}-${summary.team.losses}`, "#FFD166")}
+                    {statTile(cfg.goalsStatLabel, summary.team.goals)}
+                    {statTile(cfg.savesStatLabel, summary.team.saves)}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
+                <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.comparisonLabel}</div>
+                <div style={{display:"grid",gridTemplateColumns:"76px repeat(5,1fr)",gap:5,marginBottom:6}}>
+                  <div/>
+                  {[cfg.goalsStatLabel, cfg.assistsStatLabel, cfg.savesStatLabel, cfg.shotsStatLabel, cfg.winRateStatLabel].map(h=><div key={h} style={{fontSize:9,color:"#4A5066",fontWeight:950,textAlign:"center"}}>{h}</div>)}
+                </div>
+                {summary.playerRows.map(p => <div key={p.id} style={{display:"grid",gridTemplateColumns:"76px repeat(5,1fr)",gap:5,alignItems:"center",marginBottom:7}}>
+                  <div style={{fontSize:10.5,color:p.id===currentPlayer?p.color:"#E8ECF4",fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{p.name}</div>
+                  {[p.goals,p.assists,p.saves,p.shots,`${p.winRate}%`].map((v,i)=><div key={i} style={{fontSize:11,color:p.color,fontWeight:950,textAlign:"center"}}>{v}</div>)}
+                </div>)}
+              </div>
+
+              <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
+                <div style={{fontSize:10,color:"#A78BFA",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.nextMoveLabel}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {cfg.nextMoves.map(move => <button key={move} onClick={()=>voteNextMove(move)} className="bb-pressable" style={{background:safe.nextMoveVotes?.[currentPlayer]===move?"rgba(167,139,250,.18)":"rgba(255,255,255,.05)",border:`1px solid ${safe.nextMoveVotes?.[currentPlayer]===move?"rgba(167,139,250,.36)":"rgba(255,255,255,.08)"}`,borderRadius:12,padding:"10px",fontSize:11,fontWeight:950,color:safe.nextMoveVotes?.[currentPlayer]===move?"#A78BFA":"#8B92A8",cursor:"pointer"}}>{move}</button>)}
+                </div>
+                <div style={{marginTop:9,display:"flex",gap:6,flexWrap:"wrap"}}>{Object.entries(safe.nextMoveVotes||{}).map(([pid, move]) => <span key={pid} style={{fontSize:9.5,color:"#8B92A8",background:"rgba(255,255,255,.05)",borderRadius:999,padding:"5px 7px"}}>{PLAYERS.find(p=>p.id===pid)?.name}: {move}</span>)}</div>
+              </div>
+
+              <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
+                <div style={{fontSize:10,color:"#FF61C1",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.quickTagsLabel}</div>
+                {latestGroup ? <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                  {cfg.quickTags.map(tag => {
+                    const on = Array.isArray(latestNote.tags) && latestNote.tags.includes(tag);
+                    return <button key={tag} onClick={()=>toggleLatestTag(tag)} className="bb-pressable" style={{background:on?"rgba(255,97,193,.16)":"rgba(255,255,255,.05)",border:`1px solid ${on?"rgba(255,97,193,.34)":"rgba(255,255,255,.08)"}`,borderRadius:999,padding:"8px 10px",fontSize:10.5,fontWeight:950,color:on?"#FF61C1":"#8B92A8",cursor:"pointer"}}>{tag}</button>
+                  })}
+                </div> : <EmptyState icon="🏷️" title={cfg.noGamesTitle} body={cfg.noGamesBody} />}
+              </div>
+
+              <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(255,255,255,.08)",borderRadius:20,padding:14,marginBottom:14}}>
+                <div style={{fontSize:10,color:"#B8FF4D",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:9}}>{cfg.sessionGamesLabel}</div>
+                {!summary.gameGroups.length ? <EmptyState icon="⌁" title={cfg.noGamesTitle} body={cfg.noGamesBody} /> : summary.gameGroups.slice(0,8).map((group, idx) => {
+                  const note = safe.gameNotes?.[group.key] || {};
+                  const score = formatGameScore(group.first || {});
+                  return <div key={group.key} style={{background:idx===0?"rgba(184,255,77,.06)":"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:14,padding:11,marginBottom:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"center"}}>
+                      <div>
+                        <div style={{fontSize:12,color:group.won?"#7CFFB2":"#FF5C8A",fontWeight:950}}>{group.won ? cfg.winLabel : cfg.lossLabel} · {score}</div>
+                        <div style={{fontSize:10,color:"#8B92A8",marginTop:2}}>{group.mode} · {fmtRelTime(group.ts)}</div>
+                      </div>
+                      <div style={{fontSize:10,color:note.focusFollowed===true?"#7CFFB2":note.focusFollowed===false?"#FF5C8A":"#4A5066",fontWeight:950,textTransform:"uppercase"}}>{note.focusFollowed===true?cfg.focusYesLabel:note.focusFollowed===false?cfg.focusNoLabel:cfg.unmarkedLabel}</div>
+                    </div>
+                    {!!(note.tags||[]).length && <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:8}}>{note.tags.map(t=><span key={t} style={{fontSize:9,color:"#FF61C1",background:"rgba(255,97,193,.10)",borderRadius:999,padding:"4px 6px"}}>{t}</span>)}</div>}
+                  </div>
+                })}
+              </div>
+
+              <button onClick={endSession} className="bb-pressable" style={{width:"100%",background:"rgba(255,92,138,.12)",border:"1px solid rgba(255,92,138,.34)",borderRadius:15,padding:"13px 10px",fontSize:12,fontWeight:950,color:"#FF5C8A",cursor:"pointer"}}>{cfg.endButton}</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+
 // ===================== Burton OS / Chaos Layer =====================
 const BURTON_OS_KEY = "burton_os";
 const BURTON_STATE_PRESETS = [
@@ -2149,7 +2431,21 @@ function BurtonOSPanel({ burtonOS, setBurtonOS, currentPlayer, points, setPoints
   const os = normalizeBurtonOS(burtonOS);
   const state = applyBurtonStateDisplay(appCustomizer || os, os.state);
   const timeState = getBurtonTimeState(new Date(), appCustomizer || os);
-  const economy = buildTeamEconomyHealth(points || {}, passXP || {}, stats || []);
+  const rawEconomy = buildTeamEconomyHealth(points || {}, passXP || {}, stats || []);
+  const [economyView, setEconomyView] = useState(rawEconomy);
+  useEffect(() => {
+    const next = {
+      ...rawEconomy,
+      health:Math.max(0, Math.min(100, Math.round(Number(rawEconomy.health) || 0))),
+      totalPts:Math.max(0, Math.round(Number(rawEconomy.totalPts) || 0)),
+      totalXP:Math.max(0, Math.round(Number(rawEconomy.totalXP) || 0)),
+      totalGames:Math.max(0, Math.round(Number(rawEconomy.totalGames) || 0)),
+      totalWins:Math.max(0, Math.round(Number(rawEconomy.totalWins) || 0)),
+    };
+    const t = setTimeout(() => setEconomyView(next), 180);
+    return () => clearTimeout(t);
+  }, [rawEconomy.health, rawEconomy.totalPts, rawEconomy.totalXP, rawEconomy.totalGames, rawEconomy.totalWins, rawEconomy.label]);
+  const economy = economyView || rawEconomy;
   const economyDisplayLabel = getEconomyStateLabel(appCustomizer, economy.label);
   const economyLegendLabels = {
     crashing: getEconomyStateLabel(appCustomizer, "crashing"),
@@ -4185,7 +4481,8 @@ function HomeTab({ schedule, mmrProfiles, currentPlayer, points, setPoints, onRe
   const nextMatch = allMatches.find((m)=>!m.result);
   const [showTeamComparison, setShowTeamComparison] = useState(null);
   const [expandedStat, setExpandedStat] = useState(null);
-const [homeSubTab, setHomeSubTab] = useState("overview");    
+const [homeSubTab, setHomeSubTab] = useState("overview");
+const [showLiveSession, setShowLiveSession] = useState(false);    
   const homeSwipeRef = useRef({ x:0, y:0 });
   const handleHomeSwipeStart = (e) => {
     const t = e.touches?.[0];
@@ -4223,6 +4520,7 @@ return (
   <div className="bb-tab-content" onTouchStart={handleHomeSwipeStart} onTouchEnd={handleHomeSwipeEnd} style={{...s.tabContent,touchAction:"pan-y"}}>
     {expandedStat && <ExpandedStatModal stat={expandedStat} record={record} schedule={schedule} onClose={() => setExpandedStat(null)} />}
     {showTeamComparison && <TeamComparisonModal stats={stats} currentPlayer={currentPlayer} onClose={()=>setShowTeamComparison(false)}/>}
+    {showLiveSession && <LiveSessionFullScreen currentPlayer={currentPlayer} stats={stats} appCustomizer={appCustomizer} addToast={addToast} onClose={()=>setShowLiveSession(false)}/>}
 
     {/* Sub-tab switcher */}
     <div style={{display:"flex",gap:8,marginBottom:16}}>
@@ -4242,6 +4540,7 @@ return (
       {homeOpenLoopsDetached && (
         <div style={getTabBoxStyle(appCustomizer, "homeOverview", "openLoops")}><OpenLoopsTicker burtonOS={burtonOS} stats={stats} points={points} passXP={passXP} appCustomizer={appCustomizer} setTab={setTab}/></div>
       )}
+      <LiveSessionHomeCard currentPlayer={currentPlayer} stats={stats} appCustomizer={appCustomizer} addToast={addToast}/>
       {isManagedBoxVisible(appCustomizer, "homeOverview", "weeklyModifier") && <div style={{...getTabBoxStyle(appCustomizer, "homeOverview", "weeklyModifier"),background:`linear-gradient(135deg,${weeklyEvent.color}18,${weeklyEvent.color}08)`,border:`1px solid ${weeklyEvent.color}40`,borderRadius:16,padding:"14px 16px",marginBottom:16}}>
         <div>
           <div style={{fontSize:10,color:weeklyEvent.color,fontWeight:700,letterSpacing:1,marginBottom:3}}>THIS WEEK'S MODIFIER</div>
@@ -9531,6 +9830,120 @@ function AdminPremiumFeelControls({ appCustomizer, setAppCustomizer, addToast })
   );
 }
 
+
+function AdminLiveSessionControls({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer || {});
+  const live = normalizeLiveSessionConfig(cfg.liveSessionConfig);
+  const saveLive = async (next, msg = "live session controls saved") => {
+    await saveAppCustomizer(normalizeAppCustomizer({ ...cfg, liveSessionConfig:normalizeLiveSessionConfig(next) }), setAppCustomizer, addToast, msg);
+  };
+  const setField = (key, value) => saveLive({ ...live, [key]:value }, `${key} updated`);
+  const listEditor = (key, label, help) => (
+    <div style={{marginBottom:12}}>
+      <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>{label}</div>
+      {help && <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginBottom:6}}>{help}</div>}
+      <textarea value={(live[key] || []).join("\n")} onChange={e=>setField(key, e.target.value.split("\n"))} rows={5} style={{width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11,color:"#E8ECF4",fontWeight:700,resize:"vertical",boxSizing:"border-box"}} />
+    </div>
+  );
+  const textField = (key, label) => (
+    <label style={{display:"block",marginBottom:9}}>
+      <div style={{fontSize:9.5,color:"#4A5066",fontWeight:950,letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>{label}</div>
+      <input value={live[key] || ""} onChange={e=>setField(key, e.target.value)} style={{width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:11,padding:"9px 10px",fontSize:11.5,color:"#E8ECF4",fontWeight:800,boxSizing:"border-box"}} />
+    </label>
+  );
+  const resetLiveSession = async () => {
+    await storeSet(LIVE_SESSION_KEY, normalizeLiveSession({}));
+    addToast?.("active live session cleared", "🧹");
+  };
+  return (
+    <div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(77,158,255,.18)",borderRadius:18,padding:14,marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+          <div>
+            <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>rocket league companion layer</div>
+            <div style={{fontSize:17,color:"#E8ECF4",fontWeight:950}}>Live Session</div>
+            <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginTop:5}}>Edit every label, button, focus rule, next-move option, status, and quick tag shown inside Live Session.</div>
+          </div>
+          <button onClick={()=>saveLive({ ...live, enabled:!live.enabled }, live.enabled ? "live session hidden" : "live session enabled")} className="bb-pressable" style={{background:live.enabled?"#4D9EFF":"rgba(255,255,255,.06)",border:`1px solid ${live.enabled?"#4D9EFF":"rgba(255,255,255,.10)"}`,borderRadius:13,padding:"10px 12px",fontSize:11,fontWeight:950,color:live.enabled?"#06070D":"#8B92A8",cursor:"pointer",whiteSpace:"nowrap"}}>{live.enabled ? "on" : "off"}</button>
+        </div>
+      </div>
+
+      <AdminCollapse title="live session text" subtitle="headers, buttons, empty states, labels" accent="#4D9EFF" defaultOpen={false}>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:9}}>
+          {textField("title","main title")}
+          {textField("subtitle","subtitle")}
+          {textField("inactiveTitle","inactive title")}
+          {textField("activeBadge","active badge")}
+          {textField("startButton","start button")}
+          {textField("openButton","open button")}
+          {textField("endButton","end button")}
+          {textField("copyButton","copy button")}
+          {textField("readyCheckLabel","ready check label")}
+          {textField("queueUnlockedLabel","queue unlocked")}
+          {textField("queueLockedLabel","queue locked")}
+          {textField("currentFocusLabel","focus label")}
+          {textField("personalStatsLabel","personal stats")}
+          {textField("teamStatsLabel","team stats")}
+          {textField("comparisonLabel","comparison label")}
+          {textField("nextMoveLabel","next move label")}
+          {textField("quickTagsLabel","quick tags label")}
+          {textField("sessionGamesLabel","games label")}
+          {textField("readyButton","ready button")}
+          {textField("notReadyButton","not ready button")}
+          {textField("tiltButton","tilt button")}
+          {textField("breakButton","break button")}
+          {textField("lastGameButton","last game button")}
+          {textField("noGamesTitle","no games title")}
+          {textField("idleLabel","idle badge")}
+          {textField("gamesStatLabel","games stat label")}
+          {textField("recordStatLabel","record stat label")}
+          {textField("goalsStatLabel","goals stat label")}
+          {textField("assistsStatLabel","assists stat label")}
+          {textField("savesStatLabel","saves stat label")}
+          {textField("shotsStatLabel","shots stat label")}
+          {textField("winRateStatLabel","win rate stat label")}
+          {textField("streakStatLabel","streak stat label")}
+          {textField("yesLabel","yes button")}
+          {textField("noLabel","no button")}
+          {textField("winLabel","win label")}
+          {textField("lossLabel","loss label")}
+          {textField("focusYesLabel","focus yes label")}
+          {textField("focusNoLabel","focus no label")}
+          {textField("unmarkedLabel","unmarked label")}
+        </div>
+        <div style={{marginTop:9}}>
+          <div style={{fontSize:9.5,color:"#4A5066",fontWeight:950,letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>inactive body</div>
+          <textarea value={live.inactiveBody || ""} onChange={e=>setField("inactiveBody", e.target.value)} rows={3} style={{width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11.5,color:"#E8ECF4",fontWeight:700,resize:"vertical",boxSizing:"border-box"}} />
+        </div>
+        <div style={{marginTop:9}}>
+          <div style={{fontSize:9.5,color:"#4A5066",fontWeight:950,letterSpacing:.7,textTransform:"uppercase",marginBottom:4}}>no games body</div>
+          <textarea value={live.noGamesBody || ""} onChange={e=>setField("noGamesBody", e.target.value)} rows={3} style={{width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11.5,color:"#E8ECF4",fontWeight:700,resize:"vertical",boxSizing:"border-box"}} />
+        </div>
+      </AdminCollapse>
+
+      <AdminCollapse title="live session options" subtitle="quick tags, focus rules, statuses, next moves" accent="#B8FF4D" defaultOpen={false}>
+        {listEditor("modes", "mode options", "One option per line. The first/default selected mode is controlled below.")}
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:10,color:"#B8FF4D",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:5}}>default mode</div>
+          <select value={live.defaultMode} onChange={e=>setField("defaultMode", e.target.value)} style={{width:"100%",background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"10px",fontSize:11.5,color:"#E8ECF4",fontWeight:850}}>
+            {live.modes.map(m=><option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        {listEditor("focusRules", "focus rules", "These are the selectable rules for the next game.")}
+        {listEditor("quickTags", "quick tags", "These are the tap tags after a game, like double commit or boost waste.")}
+        {listEditor("nextMoves", "next move buttons", "These are the post-game decision buttons.")}
+        {listEditor("statusOptions", "player statuses", "These show in the player status dropdown and ready check.")}
+      </AdminCollapse>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <button onClick={()=>saveLive(DEFAULT_LIVE_SESSION_CONFIG, "live session defaults restored")} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,padding:"11px 10px",fontSize:11,fontWeight:950,color:"#8B92A8",cursor:"pointer"}}>restore defaults</button>
+        <button onClick={resetLiveSession} className="bb-pressable" style={{background:"rgba(255,92,138,.12)",border:"1px solid rgba(255,92,138,.30)",borderRadius:12,padding:"11px 10px",fontSize:11,fontWeight:950,color:"#FF5C8A",cursor:"pointer"}}>clear active session</button>
+      </div>
+    </div>
+  );
+}
+
+
 function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP, passPremium, setPassPremium, parseCredits, setParseCredits, creditRequests, setCreditRequests, points, setPoints, adminShopItems, setAdminShopItems, navPosition = "top", setNavPosition, tabAnimationStyle = "float", setTabAnimationStyle, fullScreenFloatMode = true, setFullScreenFloatMode, appCustomizer, setAppCustomizer, comments = {}, setComments, currentPlayer = ADMIN_ID, burtonOS, setBurtonOS }) {
   const [assigning,setAssigning]=useState(null);
   const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
@@ -9556,6 +9969,10 @@ function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, 
 
       <AdminCollapse title="premium feel lab" subtitle="turn Apple-style polish tests on/off" accent="#7CFFB2">
         <AdminPremiumFeelControls appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+      </AdminCollapse>
+
+      <AdminCollapse title="live session controls" subtitle="texts, quick tags, rules, statuses, session options" accent="#4D9EFF">
+        <AdminLiveSessionControls appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
       </AdminCollapse>
 
       <AdminCollapse title="tab box layout manager" subtitle="drag, reorder, rename, and hide boxes per tab" accent="#4D9EFF">
@@ -12618,6 +13035,197 @@ function getAppTextColor(customizer, key, fallback = "#4A5066") {
   return /^#[0-9a-f]{6}$/i.test(String(v || "")) ? v : fallback;
 }
 
+
+const LIVE_SESSION_KEY = "live_session";
+
+const DEFAULT_LIVE_SESSION_CONFIG = {
+  enabled: true,
+  title: "live session",
+  subtitle: "use this while queueing Rocket League",
+  inactiveTitle: "no active session",
+  inactiveBody: "Start one before queueing so tonight's games, readiness, focus, and notes stay together.",
+  activeBadge: "active",
+  codeLabel: "session code",
+  startedLabel: "started",
+  durationLabel: "duration",
+  modeLabel: "mode",
+  statusLabel: "status",
+  playersLabel: "players",
+  readyCheckLabel: "queue check",
+  queueUnlockedLabel: "queue unlocked",
+  queueLockedLabel: "waiting on",
+  currentFocusLabel: "current focus",
+  focusQuestion: "did we follow it?",
+  personalStatsLabel: "your night",
+  teamStatsLabel: "team night",
+  comparisonLabel: "team comparisons",
+  nextMoveLabel: "next move",
+  quickTagsLabel: "quick tags",
+  sessionGamesLabel: "session games",
+  recapTitle: "session ended",
+  startButton: "start session",
+  openButton: "open session",
+  endButton: "end session",
+  copyButton: "copy code",
+  readyButton: "ready",
+  notReadyButton: "not ready",
+  tiltButton: "i'm tilted",
+  breakButton: "need 2 min",
+  lastGameButton: "last game",
+  noGamesTitle: "no games yet",
+  noGamesBody: "Sync or log a game while this session is active and it will show here.",
+  idleLabel: "idle",
+  gamesStatLabel: "games",
+  recordStatLabel: "record",
+  goalsStatLabel: "goals",
+  assistsStatLabel: "assists",
+  savesStatLabel: "saves",
+  shotsStatLabel: "shots",
+  winRateStatLabel: "w%",
+  streakStatLabel: "streak",
+  yesLabel: "yes",
+  noLabel: "no",
+  winLabel: "win",
+  lossLabel: "loss",
+  focusYesLabel: "focus yes",
+  focusNoLabel: "focus no",
+  unmarkedLabel: "unmarked",
+  defaultMode: "Ranked 3v3",
+  modes: ["Ranked 3v3", "Ranked 2v2", "Casual 3v3", "Freeplay/Warmup", "Tournament"],
+  focusRules: [
+    "No double commits as third man",
+    "Do not boom the ball when you have space",
+    "Keep 20 boost before challenging",
+    "Fake challenge first on defense",
+    "Call when leaving the play",
+    "No corner boost over ball"
+  ],
+  quickTags: ["double commit", "no comms", "bad clear", "boost waste", "overcommit", "open net", "good game", "clean spacing"],
+  nextMoves: ["run it back", "switch to 2s", "take 2 min break", "go training", "end session"],
+  statusOptions: ["ready", "not ready", "need 2 min", "tilted", "on break", "last game", "in game"]
+};
+
+function cleanLiveSessionLines(value, fallback = []) {
+  const raw = Array.isArray(value) ? value : String(value || "").split(/\n|,/);
+  const cleaned = raw.map(v => String(v || "").trim()).filter(Boolean).slice(0, 40);
+  return cleaned.length ? cleaned : fallback.slice();
+}
+
+function normalizeLiveSessionConfig(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const stringKeys = [
+    "title","subtitle","inactiveTitle","inactiveBody","activeBadge","codeLabel","startedLabel","durationLabel",
+    "modeLabel","statusLabel","playersLabel","readyCheckLabel","queueUnlockedLabel","queueLockedLabel",
+    "currentFocusLabel","focusQuestion","personalStatsLabel","teamStatsLabel","comparisonLabel","nextMoveLabel",
+    "quickTagsLabel","sessionGamesLabel","recapTitle","startButton","openButton","endButton","copyButton",
+    "readyButton","notReadyButton","tiltButton","breakButton","lastGameButton","noGamesTitle","noGamesBody","idleLabel","gamesStatLabel","recordStatLabel","goalsStatLabel","assistsStatLabel","savesStatLabel","shotsStatLabel","winRateStatLabel","streakStatLabel","yesLabel","noLabel","winLabel","lossLabel","focusYesLabel","focusNoLabel","unmarkedLabel","defaultMode"
+  ];
+  const out = { ...DEFAULT_LIVE_SESSION_CONFIG, ...src };
+  out.enabled = src.enabled !== false;
+  stringKeys.forEach(k => { out[k] = String(src[k] ?? DEFAULT_LIVE_SESSION_CONFIG[k] ?? "").slice(0, 160); });
+  out.modes = cleanLiveSessionLines(src.modes, DEFAULT_LIVE_SESSION_CONFIG.modes);
+  out.focusRules = cleanLiveSessionLines(src.focusRules, DEFAULT_LIVE_SESSION_CONFIG.focusRules);
+  out.quickTags = cleanLiveSessionLines(src.quickTags, DEFAULT_LIVE_SESSION_CONFIG.quickTags);
+  out.nextMoves = cleanLiveSessionLines(src.nextMoves, DEFAULT_LIVE_SESSION_CONFIG.nextMoves);
+  out.statusOptions = cleanLiveSessionLines(src.statusOptions, DEFAULT_LIVE_SESSION_CONFIG.statusOptions);
+  if (!out.modes.includes(out.defaultMode)) out.modes = [out.defaultMode, ...out.modes].filter(Boolean);
+  return out;
+}
+
+function makeLiveSessionCode() {
+  const letters = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const pick = () => letters[Math.floor(Math.random() * letters.length)] || "B";
+  const digits = String(Math.floor(100 + Math.random() * 900));
+  return `BB-${digits}-${pick()}${pick()}`;
+}
+
+function normalizeLiveSession(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  return {
+    id: src.id || null,
+    active: !!src.active,
+    startedAt: src.startedAt || null,
+    endedAt: src.endedAt || null,
+    mode: src.mode || DEFAULT_LIVE_SESSION_CONFIG.defaultMode,
+    focusRule: src.focusRule || DEFAULT_LIVE_SESSION_CONFIG.focusRules[0],
+    createdBy: src.createdBy || null,
+    players: src.players && typeof src.players === "object" && !Array.isArray(src.players) ? src.players : {},
+    nextMoveVotes: src.nextMoveVotes && typeof src.nextMoveVotes === "object" && !Array.isArray(src.nextMoveVotes) ? src.nextMoveVotes : {},
+    gameNotes: src.gameNotes && typeof src.gameNotes === "object" && !Array.isArray(src.gameNotes) ? src.gameNotes : {},
+    history: Array.isArray(src.history) ? src.history.filter(Boolean).slice(0, 20) : [],
+  };
+}
+
+function getLiveSessionGameKey(game, idx = 0) {
+  if (!game) return `game_${idx}`;
+  return String(game.sessionCode || game.matchId || game.id || `${game.playerId || "p"}_${game.ts || game.date || idx}`);
+}
+
+function getLiveSessionWindowGames(session, stats = []) {
+  const safe = normalizeLiveSession(session);
+  if (!safe.startedAt) return [];
+  const start = new Date(safe.startedAt).getTime();
+  const end = safe.active || !safe.endedAt ? Date.now() + 60000 : new Date(safe.endedAt).getTime();
+  return (Array.isArray(stats) ? stats : []).filter(g => {
+    const ts = new Date(g?.ts || g?.date || g?.createdAt || 0).getTime();
+    return Number.isFinite(ts) && ts >= start && ts <= end;
+  }).sort((a,b)=>new Date(a.ts || a.date || 0) - new Date(b.ts || b.date || 0));
+}
+
+function buildLiveSessionStats(session, stats = []) {
+  const games = getLiveSessionWindowGames(session, stats);
+  const grouped = {};
+  games.forEach((g, idx) => {
+    const key = String(g.sessionCode || g.matchId || g.gameId || g.id || `${g.ts || idx}_${g.mode || ""}`);
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(g);
+  });
+  const gameGroups = Object.entries(grouped).map(([key, rows]) => {
+    const first = rows[0] || {};
+    const won = rows.some(gameIsWin);
+    return { key, rows, first, won, ts:first.ts || first.date, mode:first.mode || "game" };
+  }).sort((a,b)=>new Date(b.ts || 0)-new Date(a.ts || 0));
+  const playerRows = PLAYERS.map(p => {
+    const pg = games.filter(g => g.playerId === p.id);
+    const sums = ["goals","assists","saves","shots","demos","score"].reduce((acc, f) => {
+      acc[f] = pg.reduce((sum, g) => sum + (Number(g?.[f]) || 0), 0);
+      return acc;
+    }, {});
+    const wins = pg.filter(gameIsWin).length;
+    return {
+      ...p,
+      games: pg.length,
+      wins,
+      losses: Math.max(0, pg.length - wins),
+      winRate: pg.length ? Math.round((wins / pg.length) * 100) : 0,
+      ...sums,
+    };
+  });
+  const team = {
+    games: gameGroups.length,
+    wins: gameGroups.filter(g => g.won).length,
+    losses: Math.max(0, gameGroups.length - gameGroups.filter(g => g.won).length),
+    goals: playerRows.reduce((s,p)=>s+p.goals,0),
+    assists: playerRows.reduce((s,p)=>s+p.assists,0),
+    saves: playerRows.reduce((s,p)=>s+p.saves,0),
+    shots: playerRows.reduce((s,p)=>s+p.shots,0),
+    demos: playerRows.reduce((s,p)=>s+p.demos,0),
+    score: playerRows.reduce((s,p)=>s+p.score,0),
+  };
+  team.winRate = team.games ? Math.round((team.wins / team.games) * 100) : 0;
+  return { games, gameGroups, playerRows, team };
+}
+
+function fmtLiveDuration(startAt, endAt = null) {
+  if (!startAt) return "0m";
+  const start = new Date(startAt).getTime();
+  const end = endAt ? new Date(endAt).getTime() : Date.now();
+  const mins = Math.max(0, Math.floor((end - start) / 60000));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
 const DEFAULT_APP_CUSTOMIZER = {
   hiddenTabs: {},
   tabOrder: DEFAULT_APP_TAB_ORDER,
@@ -12634,6 +13242,7 @@ const DEFAULT_APP_CUSTOMIZER = {
   buttonMotion: "normal",
   ambientFx: true,
   premiumFeel: DEFAULT_PREMIUM_FEEL_SETTINGS,
+  liveSessionConfig: DEFAULT_LIVE_SESSION_CONFIG,
   enabledBoxes: DEFAULT_BURTON_BOXES,
   tabBoxLayout: DEFAULT_TAB_BOX_LAYOUT,
   courtPunishments: DEFAULT_COURT_PUNISHMENTS,
@@ -13178,6 +13787,7 @@ function normalizeAppCustomizer(cfg = {}) {
     courtPunishments,
     burtonOptionPools,
     premiumFeel: normalizePremiumFeelSettings(src.premiumFeel || src.premiumUi || {}),
+    liveSessionConfig: normalizeLiveSessionConfig(src.liveSessionConfig || {}),
     tabOrder,
     boxOrder: { ...DEFAULT_APP_CUSTOMIZER.boxOrder, ...boxOrderSrc },
     hideBorders: !!src.hideBorders,
@@ -15331,7 +15941,7 @@ const RT_KEYS_LIVE = [
   // APP120: keep gameplay + chat live, but remove in-app notification feeds from realtime.
   // Phone/native push still sends from writes; the app no longer subscribes to pings/activity_feed.
   "chat", "stats", "points", "bets", "parse_credits", "presence",
-  "team_room", "team_sessions", "typing", "soundboard_events",
+  "team_room", "team_sessions", "live_session", "typing", "soundboard_events",
   ADMIN_LIVE_SYNC_KEY
 ];
 const BOOT_LIVE_DELAY_MS = 2500;
