@@ -61,6 +61,7 @@ import { createPortal } from "react-dom";
 // APP99_BETS_STAY_OPEN_UNTIL_FRESH_SYNC_PATCH
 // APP100_CHAT_MEDIA_STOCK_GRAPH_UI_DEEPLINK_PATCH
 // APP101_RLCS_LIVE_STARTGG_BACKEND_PATCH
+// APP117_JOB_RANDOMIZER_TIME_LIMIT_RLCS_ACTIVITY_REMOVE_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1868,13 +1869,18 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
     const challengeRules = getHourlyRulesForTemplate(template, difficulty, slotLabel, diff.challenges, template.challengeText || "sync/log one game during the job window", selectedMode, activeGameMode);
     const challengeList = challengeRules.map(r => r.text);
     const payout = Math.round(Number(diff.payout || 0) * multiplier);
+    const jobMinutes = getJobTimeLimitMinutes(difficulty, selectedMode, diff.minutes);
     const now = new Date().toISOString();
-    const job={ id:`job_${Date.now()}_${currentPlayer}`, slotKey, templateId:template.id, playerId:currentPlayer, playerIds:selectedPlayerIds, playerName:playerNameById(currentPlayer), playerNames:selectedPlayerIds.map(playerNameById), jobMode:selectedMode, gameMode:activeGameMode, title:template.title, emoji:template.emoji, desc:template.desc, challengeText:template.challengeText, challengeList, challengeRules, shiftId:meta?.id, shiftLabel:meta?.label, shiftEmoji:meta?.emoji, shiftMultiplier:multiplier, difficulty, payout, basePayout:diff.payout, required:diff.challenges, minutes:diff.minutes, slotLabel, startAt:startAt.toISOString(), reminderAt:reminderAt.toISOString(), reminderMinutes, acceptedAt:now, expiresAt:new Date(startAt.getTime()+diff.minutes*60000).toISOString(), status:"reserved" };
+    const job={ id:`job_${Date.now()}_${currentPlayer}`, slotKey, templateId:template.id, playerId:currentPlayer, playerIds:selectedPlayerIds, playerName:playerNameById(currentPlayer), playerNames:selectedPlayerIds.map(playerNameById), jobMode:selectedMode, gameMode:activeGameMode, title:template.title, emoji:template.emoji, desc:template.desc, challengeText:template.challengeText, challengeList, challengeRules, shiftId:meta?.id, shiftLabel:meta?.label, shiftEmoji:meta?.emoji, shiftMultiplier:multiplier, difficulty, payout, basePayout:diff.payout, required:diff.challenges, minutes:jobMinutes, slotLabel, startAt:startAt.toISOString(), reminderAt:reminderAt.toISOString(), reminderMinutes, acceptedAt:now, expiresAt:new Date(startAt.getTime()+jobMinutes*60000).toISOString(), syncGraceMinutes:15, syncGraceUntil:new Date(startAt.getTime()+(jobMinutes+15)*60000).toISOString(), status:"reserved" };
     await save({ ...os, jobs:[job, ...jobs].slice(0,140), history:[{id:`hist_job_${Date.now()}`,type:"job",emoji:template.emoji,title:`${selectedPlayerIds.map(playerNameById).join(" + ")} claimed ${template.title}`,text:`${slotLabel} · ${meta?.label || "shift"} · ${selectedMode}/${activeGameMode} · ${difficulty} · pays ${payout} pts each`,color:"#B8FF4D",ts:now}, ...(os.history||[])].slice(0,90) }, "job slot claimed", template.emoji || "📋");
     setViewJobId(job.id);
   };
   const startReserved = async (job) => {
     const startedAt = new Date().toISOString();
+    const jobMinutes = getJobTimeLimitMinutes(job?.difficulty, job?.jobMode, job?.minutes);
+    const startMs = safeDateObj(startedAt).getTime();
+    const expiresAt = new Date(startMs + jobMinutes * 60000).toISOString();
+    const syncGraceUntil = new Date(startMs + (jobMinutes + 15) * 60000).toISOString();
     await save({
       ...os,
       jobs:jobs.map(j=>j.id===job.id?{
@@ -1883,6 +1889,10 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
         startedAt,
         progressStartedAt:startedAt,
         acceptedAt:j.acceptedAt||startedAt,
+        minutes:jobMinutes,
+        expiresAt,
+        syncGraceMinutes:15,
+        syncGraceUntil,
         progressBaseline:"fresh_start"
       }:j)
     }, "job started fresh", job.emoji || "📋");
@@ -1931,7 +1941,7 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
   };
   const settleJob = async (job) => {
     const progress = getJobProgress(job);
-    if(!progress.success && Date.now()<safeDateObj(job.expiresAt).getTime()){ addToast?.(`${progress.doneCount}/${progress.total} done`,"⏱️"); return; }
+    if(!progress.success && Date.now()<safeDateObj(job.syncGraceUntil || job.expiresAt).getTime()){ addToast?.(`${progress.doneCount}/${progress.total} done`,"⏱️"); return; }
     const success=progress.success;
     const updJobs=jobs.map(j=>j.id===job.id?{...j,status:success?"completed":"failed",completedAt:new Date().toISOString(),progress:progress.doneCount}:j);
     let updPts={...(points||{})};
@@ -11785,7 +11795,7 @@ const DEFAULT_APP_CUSTOMIZER = {
   tabBoxLayout: DEFAULT_TAB_BOX_LAYOUT,
   courtPunishments: DEFAULT_COURT_PUNISHMENTS,
   burtonOptionPools: DEFAULT_BURTON_OPTION_POOLS,
-  jobsConfig: { enabled:true, groupShifts:false, easy:{ challenges:5, minutes:60, payout:150 }, medium:{ challenges:7, minutes:45, payout:300 }, hard:{ challenges:10, minutes:30, payout:600 }, shiftGroups:getDefaultJobShiftGroups(), slotTimes:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"], templates:[
+  jobsConfig: { enabled:true, groupShifts:false, easy:{ challenges:5, minutes:45, payout:150 }, medium:{ challenges:7, minutes:75, payout:300 }, hard:{ challenges:7, minutes:120, payout:600 }, shiftGroups:getDefaultJobShiftGroups(), slotTimes:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"], templates:[
     { id:"job_ranked_shift", enabled:true, emoji:"📋", title:"Ranked Shift", desc:"clock in for synced ranked games", challengeText:"sync/log one game per challenge" },
     { id:"job_cleanup", enabled:true, emoji:"🧹", title:"Cleanup Crew", desc:"recover from rough games", challengeText:"log games after losses or low-score games" },
     { id:"job_demon", enabled:true, emoji:"🌑", title:"Demon Shift", desc:"late-night high pressure work", challengeText:"log games during the shift window" },
@@ -11907,9 +11917,20 @@ function normalizeCourtPunishments(input = {}) {
 
 function safeObj(v) { return v && typeof v === "object" && !Array.isArray(v) ? v : {}; }
 
-const JOB_RULE_STAT_OPTIONS = ["game","win","goals","assists","saves","shots","demos","score"];
+const JOB_RULE_STAT_OPTIONS = ["game","win","goals","assists","saves","shots","demos","games_with_goal","games_with_save","games_with_assist","games_with_3_shots","win_streak","goal_streak"];
 const JOB_RULE_SCOPE_OPTIONS = ["player","group","any"];
 const JOB_MODE_TO_GAME_MODE = { solo:"1v1", duo:"2v2", team:"3v3" };
+const JOB_TIME_LIMITS = {
+  easy: { solo:45, duo:60, team:60 },
+  medium: { solo:75, duo:90, team:90 },
+  hard: { solo:120, duo:150, team:150 },
+};
+function getJobTimeLimitMinutes(difficulty = "easy", jobMode = "solo", configuredMinutes = null) {
+  const diff = ["easy","medium","hard"].includes(String(difficulty)) ? String(difficulty) : "easy";
+  const mode = ["solo","duo","team"].includes(String(jobMode)) ? String(jobMode) : "solo";
+  const forced = JOB_TIME_LIMITS?.[diff]?.[mode] || JOB_TIME_LIMITS.easy.solo;
+  return Math.max(5, Math.min(240, Math.round(forced)));
+}
 function getGameModeForJobMode(jobMode, requestedMode = null) {
   const locked = JOB_MODE_TO_GAME_MODE[String(jobMode || "solo")] || null;
   return locked || (requestedMode && ["1v1","2v2","3v3"].includes(String(requestedMode)) ? String(requestedMode) : "any");
@@ -11917,32 +11938,48 @@ function getGameModeForJobMode(jobMode, requestedMode = null) {
 function getHourlyRuleKey(jobMode, slotLabel) {
   return `${String(jobMode || "solo")}::${String(slotLabel || "")}`;
 }
+function getJobModeLabel(jobMode = "solo", gameMode = null) {
+  const mode = getGameModeForJobMode(jobMode, gameMode);
+  return jobMode === "solo" ? mode : jobMode === "duo" ? `${mode} duo` : `${mode} team`;
+}
 function cleanJobRuleTextForMode(text, gameMode) {
   const mode = ["1v1","2v2","3v3"].includes(String(gameMode)) ? String(gameMode) : "1v1";
-  return String(text || "sync/log one game").replace(/(?:1v1|2v2|3v3)/gi, mode).replace(/3s/gi, mode === "3v3" ? "3s" : mode);
+  return String(text || "sync/log one game").replace(/\b(?:1v1|2v2|3v3)\b/gi, mode).replace(/\b3s\b/gi, mode === "3v3" ? "3s" : mode);
 }
 function normalizeRulesForJobMode(rules = [], jobMode = "solo", gameMode = null) {
   const lockedMode = getGameModeForJobMode(jobMode, gameMode);
+  const label = getJobModeLabel(jobMode, lockedMode);
   return (Array.isArray(rules) ? rules : []).map((rule, idx) => {
     const base = normalizeJobChallengeRule(rule, rule?.text, idx);
+    let stat = base.stat;
+    let text = cleanJobRuleTextForMode(base.text, lockedMode);
+    if (stat === "demos" && lockedMode !== "1v1") {
+      stat = "saves";
+      text = `${label}: get ${base.target} saves`;
+    }
     return {
       ...base,
+      stat,
       mode: lockedMode,
       scope: jobMode === "solo" ? "player" : base.scope,
-      text: cleanJobRuleTextForMode(base.text, lockedMode),
+      text,
     };
   });
 }
 function normalizeJobChallengeRule(input = {}, fallbackText = "sync/log one game", fallbackIndex = 0) {
   const src = safeObj(input);
-  const stat = JOB_RULE_STAT_OPTIONS.includes(String(src.stat || src.type || "")) ? String(src.stat || src.type) : "game";
+  const rawStat = String(src.stat || src.type || "");
+  const stat = JOB_RULE_STAT_OPTIONS.includes(rawStat) ? rawStat : "game";
   const scope = JOB_RULE_SCOPE_OPTIONS.includes(String(src.scope || "")) ? String(src.scope) : "player";
   const modeRaw = String(src.mode || "any");
   const mode = ["any","1v1","2v2","3v3"].includes(modeRaw) ? modeRaw : "any";
-  const target = Math.max(1, Math.min(9999, Math.round(Number(src.target ?? (stat === "game" || stat === "win" ? 1 : 1)) || 1)));
+  const target = Math.max(1, Math.min(9999, Math.round(Number(src.target ?? (stat === "game" || stat === "win" || stat.endsWith("_streak") ? 1 : 1)) || 1)));
+  const text = rawStat === "score"
+    ? "sync/log one game during the job window"
+    : String(src.text || fallbackText || "sync/log one game").slice(0,140);
   return {
     id:String(src.id || `rule_${fallbackIndex}_${stableHashString(fallbackText)}`).slice(0,48),
-    text:String(src.text || fallbackText || "sync/log one game").slice(0,140),
+    text,
     stat,
     target,
     scope,
@@ -11956,7 +11993,21 @@ function normalizeJobChallengeRules(rawRules, rawLines, required, fallbackText =
   return Array.from({ length:Math.max(1, required) }, (_, i) => normalizeJobChallengeRule(arr[i], lines[i] || fallbackText, i));
 }
 function getJobRuleStatLabel(stat) {
-  return ({ game:"games logged", win:"wins", goals:"goals", assists:"assists", saves:"saves", shots:"shots", demos:"demos", score:"score" })[stat] || stat;
+  return ({
+    game:"games logged",
+    win:"wins",
+    goals:"goals",
+    assists:"assists",
+    saves:"saves",
+    shots:"shots",
+    demos:"demos",
+    games_with_goal:"games with a goal",
+    games_with_save:"games with a save",
+    games_with_assist:"games with an assist",
+    games_with_3_shots:"games with 3+ shots",
+    win_streak:"best win streak",
+    goal_streak:"goal streak",
+  })[stat] || stat;
 }
 function getJobRuleScopeLabel(scope) {
   return ({ player:"your stats", group:"group total", any:"any selected player" })[scope] || scope;
@@ -11972,11 +12023,65 @@ function jobIncludesPlayer(job, playerId) {
 function isSameJobSlotFilled(job, slotKey) {
   return job?.slotKey === slotKey && ["reserved","active"].includes(job?.status);
 }
-function playerStatFromGame(g, stat) {
+function getJobGameUnitKey(g) {
+  const mode = normalizeGameMode(g?.mode || "game");
+  const direct = g?.sessionCode || g?.roomId || g?.matchId || g?.parseMatchId;
+  if (direct) return `${mode}__${direct}`;
+  const ts = safeDateObj(g?.ts || g?.date || 0).getTime();
+  const bucket = Number.isFinite(ts) ? Math.floor(ts / (10 * 60 * 1000)) : 0;
+  return `${mode}__${g?.id || g?.playerId || "player"}__${bucket}`;
+}
+function buildJobGameUnits(games = []) {
+  const map = new Map();
+  (Array.isArray(games) ? games : []).forEach(g => {
+    const key = getJobGameUnitKey(g);
+    const ts = safeDateObj(g?.ts || g?.date || Date.now()).getTime();
+    const cur = map.get(key) || { key, ts, games:[], playerIds:new Set(), goals:0, assists:0, saves:0, shots:0, demos:0, wins:0 };
+    cur.games.push(g);
+    if (g?.playerId) cur.playerIds.add(g.playerId);
+    cur.ts = Math.min(cur.ts || ts, ts || cur.ts || Date.now());
+    cur.goals += Number(g?.goals || 0) || 0;
+    cur.assists += Number(g?.assists || 0) || 0;
+    cur.saves += Number(g?.saves || 0) || 0;
+    cur.shots += Number(g?.shots || 0) || 0;
+    cur.demos += Number(g?.demos || 0) || 0;
+    if (gameIsWin(g)) cur.wins += 1;
+    map.set(key, cur);
+  });
+  return Array.from(map.values()).sort((a,b) => (a.ts || 0) - (b.ts || 0)).map(u => ({ ...u, playerIds:Array.from(u.playerIds || []) }));
+}
+function jobUnitStat(unit, stat) {
   if (stat === "game") return 1;
-  if (stat === "win") return gameIsWin(g) ? 1 : 0;
-  if (stat === "score") return Number(g?.score || g?.playerScore || 0) || 0;
-  return Number(g?.[stat] || 0) || 0;
+  if (stat === "win") return unit.wins > 0 ? 1 : 0;
+  if (stat === "goals") return unit.goals || 0;
+  if (stat === "assists") return unit.assists || 0;
+  if (stat === "saves") return unit.saves || 0;
+  if (stat === "shots") return unit.shots || 0;
+  if (stat === "demos") return unit.demos || 0;
+  if (stat === "games_with_goal") return (unit.goals || 0) >= 1 ? 1 : 0;
+  if (stat === "games_with_save") return (unit.saves || 0) >= 1 ? 1 : 0;
+  if (stat === "games_with_assist") return (unit.assists || 0) >= 1 ? 1 : 0;
+  if (stat === "games_with_3_shots") return (unit.shots || 0) >= 3 ? 1 : 0;
+  return 0;
+}
+function bestJobStreak(units = [], predicate = () => false) {
+  let best = 0;
+  let cur = 0;
+  (Array.isArray(units) ? units : []).forEach(unit => {
+    if (predicate(unit)) {
+      cur += 1;
+      best = Math.max(best, cur);
+    } else {
+      cur = 0;
+    }
+  });
+  return best;
+}
+function sumJobStatForGames(games = [], stat = "game") {
+  const units = buildJobGameUnits(games);
+  if (stat === "win_streak") return bestJobStreak(units, u => u.wins > 0);
+  if (stat === "goal_streak") return bestJobStreak(units, u => (u.goals || 0) >= 1);
+  return units.reduce((sum,u) => sum + jobUnitStat(u, stat), 0);
 }
 function evaluateJobChallengeRule(rule, job, stats = []) {
   const ids = getJobParticipantIds(job);
@@ -12001,19 +12106,20 @@ function evaluateJobChallengeRule(rule, job, stats = []) {
   });
   let current = 0;
   if (rule.scope === "any") {
-    current = ids.reduce((best, pid) => Math.max(best, games.filter(g=>g.playerId===pid).reduce((sum,g)=>sum+playerStatFromGame(g, rule.stat),0)), 0);
+    current = ids.reduce((best, pid) => Math.max(best, sumJobStatForGames(games.filter(g => g.playerId === pid), rule.stat)), 0);
   } else if (rule.scope === "group") {
-    current = games.reduce((sum,g)=>sum+playerStatFromGame(g, rule.stat),0);
+    current = sumJobStatForGames(games, rule.stat);
   } else {
     const owner = job.playerId;
-    current = games.filter(g=>g.playerId===owner).reduce((sum,g)=>sum+playerStatFromGame(g, rule.stat),0);
+    current = sumJobStatForGames(games.filter(g => g.playerId === owner), rule.stat);
   }
   return { current, target, done:current >= target, games };
 }
 function buildJobRulesFromJob(job) {
-  if (Array.isArray(job?.challengeRules) && job.challengeRules.length) return job.challengeRules.map((r,i)=>normalizeJobChallengeRule(r, r.text, i));
-  const required = Math.max(1, Number(job?.required) || 1);
-  return normalizeJobChallengeRules([], job?.challengeList || job?.challengeText, required, job?.challengeText || "sync/log one game");
+  const raw = Array.isArray(job?.challengeRules) && job.challengeRules.length
+    ? job.challengeRules
+    : normalizeJobChallengeRules([], job?.challengeList || job?.challengeText, Math.max(1, Number(job?.required) || 1), job?.challengeText || "sync/log one game");
+  return normalizeRulesForJobMode(raw, job?.jobMode || "solo", job?.gameMode || null);
 }
 
 function normalizeJobsConfig(input = {}) {
@@ -12022,7 +12128,10 @@ function normalizeJobsConfig(input = {}) {
   const normDiff = (key) => {
     const b = base[key] || {};
     const row = safeObj(src[key]);
-    return { challenges:Math.max(1, Math.min(30, Math.round(Number(row.challenges ?? b.challenges) || b.challenges || 5))), minutes:Math.max(5, Math.min(240, Math.round(Number(row.minutes ?? b.minutes) || b.minutes || 60))), payout:Math.max(0, Math.min(10000, Math.round(Number(row.payout ?? b.payout) || b.payout || 100))) };
+    const preferredChallenges = { easy:5, medium:7, hard:7 };
+    const maxChallenges = preferredChallenges[key] || 7;
+    const fallbackChallenges = preferredChallenges[key] || b.challenges || 5;
+    return { challenges:Math.max(1, Math.min(maxChallenges, Math.round(Number(row.challenges ?? b.challenges) || fallbackChallenges))), minutes:Math.max(5, Math.min(240, Math.round(Number(row.minutes ?? b.minutes) || b.minutes || getJobTimeLimitMinutes(key, "solo")))), payout:Math.max(0, Math.min(10000, Math.round(Number(row.payout ?? b.payout) || b.payout || 100))) };
   };
   const easy = normDiff("easy"), medium = normDiff("medium"), hard = normDiff("hard");
   const shiftGroups = normalizeJobShiftGroups(src.shiftGroups || src.slotGroups || base.shiftGroups || base.slotGroups);
@@ -12098,24 +12207,64 @@ function getWeeklyChallengePool(appCustomizer, weekNum, mode) {
 function getDefaultHourlyJobRules(jobMode = "solo") {
   const gameMode = getGameModeForJobMode(jobMode);
   const groupScope = jobMode === "solo" ? "player" : "group";
-  const anyScope = jobMode === "solo" ? "player" : "any";
-  const label = jobMode === "solo" ? "1v1" : jobMode === "duo" ? "2v2 duo" : "3v3 team";
-  const make = (stat, target, scope=groupScope, text=null) => ({ id:`rule_${jobMode}_${stat}_${target}_${stableHashString(`${jobMode}${stat}${target}${scope}${gameMode}`)}`, text:text || `${label}: get ${target} ${stat}`, stat, target, scope, mode:gameMode, operator:">=" });
-  const slots = ["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","1:00 PM","3:00 PM","4:00 PM","6:00 PM","8:00 PM","10:00 PM","12:00 AM","2:00 AM","3:00 AM"];
+  const label = getJobModeLabel(jobMode, gameMode);
+  const dateSeed = getTodayKeyLocal();
+  const make = (stat, target, scope=groupScope, text=null) => ({
+    id:`rule_${jobMode}_${stat}_${target}_${stableHashString(`${jobMode}${stat}${target}${scope}${gameMode}${text || ""}`)}`,
+    text:text || `${label}: get ${target} ${stat}`,
+    stat,
+    target,
+    scope,
+    mode:gameMode,
+    operator:">=",
+  });
+  const textFor = (stat, target) => {
+    if (stat === "game") return `log ${target} ${gameMode} game${target === 1 ? "" : "s"}${jobMode === "solo" ? "" : " together"}`;
+    if (stat === "win") return `win ${target} ${gameMode} game${target === 1 ? "" : "s"}`;
+    if (stat === "games_with_goal") return `${label}: score at least 1 goal in ${target} different games`;
+    if (stat === "games_with_save") return `${label}: get a save in ${target} different games`;
+    if (stat === "games_with_assist") return `${label}: get an assist in ${target} different games`;
+    if (stat === "games_with_3_shots") return `${label}: get 3+ shots in ${target} different games`;
+    if (stat === "win_streak") return `${label}: win ${target} games in a row`;
+    if (stat === "goal_streak") return `${label}: score at least 1 goal in ${target} games in a row`;
+    if (stat === "demos") return `${label}: get ${target} demos`;
+    return `${label}: get ${target} ${stat}`;
+  };
+  const rule = (stat, target, scope=groupScope) => make(stat, target, scope, textFor(stat, target));
+  const rand = (seed) => {
+    let h = stableHashString(seed) || 1;
+    return () => {
+      h ^= h << 13; h ^= h >>> 17; h ^= h << 5;
+      return ((h >>> 0) % 100000) / 100000;
+    };
+  };
+  const shuffle = (items, seed) => {
+    const out = [...items];
+    const r = rand(seed);
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(r() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+    return out;
+  };
+  const pack = (mandatory, optional, seed) => [...mandatory, ...shuffle(optional, seed)].map((r, idx) => ({ ...r, id:`${r.id}_${idx}_${stableHashString(seed)}`.slice(0,48) }));
+  const slots = ["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"];
   const out = { easy:{}, medium:{}, hard:{} };
   slots.forEach((slot, i) => {
+    const bump = i % 3;
+    const seedBase = `${dateSeed}_${slot}_${jobMode}_${gameMode}`;
     if (jobMode === "solo") {
-      out.easy[slot] = [make("shots",6+i%3,"player"), make("goals",Math.max(2,4+i%4),"player"), make("game",2+i%2,"player",`log ${2+i%2} 1v1 games`), make("saves",4+i%3,"player"), make("demos",1+i%2,"player")];
-      out.medium[slot] = [make("shots",10+i%4,"player"), make("goals",6+i%5,"player"), make("game",4+i%2,"player",`log ${4+i%2} 1v1 games`), make("saves",7+i%4,"player"), make("assists",5+i%4,"player"), make("win",2+i%2,"player",`win ${2+i%2} 1v1 games`), make("demos",3+i%3,"player")];
-      out.hard[slot] = [make("shots",15+i%6,"player"), make("goals",10+i%6,"player"), make("game",6+i%3,"player",`log ${6+i%3} 1v1 games`), make("saves",10+i%5,"player"), make("assists",8+i%5,"player"), make("win",4+i%3,"player",`win ${4+i%3} 1v1 games`), make("demos",5+i%4,"player"), make("score",1800+i*120,"player",`reach ${1800+i*120} score in 1v1`), make("shots",20+i%5,"player"), make("goals",12+i%6,"player")];
+      out.easy[slot] = pack([rule("game",2 + (i % 2),"player")], [rule("shots",6 + bump,"player"), rule("goals",3 + bump,"player"), rule("saves",4 + bump,"player"), rule("win",1 + (i % 2),"player"), rule("games_with_goal",2,"player"), rule("games_with_3_shots",2,"player"), rule("demos",1 + (i % 2),"player")], `${seedBase}_easy`);
+      out.medium[slot] = pack([rule("game",4 + (i % 2),"player"), rule("win",2 + (i % 2),"player")], [rule("shots",11 + bump * 2,"player"), rule("goals",6 + bump,"player"), rule("saves",7 + bump,"player"), rule("assists",4 + bump,"player"), rule("games_with_goal",3 + (i % 2),"player"), rule("games_with_3_shots",3,"player"), rule("win_streak",2,"player"), rule("demos",3 + bump,"player")], `${seedBase}_medium`);
+      out.hard[slot] = pack([rule("game",6 + (i % 3),"player"), rule("win",4 + (i % 2),"player")], [rule("shots",18 + bump * 3,"player"), rule("goals",10 + bump * 2,"player"), rule("saves",11 + bump * 2,"player"), rule("assists",7 + bump,"player"), rule("games_with_goal",5,"player"), rule("games_with_3_shots",5,"player"), rule("win_streak",3,"player"), rule("goal_streak",3,"player"), rule("demos",5 + bump,"player")], `${seedBase}_hard`);
     } else if (jobMode === "duo") {
-      out.easy[slot] = [make("shots",8+i%3,"group"), make("goals",5+i%4,"group"), make("game",2+i%2,"group",`log ${2+i%2} 2v2 games together`), make("assists",4+i%3,"group"), make("saves",5+i%3,"group")];
-      out.medium[slot] = [make("shots",14+i%4,"group"), make("goals",8+i%5,"group"), make("game",4+i%2,"group",`log ${4+i%2} 2v2 games together`), make("saves",8+i%4,"group"), make("assists",7+i%4,"group"), make("win",2+i%2,"group",`win ${2+i%2} 2v2 games`), make("demos",2+i%3,"group")];
-      out.hard[slot] = [make("shots",22+i%6,"group"), make("goals",13+i%6,"group"), make("game",6+i%3,"group",`log ${6+i%3} 2v2 games together`), make("saves",12+i%5,"group"), make("assists",11+i%5,"group"), make("win",4+i%3,"group",`win ${4+i%3} 2v2 games`), make("demos",5+i%4,"group"), make("score",2600+i*150,"group",`reach ${2600+i*150} duo score`), make("shots",26+i%5,"group",`2v2 group shots ${26+i%5}`), make("goals",16+i%6,"group",`2v2 group goals ${16+i%6}`)];
+      out.easy[slot] = pack([rule("game",2 + (i % 2),"group")], [rule("shots",10 + bump,"group"), rule("goals",5 + bump,"group"), rule("saves",6 + bump,"group"), rule("assists",4 + bump,"group"), rule("win",1 + (i % 2),"group"), rule("games_with_goal",2 + (i % 2),"group"), rule("games_with_3_shots",2,"group")], `${seedBase}_easy`);
+      out.medium[slot] = pack([rule("game",5,"group"), rule("win",3,"group")], [rule("shots",17 + bump * 2,"group"), rule("goals",9 + bump,"group"), rule("saves",11 + bump,"group"), rule("assists",10 + bump,"group"), rule("games_with_goal",4,"group"), rule("games_with_assist",3,"group"), rule("games_with_save",3,"group"), rule("games_with_3_shots",4,"group")], `${seedBase}_medium`);
+      out.hard[slot] = pack([rule("game",8,"group"), rule("win",5,"group")], [rule("shots",28 + bump * 2,"group"), rule("goals",15 + bump * 2,"group"), rule("saves",18 + bump * 2,"group"), rule("assists",16 + bump,"group"), rule("games_with_goal",6,"group"), rule("games_with_assist",5,"group"), rule("games_with_save",5,"group"), rule("games_with_3_shots",6,"group"), rule("win_streak",3,"group")], `${seedBase}_hard`);
     } else {
-      out.easy[slot] = [make("shots",10+i%3,"group"), make("goals",6+i%4,"group"), make("game",2+i%2,"group",`log ${2+i%2} 3v3 games as a team`), make("assists",5+i%3,"group"), make("saves",6+i%3,"group")];
-      out.medium[slot] = [make("shots",18+i%4,"group"), make("goals",10+i%5,"group"), make("game",4+i%2,"group",`log ${4+i%2} 3v3 games as a team`), make("saves",10+i%4,"group"), make("assists",9+i%4,"group"), make("win",2+i%2,"group",`win ${2+i%2} 3v3 games`), make("demos",3+i%3,"group")];
-      out.hard[slot] = [make("shots",28+i%6,"group"), make("goals",16+i%6,"group"), make("game",6+i%3,"group",`log ${6+i%3} 3v3 games as a team`), make("saves",16+i%5,"group"), make("assists",14+i%5,"group"), make("win",4+i%3,"group",`win ${4+i%3} 3v3 games`), make("demos",6+i%4,"group"), make("score",3600+i*180,"group",`reach ${3600+i*180} team score`), make("shots",34+i%5,"group",`3v3 group shots ${34+i%5}`), make("goals",20+i%6,"group",`3v3 group goals ${20+i%6}`)];
+      out.easy[slot] = pack([rule("game",2 + (i % 2),"group")], [rule("shots",12 + bump,"group"), rule("goals",6 + bump,"group"), rule("saves",7 + bump,"group"), rule("assists",5 + bump,"group"), rule("win",1 + (i % 2),"group"), rule("games_with_goal",2 + (i % 2),"group"), rule("games_with_assist",2,"group")], `${seedBase}_easy`);
+      out.medium[slot] = pack([rule("game",5,"group"), rule("win",3,"group")], [rule("shots",20 + bump * 2,"group"), rule("goals",11 + bump,"group"), rule("saves",12 + bump * 2,"group"), rule("assists",10 + bump,"group"), rule("games_with_goal",4,"group"), rule("games_with_assist",3,"group"), rule("games_with_save",3,"group"), rule("games_with_3_shots",4,"group")], `${seedBase}_medium`);
+      out.hard[slot] = pack([rule("game",8,"group"), rule("win",5,"group")], [rule("shots",32 + bump * 3,"group"), rule("goals",18 + bump * 2,"group"), rule("saves",20 + bump * 2,"group"), rule("assists",17 + bump,"group"), rule("games_with_goal",6,"group"), rule("games_with_assist",5,"group"), rule("games_with_save",5,"group"), rule("games_with_3_shots",6,"group"), rule("win_streak",3,"group")], `${seedBase}_hard`);
     }
   });
   return out;
@@ -18760,7 +18909,6 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const visibleMatches = statusBaseMatches.slice(0, 8);
   const sourceLabel = liveData.error ? "last saved" : liveData.cached ? "saved" : "live";
   const onlineRlcsUsers = Object.values(rlcsPresence || {}).filter(v => v && Date.now() - new Date(v.ts || 0).getTime() < RLCS_PRESENCE_TTL_MS);
-  const liveActivity = mergeRlcsActivityItems(buildRlcsActivityItems({ matches:liveMatches, bets, playerId:currentPlayer, accent:playerColor }), rlcsActivityFeed, RLCS_ACTIVITY_LIMIT);
   const activeTwitchChannel = extractTwitchChannel(active?.url || "");
   const activeTwitchInfo = activeTwitchChannel ? twitchLive.channels?.[activeTwitchChannel.toLowerCase()] : null;
 
@@ -18980,21 +19128,6 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
     </div>) : <div style={{fontSize:10,color:"#4A5066",fontWeight:800}}>only you here right now</div>}
   </div>;
 
-  const RlcsActivityPanel = () => <div style={{background:"rgba(255,255,255,.035)",border:`1px solid ${playerColor}24`,borderRadius:16,padding:10,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}>
-      <div style={{fontSize:10,color:playerColor,fontWeight:1000,letterSpacing:1,textTransform:"lowercase"}}>live activity</div>
-      <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"lowercase"}}>live updates</div>
-    </div>
-    <div style={{display:"grid",gap:6}}>
-      {liveActivity.length ? liveActivity.map(item => <div key={item.id} style={{display:"grid",gridTemplateColumns:"24px minmax(0,1fr)",gap:8,alignItems:"center",background:"rgba(0,0,0,.13)",border:"1px solid rgba(255,255,255,.045)",borderRadius:11,padding:"7px 8px"}}>
-        <div style={{width:24,height:24,borderRadius:9,background:`${item.color || playerColor}18`,color:item.color || playerColor,display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900}}>{item.icon}</div>
-        <div style={{minWidth:0}}>
-          <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",textTransform:"lowercase"}}>{item.text}</div>
-          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:1,textTransform:"lowercase"}}>{item.sub}</div>
-        </div>
-      </div>) : <div style={{fontSize:10.5,color:"#4A5066",fontWeight:800}}>waiting for live data…</div>}
-    </div>
-  </div>;
 
   const Header = () => <div style={{background:shellBg,border:`2px solid ${playerColor}40`,borderRadius:20,padding:14,marginBottom:2,boxShadow:performanceMode?"0 10px 26px rgba(0,0,0,.26)":`0 14px 34px ${playerColor}14`,maxWidth:"100%",overflow:"hidden",boxSizing:"border-box"}}>
     <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:10,alignItems:"start"}}>
@@ -19030,8 +19163,6 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
         {[100,250,500].map(v => <button key={v} onClick={()=>setWager(String(v))} className="bb-pressable" style={{minWidth:0,background:Number(wager)===v?playerColor:"rgba(255,255,255,.055)",border:`1px solid ${Number(wager)===v?playerColor:"rgba(255,255,255,.09)"}`,borderRadius:10,padding:"8px 6px",color:Number(wager)===v?"#06070D":"#E8ECF4",fontSize:10.5,fontWeight:1000,textTransform:"lowercase"}}>{v}</button>)}
       </div>
     </div>
-
-    <RlcsActivityPanel />
 
     <div style={{display:"grid",gap:10,maxWidth:"100%",overflow:"hidden"}}>
       {visibleMatches.length ? visibleMatches.map(match => {
