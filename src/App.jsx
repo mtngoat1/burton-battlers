@@ -1660,18 +1660,28 @@ function formatJobStartTime(job) {
   if (!d || !Number.isFinite(d.getTime())) return job?.slotLabel || "soon";
   return d.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
 }
+const JOB_START_LATE_GRACE_MS = 15 * 60 * 1000;
 function getJobStartGateMs(job, nowMs = Date.now()) {
   const start = safeDateObj(job?.startAt, null);
   if (!start || !Number.isFinite(start.getTime())) return 0;
   return start.getTime() - nowMs;
 }
+function getJobStartLateMs(job, nowMs = Date.now()) {
+  const start = safeDateObj(job?.startAt, null);
+  if (!start || !Number.isFinite(start.getTime())) return 0;
+  return nowMs - (start.getTime() + JOB_START_LATE_GRACE_MS);
+}
+function isJobStartExpired(job, nowMs = Date.now()) {
+  return getJobStartLateMs(job, nowMs) > 0;
+}
 function isJobStartUnlocked(job, nowMs = Date.now()) {
-  return getJobStartGateMs(job, nowMs) <= 0;
+  return getJobStartGateMs(job, nowMs) <= 0 && !isJobStartExpired(job, nowMs);
 }
 function getJobStartGateLabel(job, nowMs = Date.now()) {
   const ms = getJobStartGateMs(job, nowMs);
-  if (ms <= 0) return "ready";
-  return `starts in ${fmtShortDuration(ms)}`;
+  if (ms > 0) return `starts in ${fmtShortDuration(ms)}`;
+  if (isJobStartExpired(job, nowMs)) return "missed";
+  return "ready";
 }
 function getJobShiftReminderDedupKey(job, playerId) {
   return `job_shift_reminder_${job?.id || "job"}_${playerId || "player"}`;
@@ -1778,7 +1788,7 @@ function parseTodaySlot(slotLabel) {
   const d = new Date(); d.setHours(h,min,0,0);
   // If the slot time already passed by more than a small grace window, treat it as
   // the next upcoming shift instead of letting players claim/start old slots.
-  if (d.getTime() < now.getTime() - 30 * 60000) d.setDate(d.getDate() + 1);
+  if (d.getTime() < now.getTime() - JOB_START_LATE_GRACE_MS) d.setDate(d.getDate() + 1);
   return d;
 }
 
@@ -1956,9 +1966,14 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
     setViewJobId(job.id);
   };
   const startReserved = async (job) => {
-    const gateMs = getJobStartGateMs(job);
+    const nowMs = Date.now();
+    const gateMs = getJobStartGateMs(job, nowMs);
     if (gateMs > 0) {
       addToast?.(`shift starts in ${fmtShortDuration(gateMs)}`, "⏰");
+      return;
+    }
+    if (isJobStartExpired(job, nowMs)) {
+      addToast?.("missed start window — shifts lock 15m after start", "⏰");
       return;
     }
     const startedAt = new Date().toISOString();
@@ -5025,7 +5040,7 @@ useEffect(() => {
   // Do not open a second realtime subscription for voice_presence here.
   // Supabase/Daily can throw if this same channel is already subscribed, so we poll instead.
   const unsub = null;
-  const timer = setInterval(loadVoicePresence, 15000);
+  const timer = setInterval(loadVoicePresence, 45000);
 
   return () => {
     alive = false;
@@ -13370,7 +13385,7 @@ function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, po
   const [voicePresence, setVoicePresence] = useState({});
 
 useEffect(() => {
-  const iv = setInterval(() => setShopCountdown(getTimeUntilNextShop()), 1000);
+  const iv = setInterval(() => setShopCountdown(getTimeUntilNextShop()), 30000);
   return () => clearInterval(iv);
 }, []);
 const myModeLocalUntilRef = useRef(0);
@@ -13420,7 +13435,7 @@ useEffect(() => {
   // Do not open a second realtime subscription for voice_presence here.
   // Supabase/Daily can throw if this same channel is already subscribed, so we poll instead.
   const unsub = null;
-  const timer = setInterval(loadVoicePresence, 15000);
+  const timer = setInterval(loadVoicePresence, 45000);
   return () => { alive = false; clearInterval(timer); unsub?.(); };
 }, []);
 
@@ -14377,10 +14392,11 @@ const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "commen
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
 const RT_KEYS_LIVE = [
-  "chat", "posts", "comments", "completions", "training", "schedule", "stats", "presence", "pings",
-  "points", "bets", "pass_xp", "pass_premium", "pass_claimed", "pass_tokens", "pass_active_boosts",
-  "team_room", "team_sessions", "typing", "activity_feed", "parse_credits", "credit_requests",
-  "soundboard_events", "admin_shop_items", "full_screen_float_mode", "app_customizer", "burton_os", RLCS_ACTIVITY_FEED_KEY, RLCS_PRESENCE_KEY, ADMIN_LIVE_SYNC_KEY
+  // Keep realtime lean: only keys that need to feel instant stay subscribed.
+  // Slow stores still hydrate on boot and update when a user action writes them.
+  "chat", "posts", "comments", "stats", "presence", "pings", "points", "bets",
+  "team_room", "team_sessions", "typing", "activity_feed", "soundboard_events",
+  "admin_shop_items", "app_customizer", "burton_os", ADMIN_LIVE_SYNC_KEY
 ];
 
 // ===================== One-time manual restore =====================
@@ -15584,20 +15600,21 @@ const DAILY_PROMO_PUSHES = [
 async function maybeSendScheduledPromoPush(playerId) {
   if (!playerId) return;
   const now = new Date();
-  const today = dateKey(now);
-  const logKey = `promo_push_log_${playerId}_${today}`;
-  const sent = await storeGet(logKey).catch(() => ({})) || {};
-  for (const promo of DAILY_PROMO_PUSHES) {
+  const activePromo = DAILY_PROMO_PUSHES.find(promo => {
     const slot = new Date(now);
     slot.setHours(promo.hour, 0, 0, 0);
     const age = now.getTime() - slot.getTime();
-    if (age < 0 || age > 20 * 60 * 1000) continue;
-    const id = `${today}_${promo.hour}`;
-    if (sent[id]) continue;
-    await storeSet(logKey, { ...sent, [id]: true });
-    await sendPushToPlayersOnce(`promo:${playerId}:${id}`, [playerId], promo.title, promo.body, { url:makeNotificationUrl("boost", { type:"promo", id }), type:"promo", id });
-    break;
-  }
+    return age >= 0 && age <= 20 * 60 * 1000;
+  });
+  // Fast no-op most of the day: avoid a Supabase read every minute when no promo can fire.
+  if (!activePromo) return;
+  const today = dateKey(now);
+  const logKey = `promo_push_log_${playerId}_${today}`;
+  const sent = await storeGet(logKey).catch(() => ({})) || {};
+  const id = `${today}_${activePromo.hour}`;
+  if (sent[id]) return;
+  await storeSet(logKey, { ...sent, [id]: true });
+  await sendPushToPlayersOnce(`promo:${playerId}:${id}`, [playerId], activePromo.title, activePromo.body, { url:makeNotificationUrl("boost", { type:"promo", id }), type:"promo", id });
 }
 
 function StockTrendLine({ priceHistory, color, width = 260, height = 70 }) {
@@ -18575,7 +18592,7 @@ const RLCS_HIGH_TIER_TEAMS = Array.from(new Set([...(RLCS_REGION_BET_TEAMS.na ||
 const RLCS_LOW_TIER_TEAMS = [];
 const RLCS_KNOWN_TEAM_WATCHLIST = Array.from(new Set([...RLCS_HIGH_TIER_TEAMS, ...RLCS_LOW_TIER_TEAMS]));
 const RLCS_LCQ_STORAGE_KEY = "rlcs_lcq_live_matches";
-const RLCS_LCQ_REFRESH_MS = 75 * 1000;
+const RLCS_LCQ_REFRESH_MS = 3 * 60 * 1000;
 const RLCS_PRESENCE_TTL_MS = 2 * 60 * 1000;
 const RLCS_ACTIVITY_LIMIT = 8;
 const RLCS_TIER_META = {
@@ -19026,7 +19043,7 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
   const [bracketPoolId,setBracketPoolId]=useState("");
   const [bracketPhase,setBracketPhase]=useState("");
   const [wager,setWager]=useState("25");
-  const [performanceMode,setPerformanceMode]=useState(() => { try { return localStorage.getItem("bb_rlcs_perf_mode") === "1"; } catch (_) { return false; } });
+  const [performanceMode,setPerformanceMode]=useState(() => { try { return localStorage.getItem("bb_rlcs_perf_mode") !== "0"; } catch (_) { return true; } });
   const [liveData,setLiveData]=useState({ matches:[], bracket:null, updatedAt:null, source:"live", cached:false, error:null, loading:true });
   const [rlcsPresence,setRlcsPresence]=useState({});
   const [rlcsActivityFeed,setRlcsActivityFeed]=useState([]);
@@ -19131,11 +19148,11 @@ function RLCSBets({ currentPlayer, points, setPoints, bets, setBets, appCustomiz
         const next = { ...cleaned, [currentPlayer]: { playerId:currentPlayer, name:currentName, color:playerColor, tab:hubTab, ts:nowIso } };
         if (!alive) return;
         setRlcsPresence(next);
-        await storeSetWithPush(RLCS_PRESENCE_KEY, next).catch(() => storeSet(RLCS_PRESENCE_KEY, next));
+        await storeSet(RLCS_PRESENCE_KEY, next).catch(() => {});
       } catch (_) {}
     };
     writePresence();
-    const timer = setInterval(writePresence, performanceMode ? 90000 : 45000);
+    const timer = setInterval(writePresence, performanceMode ? 180000 : 90000);
     return () => { alive = false; clearInterval(timer); };
   }, [currentPlayer, hubTab, playerColor, performanceMode]);
 
@@ -20398,7 +20415,7 @@ useEffect(() => {
   if (!currentPlayer) return;
   const run = () => maybeSendScheduledPromoPush(currentPlayer).catch(() => {});
   run();
-  const timer = setInterval(run, 60 * 1000);
+  const timer = setInterval(run, 5 * 60 * 1000);
   return () => clearInterval(timer);
 }, [currentPlayer]);                      
 
@@ -20423,12 +20440,12 @@ const heartbeat = async (force = false) => {
 
       // Keep online status instant locally, but write to Supabase at most about once a minute.
       // Touch/mouse events were forcing a write every interaction and spiking Supabase CPU.
-      if (!force && now - lastPresenceStoreWriteRef.current < 55000) return;
+      if (!force && now - lastPresenceStoreWriteRef.current < 115000) return;
       lastPresenceStoreWriteRef.current = now;
 
       try {
         let safeFresh = base;
-        if (force || !Object.keys(base).length || now - lastPresenceFullReadRef.current > 300000) {
+        if (force || !Object.keys(base).length || now - lastPresenceFullReadRef.current > 900000) {
           const fresh = await storeGet("presence").catch(() => null);
           if (fresh && typeof fresh === "object" && !Array.isArray(fresh)) safeFresh = fresh;
           lastPresenceFullReadRef.current = now;
@@ -20448,7 +20465,7 @@ let lastForcedPresencePulse = 0;
 const updateActive = () => {
   const now = Date.now();
   lastActiveRef.current = now;
-  if (now - lastLocalPresencePulse > 10000) {
+  if (now - lastLocalPresencePulse > 30000) {
     lastLocalPresencePulse = now;
     heartbeat(false);
   }
@@ -20456,7 +20473,7 @@ const updateActive = () => {
 const updateActiveForce = () => {
   const now = Date.now();
   lastActiveRef.current = now;
-  if (now - lastForcedPresencePulse > 30000) {
+  if (now - lastForcedPresencePulse > 120000) {
     lastForcedPresencePulse = now;
     heartbeat(true);
   } else {
@@ -20467,8 +20484,8 @@ const onVisibilityChange = () => { if (!document.hidden) updateActiveForce(); };
 window.addEventListener("focus", updateActiveForce);
 document.addEventListener("visibilitychange", onVisibilityChange);
 document.addEventListener("touchstart", updateActive, { passive: true });
-document.addEventListener("mousemove", updateActive, { passive: true });
-    const hbInterval = setInterval(() => heartbeat(false), 60000);
+// Mousemove fires constantly on desktop; focus/touch/visibility are enough for presence.
+    const hbInterval = setInterval(() => heartbeat(false), 120000);
     const unsub = subscribeKVMulti(RT_KEYS_LIVE, ({ key, value }) => {
       if (key === "chat") {
   const chatList = Array.isArray(value) ? value.filter(Boolean) : [];
@@ -20719,7 +20736,6 @@ return () => {
     clearInterval(hbInterval);
     unsub?.();
     document.removeEventListener("touchstart", updateActive);
-    document.removeEventListener("mousemove", updateActive);
     document.removeEventListener("visibilitychange", onVisibilityChange);
     window.removeEventListener("focus", updateActive);
   };
@@ -20850,7 +20866,7 @@ const loadSharedData = (pid) => {
     return storeSet("presence", upd);
   }).catch(() => {});
 
-  const safeGet = async (key, fallback = null, timeoutMs = 520) => {
+  const safeGet = async (key, fallback = null, timeoutMs = 420) => {
     try {
       let finished = false;
       const work = Promise.resolve(storeGet(key)).then(v => {
@@ -21071,8 +21087,8 @@ const loadSharedData = (pid) => {
   };
 
   hydrateCritical();
-  setTimeout(hydrateSecondary, 25);
-  setTimeout(hydrateMmr, 250);
+  setTimeout(hydrateSecondary, 250);
+  setTimeout(hydrateMmr, 1200);
   return Promise.resolve(true);
 };
 
@@ -21240,7 +21256,14 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
   const topTrainingNotifs = hidePushMirroredInAppNotifs ? [] : Object.entries(completions||{})
     .filter(([k,v]) => v?.status==="approved" && k.endsWith(`__${currentPlayer}`))
     .map(([k,v]) => ({ id:k, ts:v.reviewedAt||v.submittedAt||new Date().toISOString(), text:"training approved — +15 pts", icon:"✅" }));
-  const clearedNotifIds = points?.[currentPlayer + "_clearedNotifs"] || [];
+  const storedClearedNotifIds = (() => {
+    try {
+      const raw = localStorage.getItem(`bb_cleared_notifs_${currentPlayer}`);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_) { return []; }
+  })();
+  const clearedNotifIds = [...new Set([...(points?.[currentPlayer + "_clearedNotifs"] || []), ...storedClearedNotifIds])];
   const topNotifsRaw = [...topActivityNotifs, ...topPingNotifs, ...topTrainingNotifs]
     .sort((a,b) => new Date(b.ts) - new Date(a.ts));
   const topNotifs = topNotifsRaw
@@ -21446,18 +21469,29 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
                 </button>
                 {topNotifs.length > 0 && (
                   <button onClick={async()=>{
-                    const ids = topNotifsRaw.map(n => n.id);
-                    const updPoints = { ...points, [currentPlayer + "_clearedNotifs"]: [...new Set([...(points?.[currentPlayer + "_clearedNotifs"] || []), ...ids])].slice(-300) };
+                    const ids = topNotifs.map(n => n.id).filter(Boolean);
+                    const mergedCleared = [...new Set([...(points?.[currentPlayer + "_clearedNotifs"] || []), ...storedClearedNotifIds, ...ids])].slice(-500);
+                    try { localStorage.setItem(`bb_cleared_notifs_${currentPlayer}`, JSON.stringify(mergedCleared)); } catch (_) {}
+                    const updPoints = { ...points, [currentPlayer + "_clearedNotifs"]: mergedCleared };
+                    pointsRef.current = updPoints;
                     setPoints(updPoints);
-                    await storeSet("points", updPoints);
-
-                    const freshPings = (await storeGet("pings") || []).filter(p => p.to !== currentPlayer);
-                    setPings(freshPings);
-                    await storeSetWithPush("pings", freshPings);
-
-                    const freshActivity = (await storeGet("activity_feed") || []).filter(e => e.to !== currentPlayer);
-                    setActivityFeed(freshActivity);
-                    await storeSetWithPush("activity_feed", freshActivity);
+                    setPings(prev => (Array.isArray(prev) ? prev : []).filter(p => p.to !== currentPlayer));
+                    setActivityFeed([]);
+                    await Promise.all([
+                      storeSetWithPush("points", updPoints).catch(() => storeSet("points", updPoints)),
+                      (async () => {
+                        const freshPings = (await storeGet("pings") || []).filter(p => p.to !== currentPlayer);
+                        setPings(freshPings);
+                        await storeSetWithPush("pings", freshPings);
+                      })(),
+                      (async () => {
+                        const allActivity = await storeGet("activity_feed") || [];
+                        const freshActivity = Array.isArray(allActivity) ? allActivity.filter(e => e.to !== currentPlayer) : [];
+                        setActivityFeed([]);
+                        await storeSetWithPush("activity_feed", freshActivity);
+                      })(),
+                    ]);
+                    addToast?.("notifications cleared", "🧹");
                   }} className="bb-pressable" style={{background:"rgba(255,92,138,0.1)",border:"1px solid rgba(255,92,138,0.25)",borderRadius:10,padding:"7px 10px",fontSize:10,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>
                     clear all
                   </button>
