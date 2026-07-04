@@ -65,6 +65,7 @@ import { createPortal } from "react-dom";
 // APP118_FAST_BOOT_CLICK_RESPONSIVENESS_PATCH
 // APP119_PARSE_SYNC_FAST_BOOT_RECOVERY_PATCH
 // APP120_NO_IN_APP_NOTIFICATIONS_FAST_PATH_PATCH
+// APP121_ADMIN_SHOP_TEXT_KITS_JULY4_BETS_UI_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -88,7 +89,7 @@ const ADMIN_LIVE_SYNC_KEY = "admin_live_sync";
 const AUDIO_FILE_ACCEPT = "audio/*,.mp3,.mpeg,.mpga,.m4a,.aac,.wav,.wave,.x-wav,.ogg,.oga,.webm,.flac,audio/mpeg,audio/mp3,audio/mp4,audio/aac,audio/wav,audio/x-wav,audio/ogg,audio/webm,audio/flac";
 const CHAT_MEDIA_ACCEPT = "image/*,video/*";
 const PARSE_SCRAPER_ID = "d0dcf8e8-3a72-4b21-bffb-8fa735257835";
-const PARSE_API_KEY = "pmx_cbc188bbdb744012572e5cbf6a12c828";
+const PARSE_API_KEY = "pmx_4d1b9f5d74decff79fee3e474e882df4";
 const PARLAY_MAX_LEGS = 8;
 const PARLAY_MAX_PAYOUT = 50000;
 const PARLAY_MAX_PAYOUT_FLOOR = PARLAY_MAX_PAYOUT;
@@ -786,7 +787,7 @@ function useSwipeRightToClose(onClose, threshold = 105) {
 
 function EmptyState({ icon = "○", title, body, actionLabel, onAction }) {
   return (
-    <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:18,padding:"18px 16px",textAlign:"center",marginBottom:14,boxShadow:"0 12px 28px rgba(0,0,0,0.18)"}}>
+    <div className="bb-empty-state" style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:18,padding:"18px 16px",textAlign:"center",marginBottom:14,boxShadow:"0 12px 28px rgba(0,0,0,0.18)"}}>
       <div style={{fontSize:28,marginBottom:8,opacity:.9}}>{icon}</div>
       <div style={{fontSize:14,fontWeight:900,color:"#E8ECF4",marginBottom:5,letterSpacing:.2}}>{title}</div>
       {body && <div style={{fontSize:11.5,color:"#8B92A8",lineHeight:1.45,maxWidth:280,margin:"0 auto"}}>{body}</div>}
@@ -1642,7 +1643,7 @@ function PlayerStocksBox({ burtonOS, points, setPoints, stats, appCustomizer, pa
   return <div className="bb-state-reactive-card" style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,209,102,.22)",borderRadius:18,padding:14,marginBottom:12}}>
     <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer,"playerStocksLabel","player stocks")}</div>
     <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,margin:"4px 0 10px"}}>{getAppCopy(appCustomizer,"playerStocksDesc","wins + XP market")}</div>
-    {rows.map(r=><button key={r.player.id} onClick={()=>setOpenId(r.player.id)} className="bb-pressable" style={{width:"100%",background:"rgba(255,255,255,.025)",border:"none",borderTop:"1px solid rgba(255,255,255,.06)",padding:"9px 0",display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",textAlign:"left",cursor:"pointer"}}><div><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}><span style={{color:r.player.color}}>●</span> {r.player.name}</div><div style={{fontSize:10,color:"#8B92A8"}}>{r.wins} wins · {r.xp} XP</div></div><div style={{fontSize:15,fontWeight:900,color:r.delta>=0?"#7CFFB2":"#FF5C8A"}}>{r.price} {r.delta>=0?"▲":"▼"}{Math.abs(r.delta)}</div></button>)}
+    {rows.map(r=><button key={r.player.id} onClick={()=>setOpenId(r.player.id)} className="bb-pressable" style={{width:"100%",background:"transparent",border:"none",padding:"10px 0",display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center",textAlign:"left",cursor:"pointer"}}><div><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}><span style={{color:r.player.color}}>●</span> {r.player.name}</div><div style={{fontSize:10,color:"#8B92A8"}}>{r.wins} wins · {r.xp} XP</div></div><div style={{fontSize:15,fontWeight:900,color:r.delta>=0?"#7CFFB2":"#FF5C8A"}}>{r.price} {r.delta>=0?"▲":"▼"}{Math.abs(r.delta)}</div></button>)}
     {open && typeof document !== "undefined" && createPortal(<div style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.74)",backdropFilter:"blur(10px)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}><div style={{width:"100%",maxWidth:420,background:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${bbAlpha(open.player.color,.34)}`,borderRadius:24,padding:18,boxShadow:"0 30px 90px rgba(0,0,0,.62)",fontFamily:"Inter, sans-serif"}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,marginBottom:10}}><div><div style={{fontSize:10,color:open.player.color,fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>player stock</div><div style={{fontSize:22,color:"#E8ECF4",fontWeight:900}}>{open.player.name}</div></div><button onClick={()=>setOpenId(null)} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"#8B92A8",width:38,height:38}}>×</button></div><MiniTrendGraph points={open.history} color={open.player.color}/><div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>PRICE</div><div style={{fontSize:18,color:"#E8ECF4",fontWeight:900}}>{open.price}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>WINS</div><div style={{fontSize:18,color:"#E8ECF4",fontWeight:900}}>{open.wins}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>XP</div><div style={{fontSize:18,color:"#E8ECF4",fontWeight:900}}>{open.xp}</div></div></div><button onClick={()=>buyShare(open)} className="bb-pressable bb-glow-lime" style={{marginTop:14,width:"100%",background:"#B8FF4D",border:"none",borderRadius:14,padding:12,color:"#06070D",fontWeight:1000}}>buy 1 share · {open.price} pts</button><div style={{fontSize:10,color:"#8B92A8",marginTop:8,textAlign:"center"}}>shares owned: {holdingDisplayShares(stocksLocal?.[`${currentPlayer}_${open.player.id}`])}</div></div></div>, document.body)}
   </div>;
 }
@@ -1854,7 +1855,7 @@ function OpenLoopsTicker({ burtonOS, stats, points, passXP, appCustomizer, setTa
   }
 
   if (cfg.showRareShop !== false) {
-    addLoop("rareShop", "🛒", "new shop check", "open shop to see limited drops, text collages, and finishes", "#FFD166", { tab:"shop" });
+    addLoop("rareShop", "🛒", "new shop check", "open shop to see limited drops, text collages, and finishes", "#FFD166", { tab:"presence", openShop:true });
   }
 
   if (normalizeAppCustomizer(appCustomizer).stockMarketConfig.enabled) {
@@ -1884,6 +1885,10 @@ function OpenLoopsTicker({ burtonOS, stats, points, passXP, appCustomizer, setTa
   const rawIdx = baseIdx + OPEN_LOOPS_TICKER_STATE.manualOffset;
   const currentLoopIndex = loops.length ? ((rawIdx % loops.length) + loops.length) % loops.length : 0;
   const item = loops[currentLoopIndex] || loops[0];
+  const copyOverride = (cfg.copy && item?.type && cfg.copy[item.type]) ? cfg.copy[item.type] : {};
+  const loopEmoji = copyOverride.emoji || item.emoji;
+  const loopTitle = copyOverride.title || item.title;
+  const loopText = copyOverride.text || item.text;
   const moveLoop = (dir) => {
     OPEN_LOOPS_TICKER_STATE.manualOffset += dir;
     setTickerNow(Date.now());
@@ -1908,17 +1913,22 @@ function OpenLoopsTicker({ burtonOS, stats, points, passXP, appCustomizer, setTa
   return (
     <button onTouchStart={(e)=>{e.stopPropagation(); touchStartX.current=e.touches?.[0]?.clientX||0}} onTouchMove={(e)=>{e.stopPropagation();}} onTouchEnd={(e)=>{e.stopPropagation(); const dx=(e.changedTouches?.[0]?.clientX||0)-touchStartX.current; if(Math.abs(dx)>45){ e.preventDefault(); swipeHandledRef.current=true; moveLoop(dx<0?1:-1); }}} onClick={navigate} className="bb-state-reactive-card bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,#121726,#090B14)",border:`1px solid ${bbAlpha(item.color || "#B8FF4D", .26)}`,borderRadius:18,padding:14,marginBottom:12,boxShadow:"0 16px 38px rgba(0,0,0,.24)",overflow:"hidden",textAlign:"left",cursor:"pointer",touchAction:"pan-y",overscrollBehavior:"contain"}}>
       <div style={{display:"flex",alignItems:"center",gap:11}}>
-        <div style={{width:38,height:38,borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:21,background:bbAlpha(item.color || "#B8FF4D", .14),boxShadow:`0 0 22px ${bbAlpha(item.color || "#B8FF4D", .12)}`}}>{item.emoji}</div>
+        <div style={{width:38,height:38,borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",fontSize:21,background:bbAlpha(item.color || "#B8FF4D", .14),boxShadow:`0 0 22px ${bbAlpha(item.color || "#B8FF4D", .12)}`}}>{loopEmoji}</div>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:9.5,color:item.color || "#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>{getAppCopy(appCustomizer, "openLoopsLabel", "open loops")}</div>
-          <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{item.title}</div>
-          <div style={{fontSize:10.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{item.text}</div>
+          <div style={{fontSize:14,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{loopTitle}</div>
+          <div style={{fontSize:10.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{loopText}</div>
         </div>
         <ChevronRight size={15} color={item.color || "#B8FF4D"} />
       </div>
       {loops.length > 1 && <div style={{display:"flex",gap:4,marginTop:10}}>{loops.slice(0,10).map((l,i)=><div key={`${l.type}_${i}`} style={{height:3,flex:1,borderRadius:99,background:i === currentLoopIndex ? (item.color || "#B8FF4D") : "rgba(255,255,255,.08)"}} />)}</div>}
     </button>
   );
+}
+
+function getJobXpReward(difficulty = "easy") {
+  const d = String(difficulty || "easy").toLowerCase();
+  return d === "hard" ? 100 : d === "medium" ? 75 : 50;
 }
 
 function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, appCustomizer, addToast }) {
@@ -2048,8 +2058,23 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
     const success=progress.success;
     const updJobs=jobs.map(j=>j.id===job.id?{...j,status:success?"completed":"failed",completedAt:new Date().toISOString(),progress:progress.doneCount}:j);
     let updPts={...(points||{})};
-    if(success){ getJobParticipantIds(job).forEach(pid => { updPts[pid]=(Number(updPts[pid])||0)+Number(job.payout||0); }); setPoints?.(updPts); await storeSetWithPush("points",updPts); }
-    await save({ ...os, jobs:updJobs, history:[{id:`hist_job_done_${Date.now()}`,type:"job",emoji:success?"✅":"❌",title:`${job.title} ${success?"completed":"failed"}`,text:success?`paid ${job.payout} pts to ${getJobParticipantIds(job).map(playerNameById).join(" + ")}`:`ended at ${progress.doneCount}/${progress.total}`,color:success?"#7CFFB2":"#FF5C8A",ts:new Date().toISOString()}, ...(os.history||[])].slice(0,90) }, success?"job paid":"job failed", success?"💰":"❌");
+    let xpAward = getJobXpReward(job.difficulty);
+    if(success){
+      const participantIds = getJobParticipantIds(job);
+      participantIds.forEach(pid => { updPts[pid]=(Number(updPts[pid])||0)+Number(job.payout||0); });
+      setPoints?.(updPts); await storeSetWithPush("points",updPts);
+      const freshXP = await storeGet("pass_xp").catch(() => null);
+      const updXP = freshXP && typeof freshXP === "object" && !Array.isArray(freshXP) ? { ...freshXP } : {};
+      participantIds.forEach(pid => {
+        const current = Number(updXP?.[`${pid}_freeXP`] ?? updXP?.[pid] ?? 0) || 0;
+        const next = current + xpAward;
+        updXP[pid] = next;
+        updXP[`${pid}_freeXP`] = next;
+      });
+      await storeSetWithPush("pass_xp", updXP).catch(() => {});
+      await storeSet("pass_xp_backup", updXP).catch(() => {});
+    }
+    await save({ ...os, jobs:updJobs, history:[{id:`hist_job_done_${Date.now()}`,type:"job",emoji:success?"✅":"❌",title:`${job.title} ${success?"completed":"failed"}`,text:success?`paid ${job.payout} pts + ${xpAward} XP to ${getJobParticipantIds(job).map(playerNameById).join(" + ")}`:`ended at ${progress.doneCount}/${progress.total}`,color:success?"#7CFFB2":"#FF5C8A",ts:new Date().toISOString()}, ...(os.history||[])].slice(0,90) }, success?"job paid":"job failed", success?"💰":"❌");
   };
   const myJobs = jobs.filter(j=>jobIncludesPlayer(j,currentPlayer) && ["reserved","active"].includes(j.status));
   const adminActiveJobs = currentPlayer === ADMIN_ID ? jobs.filter(j => ["reserved","active"].includes(j.status)) : [];
@@ -2464,9 +2489,153 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
       body.bb-ui-terminal_blocks .bb-tab-content > div, body.bb-ui-terminal_blocks .bb-tab-content button { border-radius:8px !important; border-color:rgba(184,255,77,.20) !important; box-shadow:none !important; }
       body.bb-ui-broadcast_cards .bb-tab-content > div { border-radius:18px !important; border-left:3px solid var(--bb-accent, #B8FF4D) !important; box-shadow:0 18px 54px rgba(0,0,0,.30) !important; }
       body.bb-ui-compact_tiles .bb-tab-content > div { border-radius:13px !important; padding:10px !important; margin-bottom:10px !important; }
+      body.bb-ui-split_buttons .bb-tab-content button { justify-content:flex-start !important; text-align:left !important; }
+      body.bb-ui-split_buttons .bb-tab-content button > svg { margin-right:4px !important; }
+      body.bb-ui-offset_cards .bb-tab-content > div:nth-child(odd) { transform:translateX(-3px); }
+      body.bb-ui-offset_cards .bb-tab-content > div:nth-child(even) { transform:translateX(3px); }
+      body.bb-ui-large_touch .bb-tab-content button { min-height:44px !important; }
+      body.bb-ui-tiny_scoreboard .bb-tab-content [style*="font-family: 'Oswald'"], body.bb-ui-tiny_scoreboard .bb-tab-content [style*="fontFamily"] { letter-spacing:-.2px !important; }
+      body.bb-ui-feed_stack .bb-tab-content > div { margin-bottom:7px !important; }
       body.bb-readable-background .bb-tab-content { text-shadow:0 1px 10px rgba(0,0,0,.22); }
       body.bb-smooth-social .bb-tab-content { contain:layout paint; }
       body.bb-compact-cards .bb-tab-content > div { border-radius:12px !important; }
+      @keyframes bbPremiumAuraFloat { 0%{ transform:translate3d(-18px,-10px,0) scale(1); opacity:.55; } 100%{ transform:translate3d(18px,14px,0) scale(1.08); opacity:.82; } }
+      @keyframes bbPremiumGridDrift { 0%{ background-position:0 0,0 0; opacity:.22; } 100%{ background-position:44px 44px,44px 44px; opacity:.36; } }
+      @keyframes bbPremiumPageIn { 0%{ opacity:0; transform:translate3d(0,18px,0) scale(.982); filter:blur(7px); } 100%{ opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
+      @keyframes bbPremiumCardIn { 0%{ opacity:0; transform:translate3d(0,20px,0) scale(.975); filter:blur(5px); } 68%{ opacity:1; transform:translate3d(0,-2px,0) scale(1.006); filter:blur(0); } 100%{ opacity:1; transform:translate3d(0,0,0) scale(1); } }
+      @keyframes bbPremiumRewardPop { 0%{ opacity:0; transform:translate3d(0,-12px,0) scale(.86); filter:blur(8px); } 62%{ opacity:1; transform:translate3d(0,2px,0) scale(1.035); filter:blur(0); } 100%{ opacity:1; transform:translate3d(0,0,0) scale(1); } }
+      @keyframes bbPremiumSkeleton { 0%{ background-position:200% 0; } 100%{ background-position:-200% 0; } }
+      @keyframes bbPremiumSheetUp { 0%{ transform:translate3d(0,105%,0) scale(.985); opacity:.8; } 100%{ transform:translate3d(0,0,0) scale(1); opacity:1; } }
+      @keyframes bbPremiumNumberBump { 0%{ transform:translateY(4px) scale(.985); opacity:.78; filter:blur(2px); } 100%{ transform:translateY(0) scale(1); opacity:1; filter:blur(0); } }
+      @keyframes bbPremiumProgressShine { 0%{ transform:translateX(-110%); opacity:0; } 22%{ opacity:.5; } 100%{ transform:translateX(115%); opacity:0; } }
+      @keyframes bbPremiumRarityPulse { 0%,100%{ box-shadow:0 14px 30px rgba(0,0,0,.20), 0 0 0 rgba(255,255,255,0); } 50%{ box-shadow:0 18px 42px rgba(0,0,0,.30), 0 0 26px rgba(255,209,102,.12); } }
+      @keyframes bbPremiumActivityIn { 0%{ opacity:0; transform:translate3d(-10px,8px,0) scale(.99); } 100%{ opacity:1; transform:translate3d(0,0,0) scale(1); } }
+      body.bb-premium-bg #root > div {
+        isolation:isolate;
+        background:
+          radial-gradient(circle at 18% 0%, rgba(88,166,255,.20), transparent 34%),
+          radial-gradient(circle at 88% 13%, rgba(255,97,193,.14), transparent 30%),
+          radial-gradient(circle at 50% 105%, rgba(184,255,77,.10), transparent 38%),
+          #05070B !important;
+      }
+      body.bb-premium-bg #root > div::before,
+      body.bb-premium-bg #root > div::after {
+        content:"";
+        position:fixed;
+        inset:0;
+        pointer-events:none;
+        z-index:0;
+      }
+      body.bb-premium-bg #root > div::before {
+        background-image:linear-gradient(rgba(255,255,255,.027) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.027) 1px, transparent 1px);
+        background-size:44px 44px;
+        mask-image:linear-gradient(to bottom, rgba(0,0,0,.72), transparent 78%);
+        animation:bbPremiumGridDrift 12s linear infinite alternate;
+      }
+      body.bb-premium-bg #root > div::after {
+        background:
+          radial-gradient(circle at 42% -16%, rgba(255,255,255,.12), transparent 35%),
+          radial-gradient(circle at 78% 70%, rgba(167,139,250,.10), transparent 35%);
+        animation:bbPremiumAuraFloat 8s ease-in-out infinite alternate;
+      }
+      body.bb-premium-bg #root > div > * { position:relative; z-index:1; }
+      body.bb-premium-glass .bb-tab-content > div,
+      body.bb-premium-glass .bb-state-reactive-card,
+      body.bb-premium-glass .bb-card-polish {
+        background:linear-gradient(180deg, rgba(255,255,255,.105), rgba(255,255,255,.042)) !important;
+        border-color:rgba(255,255,255,.135) !important;
+        box-shadow:0 24px 70px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.16) !important;
+        backdrop-filter:blur(22px) saturate(1.18) !important;
+        -webkit-backdrop-filter:blur(22px) saturate(1.18) !important;
+      }
+      body.bb-premium-glass .bb-tab-content > div { position:relative; overflow:hidden; }
+      body.bb-premium-glass .bb-tab-content > div::before {
+        content:"";
+        position:absolute;
+        inset:0;
+        pointer-events:none;
+        background:linear-gradient(120deg, rgba(255,255,255,.18), transparent 36%);
+        opacity:.22;
+      }
+      body.bb-premium-spring button,
+      body.bb-premium-spring .bb-pressable {
+        transition:transform .18s cubic-bezier(.2,.9,.2,1.35), box-shadow .2s ease, border-color .2s ease, background .2s ease, opacity .16s ease !important;
+      }
+      body.bb-premium-spring button:active,
+      body.bb-premium-spring .bb-pressable:active { transform:scale(.945) !important; }
+      @media (hover:hover) { body.bb-premium-spring .bb-pressable:hover { transform:translateY(-2px) scale(1.006); } }
+      body.bb-premium-page .bb-tab-content { animation:bbPremiumPageIn .36s cubic-bezier(.16,1,.3,1) both !important; }
+      body.bb-premium-page .bb-tab-content > * { animation:bbPremiumCardIn .46s cubic-bezier(.16,1,.3,1) both !important; }
+      body.bb-premium-page .bb-tab-content > *:nth-child(2) { animation-delay:.045s !important; }
+      body.bb-premium-page .bb-tab-content > *:nth-child(3) { animation-delay:.09s !important; }
+      body.bb-premium-page .bb-tab-content > *:nth-child(4) { animation-delay:.135s !important; }
+      body.bb-premium-reward .bb-toast-card,
+      body.bb-premium-reward .bb-reward-reveal-card { animation:bbPremiumRewardPop .48s cubic-bezier(.16,1,.3,1) both; }
+      body.bb-premium-skeleton .bb-premium-skeleton-block,
+      body.bb-premium-skeleton .bb-tab-content [style*="checking"],
+      body.bb-premium-skeleton .bb-tab-content [style*="loading"],
+      body.bb-premium-skeleton .bb-tab-content [style*="nothing yet"] {
+        background:linear-gradient(90deg, rgba(255,255,255,.055), rgba(255,255,255,.14), rgba(255,255,255,.055)) !important;
+        background-size:200% 100% !important;
+        animation:bbPremiumSkeleton 1.25s ease-in-out infinite !important;
+      }
+      body.bb-premium-shop-glow .bb-shop-item-card {
+        position:relative;
+        overflow:hidden;
+        animation:bbPremiumRarityPulse 3.8s ease-in-out infinite;
+      }
+      body.bb-premium-shop-glow .bb-shop-item-card::after {
+        content:"";
+        position:absolute;
+        inset:-1px;
+        pointer-events:none;
+        background:radial-gradient(circle at 18% 0%, rgba(255,255,255,.18), transparent 34%), radial-gradient(circle at 88% 16%, rgba(255,209,102,.12), transparent 36%);
+        opacity:.55;
+      }
+      body.bb-premium-shop-glow .bb-shop-rarity-legendary::after,
+      body.bb-premium-shop-glow .bb-shop-rarity-mythic::after { background:radial-gradient(circle at 18% 0%, rgba(255,209,102,.24), transparent 34%), radial-gradient(circle at 82% 18%, rgba(255,97,193,.16), transparent 38%); }
+      body.bb-premium-sheets div[style*="position: fixed"][style*="inset: 0"] > div[style*="border"] {
+        border-radius:28px 28px 20px 20px !important;
+        background:rgba(14,17,29,.88) !important;
+        border-color:rgba(255,255,255,.14) !important;
+        box-shadow:0 -26px 84px rgba(0,0,0,.58), inset 0 1px 0 rgba(255,255,255,.12) !important;
+        backdrop-filter:blur(26px) saturate(1.16) !important;
+        -webkit-backdrop-filter:blur(26px) saturate(1.16) !important;
+        animation:bbPremiumSheetUp .34s cubic-bezier(.16,1,.3,1) both !important;
+      }
+      body.bb-premium-numbers .bb-tab-content [style*="font-family"],
+      body.bb-premium-numbers .bb-tab-content [style*="fontFamily"],
+      body.bb-premium-numbers .bb-tab-content [style*="font-size: 16"],
+      body.bb-premium-numbers .bb-tab-content [style*="font-size: 17"],
+      body.bb-premium-numbers .bb-tab-content [style*="font-size: 18"],
+      body.bb-premium-numbers .bb-tab-content [style*="font-size: 22"] {
+        font-variant-numeric:tabular-nums;
+        animation:bbPremiumNumberBump .26s ease both;
+      }
+      body.bb-premium-progress .bb-tab-content div[style*="height: 100%"][style*="width"] {
+        position:relative;
+        overflow:hidden;
+        transition:width .72s cubic-bezier(.16,1,.3,1) !important;
+      }
+      body.bb-premium-progress .bb-tab-content div[style*="height: 100%"][style*="width"]::after {
+        content:"";
+        position:absolute;
+        inset:0;
+        background:linear-gradient(90deg, transparent, rgba(255,255,255,.42), transparent);
+        animation:bbPremiumProgressShine 1.4s ease-in-out infinite;
+      }
+      body.bb-premium-activity .bb-tab-content [style*="recent activity"],
+      body.bb-premium-activity .bb-tab-content [style*="NOTIFICATIONS"],
+      body.bb-premium-activity .bb-tab-content [style*="online now"] { animation:bbPremiumActivityIn .34s cubic-bezier(.16,1,.3,1) both; }
+      body.bb-premium-empty .bb-empty-state {
+        background:linear-gradient(145deg, rgba(255,255,255,.075), rgba(255,255,255,.032)) !important;
+        border-color:rgba(255,255,255,.12) !important;
+        box-shadow:0 18px 54px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.12) !important;
+        backdrop-filter:blur(18px) saturate(1.12) !important;
+        -webkit-backdrop-filter:blur(18px) saturate(1.12) !important;
+        animation:bbPremiumCardIn .42s cubic-bezier(.16,1,.3,1) both;
+      }
+
       .bb-heart-pop { animation:heartPop .32s ease; }
       .bb-live-dot { animation:livePulse 1.4s ease-in-out infinite; }
       .bb-tab-content { color: var(--bb-main-text, #E8ECF4); }
@@ -2501,7 +2670,7 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
 
       button.bb-force-dark, button.bb-force-dark *, .bb-force-dark, .bb-force-dark * { color:#06070D !important; }
       body.bb-text-collage-on .bb-tab-content, body.bb-text-collage-on .bb-tab-content *:not(input):not(textarea):not(button):not(svg):not(path) {
-        background-image:linear-gradient(90deg,var(--bb-collage-a,#B8FF4D),var(--bb-collage-b,#FF61C1),var(--bb-collage-c,#4D9EFF),var(--bb-collage-a,#B8FF4D));
+        background-image:var(--bb-collage-gradient, linear-gradient(90deg,var(--bb-collage-a,#B8FF4D),var(--bb-collage-b,#FF61C1),var(--bb-collage-c,#4D9EFF),var(--bb-collage-a,#B8FF4D)));
         -webkit-background-clip:text; background-clip:text; color:transparent !important;
         text-shadow:0 0 var(--bb-collage-glow,0px) var(--bb-collage-shadow,transparent);
       }
@@ -3721,7 +3890,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const [kindTab, setKindTab] = useState("title");
   const profileKindTabs = sourceTab === "pass"
     ? [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_color",label:"text"}]
-    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"border",label:"borders"},{id:"sound",label:"sounds"},{id:"background",label:"backgrounds"}];
+    : [{id:"title",label:"titles"},{id:"icon",label:"icons"},{id:"color",label:"colors"},{id:"text_collage",label:"collages"},{id:"border",label:"borders"},{id:"sound",label:"sounds"},{id:"background",label:"backgrounds"}];
   useEffect(() => {
     if (!profileKindTabs.some(t => t.id === kindTab)) setKindTab(profileKindTabs[0]?.id || "title");
   }, [sourceTab, kindTab]);
@@ -3736,6 +3905,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const itemIcon = (id) => {
     const shopItem = getAllShopItems().find(i => i.id === id);
     if (shopItem?.type === "background") return "▧";
+    if (shopItem?.type === "text_collage") return "Aa";
     if (shopItem?.type === "sound") return "";
     if (shopItem?.emoji) return shopItem.emoji;
     const reward = id.startsWith("pass_") ? getPassRewardForOwnedId(id) : null;
@@ -3749,7 +3919,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
   const toggleEquip = async (id) => {
     bbHaptic(12);
     const type = itemType(id);
-    if (!type || !["color","icon","title","background","border","text_color","sound"].includes(type)) return;
+    if (!type || !["color","icon","title","background","border","text_color","text_collage","sound"].includes(type)) return;
     const newEquipped = { ...equipped };
     if (type === "sound") {
       if (newEquipped[id]) delete newEquipped[id];
@@ -3778,6 +3948,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
             <div key={id} style={{background:equipped[id]?"rgba(184,255,77,0.09)":"rgba(255,255,255,0.035)",border:`1px solid ${equipped[id]?"rgba(184,255,77,0.28)":"rgba(255,255,255,0.06)"}`,borderRadius:12,padding:"10px 8px",minHeight:64}}>
               <div style={{fontSize:18,marginBottom:5,color:player?.color}}>{itemIcon(id)}</div>
               <div style={{fontSize:11,fontWeight:800,color:"#E8ECF4",lineHeight:1.2}}>{itemLabel(id)}</div>
+              {itemType(id) === "text_collage" && (() => { const item = getAllShopItems().find(i => i.id === id); return <div style={{fontSize:20,fontWeight:1000,marginTop:5,...getTextCollagePreviewStyle(item)}}>Aa</div>; })()}
               {itemType(id) === "text_color" && getTextKitPreview(id) && (
                 <div style={{display:"flex",gap:4,justifyContent:"center",marginTop:7}}>
                   {["main","muted","accent"].map(part => (
@@ -3785,7 +3956,7 @@ function ProfileHomeTab({ currentPlayer, points, setPoints }) {
                   ))}
                 </div>
               )}
-              {["color","icon","title","background","border","text_color"].includes(itemType(id)) && (
+              {["color","icon","title","background","border","text_color","text_collage"].includes(itemType(id)) && (
                 <button onClick={()=>toggleEquip(id)} className="bb-pressable" style={{marginTop:8,width:"100%",background:equipped[id]?"#B8FF4D":"rgba(255,255,255,0.06)",border:"none",borderRadius:8,padding:"6px 0",fontSize:10,fontWeight:800,color:equipped[id]?"#06070D":"#8B92A8",cursor:"pointer"}}>
                   {equipped[id] ? "equipped" : "equip"}
                 </button>
@@ -4513,6 +4684,7 @@ function SwipeToast({ toast, onDismiss }) {
   return (
     <div
       onClick={dismiss}
+      className="bb-toast-card"
       style={{
         background:"#1A1D2E",
         border:"1px solid rgba(184,255,77,0.25)",
@@ -4547,7 +4719,7 @@ function getChatMessageAnimation(style = "slide", isMe = false) {
   return map[key] || map.slide;
 }
 
-function ChatMessage({ msg, isMe, onReact, onReply, onEdit, animationStyle = "slide" }) {
+function ChatMessage({ msg, isMe, onReact, onReply, onEdit, onOpenMedia, animationStyle = "slide" }) {
   const player = PLAYERS.find((p) => p.id === msg.playerId);
   const [showPicker, setShowPicker] = useState(false);
   const pressTimer = useRef(null);
@@ -4598,7 +4770,7 @@ const handleMouseUp = () => { clearTimeout(pressTimer.current); };
           <div style={{marginBottom:msg.text?8:0,borderRadius:12,overflow:"hidden",background:isMe?"rgba(6,7,13,0.10)":"rgba(255,255,255,0.045)",border:`1px solid ${isMe?"rgba(6,7,13,0.10)":"rgba(255,255,255,0.07)"}`}}>
             {mediaIsVideo
               ? <video src={mediaUrl} controls playsInline preload="metadata" style={{display:"block",maxWidth:240,width:"100%",maxHeight:260,objectFit:"cover",background:"#000"}}/>
-              : <img src={mediaUrl} alt={msg.mediaName || "chat media"} loading="lazy" decoding="async" style={{display:"block",maxWidth:240,width:"100%",maxHeight:260,objectFit:"cover"}}/>
+              : <img src={mediaUrl} alt={msg.mediaName || "chat media"} loading="lazy" decoding="async" onClick={(e)=>{ e.stopPropagation(); onOpenMedia?.({ url:mediaUrl, name:msg.mediaName || "chat media" }); }} style={{display:"block",maxWidth:240,width:"100%",maxHeight:260,objectFit:"cover",cursor:"zoom-in"}}/>
             }
             {msg.mediaName && <div style={{fontSize:9.5,color:isMe?"rgba(6,7,13,0.55)":"#8B92A8",padding:"5px 7px",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{msg.mediaName}</div>}
           </div>
@@ -6518,6 +6690,7 @@ function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus,
   const [mediaFile,setMediaFile]=useState(null);
   const [mediaPreview,setMediaPreview]=useState(null);
   const [mediaUploading,setMediaUploading]=useState(false);
+  const [fullScreenMedia,setFullScreenMedia]=useState(null);
   const mediaInputRef=useRef(null);
   useEffect(() => () => { if (mediaPreview) URL.revokeObjectURL(mediaPreview); }, [mediaPreview]);
   const pickChatMedia=(file)=>{
@@ -6678,7 +6851,7 @@ return (
       </div>
       <div ref={chatScrollBoxRef} style={{...s.chatScroll, paddingBottom: chatKeyboardOpen ? 96 : 18}}>
         {messages.length === 0 && <div style={s.chatEmpty}>no messages yet. say something to the squad.</div>}
-        {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} onEdit={onEdit} animationStyle={chatAnimationStyle} onReply={(msg)=>{ setReplyTo(msg); setText(t => t || ""); setTimeout(()=>document.getElementById("bb-team-chat-input")?.focus(), 40); }} />)}
+        {messages.map((m) => <ChatMessage key={m.id} msg={m} isMe={m.playerId === currentPlayer} onReact={onReact} onEdit={onEdit} onOpenMedia={setFullScreenMedia} animationStyle={chatAnimationStyle} onReply={(msg)=>{ setReplyTo(msg); setText(t => t || ""); setTimeout(()=>document.getElementById("bb-team-chat-input")?.focus(), 40); }} />)}
         {(() => {
           const now = Date.now();
           const typers = Object.entries(typingStatus)
@@ -6745,6 +6918,12 @@ return (
           </div>
         )}
       </div>
+      {fullScreenMedia && createPortal(
+        <div onClick={()=>setFullScreenMedia(null)} style={{position:"fixed",inset:0,zIndex:999999,background:"rgba(0,0,0,.88)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+          <button onClick={()=>setFullScreenMedia(null)} className="bb-pressable" style={{position:"absolute",top:"calc(env(safe-area-inset-top) + 12px)",right:14,width:40,height:40,borderRadius:14,border:"1px solid rgba(255,255,255,.18)",background:"rgba(255,255,255,.08)",color:"#E8ECF4",fontSize:22,fontWeight:900,cursor:"pointer"}}>×</button>
+          <img src={fullScreenMedia.url} alt={fullScreenMedia.name || "chat photo"} onClick={e=>e.stopPropagation()} style={{maxWidth:"100%",maxHeight:"86vh",objectFit:"contain",borderRadius:18,boxShadow:"0 24px 80px rgba(0,0,0,.55)"}}/>
+        </div>, document.body
+      )}
     </div>
   );
 }
@@ -7693,6 +7872,7 @@ function AdminDailyShopEditor({ adminShopItems, setAdminShopItems, addToast }) {
     { id:"border", label:"borders", types:["border"] },
     { id:"sound", label:"sounds", types:["sound"] },
     { id:"background", label:"bgs", types:["background"] },
+    { id:"text_collage", label:"text", types:["text_collage"] },
   ];
   const activeTab = tabs.find(t => t.id === tab) || tabs[0];
   const normalizeShopDraftList = (items) => (Array.isArray(items) ? items : []).map(normalizeAdminShopItem).filter(Boolean);
@@ -7879,10 +8059,19 @@ function AdminDailyShopEditor({ adminShopItems, setAdminShopItems, addToast }) {
 
   const cardPreview = (item) => {
     if (item.type === "background") return <div style={{width:46,height:46,borderRadius:13,background:item.background || getBackgroundPreview(item.value),border:"1px solid rgba(255,255,255,0.12)",boxShadow:"0 10px 24px rgba(0,0,0,0.20)"}}/>;
-    if (item.type === "border") return <div style={{width:46,height:46,borderRadius:13,background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`2px solid ${item.borderColor || item.value || "#B8FF4D"}`,boxShadow:`0 0 14px ${item.borderGlow || item.borderColor || "#B8FF4D"}55`}}/>;
+    if (item.type === "border") return <div style={{width:46,height:46,borderRadius:item.borderRadius || 13,background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`${Math.max(1, Number(item.borderWidth || 2) || 2)}px ${item.borderStyle || "solid"} ${item.borderColor || item.value || "#B8FF4D"}`,boxShadow:`0 0 14px ${item.borderGlow || item.borderColor || "#B8FF4D"}55`}}/>;
+    if (item.type === "text_collage") return <div style={{width:46,height:46,borderRadius:13,background:"rgba(255,255,255,0.055)",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,fontWeight:1000,...getTextCollagePreviewStyle(item)}}>Aa</div>;
     if (item.type === "color") return <div style={{width:46,height:46,borderRadius:13,background:item.value || "#B8FF4D",border:"1px solid rgba(255,255,255,0.12)",boxShadow:`0 0 16px ${item.value || "#B8FF4D"}55`}}/>;
     const fallback = item.type === "icon" ? (item.value || "✨") : item.type === "sound" ? "" : item.type === "title" ? "T" : "";
     return <div style={{width:46,height:46,borderRadius:13,background:"rgba(255,255,255,0.055)",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:item.type === "sound" ? 12 : item.type === "title" ? 18 : 25,fontWeight:900,color:"#E8ECF4"}}>{fallback}</div>;
+  };
+
+  const setManualShopTimerHours = async (hours) => {
+    const resetAt = new Date(Date.now() + Math.max(1, Number(hours) || 24) * 60 * 60000).toISOString();
+    try { localStorage.setItem("bb_shop_manual_reset_at", resetAt); } catch (_) {}
+    const timerItem = { id:"__shop_timer", type:"meta", resetAt, updatedAt:new Date().toISOString() };
+    const base = Array.isArray(adminShopRef.current) ? adminShopRef.current.filter(i => i?.id !== "__shop_timer") : [];
+    await saveAdminItems([timerItem, ...base], `shop timer set ${hours}h`, "⏱️");
   };
 
   const inlineInput = (item, field, fallback, extraStyle = {}, labelText = "") => (
@@ -7890,7 +8079,7 @@ function AdminDailyShopEditor({ adminShopItems, setAdminShopItems, addToast }) {
       value={fallback ?? ""}
       title={labelText || field}
       onChange={(e) => {
-        const nextVal = field === "cost" ? Math.max(0, Number(e.target.value) || 0) : e.target.value;
+        const nextVal = field === "cost" ? Math.max(0, Number(e.target.value) || 0) : field === "colors" ? String(e.target.value || "").split(/[;,]/).map(x=>x.trim()).filter(Boolean) : ["borderWidth","borderRadius"].includes(field) ? Math.max(0, Number(e.target.value) || 0) : e.target.value;
         const patch = { [field]:nextVal, adminDaily:true, adminDailyHidden:false };
         if (field === "value" && item.type === "icon") patch.emoji = nextVal;
         updateItemDraft(item, patch);
@@ -7912,6 +8101,9 @@ function AdminDailyShopEditor({ adminShopItems, setAdminShopItems, addToast }) {
       {open && (
         <div style={{marginTop:12}}>
           <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>This mirrors today's Daily Shop. Tap the item name, description, price, value, or icon value right on the cards to edit them. Use arrows to move, minus to remove, and restore hidden items below.</div>
+          <div style={{background:"rgba(255,209,102,0.055)",border:"1px solid rgba(255,209,102,0.18)",borderRadius:13,padding:9,display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,alignItems:"center",marginBottom:10}}>
+            {[6,12,24,48].map(h => <button key={h} onClick={()=>setManualShopTimerHours(h)} className="bb-pressable" style={{background:"rgba(255,209,102,0.11)",border:"1px solid rgba(255,209,102,0.25)",borderRadius:9,padding:"7px 6px",fontSize:10,fontWeight:900,color:"#FFD166",cursor:"pointer"}}>timer {h}h</button>)}
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:10}}>
             {tabs.map(t => (
               <button key={t.id} onClick={()=>setTab(t.id)} className="bb-pressable" style={{background:tab===t.id?"#B8FF4D":"rgba(255,255,255,0.045)",border:`1px solid ${tab===t.id?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:10,padding:"8px 0",fontSize:10,fontWeight:900,color:tab===t.id?"#06070D":"#8B92A8",cursor:"pointer"}}>{t.label}</button>
@@ -7962,6 +8154,12 @@ function AdminDailyShopEditor({ adminShopItems, setAdminShopItems, addToast }) {
                       </div>
                       {item.type === "sound" && <input type="file" accept={AUDIO_FILE_ACCEPT} onChange={(e)=>{ const f=e.target.files?.[0]; if(!f)return; const reader=new FileReader(); reader.onload=()=>upsertAdminOverride(item,{ dataUrl:String(reader.result||""), file:String(reader.result||""), adminDaily:true, adminDailyHidden:false },"sound file uploaded","🔊"); reader.readAsDataURL(f); }} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:9,padding:"7px 8px",fontSize:10,color:"#8B92A8",width:"100%"}}/>}
                       {item.type === "background" && inlineInput(item, "background", item.background || getBackgroundPreview(item.value), {fontSize:10,color:"#A78BFA"}, "background CSS")}
+                      {item.type === "text_collage" && inlineInput(item, "collageCss", item.collageCss || getTextCollageCss(item), {fontSize:10,color:"#FF61C1"}, "text collage CSS gradient")}
+                      {item.type === "text_collage" && inlineInput(item, "colors", getTextCollageColors(item).join(","), {fontSize:10,color:"#4D9EFF"}, "#color1,#color2,#color3")}
+                      {item.type === "text_collage" && inlineInput(item, "finish", item.finish || "glow", {fontSize:10,color:"#FFD166"}, "finish: glow/shadow/plain")}
+                      {item.type === "border" && inlineInput(item, "borderColor", item.borderColor || item.value || "#B8FF4D", {fontSize:10,color:item.borderColor || "#B8FF4D"}, "border color")}
+                      {item.type === "border" && inlineInput(item, "borderGlow", item.borderGlow || item.borderColor || "#B8FF4D", {fontSize:10,color:item.borderGlow || "#B8FF4D"}, "border glow color")}
+                      {item.type === "border" && <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>{inlineInput(item, "borderWidth", item.borderWidth || 1, {fontSize:10,color:"#FFD166"}, "border px")}{inlineInput(item, "borderRadius", item.borderRadius || 13, {fontSize:10,color:"#A78BFA"}, "radius")}{inlineInput(item, "borderStyle", item.borderStyle || "solid", {fontSize:10,color:"#8B92A8"}, "solid/dashed")}</div>}
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:7}}>
                         <button onClick={()=>upsertAdminOverride(item, { hideDesc:!item.hideDesc, desc:item.hideDesc ? (item.desc || "captain custom shop item") : "", adminDaily:true, adminDailyHidden:false }, item.hideDesc ? "description shown" : "description removed", item.hideDesc ? "👁️" : "🚫")} className="bb-pressable" style={{background:item.hideDesc?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.045)",border:`1px solid ${item.hideDesc?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"7px",fontSize:9.5,fontWeight:900,color:item.hideDesc?"#FF5C8A":"#8B92A8",cursor:"pointer"}}>{item.hideDesc ? "description off" : "description on"}</button>
                         {item.type === "icon" ? <button onClick={()=>upsertAdminOverride(item, { hideEmoji:!item.hideEmoji, adminDaily:true, adminDailyHidden:false }, item.hideEmoji ? "icon shown" : "icon hidden", item.hideEmoji ? "👁️" : "🚫")} className="bb-pressable" style={{background:item.hideEmoji?"rgba(255,92,138,0.12)":"rgba(255,255,255,0.045)",border:`1px solid ${item.hideEmoji?"rgba(255,92,138,0.28)":"rgba(255,255,255,0.08)"}`,borderRadius:9,padding:"7px",fontSize:9.5,fontWeight:900,color:item.hideEmoji?"#FF5C8A":"#8B92A8",cursor:"pointer"}}>{item.hideEmoji ? "icon hidden" : "icon shown"}</button> : <div style={{background:"rgba(255,255,255,0.025)",border:"1px solid rgba(255,255,255,0.045)",borderRadius:9,padding:"7px",fontSize:9.5,fontWeight:900,color:"#4A5066",textAlign:"center"}}>no emoji</div>}
@@ -8030,6 +8228,7 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
     if (itemType === "title") { const m=getTitleRarityMeta(titleRarity); setCost(m.cost); setEmoji(m.emoji); }
     if (itemType === "icon") { setCost(750); }
     if (itemType === "background") { setCost(1600); setEmoji("▧"); }
+    if (itemType === "text_collage") { setCost(900); setEmoji("▦"); if (!backgroundCss || !backgroundCss.includes("gradient")) setBackgroundCss("linear-gradient(90deg,#B8FF4D,#FF61C1,#4D9EFF,#B8FF4D)"); }
   }, [itemType]);
 
   const targetName = playerNameById(targetId);
@@ -8190,6 +8389,25 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
     reader.readAsDataURL(file);
     if (!label.trim()) setLabel(fileName.replace(/\.[^.]+$/, ""));
   };
+  const addFourthOfJulyReward = async () => {
+    const now = new Date().toISOString();
+    const julyItems = [
+      normalizeAdminShopItem({ id:"july4_icon_fireworks_2026", type:"icon", label:"fireworks icon", desc:"4th of July drop", value:"🎆", emoji:"🎆", cost:0, adminDaily:true, adminOrder:40, adminEdited:true, createdAt:now }),
+      normalizeAdminShopItem({ id:"july4_title_rocket_freedom_2026", type:"title", label:"Rocket Freedom", desc:"limited 4th of July title", value:"Rocket Freedom", rarity:"legendary", cost:0, adminDaily:true, adminOrder:41, adminEdited:true, createdAt:now }),
+      normalizeAdminShopItem({ id:"july4_text_collage_2026", type:"text_collage", label:"fireworks text collage", desc:"red white and blue text finish", value:"july4_fireworks", colors:["#FF5C8A","#FFFFFF","#4D9EFF"], collageCss:"linear-gradient(90deg,#FF5C8A,#FFFFFF,#4D9EFF,#FFD166,#FF5C8A)", finish:"glow", cost:0, adminDaily:true, adminOrder:42, adminEdited:true, createdAt:now }),
+      normalizeAdminShopItem({ id:"july4_bg_fireworks_2026", type:"background", label:"fireworks sky", desc:"limited 4th of July background", value:"july4_fireworks", background:"radial-gradient(circle at 20% 20%, rgba(255,92,138,.34), transparent 24%), radial-gradient(circle at 76% 18%, rgba(255,255,255,.24), transparent 20%), radial-gradient(circle at 70% 78%, rgba(77,158,255,.32), transparent 26%), linear-gradient(135deg,#090B18,#16091A 48%,#071124)", cost:0, adminDaily:true, adminOrder:43, adminEdited:true, createdAt:now }),
+    ].filter(Boolean);
+    const ids = new Set(julyItems.map(i => i.id));
+    const base = Array.isArray(adminShopItems) ? adminShopItems.filter(i => !ids.has(i?.id)) : [];
+    const next = [...julyItems, ...base].slice(0, 220);
+    setAdminShopItems?.(next);
+    cacheAdminShopItems(next);
+    await storeSet(ADMIN_SHOP_ITEMS_KEY, next);
+    await storeSet(`${ADMIN_SHOP_ITEMS_KEY}_backup`, next).catch(() => {});
+    try { window.dispatchEvent(new CustomEvent("bb-admin-shop-updated", { detail: next })); } catch (_) {}
+    addToast?.("4th of July reward shop added", "🎆");
+  };
+
   const createItem = async () => {
     const safeLabel = label.trim() || `${itemType.replace("_", " ")} item`;
     const idBase = safeLabel.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "custom";
@@ -8200,7 +8418,7 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
       desc:desc.trim(),
       cost:Math.max(0, Number(cost) || 0),
       type:itemType,
-      value:itemType === "sound" ? id : itemType === "text_color" ? id : itemType === "title" ? safeLabel : itemType === "background" ? id : value,
+      value:itemType === "sound" ? id : itemType === "text_color" ? id : itemType === "title" ? safeLabel : itemType === "background" ? id : itemType === "text_collage" ? (value || id) : value,
       emoji:itemType === "icon" ? (value || emoji || "✨") : itemType === "title" ? getTitleRarityMeta(titleRarity).emoji : "",
       hideEmoji:itemType !== "icon",
       rarity:itemType === "title" ? titleRarity : undefined,
@@ -8211,6 +8429,9 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
       borderColor:itemType === "border" ? borderColor : undefined,
       borderGlow:itemType === "border" ? textAccent : undefined,
       background:itemType === "background" ? backgroundCss : undefined,
+      colors:itemType === "text_collage" ? [textMain, textMuted, textAccent] : undefined,
+      collageCss:itemType === "text_collage" ? backgroundCss : undefined,
+      finish:itemType === "text_collage" ? "glow" : undefined,
       adminDaily:addToDaily,
       createdAt:new Date().toISOString(),
     });
@@ -8337,6 +8558,7 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
       </div>
       <div style={{height:1,background:"rgba(255,255,255,0.07)",margin:"4px 0 14px"}} />
       <AdminDailyShopEditor adminShopItems={adminShopItems} setAdminShopItems={setAdminShopItems} addToast={addToast}/>
+      <button onClick={addFourthOfJulyReward} className="bb-pressable" style={{width:"100%",background:"linear-gradient(135deg,rgba(255,92,138,0.18),rgba(77,158,255,0.16))",border:"1px solid rgba(255,255,255,0.12)",borderRadius:13,padding:"11px 12px",fontSize:12,fontWeight:1000,color:"#FFFFFF",cursor:"pointer",marginBottom:14}}>🎆 add 4th of July reward drop</button>
       <div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>create new shop item</div><div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginBottom:10}}>Use this to add new items. The live editor above changes today's actual shop layout and text.</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         <select value={itemType} onChange={e=>setItemType(e.target.value)} style={inputStyle}>
@@ -8353,6 +8575,11 @@ function AdminGrantControls({ points, setPoints, passXP, setPassXP, passPremium,
       )}
       {itemType !== "sound" && itemType !== "text_color" && itemType !== "border" && itemType !== "background" && <input value={value} onChange={e=>setValue(e.target.value)} placeholder="value (emoji, hex, or title)" style={inputStyle}/>}      
       {itemType === "sound" && <><input type="file" accept={AUDIO_FILE_ACCEPT} onChange={onSoundFile} style={{...inputStyle,color:"#8B92A8"}}/><div style={{fontSize:10,color:soundDataUrl?"#7CFFB2":"#4A5066",marginBottom:8}}>{soundDataUrl ? "audio loaded into item" : "upload mp3 / wav / m4a / aac"}</div></>}
+      {itemType === "text_collage" && <div style={{background:"rgba(255,97,193,0.055)",border:"1px solid rgba(255,97,193,0.18)",borderRadius:13,padding:10,marginBottom:8}}>
+        <div style={s.modalLabel}>text collage CSS gradient</div>
+        <textarea value={backgroundCss} onChange={e=>setBackgroundCss(e.target.value)} placeholder="linear-gradient(90deg,#B8FF4D,#FF61C1,#4D9EFF,#B8FF4D)" style={{...inputStyle,minHeight:70,resize:"vertical",fontFamily:"monospace"}}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><input type="color" value={textMain} onChange={e=>setTextMain(e.target.value)} style={inputStyle}/><input type="color" value={textMuted} onChange={e=>setTextMuted(e.target.value)} style={inputStyle}/><input type="color" value={textAccent} onChange={e=>setTextAccent(e.target.value)} style={inputStyle}/></div>
+      </div>}
       {itemType === "text_color" && <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><input type="color" value={textMain} onChange={e=>setTextMain(e.target.value)} style={inputStyle}/><input type="color" value={textMuted} onChange={e=>setTextMuted(e.target.value)} style={inputStyle}/><input type="color" value={textAccent} onChange={e=>setTextAccent(e.target.value)} style={inputStyle}/></div>}
       {itemType === "border" && <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}><input type="color" value={borderColor} onChange={e=>setBorderColor(e.target.value)} style={inputStyle}/><input type="color" value={textAccent} onChange={e=>setTextAccent(e.target.value)} style={inputStyle}/></div>}
       {itemType === "background" && <textarea value={backgroundCss} onChange={e=>setBackgroundCss(e.target.value)} placeholder="CSS background / gradient" style={{...inputStyle,minHeight:70,resize:"vertical"}}/>}
@@ -8969,12 +9196,20 @@ function AdminEngagementSystems({ appCustomizer, setAppCustomizer, addToast }) {
         ["floating_bento","Floating Bento","rounded floating dashboard blocks"],
         ["terminal_blocks","Terminal Blocks","hard terminal/grid control room"],
         ["broadcast_cards","Broadcast Cards","esports broadcast panels"],
-        ["compact_tiles","Compact Tiles","denser mobile-first panels"]
+        ["compact_tiles","Compact Tiles","denser mobile-first panels"],
+        ["split_buttons","Split buttons","left-aligned touch buttons"],
+        ["offset_cards","Offset cards","alternating card positions"],
+        ["large_touch","Large touch","bigger phone hit areas"],
+        ["tiny_scoreboard","Tiny scoreboard","denser stat cards"],
+        ["feed_stack","Feed stack","tighter stacked sections"],
       ].map(([id,label,desc])=><button key={id} onClick={()=>save({uiPanelMode:id}, `${label} UI mode applied`)} className="bb-pressable" style={{background:cfg.uiPanelMode===id?"#A78BFA":"rgba(255,255,255,.05)",border:`1px solid ${cfg.uiPanelMode===id?"#A78BFA":"rgba(255,255,255,.08)"}`,borderRadius:12,padding:10,textAlign:"left",color:cfg.uiPanelMode===id?"#06070D":"#E8ECF4",fontWeight:900,fontSize:11}}>{label}<div style={{fontSize:9.5,color:cfg.uiPanelMode===id?"#21173D":"#8B92A8",fontWeight:700,marginTop:3}}>{desc}</div></button>)}</div>
       <div style={{fontSize:10,color:"#FF61C1",fontWeight:900,textTransform:"uppercase",margin:"10px 0 8px"}}>team chat animation style</div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>{[
         ["none","none"],["slide","slide"],["pop","pop"],["float","float"],["spring","spring"],["glow","glow"]
       ].map(([id,label])=><button key={id} onClick={()=>save({chatAnimationStyle:id}, `chat animation: ${label}`)} className="bb-pressable" style={{background:cfg.chatAnimationStyle===id?"rgba(255,97,193,.18)":"rgba(255,255,255,.05)",border:`1px solid ${cfg.chatAnimationStyle===id?"rgba(255,97,193,.38)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:9,color:cfg.chatAnimationStyle===id?"#FF61C1":"#8B92A8",fontWeight:900,fontSize:10}}>{label}</button>)}</div>
+    </AdminCollapse>
+    <AdminCollapse title="open loops text" subtitle="edit the ticker cards shown in Open Loops" accent="#FFD166">
+      {(() => { const openLoopCopyRows = ["jobs","rareShop","stocks","schedule","economy","pass","social","news","court","appeal","chaos","idle"]; const loopCopy = safeObj(cfg.openLoopsConfig.copy); return <div style={{display:"grid",gap:8}}>{openLoopCopyRows.map(type => { const row=safeObj(loopCopy[type]); const saveLoop=(patch)=>updateNested("openLoopsConfig",{copy:{...loopCopy,[type]:{...row,...patch}}},"open loops text saved"); return <div key={type} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:12,padding:9}}><div style={{fontSize:10,color:"#FFD166",fontWeight:900,textTransform:"uppercase",marginBottom:7}}>{type}</div><div style={{display:"grid",gridTemplateColumns:"44px 1fr",gap:7,marginBottom:7}}><input defaultValue={row.emoji || ""} onBlur={e=>saveLoop({emoji:e.target.value})} placeholder="emoji" style={inputStyle}/><input defaultValue={row.title || ""} onBlur={e=>saveLoop({title:e.target.value})} placeholder="title override" style={inputStyle}/></div><input defaultValue={row.text || ""} onBlur={e=>saveLoop({text:e.target.value})} placeholder="small text override" style={{...inputStyle,width:"100%"}}/></div>; })}</div>; })()}
     </AdminCollapse>
     <AdminCollapse title="jobs board" subtitle="difficulty timers, payouts, and job option text" accent="#B8FF4D">
       <button onClick={()=>updateNested("jobsConfig",{enabled:!cfg.jobsConfig.enabled},cfg.jobsConfig.enabled?"jobs off":"jobs on")} style={{...inputStyle,width:"100%",color:cfg.jobsConfig.enabled?"#B8FF4D":"#8B92A8",fontWeight:900,marginBottom:10}}>jobs {cfg.jobsConfig.enabled?"on":"off"}</button>
@@ -9047,6 +9282,67 @@ function AdminCollapse({ title, subtitle, accent = "#B8FF4D", children, defaultO
   );
 }
 
+function AdminPremiumFeelControls({ appCustomizer, setAppCustomizer, addToast }) {
+  const cfg = normalizeAppCustomizer(appCustomizer || {});
+  const premium = normalizePremiumFeelSettings(cfg.premiumFeel);
+  const activeCount = PREMIUM_FEEL_CONTROLS.filter(item => premium[item.id]).length;
+  const savePremium = async (nextPremium, msg = "premium feel settings saved") => {
+    const safePremium = normalizePremiumFeelSettings(nextPremium);
+    await saveAppCustomizer(normalizeAppCustomizer({ ...cfg, premiumFeel:safePremium }), setAppCustomizer, addToast, msg);
+  };
+  const toggleMaster = () => savePremium({ ...premium, enabled:!premium.enabled }, !premium.enabled ? "premium feel lab enabled" : "premium feel lab disabled");
+  const toggleOne = (id) => savePremium({ ...premium, [id]:!premium[id] }, `${PREMIUM_FEEL_CONTROLS.find(i => i.id === id)?.label || id} ${premium[id] ? "off" : "on"}`);
+  const turnAllOn = () => savePremium({ ...Object.fromEntries(Object.keys(DEFAULT_PREMIUM_FEEL_SETTINGS).map(k => [k, true])) }, "all premium tests on");
+  const turnAllOff = () => savePremium({ ...DEFAULT_PREMIUM_FEEL_SETTINGS }, "all premium tests off");
+  const cardStyle = (on, accent = "#7CFFB2") => ({
+    background:on ? bbAlpha(accent,.13) : "rgba(255,255,255,0.045)",
+    border:`1px solid ${on ? bbAlpha(accent,.34) : "rgba(255,255,255,0.08)"}`,
+    borderRadius:14,
+    padding:12,
+    textAlign:"left",
+    cursor:"pointer",
+    minHeight:104,
+  });
+  return (
+    <div>
+      <div style={{background:"linear-gradient(135deg,rgba(124,255,178,0.12),rgba(77,158,255,0.06))",border:"1px solid rgba(124,255,178,0.24)",borderRadius:16,padding:13,marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:10}}>
+          <div>
+            <div style={{fontSize:10,color:"#7CFFB2",fontWeight:1000,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>testing layer · default off</div>
+            <div style={{fontSize:18,color:"#E8ECF4",fontWeight:1000,lineHeight:1.05}}>Premium Feel Lab</div>
+            <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.4,marginTop:6}}>Turn polish systems on one at a time. If the master switch is off, none of these visual tests apply.</div>
+          </div>
+          <div style={{fontSize:10,color:premium.enabled ? "#7CFFB2" : "#FF5C8A",fontWeight:1000,textTransform:"uppercase",whiteSpace:"nowrap"}}>{premium.enabled ? `${activeCount} active` : "off"}</div>
+        </div>
+        <button onClick={toggleMaster} className="bb-pressable" style={{width:"100%",background:premium.enabled?"#7CFFB2":"rgba(255,255,255,0.055)",border:`1px solid ${premium.enabled?"#7CFFB2":"rgba(255,255,255,0.10)"}`,borderRadius:13,padding:"11px 0",fontSize:12,fontWeight:1000,color:premium.enabled?"#06070D":"#8B92A8",cursor:"pointer"}}>
+          {premium.enabled ? "premium feel lab is ON" : "premium feel lab is OFF"}
+        </button>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+          <button onClick={turnAllOn} className="bb-pressable" style={{background:"rgba(184,255,77,0.10)",border:"1px solid rgba(184,255,77,0.28)",borderRadius:11,padding:"9px 0",fontSize:10.5,fontWeight:1000,color:"#B8FF4D",cursor:"pointer"}}>turn all on</button>
+          <button onClick={turnAllOff} className="bb-pressable" style={{background:"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.28)",borderRadius:11,padding:"9px 0",fontSize:10.5,fontWeight:1000,color:"#FF5C8A",cursor:"pointer"}}>turn all off</button>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(158px,1fr))",gap:8}}>
+        {PREMIUM_FEEL_CONTROLS.map((item, idx) => {
+          const on = !!premium[item.id];
+          const accent = ["#7CFFB2","#4D9EFF","#A78BFA","#FFD166","#FF61C1"][idx % 5];
+          return (
+            <button key={item.id} onClick={()=>toggleOne(item.id)} className="bb-pressable" style={cardStyle(on, accent)}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                <div style={{fontSize:18}}>{item.emoji}</div>
+                <div style={{fontSize:9.5,color:on?accent:"#4A5066",fontWeight:1000,letterSpacing:.8,textTransform:"uppercase",marginLeft:"auto"}}>{on ? "on" : "off"}</div>
+              </div>
+              <div style={{fontSize:12.5,color:on?"#E8ECF4":"#8B92A8",fontWeight:1000,lineHeight:1.18}}>{item.label}</div>
+              <div style={{fontSize:10.2,color:"#4A5066",lineHeight:1.35,marginTop:6}}>{item.desc}</div>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{fontSize:10.5,color:"#4A5066",lineHeight:1.4,marginTop:10}}>Saved in app customizer. These only touch visual polish classes and do not change points, stats, shop data, bets, jobs, or sync logic.</div>
+    </div>
+  );
+}
+
 function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, addToast, completions, setCompletions, passXP, setPassXP, passPremium, setPassPremium, parseCredits, setParseCredits, creditRequests, setCreditRequests, points, setPoints, adminShopItems, setAdminShopItems, navPosition = "top", setNavPosition, tabAnimationStyle = "float", setTabAnimationStyle, fullScreenFloatMode = true, setFullScreenFloatMode, appCustomizer, setAppCustomizer, comments = {}, setComments, currentPlayer = ADMIN_ID, burtonOS, setBurtonOS }) {
   const [assigning,setAssigning]=useState(null);
   const [activePlayerTab,setActivePlayerTab]=useState(PLAYERS[0].id);
@@ -9068,6 +9364,10 @@ function AdminTab({ trainingData, setTrainingData, mmrProfiles, setMmrProfiles, 
 
       <AdminCollapse title="app command center" subtitle="tabs, text, borders, motion, box order" accent="#FFD166">
         <AdminAppCommandCenter appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
+      </AdminCollapse>
+
+      <AdminCollapse title="premium feel lab" subtitle="turn Apple-style polish tests on/off" accent="#7CFFB2">
+        <AdminPremiumFeelControls appCustomizer={appCustomizer} setAppCustomizer={setAppCustomizer} addToast={addToast}/>
       </AdminCollapse>
 
       <AdminCollapse title="tab box layout manager" subtitle="drag, reorder, rename, and hide boxes per tab" accent="#4D9EFF">
@@ -11322,7 +11622,19 @@ const FLOWER_TYPES = [
   { id: "daisy",      emoji: "🌼", label: "Daisy",      xp: 25,  desc: "solid effort" },
 ];
 
-function getDailyShopSeed() {
+function getManualShopResetAtMs(adminShopItems = null) {
+  try {
+    const list = Array.isArray(adminShopItems) ? adminShopItems : getAdminShopItemsSync();
+    const meta = (Array.isArray(list) ? list : []).find(i => i?.id === "__shop_timer");
+    const raw = meta?.resetAt || (typeof localStorage !== "undefined" ? localStorage.getItem("bb_shop_manual_reset_at") : "");
+    const t = raw ? safeDateObj(raw, null).getTime() : NaN;
+    return Number.isFinite(t) && t > Date.now() ? t : 0;
+  } catch (_) { return 0; }
+}
+
+function getDailyShopSeed(adminShopItems = null) {
+  const manualResetMs = getManualShopResetAtMs(adminShopItems);
+  if (manualResetMs) return manualResetMs - DAY_MS;
   const now = new Date();
   const noon = new Date(now);
   noon.setHours(12, 0, 0, 0);
@@ -11331,7 +11643,7 @@ function getDailyShopSeed() {
 }
 
 function getDailyShopItems(adminShopItems = null) {
-  const seed = getDailyShopSeed();
+  const seed = getDailyShopSeed(adminShopItems);
   const rawAdmin = Array.isArray(adminShopItems) ? adminShopItems.map(normalizeAdminShopItem).filter(Boolean) : getAdminShopItemsSync();
   const touchedTypes = new Set(rawAdmin.filter(i => i.adminEdited || i.adminDaily || i.adminDailyHidden || i.inDailyShop).map(i => i.type));
   const allShopItems = getAllShopItems(rawAdmin).filter(i => !i.adminDailyHidden && !i.adminHidden && !String(i.id || "").startsWith("__"));
@@ -11362,10 +11674,13 @@ function getDailyShopItems(adminShopItems = null) {
     ...byType("border", 1505),
     ...byType("sound", 1606),
     ...byType("background", 1707),
+    ...byType("text_collage", 1808),
   ];
 }
 
-function getTimeUntilNextShop() {
+function getTimeUntilNextShop(adminShopItems = null) {
+  const manualResetMs = getManualShopResetAtMs(adminShopItems);
+  if (manualResetMs) return manualResetMs - Date.now();
   const now = new Date();
   const next = new Date(now);
   next.setHours(12, 0, 0, 0);
@@ -11380,6 +11695,7 @@ function getNormalizedShopCost(item, idx = 0) {
   if (type === "color" || type === "text_color") return 350;
   if (type === "title") return 500;
   if (type === "border") return 1000;
+  if (type === "text_collage") return 900;
   if (type === "sound") return 1500;
   if (type === "background") {
     const low = new Set(["carbon", "spring", "turf", "moss", "midnight"]);
@@ -11952,6 +12268,58 @@ const DEFAULT_COURT_PUNISHMENTS = {
   team_sold:{ enabled:true, fineEnabled:false, fineAmount:0, curseEnabled:false, curseId:"", titleEnabled:false, title:"", stateEnabled:true, stateId:"revenge" },
   lying:{ enabled:true, fineEnabled:true, fineAmount:100, curseEnabled:true, curseId:"false_accuser", titleEnabled:true, title:"False Accuser", stateEnabled:false, stateId:"tilt" },
 };
+const DEFAULT_PREMIUM_FEEL_SETTINGS = {
+  enabled:false,
+  animatedBackground:false,
+  glassCards:false,
+  springButtons:false,
+  pageTransitions:false,
+  rewardPop:false,
+  skeletonLoaders:false,
+  shopRarityGlow:false,
+  bottomSheets:false,
+  animatedNumbers:false,
+  progressBars:false,
+  liveActivity:false,
+  emptyStates:false,
+};
+const PREMIUM_FEEL_CONTROLS = [
+  { id:"animatedBackground", label:"animated app background", emoji:"🌌", desc:"adds moving aura, grain, and depth behind the app" },
+  { id:"glassCards", label:"premium glass cards", emoji:"🪟", desc:"turns cards into layered glass panels with inner shine" },
+  { id:"springButtons", label:"spring button feedback", emoji:"👆", desc:"stronger tap/press feedback so controls feel native" },
+  { id:"pageTransitions", label:"app page transitions", emoji:"↗️", desc:"soft slide/blur movement when screens and sections arrive" },
+  { id:"rewardPop", label:"reward pop ceremony", emoji:"🎁", desc:"toasts and claims pop with a bigger premium reveal motion" },
+  { id:"skeletonLoaders", label:"skeleton loading shimmer", emoji:"▰", desc:"loading/empty blocks get a polished shimmer treatment" },
+  { id:"shopRarityGlow", label:"shop rarity glow", emoji:"💎", desc:"shop cards breathe and glow by rarity/item type" },
+  { id:"bottomSheets", label:"iOS bottom sheets", emoji:"⌃", desc:"modals lean into glassy bottom sheet motion" },
+  { id:"animatedNumbers", label:"animated numbers", emoji:"🔢", desc:"stats and balances get a subtle roll/bump feel" },
+  { id:"progressBars", label:"animated progress bars", emoji:"📊", desc:"progress fills animate smoother with a shine pass" },
+  { id:"liveActivity", label:"live activity motion", emoji:"⚡", desc:"feeds, notifications, and activity rows feel more alive" },
+  { id:"emptyStates", label:"premium empty states", emoji:"○", desc:"blank areas get more intentional depth and motion" },
+];
+const PREMIUM_FEEL_BODY_CLASS_BY_KEY = {
+  animatedBackground:"bb-premium-bg",
+  glassCards:"bb-premium-glass",
+  springButtons:"bb-premium-spring",
+  pageTransitions:"bb-premium-page",
+  rewardPop:"bb-premium-reward",
+  skeletonLoaders:"bb-premium-skeleton",
+  shopRarityGlow:"bb-premium-shop-glow",
+  bottomSheets:"bb-premium-sheets",
+  animatedNumbers:"bb-premium-numbers",
+  progressBars:"bb-premium-progress",
+  liveActivity:"bb-premium-activity",
+  emptyStates:"bb-premium-empty",
+};
+function normalizePremiumFeelSettings(input = {}) {
+  const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  return Object.fromEntries(Object.keys(DEFAULT_PREMIUM_FEEL_SETTINGS).map(key => [key, !!src[key]]));
+}
+function premiumFeelIsActive(settings, key) {
+  const cfg = normalizePremiumFeelSettings(settings);
+  return !!cfg.enabled && !!cfg[key];
+}
+
 const DEFAULT_APP_CUSTOMIZER = {
   hiddenTabs: {},
   tabOrder: DEFAULT_APP_TAB_ORDER,
@@ -11967,6 +12335,7 @@ const DEFAULT_APP_CUSTOMIZER = {
   animationDepth: "normal",
   buttonMotion: "normal",
   ambientFx: true,
+  premiumFeel: DEFAULT_PREMIUM_FEEL_SETTINGS,
   enabledBoxes: DEFAULT_BURTON_BOXES,
   tabBoxLayout: DEFAULT_TAB_BOX_LAYOUT,
   courtPunishments: DEFAULT_COURT_PUNISHMENTS,
@@ -11981,7 +12350,7 @@ const DEFAULT_APP_CUSTOMIZER = {
   economyEventConfig: { enabled:true, inflationThreshold:82, crashThreshold:28, luxuryTaxThreshold:0.62, stimulusLoginBonus:250, eventDurationHours:24 },
   scheduleConfig: { enabled:true, pingRespectAvailability:true, reminderMinutes:15, defaultSessionTitle:"Burton session" },
   appealConfig: { enabled:true, cost:250, refundOnWin:true, doublePunishOnFail:true, votesNeeded:2 },
-  openLoopsConfig: { enabled:true, rotationSeconds:5, showNews:true, showRareShop:true, showCourt:true, showJobs:true, showSchedule:true, showEconomy:true },
+  openLoopsConfig: { enabled:true, rotationSeconds:5, showNews:true, showRareShop:true, showCourt:true, showJobs:true, showSchedule:true, showEconomy:true, copy:{} },
   finishStyle:"neon_pro",
   uiPanelMode:"default",
   chatAnimationStyle:"slide",
@@ -12345,7 +12714,7 @@ function normalizeStockMarketConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER
 function normalizeEconomyEventConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.economyEventConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, inflationThreshold:Math.max(1,Math.min(100,Math.round(Number(s.inflationThreshold ?? b.inflationThreshold)||82))), crashThreshold:Math.max(0,Math.min(99,Math.round(Number(s.crashThreshold ?? b.crashThreshold)||28))), luxuryTaxThreshold:Math.max(.1,Math.min(.95,Number(s.luxuryTaxThreshold ?? b.luxuryTaxThreshold)||.62)), stimulusLoginBonus:Math.max(0,Math.min(10000,Math.round(Number(s.stimulusLoginBonus ?? b.stimulusLoginBonus)||250))), eventDurationHours:Math.max(1,Math.min(168,Math.round(Number(s.eventDurationHours ?? b.eventDurationHours)||24))) }; }
 function normalizeScheduleConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.scheduleConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, pingRespectAvailability:s.pingRespectAvailability !== false, reminderMinutes:Math.max(0,Math.min(1440,Math.round(Number(s.reminderMinutes ?? b.reminderMinutes)||30))), defaultSessionTitle:String(s.defaultSessionTitle || b.defaultSessionTitle || "Burton session").slice(0,64) }; }
 function normalizeAppealConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.appealConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, cost:Math.max(0,Math.min(10000,Math.round(Number(s.cost ?? b.cost)||250))), refundOnWin:s.refundOnWin !== false, doublePunishOnFail:s.doublePunishOnFail !== false, votesNeeded:Math.max(1,Math.min(3,Math.round(Number(s.votesNeeded ?? b.votesNeeded)||2))) }; }
-function normalizeOpenLoopsConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.openLoopsConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, rotationSeconds:Math.max(2,Math.min(30,Math.round(Number(s.rotationSeconds ?? b.rotationSeconds)||5))), showNews:s.showNews !== false, showRareShop:s.showRareShop !== false, showCourt:s.showCourt !== false, showJobs:s.showJobs !== false, showSchedule:s.showSchedule !== false, showEconomy:s.showEconomy !== false }; }
+function normalizeOpenLoopsConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.openLoopsConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, rotationSeconds:Math.max(2,Math.min(30,Math.round(Number(s.rotationSeconds ?? b.rotationSeconds)||5))), showNews:s.showNews !== false, showRareShop:s.showRareShop !== false, showCourt:s.showCourt !== false, showJobs:s.showJobs !== false, showSchedule:s.showSchedule !== false, showEconomy:s.showEconomy !== false, copy:safeObj(s.copy || b.copy || {}) }; }
 
 
 function normalizeWeeklyAdminConfig(input = {}) {
@@ -12507,6 +12876,7 @@ function normalizeAppCustomizer(cfg = {}) {
     tabBoxLayout,
     courtPunishments,
     burtonOptionPools,
+    premiumFeel: normalizePremiumFeelSettings(src.premiumFeel || src.premiumUi || {}),
     tabOrder,
     boxOrder: { ...DEFAULT_APP_CUSTOMIZER.boxOrder, ...boxOrderSrc },
     hideBorders: !!src.hideBorders,
@@ -12529,7 +12899,7 @@ function normalizeAppCustomizer(cfg = {}) {
     appealConfig: normalizeAppealConfig(src.appealConfig),
     openLoopsConfig: normalizeOpenLoopsConfig(src.openLoopsConfig),
     finishStyle: ["default","neon_pro","glass_final","tournament_broadcast","minimal_compact","arcade_luxe","midnight_terminal","sunset_glass","ice_blue","purple_haze","carbon_lime","whiteout","redline","ocean","gold_room"].includes(src.finishStyle) ? src.finishStyle : DEFAULT_APP_CUSTOMIZER.finishStyle,
-    uiPanelMode: ["default","glass_panels","floating_bento","terminal_blocks","broadcast_cards","compact_tiles"].includes(src.uiPanelMode) ? src.uiPanelMode : DEFAULT_APP_CUSTOMIZER.uiPanelMode,
+    uiPanelMode: ["default","glass_panels","floating_bento","terminal_blocks","broadcast_cards","compact_tiles","split_buttons","offset_cards","large_touch","tiny_scoreboard","feed_stack"].includes(src.uiPanelMode) ? src.uiPanelMode : DEFAULT_APP_CUSTOMIZER.uiPanelMode,
     chatAnimationStyle: ["none","slide","pop","float","spring","glow"].includes(src.chatAnimationStyle) ? src.chatAnimationStyle : DEFAULT_APP_CUSTOMIZER.chatAnimationStyle,
     underConstruction: safeObj(src.underConstruction),
     weeklyAdmin: normalizeWeeklyAdminConfig(src.weeklyAdmin),
@@ -12574,6 +12944,30 @@ async function saveAppCustomizer(nextCustomizer, setAppCustomizer, addToast, mes
   return safe;
 }
 
+function getTextCollageColors(item = {}) {
+  const raw = Array.isArray(item?.colors) ? item.colors : String(item?.colors || "").split(/[;,]/);
+  const colors = raw.map(c => String(c || "").trim()).filter(c => /^#[0-9a-f]{6}$/i.test(c));
+  return colors.length ? colors.slice(0, 5) : ["#B8FF4D", "#FF61C1", "#4D9EFF"];
+}
+function getTextCollageCss(item = {}) {
+  const raw = String(item?.collageCss || item?.background || "").trim();
+  if (raw) return raw;
+  const val = String(item?.value || "").trim();
+  if (/gradient\s*\(/i.test(val)) return val;
+  const colors = getTextCollageColors(item);
+  return `linear-gradient(90deg, ${colors.join(", ")}, ${colors[0]})`;
+}
+function getTextCollagePreviewStyle(item = {}) {
+  const colors = getTextCollageColors(item);
+  return {
+    backgroundImage:getTextCollageCss(item),
+    WebkitBackgroundClip:"text",
+    backgroundClip:"text",
+    color:"transparent",
+    textShadow:String(item?.finish || "").toLowerCase().includes("glow") ? `0 0 9px ${colors[0]}66` : "none",
+  };
+}
+
 function normalizeAdminShopItem(item, idx = 0) {
   if (!item || typeof item !== "object") return null;
   const type = item.type || "icon";
@@ -12584,7 +12978,8 @@ function normalizeAdminShopItem(item, idx = 0) {
   const hasEmoji = Object.prototype.hasOwnProperty.call(item, "emoji");
   const rawDesc = hasDesc ? String(item.desc ?? item.description ?? "") : "";
   const rawEmoji = type === "icon" ? (hasEmoji ? String(item.emoji ?? "") : String(item.value || "✨")) : "";
-  const normalizedValue = item.value || (type === "sound" ? id : type === "title" ? label : type === "icon" ? (rawEmoji || "✨") : label);
+  const normalizedValue = item.value || (type === "sound" ? id : type === "title" ? label : type === "icon" ? (rawEmoji || "✨") : type === "text_collage" ? id : label);
+  const collageColors = type === "text_collage" ? getTextCollageColors(item) : item.colors;
   return {
     ...item,
     id,
@@ -12598,6 +12993,14 @@ function normalizeAdminShopItem(item, idx = 0) {
     hideEmoji: type === "icon" ? !!item.hideEmoji : true,
     onSale: !!item.onSale,
     saleLabel: String(item.saleLabel || "ON SALE").trim() || "ON SALE",
+    colors:collageColors,
+    collageCss:type === "text_collage" ? getTextCollageCss({ ...item, colors:collageColors, value:normalizedValue }) : item.collageCss,
+    finish:type === "text_collage" ? String(item.finish || "glow") : item.finish,
+    borderColor:type === "border" ? (item.borderColor || item.value || "#B8FF4D") : item.borderColor,
+    borderGlow:type === "border" ? (item.borderGlow || item.borderColor || item.value || "#B8FF4D") : item.borderGlow,
+    borderWidth:type === "border" ? (item.borderWidth || 1) : item.borderWidth,
+    borderRadius:type === "border" ? (item.borderRadius || 13) : item.borderRadius,
+    borderStyle:type === "border" ? (item.borderStyle || "solid") : item.borderStyle,
     rarity: type === "title" ? getTitleRarityMeta(item.rarity || item.titleRarity || "common").id : item.rarity,
     unlockSource: type === "title" ? String(item.unlockSource || "admin") : item.unlockSource,
     custom:true,
@@ -12996,8 +13399,13 @@ function getEquippedShopItemByType(points, playerId, type) {
 function getPresenceBorderVisualStyle(points, playerId, online = false) {
   const item = getEquippedShopItemByType(points, playerId, "border");
   if (!item) return { border:`1px solid ${online?"rgba(124,255,178,0.15)":"rgba(255,255,255,0.05)"}` };
-  if (item?.custom && item.borderColor) {
-    return { border:`1px solid ${item.borderColor}`, boxShadow:`0 0 0 1px ${item.borderColor}22, 0 0 24px ${item.borderGlow || item.borderColor}26` };
+  if (item?.custom && (item.borderColor || /^#[0-9a-f]{6}$/i.test(String(item.value || "")))) {
+    const color = item.borderColor || item.value || "#B8FF4D";
+    const glow = item.borderGlow || color;
+    const width = Math.max(1, Math.min(8, Number(item.borderWidth) || 1));
+    const radius = Math.max(0, Math.min(34, Number(item.borderRadius) || 13));
+    const style = ["solid","dashed","dotted","double"].includes(String(item.borderStyle || "").toLowerCase()) ? String(item.borderStyle).toLowerCase() : "solid";
+    return { border:`${width}px ${style} ${color}`, borderRadius:radius, boxShadow:`0 0 0 1px ${color}22, 0 0 24px ${glow}26` };
   }
   const map = {
     lime:   { border:"1px solid rgba(184,255,77,0.62)", boxShadow:"0 0 0 1px rgba(184,255,77,0.12), 0 0 22px rgba(184,255,77,0.13)" },
@@ -13392,7 +13800,7 @@ function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, po
   const [shopTitleRarity, setShopTitleRarity] = useState("all");
   const [showRecap, setShowRecap] = useState(false);
   const [showFlowers, setShowFlowers] = useState(false);
-  const [shopCountdown, setShopCountdown] = useState(getTimeUntilNextShop());
+  const [shopCountdown, setShopCountdown] = useState(() => getTimeUntilNextShop(adminShopItems));
   const dailyShopItems = getDailyShopItems(adminShopItems);
   const allShopItems = getAllShopItems(adminShopItems);
   const [flowerTarget, setFlowerTarget] = useState(null);
@@ -13404,8 +13812,17 @@ function PresenceTab({ presence, setPresence, pings, setPings, currentPlayer, po
   const [voicePresence, setVoicePresence] = useState({});
 
 useEffect(() => {
-  const iv = setInterval(() => setShopCountdown(getTimeUntilNextShop()), 30000);
+  setShopCountdown(getTimeUntilNextShop(adminShopItems));
+  const iv = setInterval(() => setShopCountdown(getTimeUntilNextShop(adminShopItems)), 30000);
   return () => clearInterval(iv);
+}, [adminShopItems]);
+useEffect(() => {
+  const handler = (e) => {
+    const detail = e?.detail || {};
+    if (detail.openShop) setShowShop(true);
+  };
+  window.addEventListener("bb-navigate-tab", handler);
+  return () => window.removeEventListener("bb-navigate-tab", handler);
 }, []);
 const myModeLocalUntilRef = useRef(0);
 useEffect(() => {
@@ -13550,6 +13967,7 @@ const toggleEquip = async (itemId) => {
       : item.type === "title" ? titleRarity.color
       : item.type === "color" && /^#[0-9a-f]{6}$/i.test(String(item.value || "")) ? item.value
       : item.type === "text_color" && TEXT_KIT_PRESETS[item.value]?.accent ? TEXT_KIT_PRESETS[item.value].accent
+      : item.type === "text_collage" ? getTextCollageColors(item)[0]
       : playerColor;
     const priceBoxVisual = getShopPriceBoxVisual(item, canAfford, accent, appCustomizer);
     const isCustomBg = item.type === "background" && item.value === "custom";
@@ -13557,9 +13975,11 @@ const toggleEquip = async (itemId) => {
       ? <div style={{width:42,height:42,borderRadius:10,flexShrink:0,background:item.background || getBackgroundPreview(item.value),border:"1px solid rgba(255,255,255,0.08)"}} />
       : item.type === "border"
         ? <div style={{height:36,borderRadius:10,marginBottom:8,background:"linear-gradient(135deg,#11131F,#0C0E18)",...getPresenceBorderVisualStyle({ [currentPlayer + "_owned"]:[item.id], [currentPlayer + "_equipped"]:{ [item.id]:true } }, currentPlayer, true)}} />
+        : item.type === "text_collage"
+        ? <div style={{fontSize:22,marginBottom:6,fontWeight:1000,...getTextCollagePreviewStyle(item)}}>Aa</div>
         : <div style={{fontSize:item.type === "icon" ? 28 : item.type === "sound" ? 13 : 22,marginBottom:6,color:accent,fontWeight:900}}>{getShopItemRevealIcon(item)}</div>;
     return (
-      <div key={item.id} style={{background:isEquipped?`${accent}14`:"rgba(255,255,255,0.03)",borderRadius:14,padding:item.type === "background" ? "12px 14px" : "12px",border:`1px solid ${isEquipped?`${accent}55`:isOwned?"rgba(255,255,255,0.12)":"rgba(255,255,255,0.06)"}`,display:item.type === "background"?"flex":"block",alignItems:"center",gap:12,textAlign:item.type === "background"?"left":"center"}}>
+      <div key={item.id} className={`bb-shop-item-card bb-shop-rarity-${item.type === "title" ? titleRarity.id : String(item.rarity || item.type || "item").replace(/[^a-z0-9_-]/gi,"_").toLowerCase()}`} style={{background:isEquipped?`${accent}14`:"rgba(255,255,255,0.03)",borderRadius:14,padding:item.type === "background" ? "12px 14px" : "12px",border:`1px solid ${isEquipped?`${accent}55`:isOwned?"rgba(255,255,255,0.12)":"rgba(255,255,255,0.06)"}`,display:item.type === "background"?"flex":"block",alignItems:"center",gap:12,textAlign:item.type === "background"?"left":"center"}}>
         {preview}
         <div style={{flex:1,minWidth:0}}>
           {(() => {
@@ -13908,7 +14328,7 @@ await storeSetWithPush("pings", pingUpd2);
           onWheel={(e)=>e.preventDefault()}
           style={{position:"fixed",inset:0,zIndex:9999,padding:"calc(env(safe-area-inset-top) + 118px) 16px 0",display:"flex",alignItems:"flex-start",justifyContent:"center",pointerEvents:"auto",touchAction:"none",overscrollBehavior:"none",background:"linear-gradient(180deg,rgba(0,0,0,0.28),rgba(0,0,0,0.10) 46%,rgba(0,0,0,0.02))",backdropFilter:"blur(2px)",WebkitBackdropFilter:"blur(2px)",animation:"dropDown .18s cubic-bezier(.2,.8,.2,1)"}}
         >
-          <div style={{width:"100%",maxWidth:340,textAlign:"center",background:"linear-gradient(135deg,rgba(17,19,31,0.98),rgba(8,10,18,0.98))",border:"1px solid rgba(255,209,102,0.40)",borderRadius:24,padding:16,boxShadow:"0 22px 62px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,209,102,0.06)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",pointerEvents:"auto",touchAction:"manipulation",overflow:"hidden"}}>
+          <div className="bb-reward-reveal-card" style={{width:"100%",maxWidth:340,textAlign:"center",background:"linear-gradient(135deg,rgba(17,19,31,0.98),rgba(8,10,18,0.98))",border:"1px solid rgba(255,209,102,0.40)",borderRadius:24,padding:16,boxShadow:"0 22px 62px rgba(0,0,0,0.52), 0 0 0 1px rgba(255,209,102,0.06)",backdropFilter:"blur(14px)",WebkitBackdropFilter:"blur(14px)",pointerEvents:"auto",touchAction:"manipulation",overflow:"hidden"}}>
             {!purchaseReveal.opened ? (
               <button onClick={()=>setPurchaseReveal(r=>({...r,opened:true}))} className="bb-pressable" style={{background:"none",border:"none",cursor:"pointer",width:"100%",padding:0}}>
                 <div style={{fontSize:48,filter:"drop-shadow(0 12px 24px rgba(255,209,102,0.25))"}}>🎁</div>
@@ -15061,6 +15481,12 @@ function getBetSettleAt(bet) {
 
 function getBetResultFromGame(bet, game) {
   if (!game) return { status:"void", note:"no logged game before settlement" };
+  if (bet?.field === "__match_win" || bet?.type === "match_winner") {
+    const wonGame = gameIsWin(game);
+    const pickedWin = String(bet.side || "").toLowerCase() === "over" || String(bet.pick || "").toLowerCase() === "win";
+    const hit = pickedWin ? wonGame : !wonGame;
+    return { status:hit ? "won" : "lost", note:`${game.playerName || bet.playerName || "player"} ${wonGame ? "won" : "lost"} ${getBetMode(bet)}`, actual:wonGame ? 1 : 0, targetGameId:game.id };
+  }
   const value = Number(game?.[bet.field]);
   const line = Number(bet.line);
   if (!Number.isFinite(value) || !Number.isFinite(line)) return { status:"void", note:"missing stat data" };
@@ -15106,6 +15532,11 @@ function getBetAwardAmount(bet = {}, status = "", result = {}) {
 }
 
 function formatSingleBetTitle(bet = {}) {
+  if (bet?.type === "match_winner" || bet?.field === "__match_win") {
+    const subject = bet.playerName || playerNameById(bet.playerId) || "player";
+    const pick = String(bet.side || "").toLowerCase() === "over" ? "to win" : "to lose";
+    return `${subject} ${getBetMode(bet)} ${pick}`;
+  }
   if (bet?.type === "rivalry") {
     const pick = bet.pickPlayerName || playerNameById(bet.pickPlayerId) || "player";
     const opp = bet.opponentPlayerName || playerNameById(bet.opponentPlayerId) || "opponent";
@@ -16906,6 +17337,65 @@ const renderCustomPropBuilder = () => (
   </div>
 );
 
+const getWinLossPickData = (mode) => {
+  const history = sanitizeStatsForRender(stats).filter(g => g.playerId === currentPlayer && normalizeGameMode(g.mode) === normalizeGameMode(mode)).sort((a,b)=>safeDateObj(b.ts).getTime()-safeDateObj(a.ts).getTime()).slice(0, 24);
+  const wins = history.filter(gameIsWin).length;
+  const total = history.length;
+  const winPct = Math.max(0.12, Math.min(0.88, (wins + 2) / (total + 4)));
+  return { mode:normalizeGameMode(mode), total, wins, losses:Math.max(0,total-wins), winPct, losePct:1-winPct, winOdds:calcOdds(winPct), loseOdds:calcOdds(1-winPct) };
+};
+const placeWinLossBet = async (mode, pick = "win") => {
+  bbHaptic(14);
+  const data = getWinLossPickData(mode);
+  const wagerAmt = clampWager(predWager, 10);
+  if (wagerAmt < 1 || myPoints < wagerAmt) return;
+  const pickWin = pick === "win";
+  const odds = pickWin ? data.winOdds : data.loseOdds;
+  const payout = calcPayout(wagerAmt, odds.decimal);
+  const bet = {
+    id:`match_${Date.now()}_${mode}_${pick}`,
+    bettorId:currentPlayer,
+    type:"match_winner",
+    playerId:currentPlayer,
+    playerName:playerNameById(currentPlayer),
+    field:"__match_win",
+    fieldLabel:"result",
+    line:0.5,
+    side:pickWin ? "over" : "under",
+    pick:pickWin ? "win" : "loss",
+    wager:wagerAmt,
+    payout,
+    odds:odds.american,
+    status:"open",
+    placedAt:new Date().toISOString(),
+    settleAt:nextTenAmIso(),
+    targetMode:normalizeGameMode(mode),
+    targetText:`next logged ${normalizeGameMode(mode)} game for ${playerNameById(currentPlayer)}`,
+    statKeysAtPlacement:getBetSeenGameKeysForPlacement(stats, { playerId:currentPlayer, targetMode:normalizeGameMode(mode) }),
+  };
+  const nextPoints = { ...points, [currentPlayer]: myPoints - wagerAmt };
+  setPoints(nextPoints);
+  await storeSet("points", nextPoints);
+  const nextBets = [...(bets || []), bet];
+  setBets(nextBets);
+  await storeSet("bets", nextBets);
+};
+const renderWinLossPicks = () => {
+  const modes = ["1v1","2v2","3v3"].map(getWinLossPickData);
+  return <div style={{background:"linear-gradient(135deg,#11131F,#0A0C16)",border:"1px solid rgba(184,255,77,0.16)",borderRadius:16,padding:14,marginBottom:14}}>
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:10}}>
+      <div><div style={{fontSize:10,color:"#B8FF4D",fontWeight:900,letterSpacing:1,textTransform:"uppercase"}}>match result picks</div><div style={{fontSize:11,color:"#8B92A8",marginTop:3}}>bet your next game win/loss in each mode, based on your recent record.</div></div>
+      <input type="number" value={predWager} onChange={e=>setPredWager(e.target.value)} style={{width:72,background:"rgba(255,255,255,0.045)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"8px 8px",fontSize:11,fontWeight:900,color:"#E8ECF4"}} />
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr",gap:9}}>{modes.map(d => <div key={d.mode} style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:13,padding:10}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:8}}><div style={{fontSize:12,fontWeight:1000,color:"#E8ECF4"}}>{d.mode}</div><div style={{fontSize:10,color:"#4A5066",fontWeight:800}}>{d.total ? `${d.wins}-${d.losses} last ${d.total}` : "no recent games"}</div></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+        <button onClick={()=>placeWinLossBet(d.mode,"win")} className="bb-pressable" style={{background:"rgba(124,255,178,0.10)",border:"1px solid rgba(124,255,178,0.24)",borderRadius:10,padding:"8px 9px",fontSize:11,fontWeight:1000,color:"#7CFFB2",cursor:"pointer"}}>win · {d.winOdds.american}</button>
+        <button onClick={()=>placeWinLossBet(d.mode,"loss")} className="bb-pressable" style={{background:"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.24)",borderRadius:10,padding:"8px 9px",fontSize:11,fontWeight:1000,color:"#FF5C8A",cursor:"pointer"}}>lose · {d.loseOdds.american}</button>
+      </div>
+    </div>)}</div>
+  </div>;
+};
 const renderRivalryPicks = () => {
   const pick = safeRivalryPick;
   const opp = safeRivalryOpp;
@@ -17190,7 +17680,7 @@ const noBettingWeek = isEventActive("no_betting");
             )}
           </div>
           {showParlay&&renderPropsParlayBuilder()}
-          {renderRivalryPicks()}
+          {renderWinLossPicks()}
           {propMatchLocked && (() => { const playerBetIds = new Set(activePropStreamPlayers.map(p=>p.id)); const liveParlays = (bets||[]).filter(b=>b.bettorId===currentPlayer && b.isParlay && (b.legs||[]).some(l=>playerBetIds.has(l.playerId))); return <div style={{background:"rgba(255,92,138,0.06)",border:"1px solid rgba(255,92,138,0.18)",borderRadius:14,padding:12,marginBottom:14}}><div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>locked · your parlays on this player</div>{liveParlays.length ? liveParlays.slice(0,5).map(b=><div key={b.id} style={{fontSize:12,color:"#E8ECF4",fontWeight:800,padding:"6px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>{(b.legs||[]).length}-leg parlay · {b.wager} → {b.payout} · {String(b.status||"open").toUpperCase()}</div>) : <div style={{fontSize:12,color:"#8B92A8"}}>no parlays placed for this player yet.</div>}</div>; })()}
           <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
             <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>player</div>
@@ -19724,8 +20214,12 @@ const [toasts, setToasts] = useState([]);
     document.body.classList.toggle("bb-ambient-fx-on", appCustomizer?.ambientFx !== false);
     document.body.classList.remove("bb-finish-default","bb-finish-neon_pro","bb-finish-glass_final","bb-finish-tournament_broadcast","bb-finish-minimal_compact","bb-finish-arcade_luxe","bb-finish-midnight_terminal","bb-finish-sunset_glass","bb-finish-ice_blue","bb-finish-purple_haze","bb-finish-carbon_lime","bb-finish-whiteout","bb-finish-redline","bb-finish-ocean","bb-finish-gold_room");
     document.body.classList.add(`bb-finish-${normalizeAppCustomizer(appCustomizer).finishStyle}`);
-    document.body.classList.remove("bb-ui-default","bb-ui-glass_panels","bb-ui-floating_bento","bb-ui-terminal_blocks","bb-ui-broadcast_cards","bb-ui-compact_tiles");
+    document.body.classList.remove("bb-ui-default","bb-ui-glass_panels","bb-ui-floating_bento","bb-ui-terminal_blocks","bb-ui-broadcast_cards","bb-ui-compact_tiles","bb-ui-split_buttons","bb-ui-offset_cards","bb-ui-large_touch","bb-ui-tiny_scoreboard","bb-ui-feed_stack");
     document.body.classList.add(`bb-ui-${normalizeAppCustomizer(appCustomizer).uiPanelMode}`);
+    const premiumFeel = normalizePremiumFeelSettings(appCustomizer?.premiumFeel);
+    Object.entries(PREMIUM_FEEL_BODY_CLASS_BY_KEY).forEach(([key, cls]) => {
+      document.body.classList.toggle(cls, !!premiumFeel.enabled && !!premiumFeel[key]);
+    });
   }, [appCustomizer]);
   useEffect(() => {
     if (appCustomizer?.hiddenTabs?.[tab] && tab !== "home") setTab("home");
@@ -19776,9 +20270,11 @@ const [adminShopItems, setAdminShopItems]=useState(() => getAdminShopItemsSync()
       document.body.style.setProperty("--bb-collage-c", collage.colors[2] || "#4D9EFF");
       document.body.style.setProperty("--bb-collage-glow", collage.finish === "glow" ? "8px" : "0px");
       document.body.style.setProperty("--bb-collage-shadow", collage.colors[0] || "#B8FF4D");
+      document.body.style.setProperty("--bb-collage-gradient", getTextCollageCss(collage));
     }
     return () => {
       document.body.classList.remove("bb-text-collage-on","bb-text-collage-clay","bb-text-collage-knit");
+      document.body.style.removeProperty("--bb-collage-gradient");
     };
   }, [points, currentPlayer, adminShopItems]);
   const [resyncingId,setResyncingId]=useState(null);
@@ -21630,7 +22126,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
         </div>
       )}
       {chatOpen && (
-    <div {...chatSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:1200,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelUp .38s cubic-bezier(.16,1,.3,1)",paddingBottom:0,...chatSwipe.swipeStyle}}>
+    <div {...chatSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:1200,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelUp .22s cubic-bezier(.22,1,.36,1)",paddingBottom:0,willChange:"transform,opacity",contain:"layout paint",...chatSwipe.swipeStyle}}>
           <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(14px, env(safe-area-inset-top))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={closeChatPanel} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
