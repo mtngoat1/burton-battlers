@@ -2635,6 +2635,97 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
         -webkit-backdrop-filter:blur(18px) saturate(1.12) !important;
         animation:bbPremiumCardIn .42s cubic-bezier(.16,1,.3,1) both;
       }
+      @keyframes bbPremiumStatusPulse { 0%,100%{ transform:scale(1); opacity:.76; box-shadow:0 0 0 0 rgba(184,255,77,.18); } 50%{ transform:scale(1.08); opacity:1; box-shadow:0 0 0 7px rgba(184,255,77,0); } }
+      @keyframes bbPremiumTickerGlide { 0%{ transform:translate3d(-3px,0,0); opacity:.86; } 50%{ transform:translate3d(3px,0,0); opacity:1; } 100%{ transform:translate3d(-3px,0,0); opacity:.86; } }
+      @keyframes bbPremiumToastSlide { 0%{ transform:translate3d(0,-10px,0) scale(.97); opacity:0; filter:blur(6px); } 100%{ transform:translate3d(0,0,0) scale(1); opacity:1; filter:blur(0); } }
+      @keyframes bbPremiumSweep { 0%{ transform:translateX(-125%); opacity:0; } 25%{ opacity:.45; } 100%{ transform:translateX(125%); opacity:0; } }
+      body.bb-premium-soft-shadows .bb-tab-content > div,
+      body.bb-premium-soft-shadows .bb-state-reactive-card,
+      body.bb-premium-soft-shadows .bb-card-polish { box-shadow:0 26px 72px rgba(0,0,0,.36), 0 6px 18px rgba(0,0,0,.18) !important; }
+      body.bb-premium-floating-nav [style*="position: sticky"],
+      body.bb-premium-floating-nav [style*="position: fixed"][style*="bottom"],
+      body.bb-premium-floating-nav .bb-floating-fullscreen-header {
+        background:rgba(7,10,19,.64) !important;
+        border-color:rgba(255,255,255,.11) !important;
+        box-shadow:0 18px 52px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.10) !important;
+        backdrop-filter:blur(20px) saturate(1.14) !important;
+        -webkit-backdrop-filter:blur(20px) saturate(1.14) !important;
+      }
+      body.bb-premium-card-lift .bb-tab-content > div,
+      body.bb-premium-card-lift .bb-card-polish,
+      body.bb-premium-card-lift .bb-shop-item-card { transition:transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s ease, border-color .2s ease !important; will-change:transform; }
+      @media (hover:hover) { body.bb-premium-card-lift .bb-tab-content > div:hover, body.bb-premium-card-lift .bb-card-polish:hover, body.bb-premium-card-lift .bb-shop-item-card:hover { transform:translateY(-3px) scale(1.006); } }
+      body.bb-premium-hero-spotlight .bb-tab-content > div:first-child { position:relative; overflow:hidden; }
+      body.bb-premium-hero-spotlight .bb-tab-content > div:first-child::after {
+        content:""; position:absolute; inset:-2px; pointer-events:none;
+        background:radial-gradient(circle at 20% 0%, rgba(184,255,77,.18), transparent 34%), radial-gradient(circle at 86% 12%, rgba(77,158,255,.13), transparent 33%);
+        mix-blend-mode:screen; opacity:.62;
+      }
+      body.bb-premium-section-headers .bb-tab-content [style*="text-transform: uppercase"],
+      body.bb-premium-section-headers .bb-tab-content [style*="textTransform"] { letter-spacing:1.05px !important; }
+      body.bb-premium-section-headers .bb-tab-content [style*="fontSize:12"],
+      body.bb-premium-section-headers .bb-tab-content [style*="font-size: 12"] { text-shadow:0 0 18px rgba(184,255,77,.08); }
+      body.bb-premium-text-crisp { -webkit-font-smoothing:antialiased; text-rendering:geometricPrecision; }
+      body.bb-premium-text-crisp .bb-tab-content { letter-spacing:.004em; font-variant-numeric:tabular-nums; }
+      body.bb-premium-micro-dividers .bb-tab-content > div > div + div { border-top-color:rgba(255,255,255,.055); }
+      body.bb-premium-micro-dividers .bb-tab-content hr { border-color:rgba(255,255,255,.07) !important; }
+      body.bb-premium-inputs input,
+      body.bb-premium-inputs textarea,
+      body.bb-premium-inputs select {
+        background:rgba(255,255,255,.058) !important;
+        border-color:rgba(255,255,255,.13) !important;
+        box-shadow:inset 0 1px 0 rgba(255,255,255,.08), 0 10px 26px rgba(0,0,0,.16) !important;
+        transition:border-color .18s ease, box-shadow .18s ease, background .18s ease !important;
+      }
+      body.bb-premium-inputs input:focus,
+      body.bb-premium-inputs textarea:focus,
+      body.bb-premium-inputs select:focus { outline:none !important; border-color:rgba(184,255,77,.45) !important; box-shadow:0 0 0 3px rgba(184,255,77,.09), inset 0 1px 0 rgba(255,255,255,.10) !important; }
+      body.bb-premium-admin-polish .bb-admin-page .bb-tab-content > div,
+      body.bb-premium-admin-polish .bb-tab-content [style*="admin" i] { border-color:rgba(184,255,77,.13) !important; }
+      body.bb-premium-backdrop-blur div[style*="position: fixed"][style*="inset: 0"] { backdrop-filter:blur(12px) saturate(1.08); -webkit-backdrop-filter:blur(12px) saturate(1.08); }
+      body.bb-premium-toast-pro .bb-toast-card { animation:bbPremiumToastSlide .28s cubic-bezier(.16,1,.3,1) both; border:1px solid rgba(255,255,255,.14) !important; box-shadow:0 18px 50px rgba(0,0,0,.36), inset 0 1px 0 rgba(255,255,255,.10) !important; backdrop-filter:blur(18px) saturate(1.14); -webkit-backdrop-filter:blur(18px) saturate(1.14); }
+      body.bb-premium-loading-pro [style*="fetching from tracker"],
+      body.bb-premium-loading-pro [style*="usually takes"] { letter-spacing:.3px; }
+      body.bb-premium-loading-pro [style*="position: fixed"][style*="inset: 0"] { background:rgba(0,0,0,.64) !important; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); }
+      body.bb-premium-status-pulses .bb-live-dot,
+      body.bb-premium-status-pulses [style*="#7CFFB2"],
+      body.bb-premium-status-pulses [style*="#B8FF4D"] { animation:bbPremiumStatusPulse 2.1s ease-in-out infinite; }
+      body.bb-premium-ticker-motion .bb-tab-content [style*="open loops"],
+      body.bb-premium-ticker-motion .bb-tab-content [style*="ticker" i],
+      body.bb-premium-ticker-motion .bb-tab-content [style*="recent activity"] { animation:bbPremiumTickerGlide 5.2s ease-in-out infinite; }
+      body.bb-premium-scroll-snap .bb-tab-content [style*="overflowX"],
+      body.bb-premium-scroll-snap .bb-tab-content [style*="overflow-x"] { scroll-snap-type:x mandatory; scroll-padding:14px; -webkit-overflow-scrolling:touch; }
+      body.bb-premium-scroll-snap .bb-tab-content [style*="overflowX"] > *,
+      body.bb-premium-scroll-snap .bb-tab-content [style*="overflow-x"] > * { scroll-snap-align:start; }
+      body.bb-premium-sticky-actions .bb-tab-content [style*="position: sticky"],
+      body.bb-premium-sticky-actions .bb-floating-fullscreen-header { box-shadow:0 14px 42px rgba(0,0,0,.30), inset 0 -1px 0 rgba(255,255,255,.08) !important; }
+      body.bb-premium-safe-dock #root > div { padding-bottom:calc(env(safe-area-inset-bottom) + 2px) !important; }
+      body.bb-premium-safe-dock #root > div::selection { background:rgba(184,255,77,.28); }
+      body.bb-premium-reduced-noise .bb-tab-content > div,
+      body.bb-premium-reduced-noise .bb-state-reactive-card { box-shadow:0 10px 30px rgba(0,0,0,.18) !important; border-color:rgba(255,255,255,.075) !important; }
+      body.bb-premium-reduced-noise .bb-tab-content [style*="#4A5066"] { opacity:.82; }
+      body.bb-premium-strong-depth .bb-tab-content > div,
+      body.bb-premium-strong-depth .bb-state-reactive-card { box-shadow:0 32px 90px rgba(0,0,0,.48), inset 0 1px 0 rgba(255,255,255,.13) !important; border-color:rgba(255,255,255,.16) !important; }
+      body.bb-premium-shop-tilt .bb-shop-item-card { transform-style:preserve-3d; perspective:700px; transition:transform .22s cubic-bezier(.16,1,.3,1), box-shadow .22s ease !important; }
+      @media (hover:hover) { body.bb-premium-shop-tilt .bb-shop-item-card:hover { transform:perspective(700px) rotateX(1.8deg) rotateY(-2.2deg) translateY(-3px); } }
+      body.bb-premium-profile-glow .bb-tab-content [style*="profile" i],
+      body.bb-premium-profile-glow .bb-tab-content [style*="player" i] { box-shadow:0 22px 70px rgba(0,0,0,.34), 0 0 36px rgba(184,255,77,.055) !important; }
+      body.bb-premium-ranked-cards .bb-tab-content [style*="MMR"],
+      body.bb-premium-ranked-cards .bb-tab-content [style*="rank" i],
+      body.bb-premium-ranked-cards .bb-tab-content [style*="stats" i] { border-radius:16px !important; box-shadow:0 18px 48px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.08) !important; }
+      body.bb-premium-pass-track .bb-tab-content [style*="tier" i],
+      body.bb-premium-pass-track .bb-tab-content [style*="pass" i] { position:relative; }
+      body.bb-premium-pass-track .bb-tab-content [style*="tier" i]::before,
+      body.bb-premium-pass-track .bb-tab-content [style*="pass" i]::before {
+        content:""; position:absolute; left:18px; right:18px; top:50%; height:2px; pointer-events:none;
+        background:linear-gradient(90deg, transparent, rgba(184,255,77,.24), rgba(77,158,255,.16), transparent); opacity:.35;
+      }
+      body.bb-premium-pass-tier-cards .bb-tab-content [style*="tier" i] { background:linear-gradient(145deg, rgba(255,255,255,.085), rgba(255,255,255,.035)) !important; border-color:rgba(255,255,255,.13) !important; box-shadow:0 18px 50px rgba(0,0,0,.30), inset 0 1px 0 rgba(255,255,255,.11) !important; }
+      body.bb-premium-pass-ribbon .bb-tab-content [style*="premium" i],
+      body.bb-premium-pass-ribbon .bb-tab-content [style*="locked" i] { position:relative; overflow:hidden; }
+      body.bb-premium-pass-ribbon .bb-tab-content [style*="premium" i]::after,
+      body.bb-premium-pass-ribbon .bb-tab-content [style*="locked" i]::after { content:""; position:absolute; inset:0; pointer-events:none; background:linear-gradient(110deg, transparent 0%, rgba(255,209,102,.18) 44%, transparent 62%); animation:bbPremiumSweep 3.6s ease-in-out infinite; }
+
 
       .bb-heart-pop { animation:heartPop .32s ease; }
       .bb-live-dot { animation:livePulse 1.4s ease-in-out infinite; }
@@ -12313,6 +12404,31 @@ const DEFAULT_PREMIUM_FEEL_SETTINGS = {
   progressBars:false,
   liveActivity:false,
   emptyStates:false,
+  softShadows:false,
+  floatingNav:false,
+  cardHoverLift:false,
+  heroSpotlight:false,
+  sectionHeaderPolish:false,
+  textCrisp:false,
+  microDividers:false,
+  inputPolish:false,
+  adminControlPolish:false,
+  modalBackdropBlur:false,
+  toastStackPro:false,
+  loadingOverlayPro:false,
+  statusPulses:false,
+  tickerMotion:false,
+  scrollSnapRows:false,
+  stickyActionBar:false,
+  safeAreaDock:false,
+  reducedNoise:false,
+  strongDepth:false,
+  shopItemTilt:false,
+  profileShowcaseGlow:false,
+  rankedStatCards:false,
+  passRocketTrack:false,
+  passTierCards:false,
+  passPremiumRibbon:false,
 };
 const PREMIUM_FEEL_CONTROLS = [
   { id:"animatedBackground", label:"animated app background", emoji:"🌌", desc:"adds moving aura, grain, and depth behind the app" },
@@ -12327,6 +12443,31 @@ const PREMIUM_FEEL_CONTROLS = [
   { id:"progressBars", label:"animated progress bars", emoji:"📊", desc:"progress fills animate smoother with a shine pass" },
   { id:"liveActivity", label:"live activity motion", emoji:"⚡", desc:"feeds, notifications, and activity rows feel more alive" },
   { id:"emptyStates", label:"premium empty states", emoji:"○", desc:"blank areas get more intentional depth and motion" },
+  { id:"softShadows", label:"soft depth shadows", emoji:"◒", desc:"adds heavier layered shadows without changing layout" },
+  { id:"floatingNav", label:"floating nav treatment", emoji:"🧭", desc:"makes the nav/dock feel more like a native floating control" },
+  { id:"cardHoverLift", label:"card hover lift", emoji:"⬆️", desc:"cards lift gently on hover/press for more touch feedback" },
+  { id:"heroSpotlight", label:"hero spotlight glow", emoji:"🔦", desc:"adds a subtle spotlight behind the first card on each tab" },
+  { id:"sectionHeaderPolish", label:"section header polish", emoji:"⌁", desc:"tightens small section labels with accent rails and cleaner spacing" },
+  { id:"textCrisp", label:"crisper text rendering", emoji:"Aa", desc:"adds font smoothing, cleaner spacing, and tabular numbers" },
+  { id:"microDividers", label:"micro dividers", emoji:"━", desc:"adds faint separator lines between dense stacked controls" },
+  { id:"inputPolish", label:"premium inputs", emoji:"⌨️", desc:"inputs/selects/textareas get cleaner glass styling and focus rings" },
+  { id:"adminControlPolish", label:"admin control polish", emoji:"🛠️", desc:"admin panels get stronger grouping and control-room depth" },
+  { id:"modalBackdropBlur", label:"modal backdrop blur", emoji:"◌", desc:"modal overlays blur/dim behind sheets instead of feeling flat" },
+  { id:"toastStackPro", label:"pro toast stack", emoji:"🔔", desc:"toasts get better depth, border, and slide-in polish" },
+  { id:"loadingOverlayPro", label:"premium loading overlay", emoji:"⏳", desc:"sync/loading overlays feel more app-like and less default" },
+  { id:"statusPulses", label:"status pulse effects", emoji:"🟢", desc:"online/live/status dots breathe with subtle signal motion" },
+  { id:"tickerMotion", label:"ticker motion", emoji:"↔️", desc:"ticker/open-loop style rows get smoother movement and glow" },
+  { id:"scrollSnapRows", label:"horizontal snap rows", emoji:"▭", desc:"horizontal item rows snap smoother like app carousels" },
+  { id:"stickyActionBar", label:"sticky action bars", emoji:"▔", desc:"bottom/top action strips get a stronger native sticky look" },
+  { id:"safeAreaDock", label:"safe-area dock fill", emoji:"▂", desc:"adds a polished bottom fade/dock treatment around phone safe areas" },
+  { id:"reducedNoise", label:"reduced noise mode", emoji:"◐", desc:"mutes heavy borders/shadows for a cleaner Apple-like read" },
+  { id:"strongDepth", label:"strong depth mode", emoji:"▣", desc:"pushes cards forward with stronger shadows and contrast" },
+  { id:"shopItemTilt", label:"shop item tilt", emoji:"🛒", desc:"shop cards gain tiny perspective/tilt motion on hover" },
+  { id:"profileShowcaseGlow", label:"profile showcase glow", emoji:"👤", desc:"profile/player showcase cards get a soft identity aura" },
+  { id:"rankedStatCards", label:"ranked stat cards", emoji:"📈", desc:"stats/rank cards get a cleaner competitive scoreboard feel" },
+  { id:"passRocketTrack", label:"rocket-pass track polish", emoji:"🏁", desc:"pass rows/cards get a more Rocket Pass-style lane and tier feel" },
+  { id:"passTierCards", label:"premium pass tier cards", emoji:"🎟️", desc:"pass rewards read more like collectible tier tiles" },
+  { id:"passPremiumRibbon", label:"premium pass ribbon", emoji:"🏷️", desc:"premium/locked pass areas get ribbon/glow treatment" },
 ];
 const PREMIUM_FEEL_BODY_CLASS_BY_KEY = {
   animatedBackground:"bb-premium-bg",
@@ -12341,6 +12482,31 @@ const PREMIUM_FEEL_BODY_CLASS_BY_KEY = {
   progressBars:"bb-premium-progress",
   liveActivity:"bb-premium-activity",
   emptyStates:"bb-premium-empty",
+  softShadows:"bb-premium-soft-shadows",
+  floatingNav:"bb-premium-floating-nav",
+  cardHoverLift:"bb-premium-card-lift",
+  heroSpotlight:"bb-premium-hero-spotlight",
+  sectionHeaderPolish:"bb-premium-section-headers",
+  textCrisp:"bb-premium-text-crisp",
+  microDividers:"bb-premium-micro-dividers",
+  inputPolish:"bb-premium-inputs",
+  adminControlPolish:"bb-premium-admin-polish",
+  modalBackdropBlur:"bb-premium-backdrop-blur",
+  toastStackPro:"bb-premium-toast-pro",
+  loadingOverlayPro:"bb-premium-loading-pro",
+  statusPulses:"bb-premium-status-pulses",
+  tickerMotion:"bb-premium-ticker-motion",
+  scrollSnapRows:"bb-premium-scroll-snap",
+  stickyActionBar:"bb-premium-sticky-actions",
+  safeAreaDock:"bb-premium-safe-dock",
+  reducedNoise:"bb-premium-reduced-noise",
+  strongDepth:"bb-premium-strong-depth",
+  shopItemTilt:"bb-premium-shop-tilt",
+  profileShowcaseGlow:"bb-premium-profile-glow",
+  rankedStatCards:"bb-premium-ranked-cards",
+  passRocketTrack:"bb-premium-pass-track",
+  passTierCards:"bb-premium-pass-tier-cards",
+  passPremiumRibbon:"bb-premium-pass-ribbon",
 };
 function normalizePremiumFeelSettings(input = {}) {
   const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
