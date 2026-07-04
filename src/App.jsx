@@ -78,6 +78,7 @@ import { createPortal } from "react-dom";
 // APP130_FILM_ROOM_VOD_PLAYER_DEDUPE_MANUAL_START_PATCH
 // APP131_FILM_ROOM_VOD_VAULT_TABS_CLEAN_LINKS_PATCH
 // APP132_FACE_ID_LOGIN_PASSCODE_FALLBACK_PATCH
+// APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -4445,6 +4446,7 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
   const [adminMode, setAdminMode] = useState(false);
   const [bioStatus, setBioStatus] = useState("");
   const [bioBusy, setBioBusy] = useState(false);
+  const [bioGate, setBioGate] = useState("checking"); // checking -> prompting -> fallback
   const cachedAuth = useRef(null);
   const bioTried = useRef(false);
   const unlockStarted = useRef(false);
@@ -4474,21 +4476,26 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
     }, 0);
   };
 
+  const revealPasscodeFallback = (msg = "") => {
+    setBioGate("fallback");
+    if (msg) setBioStatus(msg);
+  };
+
   const tryBiometricUnlock = async (authObj = cachedAuth.current, manual = false) => {
-    if (adminMode) return;
+    if (adminMode) return revealPasscodeFallback("");
     if (!authObj?.biometricCredentialId) {
-      if (manual) setBioStatus(`${biometricLabel()} is not set up yet. Enter passcode once to add it.`);
-      return;
+      return revealPasscodeFallback(canUseBiometricLogin() ? `Enter passcode once to set up ${biometricLabel()}.` : "");
     }
     if (bioBusy || unlockStarted.current) return;
     setBioBusy(true);
-    setBioStatus(`Use ${biometricLabel()} to unlock`);
+    setBioGate("prompting");
+    setBioStatus(`Scanning ${biometricLabel()}…`);
     try {
       await unlockWithBiometricForPlayer(player, authObj);
       setBioStatus(`${biometricLabel()} accepted`);
       finishUnlock("");
     } catch (_) {
-      setBioStatus(`${biometricLabel()} failed or was cancelled. Passcode is ready below.`);
+      revealPasscodeFallback(`${biometricLabel()} failed or was cancelled. Passcode is ready below.`);
       if (manual) setError(`${biometricLabel()} failed. Use passcode.`);
     } finally {
       setBioBusy(false);
@@ -4500,21 +4507,31 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
     bioTried.current = false;
     unlockStarted.current = false;
     setBioStatus("");
-    // Do not let auth storage decide whether the keypad can continue.
-    // It is only used as an optional fast local check if it returns in time.
+    setBioGate("checking");
+
+    const fallbackTimer = setTimeout(() => {
+      if (!alive || unlockStarted.current || bioTried.current) return;
+      revealPasscodeFallback("");
+    }, 850);
+
     Promise.resolve(storeGet(`auth:${player.id}`))
       .then(a => {
         if (!alive) return;
+        clearTimeout(fallbackTimer);
         cachedAuth.current = a;
-        if (a?.biometricCredentialId && !bioTried.current) {
+        if (a?.biometricCredentialId) {
           bioTried.current = true;
-          setTimeout(() => tryBiometricUnlock(a, false), 180);
-        } else if (!a?.biometricCredentialId && canUseBiometricLogin()) {
-          setBioStatus(`Enter passcode once to set up ${biometricLabel()}.`);
+          tryBiometricUnlock(a, false);
+        } else {
+          revealPasscodeFallback(canUseBiometricLogin() ? `Enter passcode once to set up ${biometricLabel()}.` : "");
         }
       })
-      .catch(() => {});
-    return () => { alive = false; };
+      .catch(() => {
+        if (!alive) return;
+        clearTimeout(fallbackTimer);
+        revealPasscodeFallback("");
+      });
+    return () => { alive = false; clearTimeout(fallbackTimer); };
   }, [player.id]);
 
   const submit = (finalCode) => {
@@ -4527,7 +4544,6 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
       return;
     }
 
-    // Best-effort auth warmup + Face ID setup. Never block passcode fallback.
     Promise.resolve(storeGet(`auth:${player.id}`))
       .then(async a => {
         const authObj = a || cached || { passcode:finalCode };
@@ -4555,6 +4571,27 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
 
   const NUMS = [["1","2","3"],["4","5","6"],["7","8","9"],["","0","⌫"]];
 
+  if (!adminMode && bioGate !== "fallback") {
+    return (
+      <div style={{...s.loginScreen,background:"#000",animation:"fadeSlideUp .12s ease"}}>
+        <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 50% 18%, rgba(184,255,77,.10), transparent 38%), #000"}} />
+        <button onClick={onBack} className="bb-pressable" style={{position:"fixed",top:"max(16px, env(safe-area-inset-top))",left:16,zIndex:5,background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:999,padding:"9px 12px",color:"#8B92A8",fontSize:11,fontWeight:900,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}><ChevronLeft size={14}/> back</button>
+        <div style={{position:"relative",zIndex:2,minHeight:"100dvh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:24,textAlign:"center"}}>
+          <div style={{width:82,height:82,borderRadius:28,border:`1px solid ${player.color}55`,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 34px ${player.color}24`,marginBottom:18}}>
+            <div style={{width:46,height:46,borderRadius:16,border:`2px solid ${player.color}`,boxShadow:`0 0 18px ${player.color}55`}} />
+          </div>
+          <div style={{fontSize:10,color:player.color,fontWeight:950,letterSpacing:1.4,textTransform:"uppercase",marginBottom:7}}>{player.name}</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:30,fontWeight:700,color:"#E8ECF4",lineHeight:1,textTransform:"lowercase"}}>
+            {bioGate === "checking" ? "preparing unlock" : `use ${biometricLabel()}`}
+          </div>
+          <div style={{fontSize:11,color:"#8B92A8",fontWeight:800,lineHeight:1.45,marginTop:10,maxWidth:280}}>
+            {bioGate === "checking" ? "Checking saved unlock…" : "The device prompt should appear now. If it fails, passcode opens automatically."}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={s.loginScreen}>
       <div style={s.loginGlow} />
@@ -4562,14 +4599,8 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
         <button onClick={onBack} className="bb-pressable" style={s.backBtn}><ChevronLeft size={16}/> back</button>
         <div style={{ ...s.loginPlayerDot, background:player.color, margin:"0 auto 18px", width:14, height:14 }} />
         <div style={s.loginTitle}>{player.name}</div>
-        <div style={s.loginSub}>{adminMode ? "admin passcode" : `unlock with ${biometricLabel()}`}</div>
-        {!adminMode && (
-          <button onClick={()=>tryBiometricUnlock(cachedAuth.current, true)} disabled={bioBusy} className="bb-pressable bb-glow-lime" style={{...s.loginSubmit,margin:"12px auto 18px",maxWidth:260,justifyContent:"center",opacity:bioBusy?.7:1}}>
-            {bioBusy ? "checking…" : `use ${biometricLabel()}`}
-          </button>
-        )}
-        {bioStatus && !adminMode && <div style={{fontSize:10.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,textAlign:"center",margin:"-8px 0 16px"}}>{bioStatus}</div>}
         <div style={s.loginSub}>{adminMode ? "admin passcode" : "passcode fallback"}</div>
+        {bioStatus && !adminMode && <div style={{fontSize:10.5,color:"#8B92A8",fontWeight:800,lineHeight:1.35,textAlign:"center",margin:"10px 0 16px"}}>{bioStatus}</div>}
         <div style={{display:"flex",justifyContent:"center",gap:16,marginBottom:32,marginTop:8}}>
           {[0,1,2,3].map(i => (
             <div key={i} style={{width:14,height:14,borderRadius:"50%",background:code.length>i?player.color:"rgba(255,255,255,0.15)",transition:"background .15s ease",boxShadow:code.length>i?`0 0 8px ${player.color}99`:""}}/>
@@ -4591,7 +4622,7 @@ function EnterPasscodeScreen({ player, onSuccess, onBack, onAdmin }) {
           ))}
         </div>
         {player?.id === ADMIN_ID && onAdmin && (
-          <button onClick={()=>{ setAdminMode(true); setCode(""); setError(""); setBioStatus(""); }} className="bb-pressable" style={{marginTop:18,background:adminMode?"rgba(255,92,138,0.18)":"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.28)",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>
+          <button onClick={()=>{ setAdminMode(true); setCode(""); setError(""); setBioStatus(""); setBioGate("fallback"); }} className="bb-pressable" style={{marginTop:18,background:adminMode?"rgba(255,92,138,0.18)":"rgba(255,92,138,0.10)",border:"1px solid rgba(255,92,138,0.28)",borderRadius:12,padding:"10px 14px",fontSize:12,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>
             {adminMode ? "type passcode for admin" : "admin controls"}
           </button>
         )}
