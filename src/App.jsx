@@ -1650,16 +1650,28 @@ function buildJobChallengeList(job) {
   return normalizeJobChallengeLines(raw.length ? raw : fallback, required, fallback).slice(0, required).map((txt, i) => `${i+1}. ${txt}`);
 }
 function getJobReminderAt(job, appCustomizer) {
-  const cfg = normalizeAppCustomizer(appCustomizer).scheduleConfig;
   const start = safeDateObj(job?.startAt, null);
   if (!start || !Number.isFinite(start.getTime())) return null;
-  const mins = Math.max(0, Number(job?.reminderMinutes ?? cfg.reminderMinutes ?? 15) || 15);
+  const mins = Math.max(0, Number(job?.reminderMinutes ?? 30) || 30);
   return new Date(start.getTime() - mins * 60000);
 }
 function formatJobStartTime(job) {
   const d = safeDateObj(job?.startAt, null);
   if (!d || !Number.isFinite(d.getTime())) return job?.slotLabel || "soon";
   return d.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" });
+}
+function getJobStartGateMs(job, nowMs = Date.now()) {
+  const start = safeDateObj(job?.startAt, null);
+  if (!start || !Number.isFinite(start.getTime())) return 0;
+  return start.getTime() - nowMs;
+}
+function isJobStartUnlocked(job, nowMs = Date.now()) {
+  return getJobStartGateMs(job, nowMs) <= 0;
+}
+function getJobStartGateLabel(job, nowMs = Date.now()) {
+  const ms = getJobStartGateMs(job, nowMs);
+  if (ms <= 0) return "ready";
+  return `starts in ${fmtShortDuration(ms)}`;
 }
 async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurtonOS, pings, setPings, appCustomizer, addToast }) {
   if (!currentPlayer) return;
@@ -1669,7 +1681,8 @@ async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurton
   const dueJob = jobs.find(job => {
     if (!job || !jobIncludesPlayer(job, currentPlayer)) return false;
     if (!["reserved","active"].includes(job.status)) return false;
-    if (job.shiftReminderSentAt) return false;
+    const sentMap = job.shiftReminderSentAtByPlayer && typeof job.shiftReminderSentAtByPlayer === "object" ? job.shiftReminderSentAtByPlayer : {};
+    if (sentMap[currentPlayer] || job[`shiftReminderSentAt_${currentPlayer}`]) return false;
     const start = safeDateObj(job.startAt, null);
     const reminderAt = getJobReminderAt(job, appCustomizer);
     if (!start || !reminderAt) return false;
@@ -1678,9 +1691,11 @@ async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurton
     return Number.isFinite(startMs) && Number.isFinite(remindMs) && now >= remindMs && now <= startMs + 5 * 60000;
   });
   if (!dueJob) return;
-  const minutes = Math.max(0, Math.round((safeDateObj(dueJob.startAt).getTime() - now) / 60000));
-  const title = "⏰ Shift starts soon";
-  const body = `${dueJob.title || "Job"} starts ${minutes > 0 ? `in ${minutes} min` : "now"} · ${dueJob.slotLabel || formatJobStartTime(dueJob)} · pays ${Number(dueJob.payout || 0).toLocaleString()} pts`;
+  const actualMinutes = Math.max(0, Math.ceil((safeDateObj(dueJob.startAt).getTime() - now) / 60000));
+  const reminderMinutes = Math.max(1, Math.round(Number(dueJob.reminderMinutes || 30) || 30));
+  const displayMinutes = actualMinutes > Math.max(0, reminderMinutes - 5) && actualMinutes <= reminderMinutes ? reminderMinutes : actualMinutes;
+  const title = displayMinutes > 0 ? `⏰ Shift starts in ${displayMinutes} minutes` : "⏰ Shift starts now";
+  const body = `Your shift starts ${displayMinutes > 0 ? `in ${displayMinutes} minutes` : "now"} · ${dueJob.title || "Job"} · ${dueJob.slotLabel || formatJobStartTime(dueJob)} · pays ${Number(dueJob.payout || 0).toLocaleString()} pts`;
   const ping = { id:`job_shift_reminder_${dueJob.id}_${Date.now()}`, from:"system", to:currentPlayer, type:"job_shift", jobId:dueJob.id, text:body, ts:new Date().toISOString() };
   const freshPings = await storeGet("pings").catch(() => null);
   const basePings = Array.isArray(freshPings) ? freshPings : (Array.isArray(pings) ? pings : []);
@@ -1689,7 +1704,13 @@ async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurton
   await storeSetWithPush("pings", nextPings);
   await sendPushToPlayersOnce(`job_shift:${dueJob.id}`, [currentPlayer], title, body, { url:makeNotificationUrl("home", { open:"jobs", id:dueJob.id }), type:"job_shift", id:dueJob.id });
   showLocalNotification(title, body, { url:"/", type:"job_shift", id:dueJob.id }).catch(() => {});
-  const nextJobs = jobs.map(j => j.id === dueJob.id ? { ...j, shiftReminderSentAt:new Date().toISOString() } : j);
+  const reminderSentAt = new Date().toISOString();
+  const nextJobs = jobs.map(j => j.id === dueJob.id ? {
+    ...j,
+    lastShiftReminderSentAt:reminderSentAt,
+    shiftReminderSentAtByPlayer:{...(j.shiftReminderSentAtByPlayer || {}), [currentPlayer]:reminderSentAt},
+    [`shiftReminderSentAt_${currentPlayer}`]:reminderSentAt
+  } : j);
   const nextOS = { ...os, jobs:nextJobs };
   setBurtonOS?.(nextOS);
   await storeSetWithPush(BURTON_OS_KEY, nextOS);
@@ -1701,7 +1722,11 @@ function parseTodaySlot(slotLabel) {
   if (!m) return now;
   let h = Number(m[1])||0; const min = Number(m[2]||0)||0; const ap = String(m[3]||"").toUpperCase();
   if (ap === "PM" && h < 12) h += 12; if (ap === "AM" && h === 12) h = 0;
-  const d = new Date(); d.setHours(h,min,0,0); return d;
+  const d = new Date(); d.setHours(h,min,0,0);
+  // If the slot time already passed by more than a small grace window, treat it as
+  // the next upcoming shift instead of letting players claim/start old slots.
+  if (d.getTime() < now.getTime() - 30 * 60000) d.setDate(d.getDate() + 1);
+  return d;
 }
 
 const OPEN_LOOPS_TICKER_STATE = { startedAt: Date.now(), manualOffset: 0 };
@@ -1833,6 +1858,7 @@ function OpenLoopsTicker({ burtonOS, stats, points, passXP, appCustomizer, setTa
 function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, appCustomizer, addToast }) {
   const os = normalizeBurtonOS(burtonOS);
   const cfg = normalizeAppCustomizer(appCustomizer).jobsConfig;
+  const [jobNow,setJobNow]=useState(Date.now());
   const [viewJobId,setViewJobId]=useState(null);
   const [selectedMode,setSelectedMode]=useState("solo");
   const [selectedGameMode,setSelectedGameMode]=useState("1v1");
@@ -1854,8 +1880,9 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
       return [...clean, pid].slice(0, max);
     });
   };
+  useEffect(()=>{ const timer=setInterval(()=>setJobNow(Date.now()), 30000); return()=>clearInterval(timer); }, []);
   useEffect(()=>{ setSelectedPartners(prev=>prev.slice(0, Math.max(0, neededCount - 1))); setSelectedGameMode(getGameModeForJobMode(selectedMode)); }, [selectedMode]);
-  const getSlotKey = (template, difficulty, slotLabel) => `${today}_${template.id}_${selectedMode}_${activeGameMode}_${difficulty}_${slotLabel}`;
+  const getSlotKey = (template, difficulty, slotLabel) => `${dateKey(parseTodaySlot(slotLabel))}_${template.id}_${selectedMode}_${activeGameMode}_${difficulty}_${slotLabel}`;
   const claimSlot = async (template, difficulty, slotLabel, shiftMeta = null) => {
     if (!readyForMode) { addToast?.(selectedMode === "solo" ? "pick a slot" : `pick ${neededCount-1} teammate${neededCount>2?"s":""}`, "👥"); return; }
     const diff = cfg[difficulty] || cfg.easy;
@@ -1863,8 +1890,8 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
     const slotKey = getSlotKey(template, difficulty, slotLabel);
     if (jobs.some(j => isSameJobSlotFilled(j, slotKey))) { addToast?.("slot already filled", "⛔"); return; }
     const startAt = parseTodaySlot(slotLabel);
-    const reminderMinutes = normalizeAppCustomizer(appCustomizer).scheduleConfig.reminderMinutes;
-    const reminderAt = new Date(startAt.getTime() - Math.max(0, Number(reminderMinutes) || 15) * 60000);
+    const reminderMinutes = 30;
+    const reminderAt = new Date(startAt.getTime() - reminderMinutes * 60000);
     const multiplier = Math.max(1, Number(meta?.multiplier || 1));
     const challengeRules = getHourlyRulesForTemplate(template, difficulty, slotLabel, diff.challenges, template.challengeText || "sync/log one game during the job window", selectedMode, activeGameMode);
     const challengeList = challengeRules.map(r => r.text);
@@ -1876,6 +1903,11 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
     setViewJobId(job.id);
   };
   const startReserved = async (job) => {
+    const gateMs = getJobStartGateMs(job);
+    if (gateMs > 0) {
+      addToast?.(`shift starts in ${fmtShortDuration(gateMs)}`, "⏰");
+      return;
+    }
     const startedAt = new Date().toISOString();
     const jobMinutes = getJobTimeLimitMinutes(job?.difficulty, job?.jobMode, job?.minutes);
     const startMs = safeDateObj(startedAt).getTime();
@@ -1966,7 +1998,7 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
       <div style={{display:"grid",gap:6}}>{adminActiveJobs.slice(0,10).map(job=><div key={job.id} style={{display:"grid",gridTemplateColumns:"1fr auto",gap:7,alignItems:"center",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,padding:"8px 9px"}}>
         <button onClick={()=>setViewJobId(job.id)} className="bb-pressable" style={{background:"transparent",border:"none",padding:0,textAlign:"left",minWidth:0,cursor:"pointer"}}>
           <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.emoji || "📋"} {job.title} · {job.slotLabel}</div>
-          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(job.playerNames||getJobParticipantIds(job).map(playerNameById)).join(" + ")} · {job.jobMode || "solo"}/{job.gameMode || "any"} · {job.status}</div>
+          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(job.playerNames||getJobParticipantIds(job).map(playerNameById)).join(" + ")} · starts {formatJobStartTime(job)} · {job.jobMode || "solo"}/{job.gameMode || "any"} · {job.status}</div>
         </button>
         <button onClick={()=>adminReleaseJob(job)} className="bb-pressable" style={{background:"rgba(255,92,138,.12)",border:"1px solid rgba(255,92,138,.28)",borderRadius:9,padding:"7px 8px",color:"#FF5C8A",fontSize:9.5,fontWeight:900,cursor:"pointer"}}>clear</button>
       </div>)}</div>
@@ -1982,13 +2014,13 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
       <div style={{display:"grid",gap:6}}>{myJobs.map(job=><div key={job.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",gap:6,alignItems:"center",background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,padding:"8px 9px"}}>
         <button onClick={()=>setViewJobId(job.id)} className="bb-pressable" style={{background:"transparent",border:"none",padding:0,textAlign:"left",minWidth:0,cursor:"pointer"}}>
           <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{job.emoji || "📋"} {job.title} · {job.slotLabel}</div>
-          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(job.playerNames||getJobParticipantIds(job).map(playerNameById)).join(" + ")} · {job.jobMode || "solo"}/{job.gameMode || "any"} · {job.status}</div>
+          <div style={{fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{(job.playerNames||getJobParticipantIds(job).map(playerNameById)).join(" + ")} · starts {formatJobStartTime(job)} · {job.jobMode || "solo"}/{job.gameMode || "any"} · {job.status}</div>
         </button>
-        {job.status==="reserved" && <button onClick={()=>startReserved(job)} className="bb-pressable" style={{background:"rgba(184,255,77,.10)",border:"1px solid rgba(184,255,77,.24)",borderRadius:9,padding:"7px 8px",color:"#B8FF4D",fontSize:9.5,fontWeight:900,cursor:"pointer"}}>start</button>}
+        {job.status==="reserved" && (()=>{ const unlocked=isJobStartUnlocked(job, jobNow); return <button disabled={!unlocked} onClick={()=>startReserved(job)} className="bb-pressable" style={{background:unlocked?"rgba(184,255,77,.10)":"rgba(255,255,255,.025)",border:`1px solid ${unlocked?"rgba(184,255,77,.24)":"rgba(255,255,255,.06)"}`,borderRadius:9,padding:"7px 8px",color:unlocked?"#B8FF4D":"#4A5066",fontSize:9.5,fontWeight:900,cursor:unlocked?"pointer":"not-allowed"}}>{unlocked?"start":getJobStartGateLabel(job, jobNow)}</button>; })()}
         <button onClick={()=>releaseOwnJob(job)} className="bb-pressable" style={{background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"7px 8px",color:"#8B92A8",fontSize:9.5,fontWeight:900,cursor:"pointer"}}>remove</button>
       </div>)}</div>
     </div>}
-    {viewing&&<div style={{background:"rgba(184,255,77,.07)",border:"1px solid rgba(184,255,77,.22)",borderRadius:14,padding:11,marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div style={{fontSize:13,color:"#E8ECF4",fontWeight:900}}>{viewing.emoji} {viewing.title}</div><div style={{fontSize:10,color:"#FFD166",fontWeight:900}}>{Number(viewing.payout||0).toLocaleString()} pts each</div></div><div style={{fontSize:10,color:"#8B92A8",marginTop:3}}>{viewing.shiftEmoji || "🕒"} {viewing.shiftLabel || "shift"} · {viewing.slotLabel} · {viewing.jobMode || "solo"}/{viewing.gameMode || "any"} · {viewing.difficulty} · {viewing.status} · reminder {getJobReminderAt(viewing, appCustomizer)?.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}) || "off"}</div>{(()=>{ const p=getJobProgress(viewing); return <><div style={{height:8,background:"rgba(255,255,255,.08)",borderRadius:99,overflow:"hidden",margin:"9px 0"}}><div style={{height:"100%",width:`${Math.min(100,(p.doneCount/p.total)*100)}%`,background:"#B8FF4D"}}/></div><div style={{fontSize:10.5,color:"#8B92A8"}}>{p.doneCount}/{p.total} stat rules complete · ends {new Date(viewing.expiresAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</div><div style={{marginTop:7,display:"grid",gap:5}}>{p.rows.map(({rule,progress},i)=><div key={rule.id || i} style={{fontSize:10,color:progress.done?"#7CFFB2":"#8B92A8",lineHeight:1.35}}>{progress.done?"✓":"○"} {rule.text}<div style={{fontSize:9,color:progress.done?"#7CFFB2":"#4A5066",marginLeft:14}}>{progress.current}/{progress.target} {getJobRuleStatLabel(rule.stat)} · {getJobRuleScopeLabel(rule.scope)} · {rule.mode || "any"}</div></div>)}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:9}}>{viewing.status==="reserved"&&<button onClick={()=>startReserved(viewing)} className="bb-pressable" style={{background:"rgba(184,255,77,.14)",border:"1px solid rgba(184,255,77,.3)",borderRadius:10,padding:8,color:"#B8FF4D",fontSize:10,fontWeight:900}}>start job</button>}<button onClick={()=>settleJob(viewing)} className="bb-pressable" style={{background:p.success?"rgba(184,255,77,.14)":"rgba(255,255,255,.05)",border:`1px solid ${p.success?"rgba(184,255,77,.3)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:p.success?"#B8FF4D":"#8B92A8",fontSize:10,fontWeight:900}}>check / settle</button></div></>})()}</div>}
+    {viewing&&<div style={{background:"rgba(184,255,77,.07)",border:"1px solid rgba(184,255,77,.22)",borderRadius:14,padding:11,marginBottom:10}}><div style={{display:"flex",justifyContent:"space-between",gap:8}}><div style={{fontSize:13,color:"#E8ECF4",fontWeight:900}}>{viewing.emoji} {viewing.title}</div><div style={{fontSize:10,color:"#FFD166",fontWeight:900}}>{Number(viewing.payout||0).toLocaleString()} pts each</div></div><div style={{fontSize:10,color:"#8B92A8",marginTop:3}}>{viewing.shiftEmoji || "🕒"} {viewing.shiftLabel || "shift"} · starts {formatJobStartTime(viewing)} · {viewing.jobMode || "solo"}/{viewing.gameMode || "any"} · {viewing.difficulty} · {viewing.status} · reminder {getJobReminderAt(viewing, appCustomizer)?.toLocaleTimeString([], {hour:"numeric",minute:"2-digit"}) || "off"}</div>{(()=>{ const p=getJobProgress(viewing); return <><div style={{height:8,background:"rgba(255,255,255,.08)",borderRadius:99,overflow:"hidden",margin:"9px 0"}}><div style={{height:"100%",width:`${Math.min(100,(p.doneCount/p.total)*100)}%`,background:"#B8FF4D"}}/></div><div style={{fontSize:10.5,color:"#8B92A8"}}>{p.doneCount}/{p.total} stat rules complete · ends {new Date(viewing.expiresAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</div><div style={{marginTop:7,display:"grid",gap:5}}>{p.rows.map(({rule,progress},i)=><div key={rule.id || i} style={{fontSize:10,color:progress.done?"#7CFFB2":"#8B92A8",lineHeight:1.35}}>{progress.done?"✓":"○"} {rule.text}<div style={{fontSize:9,color:progress.done?"#7CFFB2":"#4A5066",marginLeft:14}}>{progress.current}/{progress.target} {getJobRuleStatLabel(rule.stat)} · {getJobRuleScopeLabel(rule.scope)} · {rule.mode || "any"}</div></div>)}</div><div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginTop:9}}>{viewing.status==="reserved"&&(()=>{ const unlocked=isJobStartUnlocked(viewing, jobNow); return <button disabled={!unlocked} onClick={()=>startReserved(viewing)} className="bb-pressable" style={{background:unlocked?"rgba(184,255,77,.14)":"rgba(255,255,255,.025)",border:`1px solid ${unlocked?"rgba(184,255,77,.3)":"rgba(255,255,255,.06)"}`,borderRadius:10,padding:8,color:unlocked?"#B8FF4D":"#4A5066",fontSize:10,fontWeight:900,cursor:unlocked?"pointer":"not-allowed"}}>{unlocked?"start job":getJobStartGateLabel(viewing, jobNow)}</button>; })()}<button onClick={()=>settleJob(viewing)} className="bb-pressable" style={{background:p.success?"rgba(184,255,77,.14)":"rgba(255,255,255,.05)",border:`1px solid ${p.success?"rgba(184,255,77,.3)":"rgba(255,255,255,.08)"}`,borderRadius:10,padding:8,color:p.success?"#B8FF4D":"#8B92A8",fontSize:10,fontWeight:900}}>check / settle</button></div></>})()}</div>}
     <div style={{display:"grid",gap:10}}>{available.map(t => <div key={t.id} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:14,padding:10}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:12.5,color:"#E8ECF4",fontWeight:900}}>{t.emoji} {t.title}</div><div style={{fontSize:10,color:"#8B92A8",lineHeight:1.35,marginTop:2}}>{t.desc}</div></div><div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase"}}>{selectedMode}</div></div>{shiftGroups.map(group=><div key={`${t.id}_${group.id}`} style={{marginTop:8}}><div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase",marginBottom:6}}>{group.emoji || "🕒"} {group.label}{Number(group.multiplier)>1?` · ${group.multiplier}x`:""}</div><div style={{display:"grid",gap:6}}>{(group.slots||[]).map(slot=><div key={`${t.id}_${slot}`} style={{display:"grid",gridTemplateColumns:"70px repeat(3,1fr)",gap:5,alignItems:"center"}}><div style={{fontSize:10,color:"#8B92A8",fontWeight:900}}>{slot}</div>{difficulties.map(d=>{ const diff=cfg[d]||cfg.easy; const meta=getJobShiftMeta(cfg, slot); const payout=Math.round(Number(diff.payout||0)*Math.max(1,Number(meta?.multiplier||1))); const filled=jobs.some(j=>isSameJobSlotFilled(j, getSlotKey(t,d,slot))); return <button key={d} disabled={filled || !readyForMode} onClick={()=>claimSlot(t,d,slot,meta)} className="bb-pressable" style={{background:filled?"rgba(255,255,255,.025)":bbAlpha(diffColor(d),.11),border:`1px solid ${filled?"rgba(255,255,255,.06)":bbAlpha(diffColor(d),.24)}`,borderRadius:9,padding:"7px 4px",color:filled?"#4A5066":diffColor(d),fontSize:9,fontWeight:900,cursor:filled||!readyForMode?"not-allowed":"pointer"}}>{filled?"filled":`${diffLabel(d)} · ${payout}`}</button>})}</div>)}</div></div>)}</div>)}</div>
   </div>;
 }
