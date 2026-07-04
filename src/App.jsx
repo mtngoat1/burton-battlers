@@ -70,6 +70,7 @@ import { createPortal } from "react-dom";
 // APP123_BALLCHASING_LIVE_SESSION_REPLAY_VAULT_PATCH
 // APP124_REPLAY_VAULT_TEAM_FILTER_PLAYER_CARDS_SAFEAREA_PATCH
 // APP125_LIVE_SESSION_SOLO_DUO_SAFEAREA_FIX_PATCH
+// APP126_BALLCHASING_NORMALIZED_REPLAY_FIX_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -996,6 +997,34 @@ function getBallchasingAliasMap(cfg = {}) {
 }
 function normalizeBallchasingReplay(raw = {}) {
   const data = liveReplaySafeObj(raw.replay || raw.data || raw);
+
+  // The app stores a normalized replay in Live Session state. When that saved
+  // object is read back, do not normalize it again as if it were the raw API shape,
+  // or blue/orange/player data gets lost and the UI shows "unknown map · 0-0".
+  if (Array.isArray(data.teams)) {
+    return {
+      ...data,
+      id: data.id || extractBallchasingReplayId(data.link || data.viewUrl || "") || null,
+      link: data.link || (data.id ? `https://ballchasing.com/api/replays/${data.id}` : ""),
+      viewUrl: data.viewUrl || (data.id ? `https://ballchasing.com/replay/${data.id}` : String(data.link || "").replace("/api/replays/", "/replay/")),
+      title: data.title || data.replay_title || "Ballchasing replay",
+      playlistId: data.playlistId || data.playlist_id || "",
+      playlistName: data.playlistName || data.playlist_name || data.playlist || "Rocket League",
+      mapName: data.mapName || data.map_name || data.map || data.map_code || "unknown map",
+      duration: Number(data.duration || 0) || 0,
+      date: data.date || data.created || null,
+      teams: data.teams.map((team, idx) => ({
+        color: team.color || (idx === 0 ? "blue" : "orange"),
+        name: team.name || team.color || (idx === 0 ? "blue" : "orange"),
+        goals: Number(team.goals ?? team.stats?.core?.goals ?? 0) || 0,
+        players: Array.isArray(team.players)
+          ? team.players.map(p => ({ ...p, teamColor: p.teamColor || team.color || (idx === 0 ? "blue" : "orange"), teamName: p.teamName || team.name || team.color || (idx === 0 ? "blue" : "orange") }))
+          : [],
+      })),
+      raw: data.raw || data,
+    };
+  }
+
   const teams = ["blue", "orange"].map(color => {
     const team = liveReplaySafeObj(data[color]);
     return {
@@ -1012,7 +1041,7 @@ function normalizeBallchasingReplay(raw = {}) {
     title: data.replay_title || data.title || "Ballchasing replay",
     playlistId: data.playlist_id || "",
     playlistName: data.playlist_name || data.playlist || "Rocket League",
-    mapName: data.map_name || data.map || "unknown map",
+    mapName: data.map_name || data.map || data.map_code || "unknown map",
     duration: Number(data.duration || 0) || 0,
     date: data.date || data.created || null,
     teams,
