@@ -13165,6 +13165,7 @@ function getStatsBallchasingCandidateSummary(item = {}) {
 }
 function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindReplay, onUnlinkReplay, compact = false }) {
   const [busy, setBusy] = useState(false);
+  const [manualReplayLink, setManualReplayLink] = useState("");
   if (!game) return null;
   const replay = getGameBallchasingReplay(game);
   const replayId = getGameBallchasingId(game);
@@ -13185,9 +13186,14 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           <button onClick={()=>runFind()} disabled={busy || !onFindReplay} className="bb-pressable" style={{background:busy?"rgba(255,255,255,.04)":"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:9,padding:"6px 8px",fontSize:8.8,fontWeight:950,color:busy?"#4A5066":"#4D9EFF",cursor:busy?"wait":"pointer"}}>{busy ? "finding…" : "find replay"}</button>
         </div>
         <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Adds map, Ballchasing player cards, boost/movement basics, and game timestamp moments. Auto-link only accepts high-confidence same-score matches now.</div>
+        {game.ballchasingNoExactCandidates && <div style={{marginTop:8,background:"rgba(255,209,102,.075)",border:"1px solid rgba(255,209,102,.18)",borderRadius:9,padding:"7px 8px",fontSize:9.3,color:"#FFD166",fontWeight:850,lineHeight:1.35}}>No same-score Ballchasing replay found yet. Do not pick random candidates — Rockpload may not have uploaded this exact game yet. Retry later or paste the exact Ballchasing replay link.</div>}
         {!!candidates.length && <div style={{display:"grid",gap:6,marginTop:8}}>
           {candidates.map(c => <button key={c.id} onClick={()=>runFind(c.id)} className="bb-pressable" style={{background:"rgba(255,255,255,.035)",border:`1px solid ${c.color}33`,borderRadius:9,padding:"7px 8px",textAlign:"left",fontSize:9.5,color:"#E8ECF4",fontWeight:850,cursor:"pointer"}}>{c.label}<span style={{color:c.color,fontWeight:950}}> · {c.confidence}</span></button>)}
         </div>}
+        <div style={{display:"flex",gap:6,marginTop:8}}>
+          <input value={manualReplayLink} onChange={(e)=>setManualReplayLink(e.target.value)} placeholder="paste exact Ballchasing link" style={{flex:1,background:"rgba(6,7,13,.5)",border:"1px solid rgba(255,255,255,.08)",borderRadius:9,padding:"7px 8px",fontSize:9.5,color:"#E8ECF4",outline:"none",minWidth:0}} />
+          <button onClick={()=>runFind(manualReplayLink)} disabled={busy || !manualReplayLink.trim()} className="bb-pressable" style={{background:manualReplayLink.trim()?"rgba(184,255,77,.12)":"rgba(255,255,255,.04)",border:`1px solid ${manualReplayLink.trim()?"rgba(184,255,77,.28)":"rgba(255,255,255,.08)"}`,borderRadius:9,padding:"7px 8px",fontSize:8.8,fontWeight:950,color:manualReplayLink.trim()?"#B8FF4D":"#4A5066",cursor:manualReplayLink.trim()?"pointer":"default"}}>link</button>
+        </div>
       </div>
     );
   }
@@ -13694,6 +13700,8 @@ const unlinkBallchasingForGame = async (game) => {
     ballchasingLinkedAt:null,
     ballchasingMatchScore:null,
     ballchasingConfidence:null,
+    ballchasingCandidates:null,
+    ballchasingNoExactCandidates:false,
   });
   setSyncDebug("Ballchasing unlinked", `${game?.mode || "game"} replay removed from this Stats game.`);
   addToast?.("Ballchasing replay unlinked", "🧹");
@@ -13736,8 +13744,8 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
         }
       }
       detailed.sort((a,b) => Number(b.matchScore || 0) - Number(a.matchScore || 0));
-      const best = detailed[0];
-      candidatesForReview = detailed.map(d => ({
+      const sameScoreCandidates = detailed.filter(d => getStatsBallchasingScoreboardMatch(game, d.replay || d));
+      candidatesForReview = sameScoreCandidates.map(d => ({
         id:d.id,
         mapName:normalizeBallchasingReplay(d.replay || d).mapName,
         scoreText:getReplayScoreboardText(d.replay || d),
@@ -13745,15 +13753,20 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
         matchScore:Number(d.matchScore || 0),
         matchNotes:d.matchNotes || [],
       })).slice(0, 4);
-      const bestReplay = best ? normalizeBallchasingReplay(best.replay || best) : null;
-      if (!best || !getStatsBallchasingAutoLinkSafe(best.matchScore, game, bestReplay)) {
-        await saveBallchasingToStatGames(game, { ballchasingCandidates:candidatesForReview, ballchasingLastSearchAt:new Date().toISOString() });
-        setSyncDebug("Ballchasing needs review", "Possible replays found, but auto-link now only accepts high-confidence matches with the same score.");
-        addToast?.("Ballchasing candidates need review", "⚠️");
+      const bestSameScore = sameScoreCandidates[0] || null;
+      const bestReplay = bestSameScore ? normalizeBallchasingReplay(bestSameScore.replay || bestSameScore) : null;
+      if (!bestSameScore || !getStatsBallchasingAutoLinkSafe(bestSameScore.matchScore, game, bestReplay)) {
+        await saveBallchasingToStatGames(game, {
+          ballchasingCandidates:candidatesForReview,
+          ballchasingNoExactCandidates:!candidatesForReview.length,
+          ballchasingLastSearchAt:new Date().toISOString(),
+        });
+        setSyncDebug(candidatesForReview.length ? "Ballchasing needs review" : "No same-score Ballchasing replay yet", candidatesForReview.length ? "Same-score candidates found, but auto-link only accepts high-confidence matches." : "The exact score for this Stats game was not found in the Ballchasing search results. Retry after Rockpload uploads or paste the exact replay link.");
+        addToast?.(candidatesForReview.length ? "Ballchasing candidates need review" : "No exact Ballchasing replay yet", candidatesForReview.length ? "⚠️" : "⏳");
         return;
       }
       chosenReplay = bestReplay;
-      matchScore = Number(best.matchScore || 0);
+      matchScore = Number(bestSameScore.matchScore || 0);
     }
     let timeline = null;
     try {
@@ -13771,6 +13784,7 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
       ballchasingMatchScore:matchScore,
       ballchasingConfidence:conf,
       ballchasingCandidates:[],
+      ballchasingNoExactCandidates:false,
       ballchasingLastSearchAt:new Date().toISOString(),
     });
     setSyncDebug("Ballchasing linked", `${chosenReplay.mapName || "replay"} · ${getReplayScoreboardText(chosenReplay)} · high confidence`);
