@@ -104,6 +104,7 @@ const DAY_MS  = 24 * 60 * 60 * 1000;
 const STOCK_BASE_PRICE = 100;
 const PARSE_CREDITS_DEFAULT = 50;
 const PARSE_RESERVE_DEFAULT = 50;
+const PARSE_INTERNAL_CREDIT_GATE_ENABLED = false; // APP112E: real Parse key controls usage; do not block sync with in-app credits
 const VOICE_PRESENCE_KEY = "voice_presence";
 const VOICE_PRESENCE_TTL_MS = 90000;
 const VOICE_PRESENCE_HEARTBEAT_MS = 30000;
@@ -24871,6 +24872,9 @@ const loadSharedData = (pid) => {
 };
 
 const useParseCredit = async (playerId) => {
+  // APP112E: do not let the old in-app credit economy block real Parse sync.
+  // The actual external Parse usage is controlled by PARSE_API_KEY, not this saved points counter.
+  if (!PARSE_INTERNAL_CREDIT_GATE_ENABLED) return true;
   const freshCredits = await storeGet("parse_credits").catch(() => null);
   const sourceCredits = freshCredits && typeof freshCredits === "object" && !Array.isArray(freshCredits)
     ? freshCredits
