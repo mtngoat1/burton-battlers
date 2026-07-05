@@ -24557,6 +24557,7 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
       setPushSub(record);
       setPushStatus("on");
       addToast("phone notifications enabled", "🔔");
+      sendPush(record, "🔔 Phone alerts reconnected", `${player?.name || "your"} notifications are linked to this phone`, { url:makeNotificationUrl("home", { type:"push_test" }), type:"push_test", id:`push_test_${Date.now()}` }).catch(() => {});
     } catch (e) {
       setPushStatus(e?.message === "notification permission was not granted" ? "denied" : "unsupported");
       addToast(e?.message || "phone notifications failed", "❌");
@@ -25667,7 +25668,33 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
   </div>
 <div style={s.topBarRight}>
   <button onClick={async()=>{ const upd={...points,[currentPlayer+"_showStars"]: points?.[currentPlayer+"_showStars"] === false}; setPoints(upd); await storeSet("points",upd); }} className="bb-pressable" style={s.logoutBtn}>{points?.[currentPlayer+"_showStars"] === false ? "☀️" : "🌙"}</button>
-  {APP_IN_APP_NOTIFICATIONS_ENABLED && <button onClick={(e)=>{ e.stopPropagation(); setShowTopNotifs(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative",display:"flex",alignItems:"center",justifyContent:"center"}}><Bell size={15}/>{topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}</button>}
+  <button
+    onClick={(e)=>{
+      e.stopPropagation();
+      if (APP_IN_APP_NOTIFICATIONS_ENABLED) setShowTopNotifs(true);
+      else enablePhoneNotifications();
+    }}
+    disabled={pushStatus === "saving"}
+    title={pushStatus === "on" ? "repair phone alerts" : "enable phone alerts"}
+    aria-label={pushStatus === "on" ? "repair phone alerts" : "enable phone alerts"}
+    className="bb-pressable"
+    style={{
+      ...s.logoutBtn,
+      position:"relative",
+      display:"flex",
+      alignItems:"center",
+      justifyContent:"center",
+      color:pushStatus === "on" ? "#7CFFB2" : pushStatus === "denied" ? "#FF5C8A" : "#B8FF4D",
+      border:`1px solid ${pushStatus === "on" ? "rgba(124,255,178,0.30)" : pushStatus === "denied" ? "rgba(255,92,138,0.30)" : "rgba(184,255,77,0.25)"}`,
+      opacity:pushStatus === "saving" ? 0.65 : 1,
+      cursor:pushStatus === "saving" ? "wait" : "pointer",
+    }}
+  >
+    <Bell size={15}/>
+    {pushStatus === "on" && (<div style={{position:"absolute",bottom:-2,right:-2,background:"#7CFFB2",border:"2px solid #070A12",borderRadius:99,width:9,height:9}}/>)}
+    {pushStatus === "denied" && (<div style={{position:"absolute",bottom:-2,right:-2,background:"#FF5C8A",border:"2px solid #070A12",borderRadius:99,width:9,height:9}}/>)}
+    {APP_IN_APP_NOTIFICATIONS_ENABLED && topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}
+  </button>
   <button onClick={(e)=>{ e.stopPropagation(); setChatOpen(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
     <MessageCircle size={16}/>
     {lastSeen.chat > 0 && Math.max(0, messages.length - lastSeen.chat) > 0 && (
