@@ -81,6 +81,7 @@ import { createPortal } from "react-dom";
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
+// APP112_PARSE_TIME_DEBUG_PATCH
 // APP111_HOME_LIVE_SESSION_SECTION_TOGGLE_PATCH
 // APP136_SESSION_STRICT_FILTER_LOW_HEAT_PATCH
 // APP137_ADMIN_LAYOUT_LAB_PATCH
@@ -5125,9 +5126,10 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
             const p = PLAYERS.find(pl => pl.id === g.playerId);
             return (
               <div key={g.id}
-                style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",display:"flex",alignItems:"center",gap:10,border:"1px solid rgba(255,255,255,0.04)",cursor:"default",textAlign:"left",width:"100%"}}>
-                <div style={{width:7,height:7,borderRadius:99,background:p?.color,flexShrink:0}}/>
-                <span style={{fontSize:12,fontWeight:700,color:p?.color,minWidth:64}}>{p?.name}</span>
+                style={{background:"rgba(255,255,255,0.03)",borderRadius:10,padding:"8px 10px",border:"1px solid rgba(255,255,255,0.04)",cursor:"default",textAlign:"left",width:"100%"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,width:"100%"}}>
+                  <div style={{width:7,height:7,borderRadius:99,background:p?.color,flexShrink:0}}/>
+                  <span style={{fontSize:12,fontWeight:700,color:p?.color,minWidth:64}}>{p?.name}</span>
 
 <div style={{
   fontSize:11,
@@ -5136,14 +5138,16 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
 }}>
   {g.ratingDelta != null ? `${g.ratingDelta > 0 ? "+" : ""}${g.ratingDelta} MMR` : "—"}
 </div>
-                <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
-                  {getStatFieldsForMode(g.mode || session?.mode).map(f => (
-                    <div key={f} style={{textAlign:"center"}}>
-                      <div style={{fontSize:8,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
-                      <div style={{fontSize:12,fontWeight:700,color:p?.color||"#E8ECF4"}}>{g[f]||0}</div>
-                    </div>
-                  ))}
+                  <div style={{display:"flex",gap:10,marginLeft:"auto"}}>
+                    {getStatFieldsForMode(g.mode || session?.mode).map(f => (
+                      <div key={f} style={{textAlign:"center"}}>
+                        <div style={{fontSize:8,color:"#4A5066",fontWeight:700,textTransform:"uppercase"}}>{f.slice(0,3)}</div>
+                        <div style={{fontSize:12,fontWeight:700,color:p?.color||"#E8ECF4"}}>{g[f]||0}</div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
+                <ParseTimeDebugCard game={g} accent={p?.color || "#B8FF4D"} compact />
               </div>
             );
           })}
@@ -12162,6 +12166,7 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
                 </div>
               ))}
             </div>
+            <ParseTimeDebugCard game={g} accent={playerColor} />
             
           </div>
         );
@@ -12969,6 +12974,90 @@ function getMatchStartInfo(match) {
     return { iso: collectedDate.toISOString(), reliable: false, source: "date_collected" };
   }
   return { iso: new Date().toISOString(), reliable: false, source: "fallback_now" };
+}
+
+
+function parseDebugTimeMs(value) {
+  if (!value) return null;
+  const t = new Date(value).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+function fmtParseDebugTime(value) {
+  const t = parseDebugTimeMs(value);
+  if (!Number.isFinite(t)) return "—";
+  try {
+    return new Date(t).toLocaleString("en-US", { month:"short", day:"numeric", hour:"numeric", minute:"2-digit", second:"2-digit" });
+  } catch (_) {
+    return new Date(t).toISOString();
+  }
+}
+function fmtParseDebugDelta(ms) {
+  if (!Number.isFinite(ms)) return "—";
+  const sign = ms >= 0 ? "+" : "-";
+  const abs = Math.abs(ms);
+  const mins = Math.floor(abs / 60000);
+  const secs = Math.round((abs % 60000) / 1000);
+  if (mins <= 0) return `${sign}${secs}s`;
+  return `${sign}${mins}m ${String(secs).padStart(2,"0")}s`;
+}
+function getParseGameTimeDebug(game = {}) {
+  const shownMs = parseDebugTimeMs(game.ts);
+  const startMs = parseDebugTimeMs(game.matchStartAt);
+  const syncedMs = parseDebugTimeMs(game.syncedAt);
+  const deltaMs = Number.isFinite(shownMs) && Number.isFinite(startMs) ? shownMs - startMs : null;
+  const source = game.matchStartSource || (game.source === "parse_sessions" ? "missing" : "manual");
+  const reliable = game.matchStartReliable === true;
+  const status = reliable
+    ? { label:"reliable start", color:"#7CFFB2", note:"Parse exposed an actual match start-style time." }
+    : source === "date_collected"
+      ? { label:"collected time", color:"#FFD166", note:"Parse is likely showing when Tracker collected/saw the match, not exact kickoff." }
+      : source === "fallback_now"
+        ? { label:"fallback time", color:"#FF5C8A", note:"No useful match time came back, so the app used the sync time." }
+        : { label:"unverified", color:"#A78BFA", note:"Time needs review before auto-linking Ballchasing." };
+  return { shownMs, startMs, syncedMs, deltaMs, source, reliable, status };
+}
+function ParseTimeDebugCard({ game, accent = "#B8FF4D", compact = false }) {
+  if (!game || game.source !== "parse_sessions") return null;
+  const dbg = getParseGameTimeDebug(game);
+  const copyPayload = {
+    player: game.playerName || playerNameById(game.playerId),
+    mode: game.mode,
+    score: formatGameScore(game),
+    parseMatchId: game.parseMatchId || null,
+    ts: game.ts || null,
+    matchStartAt: game.matchStartAt || null,
+    matchStartReliable: !!game.matchStartReliable,
+    matchStartSource: game.matchStartSource || null,
+    syncedAt: game.syncedAt || null,
+    collectedMinusStart: fmtParseDebugDelta(dbg.deltaMs),
+    parseStatsFound: !!game.parseStatsFound,
+    parseStatDebug: game.parseStatDebug || null,
+  };
+  const copyDebug = (e) => {
+    e?.stopPropagation?.();
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(JSON.stringify(copyPayload, null, 2));
+      }
+    } catch (_) {}
+  };
+  return (
+    <div style={{marginTop:compact?8:10,background:"rgba(255,255,255,0.035)",border:`1px solid ${dbg.status.color}33`,borderRadius:11,padding:compact?9:10}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:compact?7:8}}>
+        <div style={{fontSize:9.5,color:dbg.status.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>parse time debug · {dbg.status.label}</div>
+        <button onClick={copyDebug} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>copy</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:compact?"1fr":"1fr 1fr",gap:6}}>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>shown: <span style={{color:"#E8ECF4",fontWeight:800}}>{fmtParseDebugTime(game.ts)}</span></div>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>start: <span style={{color:"#E8ECF4",fontWeight:800}}>{fmtParseDebugTime(game.matchStartAt)}</span></div>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>source: <span style={{color:dbg.status.color,fontWeight:900}}>{dbg.source}</span></div>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>delta: <span style={{color:Number.isFinite(dbg.deltaMs) && Math.abs(dbg.deltaMs) <= 3*60000 ? "#7CFFB2" : "#FFD166",fontWeight:900}}>{fmtParseDebugDelta(dbg.deltaMs)}</span></div>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>synced: <span style={{color:"#E8ECF4",fontWeight:800}}>{fmtParseDebugTime(game.syncedAt)}</span></div>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>id: <span style={{color:accent,fontWeight:800}}>{String(game.parseMatchId || "—").slice(0,18)}</span></div>
+      </div>
+      <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.35,marginTop:7}}>{dbg.status.note}</div>
+    </div>
+  );
 }
 
 const PROP_BET_UNRELIABLE_START_LOCK_MS = 4 * 60 * 1000;
