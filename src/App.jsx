@@ -93,6 +93,7 @@ import { createPortal } from "react-dom";
 // APP137_ADMIN_LAYOUT_LAB_PATCH
 // APP114_STATS_BALLCHASING_CLEANUP_DEMOS_BETS_PATCH
 // APP115_STATS_BALLCHASING_DEEP_CARD_TIMESTAMPS_PATCH
+// APP116_STATS_BALLCHASING_FULLSCREEN_CARD_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -13254,16 +13255,16 @@ function getStatsBallchasingCandidateSummary(item = {}) {
     score,
   };
 }
-function StatsBallchasingDeepPlayerCard({ row, replay, game, accent = "#B8FF4D" }) {
+function StatsBallchasingDeepPlayerCard({ row, replay, game, accent = "#B8FF4D", fullScreen = false }) {
   if (!row) return null;
   const normalized = normalizeBallchasingReplay(replay || {});
   const goalTimes = getReplayTimelineForPlayer(normalized, row, "goal");
   const saveTimes = getReplayTimelineForPlayer(normalized, row, "save");
   const demoTimes = getReplayTimelineForPlayer(normalized, row, "demo");
   const metricTile = (label, value, color = "#E8ECF4") => (
-    <div style={{background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.055)",borderRadius:11,padding:8,minWidth:0}}>
-      <div style={{fontSize:8,color:"#4A5066",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div>
-      <div style={{fontSize:12.5,color,fontWeight:950,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{value ?? "—"}</div>
+    <div style={{background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.055)",borderRadius:fullScreen?14:11,padding:fullScreen?"12px 12px":"9px 8px",minWidth:0,minHeight:fullScreen?72:58,display:"flex",flexDirection:"column",justifyContent:"center"}}>
+      <div style={{fontSize:fullScreen?10:8,color:"#4A5066",fontWeight:950,textTransform:"uppercase",letterSpacing:fullScreen?0.45:0,lineHeight:1.15,whiteSpace:"normal",overflow:"visible",textOverflow:"clip"}}>{label}</div>
+      <div style={{fontSize:fullScreen?16:12.5,color,fontWeight:950,marginTop:4,lineHeight:1.16,whiteSpace:"normal",overflow:"visible",textOverflow:"clip",wordBreak:"break-word"}}>{value ?? "—"}</div>
     </div>
   );
   const section = (title, items, color = "#4D9EFF", open = false) => (
@@ -13271,7 +13272,7 @@ function StatsBallchasingDeepPlayerCard({ row, replay, game, accent = "#B8FF4D" 
       <summary style={{cursor:"pointer",listStyle:"none",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,fontSize:9.5,color,fontWeight:950,letterSpacing:.9,textTransform:"uppercase"}}>
         <span>{title}</span><span style={{color:"#4A5066"}}>tap</span>
       </summary>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginTop:9}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:fullScreen?10:7,marginTop:9}}>
         {items.map(([label,value,tileColor]) => metricTile(label, value, tileColor || "#E8ECF4"))}
       </div>
     </details>
@@ -13279,18 +13280,18 @@ function StatsBallchasingDeepPlayerCard({ row, replay, game, accent = "#B8FF4D" 
   const carText = row.carName || "car unknown";
   const possession = row.possessionPct !== null && row.possessionPct !== undefined ? fmtReplayPercent(row.possessionPct) : fmtReplaySeconds(row.possessionTime);
   return (
-    <div style={{background:`linear-gradient(135deg,${bbAlpha(row.color || accent,.14)},rgba(255,255,255,.035))`,border:`1px solid ${bbAlpha(row.color || accent,.28)}`,borderRadius:18,padding:13,boxShadow:`0 12px 30px ${bbAlpha(row.color || accent,.08)}`}}>
+    <div style={{background:`linear-gradient(135deg,${bbAlpha(row.color || accent,.14)},rgba(255,255,255,.035))`,border:`1px solid ${bbAlpha(row.color || accent,.28)}`,borderRadius:fullScreen?24:18,padding:fullScreen?18:13,boxShadow:`0 12px 30px ${bbAlpha(row.color || accent,.08)}`,width:"100%",boxSizing:"border-box"}}>
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
         <div style={{minWidth:0}}>
-          <div style={{fontSize:15,color:row.color || accent,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{row.appName || row.name}</div>
-          <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:850,marginTop:4,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{carText}{row.mvp ? " · MVP" : ""}</div>
+          <div style={{fontSize:fullScreen?24:15,color:row.color || accent,fontWeight:950,lineHeight:1.05,whiteSpace:"normal",overflow:"visible",textOverflow:"clip"}}>{row.appName || row.name}</div>
+          <div style={{fontSize:fullScreen?12:9.5,color:"#8B92A8",fontWeight:850,marginTop:5,textTransform:"uppercase",lineHeight:1.2,whiteSpace:"normal",overflow:"visible",textOverflow:"clip"}}>{carText}{row.mvp ? " · MVP" : ""}</div>
         </div>
         <div style={{textAlign:"right",flexShrink:0}}>
-          <div style={{fontSize:9,color:"#4A5066",fontWeight:950,textTransform:"uppercase"}}>score</div>
-          <div style={{fontSize:22,color:row.color || accent,fontWeight:950,lineHeight:1}}>{fmtReplayNumber(row.score)}</div>
+          <div style={{fontSize:fullScreen?11:9,color:"#4A5066",fontWeight:950,textTransform:"uppercase"}}>score</div>
+          <div style={{fontSize:fullScreen?34:22,color:row.color || accent,fontWeight:950,lineHeight:1}}>{fmtReplayNumber(row.score)}</div>
         </div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,marginBottom:8}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:fullScreen?10:7,marginBottom:8}}>
         {metricTile("goals", fmtReplayNumber(row.goals), row.color || accent)}
         {metricTile("shots", fmtReplayNumber(row.shots))}
         {metricTile("shot %", fmtReplayPercent(row.shootingPercentage))}
@@ -13326,7 +13327,7 @@ function StatsBallchasingDeepPlayerCard({ row, replay, game, accent = "#B8FF4D" 
         ["angle", fmtReplayNumber(row.cameraAngle)], ["stiffness", fmtReplayNumber(row.cameraStiffness, 2)], ["swivel", fmtReplayNumber(row.cameraSwivel, 1)],
         ["transition", fmtReplayNumber(row.cameraTransition, 1)], ["steering", fmtReplayNumber(row.steeringSensitivity, 2)], ["car", carText],
       ], "#4D9EFF", false)}
-      <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:750,lineHeight:1.35,marginTop:9}}>Goal, save, and demo times come from Ballchasing replay elapsed time.</div>
+      <div style={{fontSize:fullScreen?11:9.5,color:"#8B92A8",fontWeight:750,lineHeight:1.4,marginTop:10}}>Goal, save, and demo times come from Ballchasing replay elapsed time.</div>
     </div>
   );
 }
@@ -13334,6 +13335,7 @@ function StatsBallchasingDeepPlayerCard({ row, replay, game, accent = "#B8FF4D" 
 function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindReplay, onUnlinkReplay, compact = false }) {
   const [busy, setBusy] = useState(false);
   const [manualReplayLink, setManualReplayLink] = useState("");
+  const [sheetOpen, setSheetOpen] = useState(false);
   if (!game) return null;
   const replay = getGameBallchasingReplay(game);
   const replayId = getGameBallchasingId(game);
@@ -13371,7 +13373,27 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
   const playerNames = visibleRows.map(r => r.name).filter(Boolean);
   const moments = getReplayKeyMoments(normalized, playerNames.length ? playerNames : rows.map(r => r.name)).slice(0, compact ? 6 : 18);
   const openUrl = normalized.viewUrl || (replayId ? `https://ballchasing.com/replay/${replayId}` : "");
+  const fullRows = visibleRows.length ? visibleRows.slice(0, normalizeGameMode(game.mode) === "1v1" ? 1 : 4) : [];
+  const fullScreenSheet = sheetOpen && typeof document !== "undefined" ? createPortal((
+    <div style={{position:"fixed",inset:0,zIndex:900,background:"rgba(3,5,15,.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",display:"flex",flexDirection:"column"}}>
+      <div style={{position:"sticky",top:0,zIndex:2,padding:"max(18px, env(safe-area-inset-top)) 16px 12px",background:"rgba(3,5,15,.92)",borderBottom:"1px solid rgba(255,255,255,.06)",display:"flex",alignItems:"center",gap:10}}>
+        <button onClick={()=>setSheetOpen(false)} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,width:42,height:42,color:"#E8ECF4",fontSize:20,fontWeight:950,cursor:"pointer"}}>×</button>
+        <div style={{minWidth:0,flex:1}}>
+          <div style={{fontSize:10,color:accent,fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Ballchasing full stats</div>
+          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,color:"#E8ECF4",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)}</div>
+        </div>
+        {openUrl && <button onClick={()=>window.open(openUrl, "_blank", "noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.10)",border:"1px solid rgba(77,158,255,.24)",borderRadius:12,padding:"10px 12px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer"}}>replay</button>}
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"16px 14px max(28px, env(safe-area-inset-bottom))"}}>
+        <div style={{display:"grid",gap:14,maxWidth:640,margin:"0 auto"}}>
+          {fullRows.length ? fullRows.map(r => <StatsBallchasingDeepPlayerCard key={`sheet_${replayId}_${r.name}_${r.appPlayerId || "opp"}`} row={r} replay={normalized} game={game} accent={accent} fullScreen />) : <div style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:16,padding:14,fontSize:12,color:"#8B92A8"}}>No Burton player matched this replay.</div>}
+        </div>
+      </div>
+    </div>
+  ), document.body) : null;
   return (
+    <>
+    {fullScreenSheet}
     <div style={{marginTop:compact?8:10,background:"linear-gradient(135deg,rgba(184,255,77,0.075),rgba(77,158,255,0.055))",border:`1px solid ${confidence.color}33`,borderRadius:12,padding:compact?9:11}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
         <div style={{minWidth:0}}>
@@ -13379,7 +13401,8 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {normalized.date ? new Date(normalized.date).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "time ?"}</div>
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
-          {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>open</button>}
+          <button onClick={()=>setSheetOpen(true)} className="bb-pressable" style={{background:"rgba(184,255,77,.10)",border:"1px solid rgba(184,255,77,.24)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>open</button>
+          {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>replay</button>}
           <button onClick={()=>runFind(replayId)} disabled={busy} className="bb-pressable" style={{background:"rgba(77,158,255,.10)",border:"1px solid rgba(77,158,255,.22)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:busy?"#4A5066":"#4D9EFF",cursor:busy?"wait":"pointer"}}>{busy ? "…" : "refresh"}</button>
           {onUnlinkReplay && <button onClick={()=>onUnlinkReplay(game)} className="bb-pressable" style={{background:"rgba(255,92,138,.08)",border:"1px solid rgba(255,92,138,.18)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>unlink</button>}
         </div>
@@ -13397,8 +13420,20 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           </div>
         ))}
       </div>}
-      {!!visibleRows.length && !compact && <div style={{display:"grid",gap:10,marginBottom:moments.length?10:0}}>
-        {visibleRows.slice(0, normalizeGameMode(game.mode) === "1v1" ? 1 : 4).map(r => <StatsBallchasingDeepPlayerCard key={`${replayId}_${r.name}_${r.appPlayerId || "opp"}`} row={r} replay={normalized} game={game} accent={accent} />)}
+      {!!visibleRows.length && !compact && <div style={{display:"grid",gap:8,marginBottom:moments.length?10:0}}>
+        {visibleRows.slice(0, normalizeGameMode(game.mode) === "1v1" ? 1 : 4).map(r => (
+          <button key={`${replayId}_${r.name}_${r.appPlayerId || "opp"}`} onClick={()=>setSheetOpen(true)} className="bb-pressable" style={{width:"100%",textAlign:"left",background:`linear-gradient(135deg,${bbAlpha(r.color,.12)},rgba(255,255,255,.035))`,border:`1px solid ${bbAlpha(r.color,.25)}`,borderRadius:14,padding:"10px 11px",cursor:"pointer"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:13,color:r.color,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.appName || r.name}</div>
+                <div style={{fontSize:9,color:"#8B92A8",fontWeight:850,marginTop:3,textTransform:"uppercase"}}>tap to open full Ballchasing stats</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:normalizeGameMode(game.mode)==="1v1"?"repeat(5,auto)":"repeat(4,auto)",gap:8,alignItems:"center",flexShrink:0}}>
+                {[ ["G",r.goals], ["A",r.assists], ["S",r.saves], ["Sh",r.shots], ...(normalizeGameMode(game.mode)==="1v1" ? [["D", r.demosInflicted ?? r.demos ?? 0]] : []) ].map(([label,val]) => <div key={label} style={{textAlign:"center"}}><div style={{fontSize:7.5,color:"#4A5066",fontWeight:900}}>{label}</div><div style={{fontSize:11,color:r.color,fontWeight:950}}>{fmtReplayNumber(val)}</div></div>)}
+              </div>
+            </div>
+          </button>
+        ))}
       </div>}
       {!!moments.length && <div style={{display:"grid",gap:5}}>
         <div style={{fontSize:9,color:"#FFD166",fontWeight:950,letterSpacing:.7,textTransform:"uppercase"}}>game timestamps</div>
@@ -13406,6 +13441,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
       </div>}
       {!moments.length && <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Replay linked. Press refresh if timeline moments are missing.</div>}
     </div>
+    </>
   );
 }
 
