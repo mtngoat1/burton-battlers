@@ -91,6 +91,7 @@ import { createPortal } from "react-dom";
 // APP111_HOME_LIVE_SESSION_SECTION_TOGGLE_PATCH
 // APP136_SESSION_STRICT_FILTER_LOW_HEAT_PATCH
 // APP137_ADMIN_LAYOUT_LAB_PATCH
+// APP138_CPU_SUPABASE_LIGHT_CHAT_ANIMATION_PATCH
 // APP114_STATS_BALLCHASING_CLEANUP_DEMOS_BETS_PATCH
 // APP115_STATS_BALLCHASING_DEEP_CARD_TIMESTAMPS_PATCH
 // APP116_STATS_BALLCHASING_FULLSCREEN_CARD_PATCH
@@ -4107,6 +4108,7 @@ function BurtonOSPanel({ burtonOS, setBurtonOS, currentPlayer, points, setPoints
 function GlobalStyles() {
   useEffect(() => {
     if (typeof window === "undefined" || typeof document === "undefined") return;
+    if (BB_CPU_SAVER_MODE) return;
     const seen = new WeakSet();
     const isProgressFill = (el) => {
       if (!el || el.nodeType !== 1 || el.dataset?.bbProgressSeen === "1") return false;
@@ -4160,6 +4162,8 @@ function GlobalStyles() {
       @keyframes chatFadeIn { from { opacity:0; } to { opacity:1; } }
       @keyframes chatPanelIn { from { opacity:0; transform:translateY(14px) scale(.995); } to { opacity:1; transform:translateY(0) scale(1); } }
       @keyframes chatPanelUp { from { transform:translateY(32px); } to { transform:translateY(0); } }
+      @keyframes bbTeamChatSheetIn { 0% { opacity:0; transform:translate3d(0,100%,0) scale(.985); filter:blur(8px); } 62% { opacity:1; transform:translate3d(0,-8px,0) scale(1.004); filter:blur(0); } 100% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } }
+      @keyframes bbTeamChatSheetOut { 0% { opacity:1; transform:translate3d(0,0,0) scale(1); filter:blur(0); } 100% { opacity:0; transform:translate3d(0,92%,0) scale(.985); filter:blur(4px); } }
       @keyframes chatBubbleInLeft { from { opacity:0; transform:translate3d(-18px,10px,0) scale(.985); } to { opacity:1; transform:translate3d(0,0,0) scale(1); } }
       @keyframes chatBubbleInRight { from { opacity:0; transform:translate3d(18px,10px,0) scale(.985); } to { opacity:1; transform:translate3d(0,0,0) scale(1); } }
       @keyframes chatGlowIn { from { opacity:0; transform:translateY(10px); filter:drop-shadow(0 0 0 rgba(184,255,77,0)); } 55% { opacity:1; filter:drop-shadow(0 0 16px rgba(184,255,77,.32)); } to { opacity:1; transform:translateY(0); filter:drop-shadow(0 0 0 rgba(184,255,77,0)); } }
@@ -4245,6 +4249,24 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
       body.bb-motion-high .bb-pressable:hover { transform:translateY(-2px) scale(1.006); }
       body.bb-button-bouncy button:active, body.bb-button-bouncy .bb-pressable:active { transform:scale(.94); }
       body.bb-ambient-fx-on .bb-state-reactive-card { animation:bbStateGlow 3.8s ease-in-out infinite; }
+      body.bb-cpu-saver .bb-state-reactive-card,
+      body.bb-cpu-saver .bb-pass-mesh-fill,
+      body.bb-cpu-saver .bb-progress-fill-once[data-bb-progress-seen="1"] {
+        animation:none !important;
+      }
+      body.bb-cpu-saver .bb-tab-content > * {
+        will-change:auto !important;
+        animation-duration:.20s !important;
+        animation-delay:0s !important;
+      }
+      .bb-team-chat-panel {
+        transform-origin:bottom center;
+        backface-visibility:hidden;
+        -webkit-backface-visibility:hidden;
+      }
+      .bb-social-comments-modal {
+        font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+      }
 
       body.bb-fullscreen-float .bb-fullscreen-shell {
         background:rgba(0,0,0,0.68) !important;
@@ -8825,22 +8847,25 @@ function ChatTab({ messages, setMessages, currentPlayer, addToast, typingStatus,
     setMediaPreview(URL.createObjectURL(file));
   };
   const clearChatMedia=()=>{ if(mediaPreview) URL.revokeObjectURL(mediaPreview); setMediaPreview(null); setMediaFile(null); if(mediaInputRef.current) mediaInputRef.current.value=""; };
+const typingWriteTimerRef = useRef(null);
+useEffect(() => () => clearTimeout(typingWriteTimerRef.current), []);
 useEffect(() => {
-  if (!text.trim()) {
+  clearTimeout(typingWriteTimerRef.current);
+  const hasText = !!text.trim();
+
+  // Debounce typing writes so every keystroke does not hit Supabase.
+  typingWriteTimerRef.current = setTimeout(() => {
     storeGet("typing").then(current => {
       const upd = { ...(current || {}) };
-      delete upd[currentPlayer];
+      if (hasText) upd[currentPlayer] = new Date().toISOString();
+      else delete upd[currentPlayer];
       setTypingStatus(upd);
-      storeSet("typing", upd);
-    });
-    return;
-  }
-  storeGet("typing").then(current => {
-    const upd = { ...(current || {}), [currentPlayer]: new Date().toISOString() };
-    setTypingStatus(upd);
-    storeSet("typing", upd);
-  });
-}, [text]);           
+      storeSet("typing", upd).catch(() => {});
+    }).catch(() => {});
+  }, hasText ? 850 : 1200);
+
+  return () => clearTimeout(typingWriteTimerRef.current);
+}, [text, currentPlayer, setTypingStatus]);           
   const scrollRef = useRef(null);
   const chatScrollBoxRef = useRef(null);
   const didInitialChatScroll = useRef(false);
@@ -9376,7 +9401,8 @@ function PostCommentsModal({ post, onAddComment, onHeartComment, currentPlayer, 
       onClick={onClose}
     >
       <div
-        style={{...s.modalBox,width:"100%",maxWidth:480,maxHeight:"72dvh",display:"flex",flexDirection:"column",paddingBottom:"max(18px, env(safe-area-inset-bottom))",overflow:"hidden",borderRadius:"24px",border:"1px solid rgba(255,255,255,0.10)",borderBottom:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 26px 80px rgba(0,0,0,0.58)",animation:"modalSheetUp .2s cubic-bezier(.2,.8,.2,1)"}}
+        className="bb-social-comments-modal"
+        style={{...s.modalBox,width:"100%",maxWidth:480,maxHeight:"72dvh",display:"flex",flexDirection:"column",paddingBottom:"max(18px, env(safe-area-inset-bottom))",overflow:"hidden",borderRadius:"24px",border:"1px solid rgba(255,255,255,0.10)",borderBottom:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 26px 80px rgba(0,0,0,0.58)",animation:"modalSheetUp .2s cubic-bezier(.2,.8,.2,1)",fontFamily:"'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"}}
         onClick={(e)=>e.stopPropagation()}
       >
         <div style={s.modalHeader}><div style={s.modalTitle}>comments</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
@@ -12505,7 +12531,7 @@ async function saveStatsEverywhere(nextStats, setStatsFn) {
   const clean = sanitizeStatsForRender(nextStats);
   if (typeof setStatsFn === "function") setStatsFn(clean);
   await storeSet("stats", clean);
-  if (isMeaningfulStatsSnapshot(clean)) storeSet("stats_backup", clean).catch(() => {});
+  if (isMeaningfulStatsSnapshot(clean)) storeSetBackground("stats_backup", clean).catch(() => {});
   return clean;
 }
 
@@ -18527,6 +18553,7 @@ function TokenDetailModal({ token, currentPlayer, passTokens, setPassTokens, act
   );
 }
 function StarfieldBg() {
+  if (BB_CPU_SAVER_MODE) return null;
   const stars = Array.from({length:80},(_,i)=>({
     x: (i*137.5)%100, y: (i*97.3)%100,
     r: i%5===0?1.5:i%3===0?1:0.6,
@@ -18542,6 +18569,7 @@ function StarfieldBg() {
   );
 }
 function SeasonalTextKitFx({ kitValue }) {
+  if (BB_CPU_SAVER_MODE) return null;
   if (kitValue !== "fall" && kitValue !== "winter") return null;
   if (kitValue === "fall") {
     const leaves = Array.from({ length: 18 }, (_, i) => ({
@@ -18587,10 +18615,10 @@ const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "commen
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
 const RT_KEYS_LIVE = [
-  // APP120: keep gameplay + chat live, but remove in-app notification feeds from realtime.
-  // Phone/native push still sends from writes; the app no longer subscribes to pings/activity_feed.
-  "chat", "stats", "points", "bets", "parse_credits", "presence",
-  "team_room", "team_sessions", "live_session", "typing", "soundboard_events",
+  // APP138: keep only instant gameplay/chat/session keys live.
+  // Slow admin/shop/credits/notification feeds hydrate on boot or update through explicit writes, cutting Supabase realtime load.
+  "chat", "stats", "points", "bets", "presence",
+  "team_room", "team_sessions", "live_session", "typing",
   ADMIN_LIVE_SYNC_KEY
 ];
 const BOOT_LIVE_DELAY_MS = 2500;
@@ -18599,6 +18627,39 @@ const BOOT_MMR_HYDRATE_DELAY_MS = 9000;
 const BOOT_BACKGROUND_EFFECT_DELAY_MS = 3500;
 // APP120: disable in-app notification/toast UI and dropdown hydration. Phone/native push paths still run through storeSetWithPush/showLocalNotification.
 const APP_IN_APP_NOTIFICATIONS_ENABLED = false;
+
+// APP138_CPU_SUPABASE_LIGHT_CHAT_ANIMATION_PATCH
+// Keep the app cooler on phones by reducing background writes/reads while keeping the important live pieces instant.
+const BB_CPU_SAVER_MODE = true;
+const BB_BACKGROUND_WRITE_DELAY_MS = 900;
+const BB_BACKGROUND_WRITE_MIN_MS = 45000;
+const CHAT_PANEL_CLOSE_MS = 260;
+const BB_BACKGROUND_WRITE_CACHE = new Map();
+const BB_BACKGROUND_WRITE_TIMERS = new Map();
+const BB_BACKGROUND_WRITE_LAST_AT = new Map();
+
+function storeSetBackground(key, value, { delayMs = BB_BACKGROUND_WRITE_DELAY_MS, minIntervalMs = BB_BACKGROUND_WRITE_MIN_MS } = {}) {
+  const snapshot = bbStableStorageString(value);
+  if (BB_BACKGROUND_WRITE_CACHE.get(key) === snapshot) return Promise.resolve(false);
+  BB_BACKGROUND_WRITE_CACHE.set(key, snapshot);
+  const now = Date.now();
+  const lastAt = BB_BACKGROUND_WRITE_LAST_AT.get(key) || 0;
+  const wait = Math.max(delayMs, minIntervalMs - (now - lastAt), 0);
+  clearTimeout(BB_BACKGROUND_WRITE_TIMERS.get(key));
+  return new Promise(resolve => {
+    const timer = setTimeout(async () => {
+      BB_BACKGROUND_WRITE_TIMERS.delete(key);
+      BB_BACKGROUND_WRITE_LAST_AT.set(key, Date.now());
+      try {
+        await storeSet(key, value);
+        resolve(true);
+      } catch (_) {
+        resolve(false);
+      }
+    }, wait);
+    BB_BACKGROUND_WRITE_TIMERS.set(key, timer);
+  });
+}
 
 // ===================== One-time manual restore =====================
 const MANUAL_RESTORE_PATCH_ID = "manual_restore_20260630_points_pass_v1";
@@ -19100,18 +19161,33 @@ async function dispatchPushForStoreChange(key, before, after) {
 }
 
 const BB_STORE_WRITE_CACHE = new Map();
+const BB_PUSH_DIFF_KEYS = new Set([
+  "pings", "activity_feed", "posts", "chat", "stocks", "completions",
+  "active_race", "credit_requests", ADMIN_SHOP_ITEMS_KEY, "admin_shop_items"
+]);
 function bbStableStorageString(value) {
   try { return JSON.stringify(value); } catch (_) { return String(Date.now()); }
 }
 async function storeSetWithPush(key, value) {
   const snapshot = bbStableStorageString(value);
   if (BB_STORE_WRITE_CACHE.get(key) === snapshot) return;
+  const needsPushDiff = BB_PUSH_DIFF_KEYS.has(key);
+  let before = null;
+
+  // In CPU/Supabase light mode, do not pre-read for ordinary writes. That old read-before-write
+  // doubled Supabase work on points/bets/pass saves. Keep the pre-read only for keys that send push alerts.
+  if (needsPushDiff) {
+    before = await storeGet(key).catch(() => null);
+    const beforeSnapshot = bbStableStorageString(before);
+    if (beforeSnapshot === snapshot) {
+      BB_STORE_WRITE_CACHE.set(key, snapshot);
+      return;
+    }
+  }
+
   BB_STORE_WRITE_CACHE.set(key, snapshot);
-  const before = await storeGet(key).catch(() => null);
-  const beforeSnapshot = bbStableStorageString(before);
-  if (beforeSnapshot === snapshot) return;
   await storeSet(key, value);
-  dispatchPushForStoreChange(key, before, value).catch(e => console.error("push mirror failed", e));
+  if (needsPushDiff) dispatchPushForStoreChange(key, before, value).catch(e => console.error("push mirror failed", e));
 }
 
 async function showLocalNotification(title, body, data = {}) {
@@ -22443,7 +22519,7 @@ function TeamChemistryTab({ stats, currentPlayer, points, setPoints, chemistry, 
     const next = { ...(chemistry && typeof chemistry === "object" && !Array.isArray(chemistry) ? chemistry : {}), _resetVersion: CHEMISTRY_RESET_VERSION };
     setChemistry(next);
     storeSet("chemistry", next).catch(() => {});
-    if (isMeaningfulChemistrySnapshot(next)) storeSet("chemistry_backup", next).catch(() => {});
+    if (isMeaningfulChemistrySnapshot(next)) storeSetBackground("chemistry_backup", next).catch(() => {});
   }, [chemistry?._resetVersion]);
   const [duoSwipeOffset, setDuoSwipeOffset] = useState(0);
   const duoSwipeStartX = useRef(0);
@@ -23948,7 +24024,8 @@ const [toasts, setToasts] = useState([]);
     document.body.classList.toggle("bb-motion-low", appCustomizer?.animationDepth === "low");
     document.body.classList.toggle("bb-motion-high", appCustomizer?.animationDepth === "high");
     document.body.classList.toggle("bb-button-bouncy", appCustomizer?.buttonMotion === "bouncy");
-    document.body.classList.toggle("bb-ambient-fx-on", appCustomizer?.ambientFx !== false);
+    document.body.classList.toggle("bb-ambient-fx-on", appCustomizer?.ambientFx !== false && !BB_CPU_SAVER_MODE);
+    document.body.classList.toggle("bb-cpu-saver", BB_CPU_SAVER_MODE);
     document.body.classList.remove("bb-finish-default","bb-finish-neon_pro","bb-finish-glass_final","bb-finish-tournament_broadcast","bb-finish-minimal_compact","bb-finish-arcade_luxe","bb-finish-midnight_terminal","bb-finish-sunset_glass","bb-finish-ice_blue","bb-finish-purple_haze","bb-finish-carbon_lime","bb-finish-whiteout","bb-finish-redline","bb-finish-ocean","bb-finish-gold_room");
     document.body.classList.add(`bb-finish-${normalizeAppCustomizer(appCustomizer).finishStyle}`);
     document.body.classList.remove("bb-ui-default","bb-ui-glass_panels","bb-ui-floating_bento","bb-ui-terminal_blocks","bb-ui-broadcast_cards","bb-ui-compact_tiles","bb-ui-split_buttons","bb-ui-offset_cards","bb-ui-large_touch","bb-ui-tiny_scoreboard","bb-ui-feed_stack");
@@ -24058,32 +24135,32 @@ const [flowers, setFlowers] = useState([]);
 const [timeLogs, setTimeLogs] = useState([]);
   useEffect(() => {
     if (!isMeaningfulPointsSnapshot(points) || looksLikeWipedPointsSnapshot(points)) return;
-    storeSet("points_backup", points).catch(() => {});
+    storeSetBackground("points_backup", points).catch(() => {});
   }, [points]);
 
   useEffect(() => {
     if (!hasAnyStoredKey(passXP)) return;
-    storeSet("pass_xp_backup", passXP).catch(() => {});
+    storeSetBackground("pass_xp_backup", passXP).catch(() => {});
   }, [passXP]);
 
   useEffect(() => {
     if (!hasAnyStoredKey(passPremium)) return;
-    storeSet("pass_premium_backup", passPremium).catch(() => {});
+    storeSetBackground("pass_premium_backup", passPremium).catch(() => {});
   }, [passPremium]);
 
   useEffect(() => {
     if (!isMeaningfulGenericSnapshot(passClaimed)) return;
-    storeSet("pass_claimed_backup", passClaimed).catch(() => {});
+    storeSetBackground("pass_claimed_backup", passClaimed).catch(() => {});
   }, [passClaimed]);
 
   useEffect(() => {
     if (!isMeaningfulGenericSnapshot(passTokens)) return;
-    storeSet("pass_tokens_backup", passTokens).catch(() => {});
+    storeSetBackground("pass_tokens_backup", passTokens).catch(() => {});
   }, [passTokens]);
 
   useEffect(() => {
     if (!isMeaningfulGenericSnapshot(passActiveBoosts)) return;
-    storeSet("pass_active_boosts_backup", passActiveBoosts).catch(() => {});
+    storeSetBackground("pass_active_boosts_backup", passActiveBoosts).catch(() => {});
   }, [passActiveBoosts]);
 
   useEffect(() => {
@@ -24109,6 +24186,8 @@ const [flipChallenges, setFlipChallenges] = useState([]);
 const [teamRoom, setTeamRoom] = useState(null); // { id, mode, createdBy, createdAt, games:[] }                      
 const [teamSessions, setTeamSessions] = useState([]); // planned 3v3 sessions / RSVPs
 const [chatOpen, setChatOpen] = useState(false);
+const [chatClosing, setChatClosing] = useState(false);
+const chatCloseTimerRef = useRef(null);
 const [socialDeepLink, setSocialDeepLink] = useState(null);
 const [pendingNotificationLink, setPendingNotificationLink] = useState(null);
 const [showTopNotifs, setShowTopNotifs] = useState(false);
@@ -24357,7 +24436,7 @@ useEffect(() => {
 }, [currentPlayer, authStage]);
 
 useEffect(() => {
-  if (Array.isArray(stats) && stats.length) storeSet("stats_backup", stats).catch(() => {});
+  if (Array.isArray(stats) && stats.length) storeSetBackground("stats_backup", stats).catch(() => {});
 }, [stats]);
 
 useEffect(() => {
@@ -24389,26 +24468,38 @@ useEffect(() => {
 }, [stats, currentPlayer, authStage, sharedDataReady]);
 
 useEffect(() => {
-  if (Array.isArray(teamSessions) && teamSessions.length) storeSet("team_sessions_backup", teamSessions).catch(() => {});
+  if (Array.isArray(teamSessions) && teamSessions.length) storeSetBackground("team_sessions_backup", teamSessions).catch(() => {});
 }, [teamSessions]);
 
 useEffect(() => {
-  if (isMeaningfulChemistrySnapshot(chemistry)) storeSet("chemistry_backup", chemistry).catch(() => {});
+  if (isMeaningfulChemistrySnapshot(chemistry)) storeSetBackground("chemistry_backup", chemistry).catch(() => {});
 }, [chemistry]);
 
 useEffect(() => {
-  if (Array.isArray(timeLogs) && timeLogs.length) storeSet("time_logs_backup", timeLogs).catch(() => {});
+  if (Array.isArray(timeLogs) && timeLogs.length) storeSetBackground("time_logs_backup", timeLogs).catch(() => {});
 }, [timeLogs]);
 
 useEffect(() => {
   pushStatusRef.current = pushStatus;
 }, [pushStatus]);              
+const openChatPanel = useCallback(() => {
+  clearTimeout(chatCloseTimerRef.current);
+  setChatClosing(false);
+  setChatOpen(true);
+}, []);
 const closeChatPanel = useCallback(() => {
-  setChatOpen(false);
+  if (!chatOpen && !chatClosing) return;
   const upd = { ...lastSeen, chat: messages.length };
   setLastSeen(upd);
-  storeSet(`lastSeen:${currentPlayer}`, upd);
-}, [lastSeen, messages.length, currentPlayer]);
+  storeSet(`lastSeen:${currentPlayer}`, upd).catch?.(() => {});
+  clearTimeout(chatCloseTimerRef.current);
+  setChatClosing(true);
+  chatCloseTimerRef.current = setTimeout(() => {
+    setChatOpen(false);
+    setChatClosing(false);
+  }, CHAT_PANEL_CLOSE_MS);
+}, [chatOpen, chatClosing, lastSeen, messages.length, currentPlayer]);
+useEffect(() => () => clearTimeout(chatCloseTimerRef.current), []);
 const chatSwipe = useSwipeRightToClose(closeChatPanel);
 const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
 
@@ -24470,7 +24561,7 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
     }
     if (link.action === "chat") {
       setTab("room");
-      setChatOpen(true);
+      openChatPanel();
       done();
       return;
     }
@@ -24525,7 +24616,7 @@ const bracketSwipe = useSwipeRightToClose(() => setShowBracket(false));
       return;
     }
     done();
-  }, [currentPlayer, pendingNotificationLink]);
+  }, [currentPlayer, pendingNotificationLink, openChatPanel]);
 
   useEffect(() => {
     if (!currentPlayer || typeof window === "undefined") return;
@@ -24805,7 +24896,7 @@ if (key === "chemistry") {
   } else {
     chemistryRef.current = incomingChem;
     setChemistry(incomingChem);
-    if (isMeaningfulChemistrySnapshot(incomingChem)) storeSet("chemistry_backup", incomingChem).catch(() => {});
+    if (isMeaningfulChemistrySnapshot(incomingChem)) storeSetBackground("chemistry_backup", incomingChem).catch(() => {});
   }
 }
 if (key === "coin_flips") setCoinFlips(value);
@@ -24856,7 +24947,7 @@ if (key === "active_race") {
         } else {
           statsRef.current = incomingStats;
           setStats(incomingStats);
-          if (isMeaningfulStatsSnapshot(incomingStats)) storeSet("stats_backup", incomingStats).catch(() => {});
+          if (isMeaningfulStatsSnapshot(incomingStats)) storeSetBackground("stats_backup", incomingStats).catch(() => {});
         }
       }
       if (key === "presence") {
@@ -24893,10 +24984,10 @@ if (key === "pass_xp") {
   if (shouldAcceptPassXPUpdate(incoming, current)) {
     setPassXP(incoming);
     passXPRef.current = incoming;
-    if (hasAnyStoredKey(incoming)) storeSet("pass_xp_backup", incoming).catch(() => {});
+    if (hasAnyStoredKey(incoming)) storeSetBackground("pass_xp_backup", incoming).catch(() => {});
   } else if (hasAnyStoredKey(current)) {
     storeSet("pass_xp", current).catch(() => {});
-    storeSet("pass_xp_backup", current).catch(() => {});
+    storeSetBackground("pass_xp_backup", current).catch(() => {});
   }
 }
 if (key === "pass_premium") {
@@ -24905,10 +24996,10 @@ if (key === "pass_premium") {
   if (shouldAcceptPremiumUpdate(incoming, current)) {
     setPassPremium(incoming);
     passPremiumRef.current = incoming;
-    if (hasAnyStoredKey(incoming)) storeSet("pass_premium_backup", incoming).catch(() => {});
+    if (hasAnyStoredKey(incoming)) storeSetBackground("pass_premium_backup", incoming).catch(() => {});
   } else if (hasAnyStoredKey(current)) {
     storeSet("pass_premium", current).catch(() => {});
-    storeSet("pass_premium_backup", current).catch(() => {});
+    storeSetBackground("pass_premium_backup", current).catch(() => {});
   }
 }
 if (key === "pass_claimed") {
@@ -24916,11 +25007,11 @@ if (key === "pass_claimed") {
   const current = passClaimedRef.current || {};
   if (isMeaningfulGenericSnapshot(current) && !isMeaningfulGenericSnapshot(incoming)) {
     storeSet("pass_claimed", current).catch(() => {});
-    storeSet("pass_claimed_backup", current).catch(() => {});
+    storeSetBackground("pass_claimed_backup", current).catch(() => {});
   } else {
     setPassClaimed(incoming);
     passClaimedRef.current = incoming;
-    if (isMeaningfulGenericSnapshot(incoming)) storeSet("pass_claimed_backup", incoming).catch(() => {});
+    if (isMeaningfulGenericSnapshot(incoming)) storeSetBackground("pass_claimed_backup", incoming).catch(() => {});
   }
 }
 if (key === "pass_tokens") {
@@ -24928,11 +25019,11 @@ if (key === "pass_tokens") {
   const current = passTokensRef.current || {};
   if (isMeaningfulGenericSnapshot(current) && !isMeaningfulGenericSnapshot(incoming)) {
     storeSet("pass_tokens", current).catch(() => {});
-    storeSet("pass_tokens_backup", current).catch(() => {});
+    storeSetBackground("pass_tokens_backup", current).catch(() => {});
   } else {
     setPassTokens(incoming);
     passTokensRef.current = incoming;
-    if (isMeaningfulGenericSnapshot(incoming)) storeSet("pass_tokens_backup", incoming).catch(() => {});
+    if (isMeaningfulGenericSnapshot(incoming)) storeSetBackground("pass_tokens_backup", incoming).catch(() => {});
   }
 }
 if (key === "pass_active_boosts") {
@@ -24940,11 +25031,11 @@ if (key === "pass_active_boosts") {
   const current = passActiveBoostsRef.current || {};
   if (isMeaningfulGenericSnapshot(current) && !isMeaningfulGenericSnapshot(incoming)) {
     storeSet("pass_active_boosts", current).catch(() => {});
-    storeSet("pass_active_boosts_backup", current).catch(() => {});
+    storeSetBackground("pass_active_boosts_backup", current).catch(() => {});
   } else {
     setPassActiveBoosts(incoming);
     passActiveBoostsRef.current = incoming;
-    if (isMeaningfulGenericSnapshot(incoming)) storeSet("pass_active_boosts_backup", incoming).catch(() => {});
+    if (isMeaningfulGenericSnapshot(incoming)) storeSetBackground("pass_active_boosts_backup", incoming).catch(() => {});
   }
 }
 if (key === "typing") setTypingStatus(value || {});
@@ -25209,13 +25300,13 @@ const loadSharedData = (pid) => {
       if (isMeaningfulStatsSnapshot(statsCurrent)) {
         setStats(statsCurrent);
         statsRef.current = statsCurrent;
-        storeSet("stats_backup", statsCurrent).catch(() => {});
+        storeSetBackground("stats_backup", statsCurrent).catch(() => {});
       } else if (backupHasMoreStatsData(statsBackup, statsCurrent || [])) {
         const restoredStats = sanitizeStatsForRender(statsBackup);
         setStats(restoredStats);
         statsRef.current = restoredStats;
         storeSet("stats", restoredStats).catch(() => {});
-        storeSet("stats_backup", restoredStats).catch(() => {});
+        storeSetBackground("stats_backup", restoredStats).catch(() => {});
         addToast("game history restored", "↩");
       } else if (Array.isArray(statsCurrent)) {
         setStats(statsCurrent);
@@ -25319,12 +25410,12 @@ const loadSharedData = (pid) => {
       if (chem && typeof chem === "object" && isMeaningfulChemistrySnapshot(chem)) {
         setChemistry(chem);
         chemistryRef.current = chem;
-        storeSet("chemistry_backup", chem).catch(() => {});
+        storeSetBackground("chemistry_backup", chem).catch(() => {});
       } else if (backupHasMoreChemistryData(chemBackup, chem || {})) {
         setChemistry(chemBackup);
         chemistryRef.current = chemBackup;
         storeSet("chemistry", chemBackup).catch(() => {});
-        storeSet("chemistry_backup", chemBackup).catch(() => {});
+        storeSetBackground("chemistry_backup", chemBackup).catch(() => {});
         addToast("chemistry restored", "↩");
       } else if (chem && typeof chem === "object") {
         setChemistry(chem);
@@ -25685,7 +25776,9 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
       alignItems:"center",
       justifyContent:"center",
       color:pushStatus === "on" ? "#7CFFB2" : pushStatus === "denied" ? "#FF5C8A" : "#B8FF4D",
-      border:`1px solid ${pushStatus === "on" ? "rgba(124,255,178,0.30)" : pushStatus === "denied" ? "rgba(255,92,138,0.30)" : "rgba(184,255,77,0.25)"}`,
+      border:"none",
+      background:"none",
+      boxShadow:"none",
       opacity:pushStatus === "saving" ? 0.65 : 1,
       cursor:pushStatus === "saving" ? "wait" : "pointer",
     }}
@@ -25695,7 +25788,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
     {pushStatus === "denied" && (<div style={{position:"absolute",bottom:-2,right:-2,background:"#FF5C8A",border:"2px solid #070A12",borderRadius:99,width:9,height:9}}/>)}
     {APP_IN_APP_NOTIFICATIONS_ENABLED && topNotifs.length > 0 && (<div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>{topNotifs.length}</div>)}
   </button>
-  <button onClick={(e)=>{ e.stopPropagation(); setChatOpen(true); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
+  <button onClick={(e)=>{ e.stopPropagation(); openChatPanel(); }} className="bb-pressable" style={{...s.logoutBtn,position:"relative"}}>
     <MessageCircle size={16}/>
     {lastSeen.chat > 0 && Math.max(0, messages.length - lastSeen.chat) > 0 && (
       <div style={{position:"absolute",top:-3,right:-4,background:"#FF5C8A",borderRadius:99,minWidth:13,height:13,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#fff",padding:"0 3px"}}>
@@ -25888,8 +25981,26 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
           </div>
         </div>
       )}
-      {chatOpen && (
-    <div {...chatSwipe.swipeHandlers} style={{position:"fixed",inset:0,zIndex:1200,background:"linear-gradient(180deg,#06070D,#0A0C16)",display:"flex",flexDirection:"column",animation:"chatPanelUp .22s cubic-bezier(.22,1,.36,1)",paddingBottom:0,willChange:"transform,opacity",contain:"layout paint",...chatSwipe.swipeStyle}}>
+      {(chatOpen || chatClosing) && (
+    <div
+      {...chatSwipe.swipeHandlers}
+      className="bb-team-chat-panel"
+      style={{
+        position:"fixed",
+        inset:0,
+        zIndex:1200,
+        background:"linear-gradient(180deg,#06070D,#0A0C16)",
+        display:"flex",
+        flexDirection:"column",
+        animation:chatClosing ? `bbTeamChatSheetOut ${CHAT_PANEL_CLOSE_MS}ms cubic-bezier(.4,0,.2,1) both` : "bbTeamChatSheetIn .34s cubic-bezier(.16,1,.3,1) both",
+        paddingBottom:0,
+        willChange:"transform,opacity",
+        contain:"layout paint",
+        pointerEvents:chatClosing ? "none" : "auto",
+        ...chatSwipe.swipeStyle,
+        ...(chatClosing ? { transform:"translate3d(0,92%,0) scale(.985)", opacity:0, transition:`transform ${CHAT_PANEL_CLOSE_MS}ms cubic-bezier(.4,0,.2,1), opacity ${CHAT_PANEL_CLOSE_MS}ms ease` } : null)
+      }}
+    >
           <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
             <div style={{display:"flex",alignItems:"center",gap:10,padding:"14px 16px",paddingTop:"max(62px, calc(env(safe-area-inset-top, 0px) + 22px))",borderBottom:"1px solid rgba(255,255,255,0.06)",flexShrink:0}}>
               <button onClick={closeChatPanel} className="bb-pressable" style={{background:"none",border:"none",color:"#8B92A8",cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>
@@ -25898,7 +26009,7 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
               <div style={{fontFamily:"'Oswald',sans-serif",fontSize:15,fontWeight:600}}>team chat</div>
             </div>
            <div style={{flex:1,minHeight:0,display:"flex",flexDirection:"column"}}>
-<AppSectionBoundary resetKey={`chat-${chatOpen}`} label="chat" accent={userColor} onGoHome={()=>setChatOpen(false)}><ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus} setTab={setTab} setChatOpen={setChatOpen} appCustomizer={appCustomizer}/></AppSectionBoundary>
+<AppSectionBoundary resetKey={`chat-${chatOpen}`} label="chat" accent={userColor} onGoHome={closeChatPanel}><ChatTab messages={messages} setMessages={setMessages} currentPlayer={currentPlayer} addToast={addToast} typingStatus={typingStatus} setTypingStatus={setTypingStatus} setTab={setTab} setChatOpen={(next)=> next ? openChatPanel() : closeChatPanel()} appCustomizer={appCustomizer}/></AppSectionBoundary>
 </div>
           </div>
         </div>
@@ -26031,7 +26142,7 @@ tabBtn:{flexShrink:0,minWidth:62,background:"none",border:"none",display:"flex",
   matchRowStatus:{fontSize:9.5,fontWeight:700,border:"1px solid",borderRadius:99,padding:"3px 8px",letterSpacing:0.5},
   hintText:{fontSize:12,color:"#4A5066",textAlign:"center",marginTop:16},
   modalOverlay:{position:"fixed",inset:0,background:"rgba(0,0,0,0.65)",display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:200},
-modalBox:{background:"linear-gradient(180deg,#121526,#0B0D17)",borderRadius:"24px 24px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.09)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(80px, calc(env(safe-area-inset-bottom) + 60px))",boxShadow:"0 -18px 44px rgba(0,0,0,0.38)",animation:"modalSheetUp .22s cubic-bezier(.2,.8,.2,1)"},
+modalBox:{background:"linear-gradient(180deg,#121526,#0B0D17)",borderRadius:"24px 24px 0 0",padding:20,width:"100%",maxWidth:480,boxSizing:"border-box",border:"1px solid rgba(255,255,255,0.09)",borderBottom:"none",maxHeight:"88vh",overflowY:"auto",paddingBottom:"max(80px, calc(env(safe-area-inset-bottom) + 60px))",boxShadow:"0 -18px 44px rgba(0,0,0,0.38)",animation:"modalSheetUp .22s cubic-bezier(.2,.8,.2,1)",fontFamily:"'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"},
   modalHeader:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16},
   modalTitle:{fontFamily:"'Oswald',sans-serif",fontSize:17,fontWeight:600},
   modalClose:{background:"none",border:"none",color:"#8B92A8",cursor:"pointer"},
