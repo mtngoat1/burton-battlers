@@ -91,6 +91,7 @@ import { createPortal } from "react-dom";
 // APP111_HOME_LIVE_SESSION_SECTION_TOGGLE_PATCH
 // APP136_SESSION_STRICT_FILTER_LOW_HEAT_PATCH
 // APP137_ADMIN_LAYOUT_LAB_PATCH
+// APP114_STATS_BALLCHASING_CLEANUP_DEMOS_BETS_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1380,8 +1381,9 @@ function buildBallchasingPlayerRows(replay, cfg = {}) {
       percentOffHalf: numberStat(positioning.percent_offensive_half, null),
       percentBehindBall: numberStat(positioning.percent_behind_ball, null),
       percentInfrontBall: numberStat(positioning.percent_infront_ball, null),
-      demosInflicted: numberStat(demo.inflicted ?? demo.demos_inflicted, null),
-      demosTaken: numberStat(demo.taken ?? demo.demos_taken, null),
+      demos: numberStat(demo.inflicted ?? demo.demos_inflicted ?? demo.demos ?? core.demos ?? player.demos, 0),
+      demosInflicted: numberStat(demo.inflicted ?? demo.demos_inflicted ?? demo.demos ?? core.demos ?? player.demos, null),
+      demosTaken: numberStat(demo.taken ?? demo.demos_taken ?? demo.taken_by, null),
       carName: replayPick(player.car_name, player.carName, player.car?.name, player.car, player.loadout?.car, player.stats?.car?.name),
       possessionPct: numberStat(player.possession_percentage ?? player.possessionPercent ?? player.ball?.possession_percentage ?? player.ball?.possessionPercent ?? player.stats?.ball?.possession_percentage ?? player.stats?.possession?.percentage, null),
       possessionTime: numberStat(player.possession_time ?? player.ball?.possession_time ?? player.stats?.ball?.possession_time ?? player.stats?.possession?.time ?? player.teamStats?.ball?.possession_time, null),
@@ -4036,7 +4038,7 @@ function BurtonOSPanel({ burtonOS, setBurtonOS, currentPlayer, points, setPoints
               <ChevronRight size={15} color={economy.color} />
             </div>
           </div>
-          <div style={{height:12,background:"rgba(255,255,255,.07)",borderRadius:99,overflow:"hidden",marginBottom:8}}><div style={{height:"100%",width:`${economy.health}%`,background:`linear-gradient(90deg,#FF5C8A,#FFD166,${economy.color})`,borderRadius:99,transition:"none",transform:"translateZ(0)"}} /></div>
+          <div style={{height:12,background:"rgba(255,255,255,.07)",borderRadius:99,overflow:"hidden",marginBottom:8}}><div data-bb-progress-static="1" style={{height:"100%",width:`${economy.health}%`,background:`linear-gradient(90deg,#FF5C8A,#FFD166,${economy.color})`,borderRadius:99,transition:"none",transform:"translateZ(0)"}} /></div>
           <MiniTrendGraph points={((os.economy?.history||[]).length?os.economy.history:[{price:economy.health}]).map(h=>({price:h.health||h.price||economy.health}))} color={economy.color} height={34}/>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginTop:-2}}>
             <div style={{background:"rgba(255,255,255,.04)",borderRadius:11,padding:9}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>PTS</div><div style={{fontSize:14,color:"#E8ECF4",fontWeight:900}}>{economy.totalPts}</div></div>
@@ -4054,7 +4056,7 @@ function BurtonOSPanel({ burtonOS, setBurtonOS, currentPlayer, points, setPoints
           </div>
           <button onClick={()=>setEconomyOpen(false)} style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.1)",borderRadius:12,color:"#8B92A8",width:36,height:36}}>×</button>
         </div>
-        <div style={{height:14,background:"rgba(255,255,255,.07)",borderRadius:99,overflow:"hidden",margin:"4px 0 7px"}}><div style={{height:"100%",width:`${economy.health}%`,background:`linear-gradient(90deg,#FF2D55,#FF5C8A,#FFD166,#B8FF4D,#7CFFB2)`,borderRadius:99,boxShadow:`0 0 18px ${bbAlpha(economy.color,.22)}`,transition:"none",transform:"translateZ(0)"}} /></div>
+        <div style={{height:14,background:"rgba(255,255,255,.07)",borderRadius:99,overflow:"hidden",margin:"4px 0 7px"}}><div data-bb-progress-static="1" style={{height:"100%",width:`${economy.health}%`,background:`linear-gradient(90deg,#FF2D55,#FF5C8A,#FFD166,#B8FF4D,#7CFFB2)`,borderRadius:99,boxShadow:`0 0 18px ${bbAlpha(economy.color,.22)}`,transition:"none",transform:"translateZ(0)"}} /></div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}><div style={{fontSize:9,color:"#FF2D55",fontWeight:900}}>{economyLegendLabels.crashing}</div><div style={{fontSize:9,color:"#FF5C8A",fontWeight:900}}>{economyLegendLabels.unstable}</div><div style={{fontSize:9,color:"#FFD166",fontWeight:900}}>{economyLegendLabels.shaky}</div><div style={{fontSize:9,color:"#B8FF4D",fontWeight:900}}>{economyLegendLabels.stable}</div><div style={{fontSize:9,color:"#7CFFB2",fontWeight:900}}>{economyLegendLabels.booming}</div></div>
         <MiniTrendGraph points={((os.economy?.history||[]).length?os.economy.history:[{price:economy.health}]).map(h=>({price:h.health||h.price||economy.health}))} color={economy.color} height={68}/>
         <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8,marginTop:12}}><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>TEAM PTS</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalPts||0).toLocaleString()}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>TEAM XP</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalXP||0).toLocaleString()}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>GAMES</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalGames||0).toLocaleString()}</div></div><div style={{background:"rgba(255,255,255,.04)",borderRadius:12,padding:10}}><div style={{fontSize:9,color:"#4A5066",fontWeight:900}}>WINS</div><div style={{fontSize:16,color:"#E8ECF4",fontWeight:900}}>{Number(economy.totalWins||0).toLocaleString()}</div></div></div><div style={{marginTop:12,display:"grid",gap:7}}>{PLAYERS.map(p=>{ const playerPts=Number(points?.[p.id]||0); const playerXP=getFreePassXPForPlayer(passXP||{},p.id)+getPremiumPassXPForPlayer(passXP||{},p.id,!!points?.[`${p.id}_premium`]); const playerWins=(stats||[]).filter(g=>g.playerId===p.id&&gameIsWin(g)).length; return <div key={p.id} style={{display:"grid",gridTemplateColumns:"74px 1fr",gap:8,alignItems:"center",background:"rgba(255,255,255,.035)",borderRadius:10,padding:8}}><div style={{fontSize:11,color:p.color,fontWeight:900}}>{p.name}</div><div style={{fontSize:10.5,color:"#8B92A8"}}>{playerPts.toLocaleString()} pts · {playerXP.toLocaleString()} XP · {playerWins} wins</div></div> })}</div></div></div>, document.body)}
@@ -4102,6 +4104,7 @@ function GlobalStyles() {
     const seen = new WeakSet();
     const isProgressFill = (el) => {
       if (!el || el.nodeType !== 1 || el.dataset?.bbProgressSeen === "1") return false;
+      if (el.dataset?.bbProgressStatic === "1" || el.closest?.('[data-bb-progress-static="1"]')) return false;
       const inline = String(el.getAttribute("style") || "").toLowerCase();
       if (!inline.includes("width") || !inline.includes("%")) return false;
       const cs = window.getComputedStyle(el);
@@ -13108,10 +13111,84 @@ function getStatsBallchasingScoreboardKnown(game = {}, replay = {}) {
 function getStatsBallchasingLooksWrong(game = {}, replay = {}) {
   return getStatsBallchasingScoreboardKnown(game, replay) && !getStatsBallchasingScoreboardMatch(game, replay);
 }
+function getBallchasingRowForStatGame(replay = {}, game = {}, playerId = ADMIN_ID, cfg = {}) {
+  const rows = buildBallchasingPlayerRows(replay, cfg);
+  const targetName = replayLower(game.playerName || playerNameById(game.playerId || playerId));
+  return rows.find(r => r.appPlayerId === (game.playerId || playerId)) || rows.find(r => replayLower(r.name) === targetName) || rows.find(r => r.appPlayerId === playerId) || null;
+}
+function getBallchasingOpponentGoalsForRow(replay = {}, row = null) {
+  const safe = normalizeBallchasingReplay(replay || {});
+  if (!row) return null;
+  const mine = safe.teams.find(t => String(t.color || "").toLowerCase() === String(row.teamColor || "").toLowerCase() || String(t.name || "").toLowerCase() === String(row.teamName || "").toLowerCase());
+  const other = safe.teams.find(t => t !== mine);
+  const val = Number(other?.goals);
+  return Number.isFinite(val) ? val : null;
+}
+function getBallchasingOrientedScoreForStatGame(replay = {}, game = {}, playerId = ADMIN_ID, cfg = {}) {
+  const safe = normalizeBallchasingReplay(replay || {});
+  const row = getBallchasingRowForStatGame(safe, game, playerId, cfg);
+  if (!row) return null;
+  const our = Number(row.teamGoals ?? row.goals);
+  const their = getBallchasingOpponentGoalsForRow(safe, row);
+  if (!Number.isFinite(our) || !Number.isFinite(their)) return null;
+  return { ourScore:our, theirScore:their };
+}
+function getBallchasingDemoCountForStatGame(replay = {}, game = {}, playerId = ADMIN_ID, cfg = {}) {
+  const safe = normalizeBallchasingReplay(replay || {});
+  const row = getBallchasingRowForStatGame(safe, game, playerId, cfg);
+  const rowDemos = Number(row?.demosInflicted ?? row?.demos);
+  if (Number.isFinite(rowDemos)) return Math.max(0, rowDemos);
+  const names = [row?.name, row?.appName, game.playerName, playerNameById(game.playerId || playerId)].map(replayLower).filter(Boolean);
+  const allowed = new Set(names);
+  return getReplayEvents(safe).filter(ev => {
+    const type = getReplayEventType(ev);
+    if (!(type.includes("demo") || type.includes("kill"))) return false;
+    if (type.includes("demoed") || type.includes("death")) return false;
+    const evNames = getReplayEventPlayers(ev);
+    return evNames.some(n => allowed.has(n));
+  }).length;
+}
+function getStatsBallchasingPlayerStatMatchInfo(game = {}, replay = {}, playerId = ADMIN_ID, cfg = {}) {
+  const row = getBallchasingRowForStatGame(replay, game, playerId, cfg);
+  if (!row) return { row:null, matched:0, total:0, exact:false };
+  const fields = ["goals", "assists", "saves", "shots"];
+  if (normalizeGameMode(game.mode) === "1v1") fields.push("demos");
+  let matched = 0;
+  let compared = 0;
+  fields.forEach(f => {
+    const gameVal = Number(f === "demos" ? (game.demos || 0) : game[f]);
+    let rowVal = f === "demos" ? Number(row.demosInflicted ?? row.demos ?? 0) : Number(row[f]);
+    if (!Number.isFinite(gameVal) || !Number.isFinite(rowVal)) return;
+    if (f === "demos" && Number(gameVal) === 0 && Number(rowVal) > 0) {
+      // Parse often misses 1v1 demos, so don't make a missing Parse demo break a strong replay match.
+      return;
+    }
+    compared += 1;
+    if (gameVal === rowVal) matched += 1;
+  });
+  return { row, matched, total:compared, exact:compared >= 3 && matched >= compared };
+}
+function buildStatsBallchasingSavePatch(game = {}, replay = {}, timeline = null, matchScore = 100, confidenceLabel = "high", playerId = ADMIN_ID, cfg = {}) {
+  const safe = normalizeBallchasingReplay(timeline ? { ...replay, timeline, raw:{ ...(replay.raw || {}), timeline } } : replay);
+  const oriented = getBallchasingOrientedScoreForStatGame(safe, game, playerId, cfg);
+  const isOnes = normalizeGameMode(game.mode) === "1v1";
+  const demos = isOnes ? getBallchasingDemoCountForStatGame(safe, game, playerId, cfg) : null;
+  return {
+    ...(oriented ? { ourScore:oriented.ourScore, theirScore:oriented.theirScore, parseDetectedOurScore:oriented.ourScore, parseDetectedTheirScore:oriented.theirScore, opponentScoreManual:true, result:oriented.ourScore > oriented.theirScore ? "win" : oriented.ourScore < oriented.theirScore ? "loss" : (game.result || null) } : {}),
+    ...(isOnes && Number.isFinite(demos) ? { demos:Math.max(0, demos), demosSource:"ballchasing" } : {}),
+    ballchasingReplayId:safe.id,
+    ballchasingReplay:safe,
+    ballchasingTimeline:timeline,
+    ballchasingLinkedAt:new Date().toISOString(),
+    ballchasingMatchScore:matchScore,
+    ballchasingConfidence:confidenceLabel,
+    ballchasingCandidates:[],
+    ballchasingNoExactCandidates:false,
+    ballchasingLastSearchAt:new Date().toISOString(),
+  };
+}
 function getStatsBallchasingAutoLinkSafe(score = 0, game = {}, replay = {}) {
-  const n = Number(score) || 0;
-  if (getStatsBallchasingLooksWrong(game, replay)) return false;
-  return n >= 55;
+  return Number(score) >= 70;
 }
 function scoreBallchasingCandidateForStatGame(game = {}, replay = {}, playerId = ADMIN_ID, cfg = {}) {
   const safe = normalizeBallchasingReplay(replay || {});
@@ -13121,10 +13198,10 @@ function scoreBallchasingCandidateForStatGame(game = {}, replay = {}, playerId =
   const replayMs = replayDateMs(safe);
   if (Number.isFinite(gameMs) && Number.isFinite(replayMs) && replayMs > 0) {
     const diffMin = Math.abs(gameMs - replayMs) / 60000;
-    if (diffMin <= 10) { score += 30; notes.push("time ≤10m"); }
-    else if (diffMin <= 25) { score += 24; notes.push("time ≤25m"); }
-    else if (diffMin <= 60) { score += 16; notes.push("time ≤60m"); }
-    else if (diffMin <= 120) { score += 8; notes.push("time broad"); }
+    if (diffMin <= 10) { score += 24; notes.push("time ≤10m"); }
+    else if (diffMin <= 25) { score += 20; notes.push("time ≤25m"); }
+    else if (diffMin <= 60) { score += 14; notes.push("time ≤60m"); }
+    else if (diffMin <= 240) { score += 6; notes.push("time broad"); }
   }
   const gameMode = normalizeGameMode(game.mode);
   const playlist = String(safe.playlistId || safe.playlistName || "").toLowerCase();
@@ -13133,18 +13210,22 @@ function scoreBallchasingCandidateForStatGame(game = {}, replay = {}, playerId =
       (gameMode === "3v3" && (playlist.includes("standard") || playlist.includes("3v3") || playlist.includes("tournament")))) {
     score += 18; notes.push("mode");
   }
+  const statInfo = getStatsBallchasingPlayerStatMatchInfo(game, safe, playerId, cfg);
+  if (statInfo.row) {
+    score += 12; notes.push("player");
+    if (statInfo.matched) { score += Math.min(30, statInfo.matched * 8); notes.push(`${statInfo.matched} stats`); }
+    if (statInfo.exact) { score += 18; notes.push("exact stat line"); }
+  }
+  const oriented = getBallchasingOrientedScoreForStatGame(safe, game, playerId, cfg);
   const scoreKnown = getStatsBallchasingScoreboardKnown(game, safe);
   const scoreMatches = getStatsBallchasingScoreboardMatch(game, safe);
-  if (scoreMatches) { score += 24; notes.push("score"); }
-  else if (scoreKnown) { score -= 60; notes.push("score mismatch"); }
-  const rows = buildBallchasingPlayerRows(safe, cfg);
-  const appRow = rows.find(r => r.appPlayerId === playerId) || rows.find(r => replayLower(r.name) === replayLower(game.playerName || playerNameById(game.playerId)));
-  if (appRow) {
-    score += 10; notes.push("player");
-    const fields = ["goals","assists","saves","shots", ...(normalizeGameMode(game.mode) === "1v1" ? ["demos"] : [])];
-    const matched = fields.filter(f => Number(game[f] || 0) === Number(appRow[f] || 0)).length;
-    score += Math.min(18, matched * 4);
-    if (matched) notes.push(`${matched} stats`);
+  if (scoreMatches) { score += 18; notes.push("score"); }
+  else if (oriented && Number(game.goals) === Number(statInfo.row?.goals) && statInfo.exact) {
+    score += 10;
+    notes.push("Ballchasing score fixes Parse score");
+  } else if (scoreKnown) {
+    score -= 28;
+    notes.push("score mismatch");
   }
   return { score:Math.max(0, Math.min(100, score)), notes };
 }
@@ -13185,8 +13266,8 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           <div style={{fontSize:9.5,color:"#4D9EFF",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>Ballchasing extra stats</div>
           <button onClick={()=>runFind()} disabled={busy || !onFindReplay} className="bb-pressable" style={{background:busy?"rgba(255,255,255,.04)":"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:9,padding:"6px 8px",fontSize:8.8,fontWeight:950,color:busy?"#4A5066":"#4D9EFF",cursor:busy?"wait":"pointer"}}>{busy ? "finding…" : "find replay"}</button>
         </div>
-        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Adds map, Ballchasing player cards, boost/movement basics, and game timestamp moments. Auto-link only accepts high-confidence same-score matches now.</div>
-        {game.ballchasingNoExactCandidates && <div style={{marginTop:8,background:"rgba(255,209,102,.075)",border:"1px solid rgba(255,209,102,.18)",borderRadius:9,padding:"7px 8px",fontSize:9.3,color:"#FFD166",fontWeight:850,lineHeight:1.35}}>No same-score Ballchasing replay found yet. Do not pick random candidates — Rockpload may not have uploaded this exact game yet. Retry later or paste the exact Ballchasing replay link.</div>}
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Adds map, Ballchasing player cards, boost/movement basics, demos for 1v1, and game timestamp moments. Auto-link only accepts high-confidence matches.</div>
+        {game.ballchasingNoExactCandidates && <div style={{marginTop:8,background:"rgba(255,209,102,.075)",border:"1px solid rgba(255,209,102,.18)",borderRadius:9,padding:"7px 8px",fontSize:9.3,color:"#FFD166",fontWeight:850,lineHeight:1.35}}>No confident Ballchasing replay found yet. Rockpload may not have uploaded this exact game yet. Retry later or paste the exact Ballchasing replay link.</div>}
         {!!candidates.length && <div style={{display:"grid",gap:6,marginTop:8}}>
           {candidates.map(c => <button key={c.id} onClick={()=>runFind(c.id)} className="bb-pressable" style={{background:"rgba(255,255,255,.035)",border:`1px solid ${c.color}33`,borderRadius:9,padding:"7px 8px",textAlign:"left",fontSize:9.5,color:"#E8ECF4",fontWeight:850,cursor:"pointer"}}>{c.label}<span style={{color:c.color,fontWeight:950}}> · {c.confidence}</span></button>)}
         </div>}
@@ -13209,7 +13290,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
         <div style={{minWidth:0}}>
           <div style={{fontSize:9.5,color:linkedNeedsReview?"#FFD166":confidence.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{linkedNeedsReview ? "Ballchasing review needed" : "Ballchasing linked"} · {confidence.label}</div>
           <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {normalized.date ? new Date(normalized.date).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "time ?"}</div>
-          {linkedNeedsReview && <div style={{fontSize:9.5,color:"#FFD166",lineHeight:1.35,marginTop:5}}>{linkedScoreMismatch ? "Score does not match this Stats game. Press unlink, then find replay again after Rockpload uploads the right game." : "Medium/low matches are no longer trusted automatically. Review or unlink if this is not the right replay."}</div>}
+          {linkedNeedsReview && <div style={{fontSize:9.5,color:"#FFD166",lineHeight:1.35,marginTop:5}}>{linkedScoreMismatch ? "Parse score may be incomplete. If this is the wrong replay, press unlink and retry or paste the exact replay link." : "Medium/low matches are no longer trusted automatically. Review or unlink if this is not the right replay."}</div>}
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>open</button>}
@@ -13224,8 +13305,8 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
               <div style={{fontSize:10.5,color:r.color,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.appName || r.name}</div>
               <div style={{fontSize:10,color:"#E8ECF4",fontWeight:950}}>{fmtReplayNumber(r.score)}</div>
             </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
-              {[ ["G",r.goals], ["A",r.assists], ["S",r.saves], ["Sh",r.shots] ].map(([label,val]) => <div key={label} style={{textAlign:"center"}}><div style={{fontSize:7.5,color:"#4A5066",fontWeight:900}}>{label}</div><div style={{fontSize:10.5,color:r.color,fontWeight:950}}>{fmtReplayNumber(val)}</div></div>)}
+            <div style={{display:"grid",gridTemplateColumns:normalizeGameMode(game.mode)==="1v1"?"repeat(5,1fr)":"repeat(4,1fr)",gap:4}}>
+              {[ ["G",r.goals], ["A",r.assists], ["S",r.saves], ["Sh",r.shots], ...(normalizeGameMode(game.mode)==="1v1" ? [["D", r.demosInflicted ?? r.demos ?? 0]] : []) ].map(([label,val]) => <div key={label} style={{textAlign:"center"}}><div style={{fontSize:7.5,color:"#4A5066",fontWeight:900}}>{label}</div><div style={{fontSize:10.5,color:r.color,fontWeight:950}}>{fmtReplayNumber(val)}</div></div>)}
             </div>
             {!compact && <div style={{fontSize:8.5,color:"#8B92A8",marginTop:5,lineHeight:1.25}}>boost avg {fmtReplayNumber(r.avgBoost)} · speed {fmtReplayNumber(r.avgSpeed)}</div>}
           </div>
@@ -13719,21 +13800,53 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
     let candidatesForReview = [];
     if (forcedId) {
       chosenReplay = await fetchBallchasingViaConfig(ballchasingCfg, { replayId:forcedId });
-      matchScore = 100;
+      const scored = scoreBallchasingCandidateForStatGame(game, chosenReplay, p?.id || game.playerId || currentPlayer, ballchasingCfg);
+      matchScore = Math.max(100, scored.score || 0);
     } else {
       const names = getBallchasingSearchNamesForStatGame(game);
       if (!names.length) throw new Error("No Ballchasing/Tracker names saved for this player.");
-      const raw = await fetchBallchasingSearchRawViaConfig(ballchasingCfg, {
-        playerName:names.join(","),
-        mode:normalizeGameMode(game.mode),
-        after:getStatsBallchasingSearchAnchor(game),
-        afterBufferMinutes:120,
-        count:12,
-      });
-      const candidateBasics = getBallchasingSearchCandidates(raw).slice(0, 8);
+      const seen = new Set();
+      const candidateBasics = [];
+      const pushCandidates = (raw) => {
+        getBallchasingSearchCandidates(raw).forEach(item => {
+          const id = item.id || extractBallchasingReplayId(item.link || item.viewUrl || "");
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          candidateBasics.push({ ...item, id });
+        });
+      };
+      const anchor = getStatsBallchasingSearchAnchor(game);
+      for (const name of names.slice(0, 5)) {
+        try {
+          const raw = await fetchBallchasingSearchRawViaConfig(ballchasingCfg, {
+            playerName:name,
+            mode:normalizeGameMode(game.mode),
+            after:anchor,
+            afterBufferMinutes:360,
+            count:25,
+          });
+          pushCandidates(raw);
+        } catch (_) {}
+        if (candidateBasics.length >= 12) break;
+      }
+      // Parse often gives collected time, not kickoff time. If the tight time search misses,
+      // do a broader recent replay scan by player and let the stat-line scorer pick the match.
+      if (candidateBasics.length < 6) {
+        for (const name of names.slice(0, 5)) {
+          try {
+            const raw = await fetchBallchasingSearchRawViaConfig(ballchasingCfg, {
+              playerName:name,
+              mode:normalizeGameMode(game.mode),
+              count:30,
+            });
+            pushCandidates(raw);
+          } catch (_) {}
+          if (candidateBasics.length >= 12) break;
+        }
+      }
       if (!candidateBasics.length) throw new Error("No Ballchasing candidates found yet. Rockpload may not have uploaded this replay.");
       const detailed = [];
-      for (const item of candidateBasics.slice(0, 6)) {
+      for (const item of candidateBasics.slice(0, 12)) {
         try {
           const detail = await fetchBallchasingViaConfig(ballchasingCfg, { replayId:item.id });
           const scored = scoreBallchasingCandidateForStatGame(game, detail, p?.id || game.playerId || currentPlayer, ballchasingCfg);
@@ -13744,8 +13857,7 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
         }
       }
       detailed.sort((a,b) => Number(b.matchScore || 0) - Number(a.matchScore || 0));
-      const sameScoreCandidates = detailed.filter(d => getStatsBallchasingScoreboardMatch(game, d.replay || d));
-      candidatesForReview = sameScoreCandidates.map(d => ({
+      candidatesForReview = detailed.filter(d => Number(d.matchScore || 0) >= 35).map(d => ({
         id:d.id,
         mapName:normalizeBallchasingReplay(d.replay || d).mapName,
         scoreText:getReplayScoreboardText(d.replay || d),
@@ -13753,20 +13865,20 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
         matchScore:Number(d.matchScore || 0),
         matchNotes:d.matchNotes || [],
       })).slice(0, 4);
-      const bestSameScore = sameScoreCandidates[0] || null;
-      const bestReplay = bestSameScore ? normalizeBallchasingReplay(bestSameScore.replay || bestSameScore) : null;
-      if (!bestSameScore || !getStatsBallchasingAutoLinkSafe(bestSameScore.matchScore, game, bestReplay)) {
+      const best = detailed[0] || null;
+      const bestReplay = best ? normalizeBallchasingReplay(best.replay || best) : null;
+      if (!best || !getStatsBallchasingAutoLinkSafe(best.matchScore, game, bestReplay)) {
         await saveBallchasingToStatGames(game, {
           ballchasingCandidates:candidatesForReview,
           ballchasingNoExactCandidates:!candidatesForReview.length,
           ballchasingLastSearchAt:new Date().toISOString(),
         });
-        setSyncDebug(candidatesForReview.length ? "Ballchasing needs review" : "No same-score Ballchasing replay yet", candidatesForReview.length ? "Same-score candidates found, but auto-link only accepts high-confidence matches." : "The exact score for this Stats game was not found in the Ballchasing search results. Retry after Rockpload uploads or paste the exact replay link.");
-        addToast?.(candidatesForReview.length ? "Ballchasing candidates need review" : "No exact Ballchasing replay yet", candidatesForReview.length ? "⚠️" : "⏳");
+        setSyncDebug(candidatesForReview.length ? "Ballchasing needs review" : "No Ballchasing replay found yet", candidatesForReview.length ? "Review candidates, or paste the exact Ballchasing replay link." : "Rockpload may not have uploaded this exact game yet. Retry later or paste the replay link.");
+        addToast?.(candidatesForReview.length ? "Ballchasing candidates need review" : "No Ballchasing replay yet", candidatesForReview.length ? "⚠️" : "⏳");
         return;
       }
       chosenReplay = bestReplay;
-      matchScore = Number(bestSameScore.matchScore || 0);
+      matchScore = Number(best.matchScore || 0);
     }
     let timeline = null;
     try {
@@ -13776,18 +13888,9 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
       console.warn("Ballchasing timeline skipped", timelineErr);
     }
     const conf = getBallchasingConfidenceMeta(matchScore).label;
-    await saveBallchasingToStatGames(game, {
-      ballchasingReplayId:chosenReplay.id,
-      ballchasingReplay:chosenReplay,
-      ballchasingTimeline:timeline,
-      ballchasingLinkedAt:new Date().toISOString(),
-      ballchasingMatchScore:matchScore,
-      ballchasingConfidence:conf,
-      ballchasingCandidates:[],
-      ballchasingNoExactCandidates:false,
-      ballchasingLastSearchAt:new Date().toISOString(),
-    });
-    setSyncDebug("Ballchasing linked", `${chosenReplay.mapName || "replay"} · ${getReplayScoreboardText(chosenReplay)} · high confidence`);
+    const patch = buildStatsBallchasingSavePatch(game, chosenReplay, timeline, matchScore, conf, p?.id || game.playerId || currentPlayer, ballchasingCfg);
+    await saveBallchasingToStatGames(game, patch);
+    setSyncDebug("Ballchasing linked", `${chosenReplay.mapName || "replay"} · ${getReplayScoreboardText(chosenReplay)} · ${conf} confidence`);
     addToast?.("Ballchasing replay linked to Stats game", "✅");
   } catch (e) {
     console.error(e);
@@ -14411,7 +14514,7 @@ return (
           </button>
         ))}
       </div>
-      {latestMyGame && (
+      {false && latestMyGame && (
         <div style={{background:"linear-gradient(135deg,rgba(184,255,77,0.12),rgba(77,158,255,0.08))",border:`1px solid ${playerColor}33`,borderRadius:16,padding:13,marginBottom:14}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:8}}>
             <div>
@@ -21157,65 +21260,6 @@ const noBettingWeek = isEventActive("no_betting");
    {/* PROPS */}
       {section==="props"&&(
         <div>
-          <div style={{background:"linear-gradient(135deg,#160D24,#0A0C16)",border:"1px solid rgba(167,139,250,0.20)",borderRadius:16,padding:14,marginBottom:14,boxShadow:"0 12px 28px rgba(0,0,0,0.18)"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,marginBottom:showPropStream&&canWatchPropStream?12:0}}>
-              <div style={{minWidth:0}}>
-                <div style={{fontSize:10,color:"#A78BFA",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>watch while you bet</div>
-                <div style={{display:"flex",alignItems:"center",gap:7,fontSize:13,fontWeight:900,color:"#E8ECF4",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
-                  <span>{propModeFilter === "2v2" ? (activePropDuo?.label || "duo") : propModeFilter === "1v1" && propStreamMode === "multi" ? `${activePropPlayer?.name || "player"} + ${oneVOneCoStreamPlayer?.name || "pov"}` : (activePropPlayer?.name || "player")}</span>
-                  {activePropStreamHandles.slice(0,2).map(x => <TwitchLiveDot key={x.player.id} handle={x.handle} size={8}/>)}
-                </div>
-                {!canWatchPropStream && (
-                  <div style={{fontSize:11,color:"#4A5066",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>no twitch linked for this view</div>
-                )}
-              </div>
-              <button onClick={()=>canWatchPropStream&&setShowPropStream(v=>!v)} disabled={!canWatchPropStream} className="bb-pressable bb-glow-violet" style={{background:canWatchPropStream?"rgba(167,139,250,0.12)":"rgba(255,255,255,0.04)",border:`1px solid ${canWatchPropStream?"rgba(167,139,250,0.32)":"rgba(255,255,255,0.06)"}`,borderRadius:8,padding:"6px 9px",fontSize:11,fontWeight:800,color:canWatchPropStream?"#A78BFA":"#4A5066",cursor:canWatchPropStream?"pointer":"default",display:"flex",alignItems:"center",gap:5,flexShrink:0}}>
-                <Tv size={13}/>{showPropStream ? "hide" : (activePropStreamHandles.length > 1 ? "multiview" : "watch")}
-              </button>
-            </div>
-            {propModeFilter === "1v1" && (
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:showPropStream&&canWatchPropStream?12:0}}>
-                {["single","multi"].map(view => (
-                  <button key={view} onClick={()=>setPropStreamMode(view)} className="bb-pressable" style={{background:propStreamMode===view?"rgba(167,139,250,0.16)":"rgba(255,255,255,0.045)",border:`1px solid ${propStreamMode===view?"rgba(167,139,250,0.35)":"rgba(255,255,255,0.07)"}`,borderRadius:8,padding:"6px 7px",fontSize:10.5,fontWeight:800,color:propStreamMode===view?"#A78BFA":"#8B92A8",cursor:"pointer"}}>
-                    {view === "single" ? "single POV" : "1v1 multiview"}
-                  </button>
-                ))}
-              </div>
-            )}
-            {propModeFilter === "1v1" && propStreamMode === "multi" && oneVOneStreamOptions.length > 0 && (
-              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:showPropStream&&canWatchPropStream?12:0}}>
-                {oneVOneStreamOptions.map(p => (
-                  <button key={p.id} onClick={()=>setPropOneVOneCoStreamPlayerId(p.id)} className="bb-pressable" style={{flex:"1 1 110px",background:oneVOneCoStreamPlayer?.id===p.id?"rgba(167,139,250,0.16)":"rgba(255,255,255,0.045)",border:`1px solid ${oneVOneCoStreamPlayer?.id===p.id?"rgba(167,139,250,0.35)":"rgba(255,255,255,0.07)"}`,borderRadius:8,padding:"6px 7px",fontSize:10.5,fontWeight:800,color:oneVOneCoStreamPlayer?.id===p.id?"#A78BFA":"#8B92A8",cursor:"pointer"}}>
-                    second POV · {p.name}
-                  </button>
-                ))}
-              </div>
-            )}
-            {showPropStream && canWatchPropStream && (
-              <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                {activePropStreamHandles.map(({player, handle}, idx) => (
-                  <div key={`${player.id}-${handle}`} style={{borderRadius:14,overflow:"hidden",background:"#05060C",border:`1px solid ${player.color}44`}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",background:"rgba(255,255,255,0.04)"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:7,fontSize:11,fontWeight:900,color:player.color}}><TwitchLiveDot handle={handle} size={7}/>{player.name} POV</div>
-                      <div style={{fontSize:10,color:"#4A5066"}}>twitch.tv/{normalizeTwitchHandle(handle)}</div>
-                    </div>
-                    <div style={{position:"relative",paddingTop:"56.25%"}}>
-                      <iframe
-                        src={`https://player.twitch.tv/?channel=${encodeURIComponent(normalizeTwitchHandle(handle))}&parent=${twitchParent}&autoplay=${idx===0?"true":"false"}&muted=${idx===0?"false":"true"}`}
-                        title={`${player.name} Twitch stream`}
-                        allow="autoplay; fullscreen; picture-in-picture"
-                        allowFullScreen
-                        style={{position:"absolute",inset:0,width:"100%",height:"100%",border:"none"}}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {showPropStream && canWatchPropStream && (
-              <button onClick={()=>setPropMatchLocked(v=>!v)} className="bb-pressable" style={{width:"100%",marginTop:10,background:propMatchLocked?"rgba(255,92,138,0.13)":"rgba(184,255,77,0.08)",border:`1px solid ${propMatchLocked?"rgba(255,92,138,0.32)":"rgba(184,255,77,0.24)"}`,borderRadius:11,padding:"9px 10px",fontSize:11,fontWeight:900,color:propMatchLocked?"#FF5C8A":"#B8FF4D",cursor:"pointer"}}>{propMatchLocked ? "match detected / bets locked — tap when game ends" : "watching stream — tap if match starts to lock bets"}</button>
-            )}
-          </div>
           <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
             <button onClick={()=>setShowParlay(v=>!v)} className="bb-pressable" style={{flex:1,background:showParlay?"#FFD166":"rgba(255,209,102,0.12)",border:"1px solid rgba(255,209,102,0.32)",borderRadius:12,padding:"11px 12px",fontSize:12,fontWeight:900,color:showParlay?"#06070D":"#FFD166",cursor:"pointer"}}>
               parlay {parlayLegs.length ? `(${parlayLegs.length})` : ""}
@@ -21226,7 +21270,6 @@ const noBettingWeek = isEventActive("no_betting");
           </div>
           {showParlay&&renderPropsParlayBuilder()}
           {renderWinLossPicks()}
-          {propMatchLocked && (() => { const playerBetIds = new Set(activePropStreamPlayers.map(p=>p.id)); const liveParlays = (bets||[]).filter(b=>b.bettorId===currentPlayer && b.isParlay && (b.legs||[]).some(l=>playerBetIds.has(l.playerId))); return <div style={{background:"rgba(255,92,138,0.06)",border:"1px solid rgba(255,92,138,0.18)",borderRadius:14,padding:12,marginBottom:14}}><div style={{fontSize:10,color:"#FF5C8A",fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>locked · your parlays on this player</div>{liveParlays.length ? liveParlays.slice(0,5).map(b=><div key={b.id} style={{fontSize:12,color:"#E8ECF4",fontWeight:800,padding:"6px 0",borderTop:"1px solid rgba(255,255,255,0.045)"}}>{(b.legs||[]).length}-leg parlay · {b.wager} → {b.payout} · {String(b.status||"open").toUpperCase()}</div>) : <div style={{fontSize:12,color:"#8B92A8"}}>no parlays placed for this player yet.</div>}</div>; })()}
           <div style={{background:"#11131F",borderRadius:14,padding:14,marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
             <div style={{fontSize:11,color:"#4A5066",fontWeight:900,letterSpacing:.8,textTransform:"uppercase",marginBottom:8}}>player</div>
             <div style={{display:"flex",gap:8,marginBottom:12}}>
