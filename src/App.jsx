@@ -82,6 +82,7 @@ import { createPortal } from "react-dom";
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
 // APP112_PARSE_TIME_DEBUG_PATCH
+// APP112B_PARSE_SYNC_FEEDBACK_PATCH
 // APP111_HOME_LIVE_SESSION_SECTION_TOGGLE_PATCH
 // APP136_SESSION_STRICT_FILTER_LOW_HEAT_PATCH
 // APP137_ADMIN_LAYOUT_LAB_PATCH
@@ -13647,17 +13648,33 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     const playlist = playlistByMode[requestedMode] || "Ranked Standard 3v3";
     const creditsNeeded = playersToSync.length;
 
-    if (useParseCredit) {
-      for (let i = 0; i < creditsNeeded; i++) {
-        const creditOk = await useParseCredit(currentPlayer);
-        if (!creditOk) return;
-      }
-    }
-
+    // APP112B: show feedback immediately so the button never feels dead while credits/storage/API wake up.
     setMatchSyncing(true);
-    addToast?.(`syncing latest ${requestedMode} match…`, "🔄");
+    addToast?.(`starting latest ${requestedMode} sync…`, "🔄");
+
+    const runParseCreditCheck = async () => {
+      if (!useParseCredit) return true;
+      for (let i = 0; i < creditsNeeded; i++) {
+        const creditResult = await Promise.race([
+          useParseCredit(currentPlayer),
+          new Promise(resolve => setTimeout(() => resolve("timeout"), 9000)),
+        ]);
+        if (creditResult === "timeout") {
+          addToast?.("parse credit check timed out — refresh and try again", "⚠️");
+          return false;
+        }
+        if (!creditResult) return false;
+      }
+      return true;
+    };
 
     try {
+      const creditsOk = await runParseCreditCheck();
+      if (!creditsOk) {
+        setMatchSyncing(false);
+        return;
+      }
+      addToast?.(`syncing latest ${requestedMode} match…`, "🔄");
       const freshSyncStats = await getFreshStatsForWrite(stats);
       const pulled = await Promise.all(
         playersToSync.map(async (p) => ({
