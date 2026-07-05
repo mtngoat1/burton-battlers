@@ -81,6 +81,7 @@ import { createPortal } from "react-dom";
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
+// APP113_STATS_PARSE_BALLCHASING_LINK_PATCH
 // APP112F_SYNCED_GAME_VISIBLE_FIX
 // APP112D_PARSE_SYNC_DEBUG_PANEL_PATCH
 // APP112_PARSE_TIME_DEBUG_PATCH
@@ -5088,7 +5089,7 @@ function getWeekStart() {
   return Object.values(groups).filter(Boolean).sort((a,b) => safeDateObj(b?.ts).getTime() - safeDateObj(a?.ts).getTime());
 }
             
-function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore, jumpGameId = null }) {
+function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore, jumpGameId = null, onFindBallchasingReplay, onUnlinkBallchasingReplay, ballchasingCfg }) {
   const safeGames = Array.isArray(session?.games) ? session.games.filter(Boolean).map(normalizeStatForRender).filter(Boolean) : [];
   const safeSession = { ...(session || {}), games: safeGames, mode: session?.mode || safeGames[0]?.mode || "3v3", ts: session?.ts || safeGames[0]?.ts || new Date().toISOString() };
   const [open, setOpen] = useState(!!jumpGameId && safeGames.some(g => String(g.id) === String(jumpGameId)));
@@ -5153,6 +5154,7 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
                   </div>
                 </div>
                 <ParseTimeDebugCard game={g} accent={p?.color || "#B8FF4D"} compact />
+                <StatsBallchasingPanel game={g} accent={p?.color || "#B8FF4D"} cfg={ballchasingCfg} compact onFindReplay={onFindBallchasingReplay} onUnlinkReplay={onUnlinkBallchasingReplay} />
               </div>
             );
           })}
@@ -12130,7 +12132,7 @@ const FIELDS = ["goals","assists","saves","shots"];
   );
 }
 
-function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats, currentPlayer, onUpdateOpponentScore }) {
+function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats, currentPlayer, onUpdateOpponentScore, onFindBallchasingReplay, onUnlinkBallchasingReplay, ballchasingCfg }) {
   const [open, setOpen] = useState(dk === jumpDate || false);
   const date = new Date(dk + "T00:00:00");
   const wins = games.filter(g => gameIsWin(g)).length;
@@ -12172,6 +12174,7 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
               ))}
             </div>
             <ParseTimeDebugCard game={g} accent={playerColor} />
+            <StatsBallchasingPanel game={g} accent={playerColor} cfg={ballchasingCfg} onFindReplay={onFindBallchasingReplay} onUnlinkReplay={onUnlinkBallchasingReplay} />
             
           </div>
         );
@@ -12181,7 +12184,7 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
 }
 
 
-function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUpdateOpponentScore }) {
+function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUpdateOpponentScore, onFindBallchasingReplay, onUnlinkBallchasingReplay, ballchasingCfg }) {
   const [openModes, setOpenModes] = useState({ "2v2": true, "1v1": true });
   const toggleMode = (mode) => setOpenModes(prev => ({ ...prev, [mode]: !prev[mode] }));
 
@@ -12194,7 +12197,7 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
       return groups.map((grp, idx) => {
         const duoIds = [...new Set(grp.games.flatMap(g => g.duoIds || [g.playerId]).filter(Boolean))];
         const duoNames = duoIds.map(id => PLAYERS.find(p => p.id === id)?.name).filter(Boolean).join(" + ") || "duo";
-        return <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats} gameLabel={`${duoNames} · GAME ${groups.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} />;
+        return <SessionGroupCard key={`${grp.code}_${grp.mode}_${grp.ts}`} session={grp} allStats={stats} gameLabel={`${duoNames} · GAME ${groups.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} onFindBallchasingReplay={onFindBallchasingReplay} onUnlinkBallchasingReplay={onUnlinkBallchasingReplay} ballchasingCfg={ballchasingCfg} />;
       });
     }
 
@@ -12216,7 +12219,7 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
     return Object.entries(dayMap)
       .sort((a,b) => b[0].localeCompare(a[0]))
       .map(([dk, dayGames]) => (
-        <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={null} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={onUpdateOpponentScore}/>
+        <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={null} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={onUpdateOpponentScore} onFindBallchasingReplay={onFindBallchasingReplay} onUnlinkBallchasingReplay={onUnlinkBallchasingReplay} ballchasingCfg={ballchasingCfg}/>
       ));
   };
 
@@ -12246,7 +12249,7 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
   );
 }
 
-function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null, modeFilter = "3v3" }) {
+function TeamLinkGames({ stats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null, modeFilter = "3v3", onFindBallchasingReplay, onUnlinkBallchasingReplay, ballchasingCfg }) {
  const safeStats = sanitizeStatsForRender(stats);
  const safeGameDateKey = (game) => dateKey(game?.ts || game?.date || Date.now());
  const roomGames = safeStats.filter(g => g && normalizeGameMode(g.mode) === modeFilter && (modeFilter === "3v3" ? (g.roomId || g.sessionCode) : true));
@@ -12277,14 +12280,14 @@ if (!sessionMap[key]) sessionMap[key] = { code: key, mode: g.mode || "3v3", game
         });
         const sessions = Object.values(sessionMap).filter(s => s && Array.isArray(s.games) && s.games.length).sort((a,b) => safeDateObj(b?.ts || 0).getTime() - safeDateObj(a?.ts || 0).getTime());
         return (
-          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={safeStats} onUpdateOpponentScore={onUpdateOpponentScore} jumpDate={jumpDate} jumpGameId={jumpGameId} />
+          <TeamLinkDayGroup key={dk} dk={dk} sessions={sessions} allStats={safeStats} onUpdateOpponentScore={onUpdateOpponentScore} jumpDate={jumpDate} jumpGameId={jumpGameId} onFindBallchasingReplay={onFindBallchasingReplay} onUnlinkBallchasingReplay={onUnlinkBallchasingReplay} ballchasingCfg={ballchasingCfg} />
         );
       })}
     </div>
   );
 }
 
-function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null }) {
+function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore, jumpDate = null, jumpGameId = null, onFindBallchasingReplay, onUnlinkBallchasingReplay, ballchasingCfg }) {
   const safeSessions = Array.isArray(sessions) ? sessions.filter(s => s && Array.isArray(s.games) && s.games.length) : [];
   const hasJumpGame = safeSessions.some(s => (s.games || []).some(g => String(g?.id) === String(jumpGameId)));
   const [open, setOpen] = useState(dk === jumpDate || hasJumpGame);
@@ -12304,7 +12307,7 @@ function TeamLinkDayGroup({ dk, sessions, allStats, onUpdateOpponentScore, jumpD
         <ChevronRight size={14} color="#4A5066" style={{transform:open?"rotate(90deg)":"none",transition:"transform .2s"}}/>
       </button>
  {open && safeSessions.map((sess, idx) => (
-     <SessionGroupCard key={`${sess.code}_${sess.ts || idx}`} session={sess} allStats={Array.isArray(allStats) ? allStats : []} gameLabel={`GAME ${safeSessions.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} jumpGameId={jumpGameId}/>
+     <SessionGroupCard key={`${sess.code}_${sess.ts || idx}`} session={sess} allStats={Array.isArray(allStats) ? allStats : []} gameLabel={`GAME ${safeSessions.length - idx}`} onUpdateOpponentScore={onUpdateOpponentScore} jumpGameId={jumpGameId} onFindBallchasingReplay={onFindBallchasingReplay} onUnlinkBallchasingReplay={onUnlinkBallchasingReplay} ballchasingCfg={ballchasingCfg}/>
 ))}
     </div>
   );
@@ -13065,6 +13068,151 @@ function ParseTimeDebugCard({ game, accent = "#B8FF4D", compact = false }) {
   );
 }
 
+
+// ===================== Stats Ballchasing Link helpers =====================
+function getGameBallchasingId(game = {}) {
+  return String(game.ballchasingReplayId || game.replayId || extractBallchasingReplayId(game.ballchasingUrl || game.ballchasingLink || game.replayUrl || "") || "").trim();
+}
+function getGameBallchasingReplay(game = {}) {
+  const raw = game.ballchasingReplay || game.replay || null;
+  if (raw && typeof raw === "object") return normalizeBallchasingReplay(raw);
+  const id = getGameBallchasingId(game);
+  return id ? normalizeBallchasingReplay({ id, link:`https://ballchasing.com/api/replays/${id}` }) : null;
+}
+function getBallchasingConfidenceMeta(scoreOrLabel = 0) {
+  const s = typeof scoreOrLabel === "string" ? scoreOrLabel.toLowerCase() : "";
+  const score = Number(scoreOrLabel);
+  if (s.includes("manual") || score >= 70) return { label:s || "high", color:"#7CFFB2" };
+  if (s.includes("high") || score >= 55) return { label:"high", color:"#7CFFB2" };
+  if (s.includes("medium") || score >= 35) return { label:"medium", color:"#FFD166" };
+  if (s.includes("low") || score > 0) return { label:"low", color:"#FF8C42" };
+  return { label:"review", color:"#A78BFA" };
+}
+function getStatsBallchasingScoreboardMatch(game = {}, replay = {}) {
+  const safe = normalizeBallchasingReplay(replay || {});
+  const our = Number(game.ourScore);
+  const their = Number(game.theirScore);
+  if (!Number.isFinite(our) || !Number.isFinite(their)) return false;
+  const blue = Number(safe.teams?.[0]?.goals);
+  const orange = Number(safe.teams?.[1]?.goals);
+  if (!Number.isFinite(blue) || !Number.isFinite(orange)) return false;
+  return (our === blue && their === orange) || (our === orange && their === blue);
+}
+function scoreBallchasingCandidateForStatGame(game = {}, replay = {}, playerId = ADMIN_ID, cfg = {}) {
+  const safe = normalizeBallchasingReplay(replay || {});
+  let score = 0;
+  const notes = [];
+  const gameMs = safeDateObj(game.matchStartAt || game.ts || game.syncedAt || Date.now()).getTime();
+  const replayMs = replayDateMs(safe);
+  if (Number.isFinite(gameMs) && Number.isFinite(replayMs) && replayMs > 0) {
+    const diffMin = Math.abs(gameMs - replayMs) / 60000;
+    if (diffMin <= 10) { score += 30; notes.push("time ≤10m"); }
+    else if (diffMin <= 25) { score += 24; notes.push("time ≤25m"); }
+    else if (diffMin <= 60) { score += 16; notes.push("time ≤60m"); }
+    else if (diffMin <= 120) { score += 8; notes.push("time broad"); }
+  }
+  const gameMode = normalizeGameMode(game.mode);
+  const playlist = String(safe.playlistId || safe.playlistName || "").toLowerCase();
+  if ((gameMode === "1v1" && (playlist.includes("duel") || playlist.includes("1v1"))) ||
+      (gameMode === "2v2" && (playlist.includes("double") || playlist.includes("2v2"))) ||
+      (gameMode === "3v3" && (playlist.includes("standard") || playlist.includes("3v3") || playlist.includes("tournament")))) {
+    score += 18; notes.push("mode");
+  }
+  if (getStatsBallchasingScoreboardMatch(game, safe)) { score += 18; notes.push("score"); }
+  const rows = buildBallchasingPlayerRows(safe, cfg);
+  const appRow = rows.find(r => r.appPlayerId === playerId) || rows.find(r => replayLower(r.name) === replayLower(game.playerName || playerNameById(game.playerId)));
+  if (appRow) {
+    score += 10; notes.push("player");
+    const fields = ["goals","assists","saves","shots", ...(normalizeGameMode(game.mode) === "1v1" ? ["demos"] : [])];
+    const matched = fields.filter(f => Number(game[f] || 0) === Number(appRow[f] || 0)).length;
+    score += Math.min(18, matched * 4);
+    if (matched) notes.push(`${matched} stats`);
+  }
+  return { score, notes };
+}
+function getStatsBallchasingSearchAnchor(game = {}) {
+  return game.matchStartAt || game.ts || game.syncedAt || new Date().toISOString();
+}
+function getStatsBallchasingCandidateSummary(item = {}) {
+  const safe = normalizeBallchasingReplay(item.replay || item);
+  const score = Number(item.matchScore || item.score || 0);
+  const meta = getBallchasingConfidenceMeta(score);
+  return {
+    id: safe.id || item.id || extractBallchasingReplayId(item.link || item.viewUrl || ""),
+    label: `${safe.mapName || "map"} · ${getReplayScoreboardText(safe)} · ${safe.date ? new Date(safe.date).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "time ?"}`,
+    confidence: meta.label,
+    color: meta.color,
+    score,
+  };
+}
+function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindReplay, onUnlinkReplay, compact = false }) {
+  const [busy, setBusy] = useState(false);
+  if (!game) return null;
+  const replay = getGameBallchasingReplay(game);
+  const replayId = getGameBallchasingId(game);
+  const confidence = getBallchasingConfidenceMeta(game.ballchasingMatchScore || game.ballchasingConfidence || 0);
+  const runFind = async (candidateId = "") => {
+    if (!onFindReplay || busy) return;
+    setBusy(true);
+    try { await onFindReplay(game, candidateId); } finally { setBusy(false); }
+  };
+  const candidates = Array.isArray(game.ballchasingCandidates) ? game.ballchasingCandidates.slice(0, 4).map(getStatsBallchasingCandidateSummary).filter(c => c.id) : [];
+  if (!replayId && !replay) {
+    return (
+      <div style={{marginTop:compact?8:10,background:"rgba(77,158,255,0.055)",border:"1px solid rgba(77,158,255,0.18)",borderRadius:12,padding:compact?9:10}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,marginBottom:6}}>
+          <div style={{fontSize:9.5,color:"#4D9EFF",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>Ballchasing extra stats</div>
+          <button onClick={()=>runFind()} disabled={busy || !onFindReplay} className="bb-pressable" style={{background:busy?"rgba(255,255,255,.04)":"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:9,padding:"6px 8px",fontSize:8.8,fontWeight:950,color:busy?"#4A5066":"#4D9EFF",cursor:busy?"wait":"pointer"}}>{busy ? "finding…" : "find replay"}</button>
+        </div>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Adds map, Ballchasing player cards, boost/movement basics, and replay timestamp moments to this Stats game.</div>
+        {!!candidates.length && <div style={{display:"grid",gap:6,marginTop:8}}>
+          {candidates.map(c => <button key={c.id} onClick={()=>runFind(c.id)} className="bb-pressable" style={{background:"rgba(255,255,255,.035)",border:`1px solid ${c.color}33`,borderRadius:9,padding:"7px 8px",textAlign:"left",fontSize:9.5,color:"#E8ECF4",fontWeight:850,cursor:"pointer"}}>{c.label}<span style={{color:c.color,fontWeight:950}}> · {c.confidence}</span></button>)}
+        </div>}
+      </div>
+    );
+  }
+  const normalized = replay || normalizeBallchasingReplay({ id:replayId });
+  const rows = buildBallchasingPlayerRows(normalized, cfg);
+  const visibleRows = getVisibleReplayRowsForMode(rows, game.mode || "1v1", game.playerId || ADMIN_ID);
+  const playerNames = visibleRows.map(r => r.name).filter(Boolean);
+  const moments = getReplayKeyMoments(normalized, playerNames.length ? playerNames : rows.map(r => r.name)).slice(0, compact ? 6 : 10);
+  const openUrl = normalized.viewUrl || (replayId ? `https://ballchasing.com/replay/${replayId}` : "");
+  return (
+    <div style={{marginTop:compact?8:10,background:"linear-gradient(135deg,rgba(184,255,77,0.075),rgba(77,158,255,0.055))",border:`1px solid ${confidence.color}33`,borderRadius:12,padding:compact?9:11}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:9.5,color:confidence.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>Ballchasing linked · {confidence.label}</div>
+          <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {normalized.date ? new Date(normalized.date).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "time ?"}</div>
+        </div>
+        <div style={{display:"flex",gap:6,flexShrink:0}}>
+          {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>open</button>}
+          <button onClick={()=>runFind(replayId)} disabled={busy} className="bb-pressable" style={{background:"rgba(77,158,255,.10)",border:"1px solid rgba(77,158,255,.22)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:busy?"#4A5066":"#4D9EFF",cursor:busy?"wait":"pointer"}}>{busy ? "…" : "refresh"}</button>
+          {onUnlinkReplay && <button onClick={()=>onUnlinkReplay(game)} className="bb-pressable" style={{background:"rgba(255,92,138,.08)",border:"1px solid rgba(255,92,138,.18)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>unlink</button>}
+        </div>
+      </div>
+      {!!visibleRows.length && <div style={{display:"grid",gridTemplateColumns:compact?"1fr":"1fr 1fr",gap:7,marginBottom:moments.length?8:0}}>
+        {visibleRows.slice(0, compact ? 2 : 4).map(r => (
+          <div key={`${replayId}_${r.name}_${r.appPlayerId || "opp"}`} style={{background:"rgba(6,7,13,.45)",border:`1px solid ${bbAlpha(r.color,.24)}`,borderRadius:10,padding:"8px 7px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:6,alignItems:"center",marginBottom:5}}>
+              <div style={{fontSize:10.5,color:r.color,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.appName || r.name}</div>
+              <div style={{fontSize:10,color:"#E8ECF4",fontWeight:950}}>{fmtReplayNumber(r.score)}</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
+              {[ ["G",r.goals], ["A",r.assists], ["S",r.saves], ["Sh",r.shots] ].map(([label,val]) => <div key={label} style={{textAlign:"center"}}><div style={{fontSize:7.5,color:"#4A5066",fontWeight:900}}>{label}</div><div style={{fontSize:10.5,color:r.color,fontWeight:950}}>{fmtReplayNumber(val)}</div></div>)}
+            </div>
+            {!compact && <div style={{fontSize:8.5,color:"#8B92A8",marginTop:5,lineHeight:1.25}}>boost avg {fmtReplayNumber(r.avgBoost)} · speed {fmtReplayNumber(r.avgSpeed)}</div>}
+          </div>
+        ))}
+      </div>}
+      {!!moments.length && <div style={{display:"grid",gap:5}}>
+        <div style={{fontSize:9,color:"#FFD166",fontWeight:950,letterSpacing:.7,textTransform:"uppercase"}}>game timestamps</div>
+        {moments.map((m, i) => <div key={`${m.id}_${i}`} style={{display:"flex",justifyContent:"space-between",gap:8,background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:9,padding:"6px 7px"}}><div style={{fontSize:9.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div><div style={{fontSize:8.5,color:m.kind==="goal"?"#FFD166":m.kind==="save"?"#4D9EFF":m.kind.includes("demo")?"#FF8C42":"#8B92A8",fontWeight:950,textTransform:"uppercase"}}>{m.kind}</div></div>)}
+      </div>}
+      {!moments.length && <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Replay linked. Press refresh if timeline moments are missing.</div>}
+    </div>
+  );
+}
+
 const PROP_BET_UNRELIABLE_START_LOCK_MS = 4 * 60 * 1000;
 function getPropBetLockTimeMsForGame(game) {
   const hasExplicitStart = !!(game?.matchStartAt || game?.startedAt || game?.startTime || game?.dateStarted);
@@ -13488,6 +13636,131 @@ const formatSyncDebugTs = (iso) => {
   if (!iso) return "";
   try { return new Date(iso).toLocaleTimeString([], { hour:"numeric", minute:"2-digit", second:"2-digit" }); } catch (_) { return ""; }
 };
+const ballchasingCfg = normalizeLiveSessionConfig(normalizeAppCustomizer(appCustomizer || {}).liveSessionConfig);
+const [ballchasingSyncingGameId, setBallchasingSyncingGameId] = useState(null);
+const getBallchasingSearchNamesForStatGame = (game = {}) => {
+  const p = PLAYERS.find(pl => pl.id === game.playerId) || PLAYERS.find(pl => pl.id === currentPlayer) || PLAYERS[0];
+  const saved = mmrProfiles?.[p?.id] || {};
+  const aliasMap = getBallchasingAliasMap(ballchasingCfg);
+  return Array.from(new Set([
+    game.playerName,
+    saved.handle,
+    saved.trackerName,
+    p?.handle,
+    p?.trackerName,
+    p?.name,
+    ...(aliasMap[p?.id] || []),
+  ].map(v => String(v || "").trim()).filter(Boolean))).slice(0, 8);
+};
+const saveBallchasingToStatGames = async (game, patch) => {
+  const baseStats = await getFreshStatsForWrite(stats);
+  const targetSession = game?.sessionCode || game?.roomId || "";
+  const targetMode = normalizeGameMode(game?.mode);
+  const upd = baseStats.map(g => {
+    const sameSingle = !!game?.id && String(g.id) === String(game.id);
+    const sameSession = !!targetSession && (g.sessionCode === targetSession || g.roomId === targetSession) && normalizeGameMode(g.mode) === targetMode;
+    if (!sameSingle && !sameSession) return g;
+    return { ...g, ...patch, ballchasingUpdatedAt:new Date().toISOString() };
+  });
+  await saveStatsEverywhere(upd, setStats);
+  return upd;
+};
+const unlinkBallchasingForGame = async (game) => {
+  await saveBallchasingToStatGames(game, {
+    ballchasingReplayId:null,
+    ballchasingReplay:null,
+    ballchasingTimeline:null,
+    ballchasingLinkedAt:null,
+    ballchasingMatchScore:null,
+    ballchasingConfidence:null,
+  });
+  setSyncDebug("Ballchasing unlinked", `${game?.mode || "game"} replay removed from this Stats game.`);
+  addToast?.("Ballchasing replay unlinked", "🧹");
+};
+const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
+  const targetId = game?.id || game?.parseMatchId || game?.sessionCode || `${game?.mode}_${game?.ts}`;
+  if (ballchasingSyncingGameId) return;
+  setBallchasingSyncingGameId(targetId);
+  const p = PLAYERS.find(pl => pl.id === game.playerId) || PLAYERS.find(pl => pl.id === currentPlayer) || PLAYERS[0];
+  try {
+    const forcedId = extractBallchasingReplayId(forcedReplayId || "") || String(forcedReplayId || "").trim();
+    setSyncDebug("finding Ballchasing replay", forcedId ? `loading replay ${forcedId}` : `${normalizeGameMode(game.mode)} · ${(getBallchasingSearchNamesForStatGame(game)[0] || p?.name || "player")}`);
+    let chosenReplay = null;
+    let matchScore = 100;
+    let candidatesForReview = [];
+    if (forcedId) {
+      chosenReplay = await fetchBallchasingViaConfig(ballchasingCfg, { replayId:forcedId });
+      matchScore = 100;
+    } else {
+      const names = getBallchasingSearchNamesForStatGame(game);
+      if (!names.length) throw new Error("No Ballchasing/Tracker names saved for this player.");
+      const raw = await fetchBallchasingSearchRawViaConfig(ballchasingCfg, {
+        playerName:names.join(","),
+        mode:normalizeGameMode(game.mode),
+        after:getStatsBallchasingSearchAnchor(game),
+        afterBufferMinutes:120,
+        count:12,
+      });
+      const candidateBasics = getBallchasingSearchCandidates(raw).slice(0, 8);
+      if (!candidateBasics.length) throw new Error("No Ballchasing candidates found yet. Rockpload may not have uploaded this replay.");
+      const detailed = [];
+      for (const item of candidateBasics.slice(0, 6)) {
+        try {
+          const detail = await fetchBallchasingViaConfig(ballchasingCfg, { replayId:item.id });
+          const scored = scoreBallchasingCandidateForStatGame(game, detail, p?.id || game.playerId || currentPlayer, ballchasingCfg);
+          detailed.push({ ...item, id:item.id, replay:detail, matchScore:scored.score, matchNotes:scored.notes });
+        } catch (_) {
+          const scored = scoreBallchasingCandidateForStatGame(game, item, p?.id || game.playerId || currentPlayer, ballchasingCfg);
+          detailed.push({ ...item, id:item.id, replay:normalizeBallchasingReplay(item), matchScore:scored.score, matchNotes:scored.notes });
+        }
+      }
+      detailed.sort((a,b) => Number(b.matchScore || 0) - Number(a.matchScore || 0));
+      const best = detailed[0];
+      candidatesForReview = detailed.map(d => ({
+        id:d.id,
+        mapName:normalizeBallchasingReplay(d.replay || d).mapName,
+        scoreText:getReplayScoreboardText(d.replay || d),
+        date:normalizeBallchasingReplay(d.replay || d).date,
+        matchScore:Number(d.matchScore || 0),
+        matchNotes:d.matchNotes || [],
+      })).slice(0, 4);
+      if (!best || Number(best.matchScore || 0) < 35) {
+        await saveBallchasingToStatGames(game, { ballchasingCandidates:candidatesForReview, ballchasingLastSearchAt:new Date().toISOString() });
+        setSyncDebug("Ballchasing needs review", "Found possible replays, but none were confident enough to auto-link.");
+        addToast?.("Ballchasing found candidates — review in game dropdown", "⚠️");
+        return;
+      }
+      chosenReplay = normalizeBallchasingReplay(best.replay || best);
+      matchScore = Number(best.matchScore || 0);
+    }
+    let timeline = null;
+    try {
+      timeline = await fetchBallchasingTimelineViaConfig(ballchasingCfg, chosenReplay.id);
+      if (timeline) chosenReplay = normalizeBallchasingReplay({ ...chosenReplay, timeline, raw:{ ...(chosenReplay.raw || {}), timeline } });
+    } catch (timelineErr) {
+      console.warn("Ballchasing timeline skipped", timelineErr);
+    }
+    const conf = getBallchasingConfidenceMeta(matchScore).label;
+    await saveBallchasingToStatGames(game, {
+      ballchasingReplayId:chosenReplay.id,
+      ballchasingReplay:chosenReplay,
+      ballchasingTimeline:timeline,
+      ballchasingLinkedAt:new Date().toISOString(),
+      ballchasingMatchScore:matchScore,
+      ballchasingConfidence:conf,
+      ballchasingCandidates:[],
+      ballchasingLastSearchAt:new Date().toISOString(),
+    });
+    setSyncDebug("Ballchasing linked", `${chosenReplay.mapName || "replay"} · ${getReplayScoreboardText(chosenReplay)} · ${conf}`);
+    addToast?.("Ballchasing replay linked to Stats game", "✅");
+  } catch (e) {
+    console.error(e);
+    setSyncDebug("Ballchasing link failed", e?.message || String(e || "No replay found"));
+    addToast?.("Ballchasing replay not found yet", "⚠️");
+  } finally {
+    setBallchasingSyncingGameId(null);
+  }
+};
 const [rankSyncing, setRankSyncing] = useState(false);
 const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
 const [syncMode, setSyncMode] = useState(currentPlayer === ADMIN_ID ? "3v3" : "2v2");
@@ -13849,6 +14122,9 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       }).catch(e => console.warn("post-sync bet settle failed", e));
       setSyncDebug("sync complete", `${sessionCode} ${requestedMode} imported · match id: ${pulled[0]?.match?.id || "unknown"}`);
       addToast?.(`${sessionCode} ${requestedMode} synced from tracker`, "✅");
+      // APP113: after Parse imports the Stats game, immediately try to attach its Ballchasing replay.
+      // If Rockpload has not uploaded yet, the game dropdown keeps a Find Replay button for later.
+      setTimeout(() => findBallchasingForStatGame(importedGames[0]).catch(e => console.warn("post-sync Ballchasing link failed", e)), 450);
       setTimeout(() => setShowSyncMatchModal(false), 350);
     } catch(e) {
       console.error(e);
@@ -14088,7 +14364,7 @@ return (
 {statsSubTab==="mmr" ? (
   <LiveMMRFeed mmrProfiles={mmrProfiles} />
 ) : statsSubTab==="teamlink" ? (
-  <TeamLinkTab stats={stats} onUpdateOpponentScore={updateOpponentScore} />
+  <TeamLinkTab stats={stats} onUpdateOpponentScore={updateOpponentScore} onFindBallchasingReplay={findBallchasingForStatGame} onUnlinkBallchasingReplay={unlinkBallchasingForGame} ballchasingCfg={ballchasingCfg} />
 ) : statsSubTab==="chem" ? (
   <TeamChemistryTab stats={stats} currentPlayer={currentPlayer} points={points} setPoints={setPoints} chemistry={chemistry} setChemistry={setChemistry} appCustomizer={appCustomizer}/>
 ) : (
@@ -14122,6 +14398,7 @@ return (
             saved under {fmtDay(new Date(latestMyGame.ts))} · match id: {latestMyGame.parseMatchId || latestMyGame.matchId || latestMyGame.id}
           </div>
           <ParseTimeDebugCard game={latestMyGame} accent={playerColor} />
+          <StatsBallchasingPanel game={latestMyGame} accent={playerColor} cfg={ballchasingCfg} onFindReplay={findBallchasingForStatGame} onUnlinkReplay={unlinkBallchasingForGame} />
         </div>
       )}
       <div style={{...s.sectionLabel,marginBottom:10}}>your averages · last {Math.min(5,myGames.length)} games</div>
@@ -14193,7 +14470,7 @@ return (
         const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
         const visibleDays = showAllGames ? days : days.slice(0,3);
         return visibleDays.map(([dk, dayGames], idx) => (
-          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={idx === 0 ? dk : jumpDate} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={updateOpponentScore}/>
+          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={idx === 0 ? dk : jumpDate} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={updateOpponentScore} onFindBallchasingReplay={findBallchasingForStatGame} onUnlinkBallchasingReplay={unlinkBallchasingForGame} ballchasingCfg={ballchasingCfg}/>
         ));
       })()}
 {Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
@@ -23247,7 +23524,7 @@ const GAME_CARDS = [
   { id:"race", label:"Race Mode", desc:"first to hit the objective wins bonus pts", color:"#B8FF4D" },
 ];
 
-function TeamLinkTab({ stats, onUpdateOpponentScore }) {
+function TeamLinkTab({ stats, onUpdateOpponentScore, onFindBallchasingReplay, onUnlinkBallchasingReplay, ballchasingCfg }) {
   const [mode, setMode] = useState("3v3");
   return (
     <div className="bb-tab-content" style={s.tabContent}>
@@ -23258,7 +23535,7 @@ function TeamLinkTab({ stats, onUpdateOpponentScore }) {
           <button key={m} onClick={()=>setMode(m)} className="bb-pressable" style={{flex:1,background:mode===m?"#B8FF4D":"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:11,padding:"10px 0",fontSize:12,fontWeight:900,color:mode===m?"#06070D":"#8B92A8",cursor:"pointer"}}>{m}</button>
         ))}
       </div>
-      <TeamLinkGames stats={stats} onUpdateOpponentScore={onUpdateOpponentScore} modeFilter={mode}/>
+      <TeamLinkGames stats={stats} onUpdateOpponentScore={onUpdateOpponentScore} modeFilter={mode} onFindBallchasingReplay={onFindBallchasingReplay} onUnlinkBallchasingReplay={onUnlinkBallchasingReplay} ballchasingCfg={ballchasingCfg}/>
     </div>
   );
 }
