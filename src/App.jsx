@@ -92,6 +92,7 @@ import { createPortal } from "react-dom";
 // APP136_SESSION_STRICT_FILTER_LOW_HEAT_PATCH
 // APP137_ADMIN_LAYOUT_LAB_PATCH
 // APP114_STATS_BALLCHASING_CLEANUP_DEMOS_BETS_PATCH
+// APP115_STATS_BALLCHASING_DEEP_CARD_TIMESTAMPS_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1233,10 +1234,14 @@ function getReplayTimelineForPlayer(replay, row, kind = "goal") {
   return events.filter(ev => {
     const type = getReplayEventType(ev);
     const players = getReplayEventPlayers(ev);
-    const kindMatch = kindLower === "goal" ? type.includes("goal") || !!ev.scorer || !!ev.scorer_name : type.includes("save") || !!ev.saver || !!ev.saver_name;
+    let kindMatch = false;
+    if (kindLower === "goal") kindMatch = type.includes("goal") || !!ev.scorer || !!ev.scorer_name;
+    else if (kindLower === "save") kindMatch = type.includes("save") || !!ev.saver || !!ev.saver_name;
+    else if (kindLower === "demo") kindMatch = (type.includes("demo") || type.includes("kill")) && !(type.includes("demoed") || type.includes("death"));
+    else kindMatch = type.includes(kindLower);
     const playerMatch = !players.length || rowNames.some(n => players.includes(n));
     return kindMatch && playerMatch;
-  }).map(ev => fmtReplayTimecode(getReplayEventTime(ev))).filter(t => t && t !== "—").slice(0, 8);
+  }).map(ev => fmtReplayTimecode(getReplayEventTime(ev))).filter(t => t && t !== "—").slice(0, 10);
 }
 function fmtReplayTimeline(events, count = 0) {
   if (events?.length) return events.join(", ");
@@ -13137,16 +13142,21 @@ function getBallchasingDemoCountForStatGame(replay = {}, game = {}, playerId = A
   const safe = normalizeBallchasingReplay(replay || {});
   const row = getBallchasingRowForStatGame(safe, game, playerId, cfg);
   const rowDemos = Number(row?.demosInflicted ?? row?.demos);
-  if (Number.isFinite(rowDemos)) return Math.max(0, rowDemos);
   const names = [row?.name, row?.appName, game.playerName, playerNameById(game.playerId || playerId)].map(replayLower).filter(Boolean);
   const allowed = new Set(names);
-  return getReplayEvents(safe).filter(ev => {
+  const timelineDemos = getReplayEvents(safe).filter(ev => {
     const type = getReplayEventType(ev);
     if (!(type.includes("demo") || type.includes("kill"))) return false;
     if (type.includes("demoed") || type.includes("death")) return false;
     const evNames = getReplayEventPlayers(ev);
-    return evNames.some(n => allowed.has(n));
+    return !allowed.size || evNames.some(n => allowed.has(n));
   }).length;
+  // Use whichever source has the demo count. Ballchasing core rows are usually best, but
+  // the timeline can still carry demo events when a stat row says 0/null.
+  if (Number.isFinite(rowDemos) && rowDemos > 0) return Math.max(0, rowDemos);
+  if (timelineDemos > 0) return timelineDemos;
+  if (Number.isFinite(rowDemos)) return Math.max(0, rowDemos);
+  return 0;
 }
 function getStatsBallchasingPlayerStatMatchInfo(game = {}, replay = {}, playerId = ADMIN_ID, cfg = {}) {
   const row = getBallchasingRowForStatGame(replay, game, playerId, cfg);
@@ -13244,6 +13254,83 @@ function getStatsBallchasingCandidateSummary(item = {}) {
     score,
   };
 }
+function StatsBallchasingDeepPlayerCard({ row, replay, game, accent = "#B8FF4D" }) {
+  if (!row) return null;
+  const normalized = normalizeBallchasingReplay(replay || {});
+  const goalTimes = getReplayTimelineForPlayer(normalized, row, "goal");
+  const saveTimes = getReplayTimelineForPlayer(normalized, row, "save");
+  const demoTimes = getReplayTimelineForPlayer(normalized, row, "demo");
+  const metricTile = (label, value, color = "#E8ECF4") => (
+    <div style={{background:"rgba(255,255,255,.045)",border:"1px solid rgba(255,255,255,.055)",borderRadius:11,padding:8,minWidth:0}}>
+      <div style={{fontSize:8,color:"#4A5066",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{label}</div>
+      <div style={{fontSize:12.5,color,fontWeight:950,marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{value ?? "—"}</div>
+    </div>
+  );
+  const section = (title, items, color = "#4D9EFF", open = false) => (
+    <details open={open} style={{background:"rgba(0,0,0,.14)",border:"1px solid rgba(255,255,255,.055)",borderRadius:14,padding:"9px 10px",marginTop:8}}>
+      <summary style={{cursor:"pointer",listStyle:"none",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,fontSize:9.5,color,fontWeight:950,letterSpacing:.9,textTransform:"uppercase"}}>
+        <span>{title}</span><span style={{color:"#4A5066"}}>tap</span>
+      </summary>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginTop:9}}>
+        {items.map(([label,value,tileColor]) => metricTile(label, value, tileColor || "#E8ECF4"))}
+      </div>
+    </details>
+  );
+  const carText = row.carName || "car unknown";
+  const possession = row.possessionPct !== null && row.possessionPct !== undefined ? fmtReplayPercent(row.possessionPct) : fmtReplaySeconds(row.possessionTime);
+  return (
+    <div style={{background:`linear-gradient(135deg,${bbAlpha(row.color || accent,.14)},rgba(255,255,255,.035))`,border:`1px solid ${bbAlpha(row.color || accent,.28)}`,borderRadius:18,padding:13,boxShadow:`0 12px 30px ${bbAlpha(row.color || accent,.08)}`}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
+        <div style={{minWidth:0}}>
+          <div style={{fontSize:15,color:row.color || accent,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{row.appName || row.name}</div>
+          <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:850,marginTop:4,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{carText}{row.mvp ? " · MVP" : ""}</div>
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <div style={{fontSize:9,color:"#4A5066",fontWeight:950,textTransform:"uppercase"}}>score</div>
+          <div style={{fontSize:22,color:row.color || accent,fontWeight:950,lineHeight:1}}>{fmtReplayNumber(row.score)}</div>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:7,marginBottom:8}}>
+        {metricTile("goals", fmtReplayNumber(row.goals), row.color || accent)}
+        {metricTile("shots", fmtReplayNumber(row.shots))}
+        {metricTile("shot %", fmtReplayPercent(row.shootingPercentage))}
+        {metricTile("saves", fmtReplayNumber(row.saves))}
+      </div>
+      {section("core", [
+        ["assists", fmtReplayNumber(row.assists)], ["shots against", fmtReplayNumber(row.shotsAgainst)], ["goals against", fmtReplayNumber(row.goalsAgainst)],
+        ["goal times", fmtReplayTimeline(goalTimes, row.goals), row.goals ? "#FFD166" : "#8B92A8"], ["save times", fmtReplayTimeline(saveTimes, row.saves), row.saves ? "#4D9EFF" : "#8B92A8"], ["demos", `${fmtReplayNumber(row.demosInflicted ?? row.demos)}/${fmtReplayNumber(row.demosTaken)}`, "#FF8C42"],
+        ["demo times", fmtReplayTimeline(demoTimes, row.demosInflicted ?? row.demos), "#FF8C42"],
+      ], row.color || accent, true)}
+      {section("boost", [
+        ["collected", fmtReplayNumber(row.boostCollected), "#B8FF4D"], ["stolen", fmtReplayNumber(row.boostStolen)], ["BPM", fmtReplayNumber(row.bpm)],
+        ["BCPM", fmtReplayNumber(row.bcpm)], ["avg boost", fmtReplayNumber(row.avgBoost)], ["0 boost", `${fmtReplaySeconds(row.zeroBoostTime)} · ${fmtReplayPercent(row.zeroBoostPct)}`],
+        ["full boost", `${fmtReplaySeconds(row.fullBoostTime)} · ${fmtReplayPercent(row.fullBoostPct)}`], ["big pads", `${fmtReplayNumber(row.boostCollectedBig)} (${fmtReplayNumber(row.boostCountBig)})`], ["small pads", `${fmtReplayNumber(row.boostCollectedSmall)} (${fmtReplayNumber(row.boostCountSmall)})`],
+        ["big stolen", `${fmtReplayNumber(row.boostStolenBig)} (${fmtReplayNumber(row.boostCountStolenBig)})`], ["small stolen", `${fmtReplayNumber(row.boostStolenSmall)} (${fmtReplayNumber(row.boostCountStolenSmall)})`], ["overfill", fmtReplayNumber(row.boostOverfill)],
+        ["0-25", `${fmtReplaySeconds(row.boostTime0_25)} · ${fmtReplayPercent(row.boostPct0_25)}`], ["25-50", `${fmtReplaySeconds(row.boostTime25_50)} · ${fmtReplayPercent(row.boostPct25_50)}`], ["75-100", `${fmtReplaySeconds(row.boostTime75_100)} · ${fmtReplayPercent(row.boostPct75_100)}`],
+      ], "#B8FF4D", true)}
+      {section("movement", [
+        ["avg speed", fmtReplayNumber(row.avgSpeed), "#A78BFA"], ["distance", fmtReplayDistance(row.totalDistance)], ["speed %", fmtReplayPercent(row.avgSpeedPct)],
+        ["slow", `${fmtReplaySeconds(row.slowSpeedTime)} · ${fmtReplayPercent(row.percentSlowSpeed)}`], ["boost speed", `${fmtReplaySeconds(row.boostSpeedTime)} · ${fmtReplayPercent(row.percentBoostSpeed)}`], ["supersonic", `${fmtReplaySeconds(row.supersonicTime)} · ${fmtReplayPercent(row.percentSupersonicSpeed)}`],
+        ["ground", `${fmtReplaySeconds(row.groundTime)} · ${fmtReplayPercent(row.percentGround)}`], ["low air", `${fmtReplaySeconds(row.lowAirTime)} · ${fmtReplayPercent(row.percentLowAir)}`], ["high air", `${fmtReplaySeconds(row.highAirTime)} · ${fmtReplayPercent(row.percentHighAir)}`],
+        ["powerslide", fmtReplaySeconds(row.powerslideTime)], ["slide count", fmtReplayNumber(row.powerslideCount)], ["avg slide", fmtReplaySeconds(row.avgPowerslideDuration)],
+      ], "#A78BFA", false)}
+      {section("positioning", [
+        ["def 3rd", `${fmtReplaySeconds(row.defThird)} · ${fmtReplayPercent(row.percentDefThird)}`], ["neutral 3rd", `${fmtReplaySeconds(row.neutralThird)} · ${fmtReplayPercent(row.percentNeutralThird)}`], ["off 3rd", `${fmtReplaySeconds(row.offThird)} · ${fmtReplayPercent(row.percentOffThird)}`],
+        ["def half", `${fmtReplaySeconds(row.defHalf)} · ${fmtReplayPercent(row.percentDefHalf)}`], ["off half", `${fmtReplaySeconds(row.offHalf)} · ${fmtReplayPercent(row.percentOffHalf)}`], ["behind ball", `${fmtReplaySeconds(row.behindBall)} · ${fmtReplayPercent(row.percentBehindBall)}`],
+        ["in front", `${fmtReplaySeconds(row.infrontBall)} · ${fmtReplayPercent(row.percentInfrontBall)}`], ["dist ball", fmtReplayDistance(row.avgDistBall)], ["dist mates", fmtReplayDistance(row.avgDistMates)],
+        ["closest", fmtReplaySeconds(row.closestToBallTime)], ["farthest", fmtReplaySeconds(row.farthestFromBallTime)], ["last def GA", fmtReplayNumber(row.goalsAgainstLastDefender)],
+        ["possession", possession], ["side time", fmtReplaySeconds(row.teamSideTime)], ["most back/forward", `${fmtReplaySeconds(row.mostBackTime)} / ${fmtReplaySeconds(row.mostForwardTime)}`],
+      ], "#FFD166", false)}
+      {section("camera + settings", [
+        ["FOV", fmtReplayNumber(row.fov)], ["distance", fmtReplayNumber(row.cameraDistance)], ["height", fmtReplayNumber(row.cameraHeight)],
+        ["angle", fmtReplayNumber(row.cameraAngle)], ["stiffness", fmtReplayNumber(row.cameraStiffness, 2)], ["swivel", fmtReplayNumber(row.cameraSwivel, 1)],
+        ["transition", fmtReplayNumber(row.cameraTransition, 1)], ["steering", fmtReplayNumber(row.steeringSensitivity, 2)], ["car", carText],
+      ], "#4D9EFF", false)}
+      <div style={{fontSize:9.5,color:"#8B92A8",fontWeight:750,lineHeight:1.35,marginTop:9}}>Goal, save, and demo times come from Ballchasing replay elapsed time.</div>
+    </div>
+  );
+}
+
 function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindReplay, onUnlinkReplay, compact = false }) {
   const [busy, setBusy] = useState(false);
   const [manualReplayLink, setManualReplayLink] = useState("");
@@ -13282,7 +13369,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
   const rows = buildBallchasingPlayerRows(normalized, cfg);
   const visibleRows = getVisibleReplayRowsForMode(rows, game.mode || "1v1", game.playerId || ADMIN_ID);
   const playerNames = visibleRows.map(r => r.name).filter(Boolean);
-  const moments = getReplayKeyMoments(normalized, playerNames.length ? playerNames : rows.map(r => r.name)).slice(0, compact ? 6 : 10);
+  const moments = getReplayKeyMoments(normalized, playerNames.length ? playerNames : rows.map(r => r.name)).slice(0, compact ? 6 : 18);
   const openUrl = normalized.viewUrl || (replayId ? `https://ballchasing.com/replay/${replayId}` : "");
   return (
     <div style={{marginTop:compact?8:10,background:"linear-gradient(135deg,rgba(184,255,77,0.075),rgba(77,158,255,0.055))",border:`1px solid ${confidence.color}33`,borderRadius:12,padding:compact?9:11}}>
@@ -13290,7 +13377,6 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
         <div style={{minWidth:0}}>
           <div style={{fontSize:9.5,color:linkedNeedsReview?"#FFD166":confidence.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{linkedNeedsReview ? "Ballchasing review needed" : "Ballchasing linked"} · {confidence.label}</div>
           <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {normalized.date ? new Date(normalized.date).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "time ?"}</div>
-          {linkedNeedsReview && <div style={{fontSize:9.5,color:"#FFD166",lineHeight:1.35,marginTop:5}}>{linkedScoreMismatch ? "Parse score may be incomplete. If this is the wrong replay, press unlink and retry or paste the exact replay link." : "Medium/low matches are no longer trusted automatically. Review or unlink if this is not the right replay."}</div>}
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>open</button>}
@@ -13298,8 +13384,8 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           {onUnlinkReplay && <button onClick={()=>onUnlinkReplay(game)} className="bb-pressable" style={{background:"rgba(255,92,138,.08)",border:"1px solid rgba(255,92,138,.18)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>unlink</button>}
         </div>
       </div>
-      {!!visibleRows.length && <div style={{display:"grid",gridTemplateColumns:compact?"1fr":"1fr 1fr",gap:7,marginBottom:moments.length?8:0}}>
-        {visibleRows.slice(0, compact ? 2 : 4).map(r => (
+      {!!visibleRows.length && compact && <div style={{display:"grid",gridTemplateColumns:"1fr",gap:7,marginBottom:moments.length?8:0}}>
+        {visibleRows.slice(0, 2).map(r => (
           <div key={`${replayId}_${r.name}_${r.appPlayerId || "opp"}`} style={{background:"rgba(6,7,13,.45)",border:`1px solid ${bbAlpha(r.color,.24)}`,borderRadius:10,padding:"8px 7px"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:6,alignItems:"center",marginBottom:5}}>
               <div style={{fontSize:10.5,color:r.color,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.appName || r.name}</div>
@@ -13308,9 +13394,11 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
             <div style={{display:"grid",gridTemplateColumns:normalizeGameMode(game.mode)==="1v1"?"repeat(5,1fr)":"repeat(4,1fr)",gap:4}}>
               {[ ["G",r.goals], ["A",r.assists], ["S",r.saves], ["Sh",r.shots], ...(normalizeGameMode(game.mode)==="1v1" ? [["D", r.demosInflicted ?? r.demos ?? 0]] : []) ].map(([label,val]) => <div key={label} style={{textAlign:"center"}}><div style={{fontSize:7.5,color:"#4A5066",fontWeight:900}}>{label}</div><div style={{fontSize:10.5,color:r.color,fontWeight:950}}>{fmtReplayNumber(val)}</div></div>)}
             </div>
-            {!compact && <div style={{fontSize:8.5,color:"#8B92A8",marginTop:5,lineHeight:1.25}}>boost avg {fmtReplayNumber(r.avgBoost)} · speed {fmtReplayNumber(r.avgSpeed)}</div>}
           </div>
         ))}
+      </div>}
+      {!!visibleRows.length && !compact && <div style={{display:"grid",gap:10,marginBottom:moments.length?10:0}}>
+        {visibleRows.slice(0, normalizeGameMode(game.mode) === "1v1" ? 1 : 4).map(r => <StatsBallchasingDeepPlayerCard key={`${replayId}_${r.name}_${r.appPlayerId || "opp"}`} row={r} replay={normalized} game={game} accent={accent} />)}
       </div>}
       {!!moments.length && <div style={{display:"grid",gap:5}}>
         <div style={{fontSize:9,color:"#FFD166",fontWeight:950,letterSpacing:.7,textTransform:"uppercase"}}>game timestamps</div>
@@ -13822,31 +13910,31 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
             playerName:name,
             mode:normalizeGameMode(game.mode),
             after:anchor,
-            afterBufferMinutes:360,
-            count:25,
+            afterBufferMinutes:1440,
+            count:50,
           });
           pushCandidates(raw);
         } catch (_) {}
-        if (candidateBasics.length >= 12) break;
+        if (candidateBasics.length >= 30) break;
       }
       // Parse often gives collected time, not kickoff time. If the tight time search misses,
       // do a broader recent replay scan by player and let the stat-line scorer pick the match.
-      if (candidateBasics.length < 6) {
+      if (candidateBasics.length < 18) {
         for (const name of names.slice(0, 5)) {
           try {
             const raw = await fetchBallchasingSearchRawViaConfig(ballchasingCfg, {
               playerName:name,
               mode:normalizeGameMode(game.mode),
-              count:30,
+              count:50,
             });
             pushCandidates(raw);
           } catch (_) {}
-          if (candidateBasics.length >= 12) break;
+          if (candidateBasics.length >= 30) break;
         }
       }
       if (!candidateBasics.length) throw new Error("No Ballchasing candidates found yet. Rockpload may not have uploaded this replay.");
       const detailed = [];
-      for (const item of candidateBasics.slice(0, 12)) {
+      for (const item of candidateBasics.slice(0, 30)) {
         try {
           const detail = await fetchBallchasingViaConfig(ballchasingCfg, { replayId:item.id });
           const scored = scoreBallchasingCandidateForStatGame(game, detail, p?.id || game.playerId || currentPlayer, ballchasingCfg);
