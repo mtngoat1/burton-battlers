@@ -13375,12 +13375,12 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
   const openUrl = normalized.viewUrl || (replayId ? `https://ballchasing.com/replay/${replayId}` : "");
   const fullRows = visibleRows.length ? visibleRows.slice(0, normalizeGameMode(game.mode) === "1v1" ? 1 : 4) : [];
   const fullScreenSheet = sheetOpen && typeof document !== "undefined" ? createPortal((
-    <div style={{position:"fixed",inset:0,zIndex:900,background:"rgba(3,5,15,.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",display:"flex",flexDirection:"column"}}>
+    <div style={{position:"fixed",inset:0,zIndex:900,background:"rgba(3,5,15,.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",display:"flex",flexDirection:"column",fontFamily:"Inter, sans-serif"}}>
       <div style={{position:"sticky",top:0,zIndex:2,padding:"max(18px, env(safe-area-inset-top)) 16px 12px",background:"rgba(3,5,15,.92)",borderBottom:"1px solid rgba(255,255,255,.06)",display:"flex",alignItems:"center",gap:10}}>
         <button onClick={()=>setSheetOpen(false)} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.09)",borderRadius:12,width:42,height:42,color:"#E8ECF4",fontSize:20,fontWeight:950,cursor:"pointer"}}>×</button>
         <div style={{minWidth:0,flex:1}}>
           <div style={{fontSize:10,color:accent,fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Ballchasing full stats</div>
-          <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,color:"#E8ECF4",fontWeight:700,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)}</div>
+          <div style={{fontFamily:"Inter, sans-serif",fontSize:20,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)}</div>
         </div>
         {openUrl && <button onClick={()=>window.open(openUrl, "_blank", "noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.10)",border:"1px solid rgba(77,158,255,.24)",borderRadius:12,padding:"10px 12px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer"}}>replay</button>}
       </div>
