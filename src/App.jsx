@@ -83,6 +83,7 @@ import { createPortal } from "react-dom";
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
 // APP112_PARSE_TIME_DEBUG_PATCH
 // APP112B_PARSE_SYNC_FEEDBACK_PATCH
+// APP112C_PARSE_SYNC_SAVED_TRACKER_IDENTITY_PATCH
 // APP111_HOME_LIVE_SESSION_SECTION_TOGGLE_PATCH
 // APP136_SESSION_STRICT_FILTER_LOW_HEAT_PATCH
 // APP137_ADMIN_LAYOUT_LAB_PATCH
@@ -13646,11 +13647,25 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     }
 
     const playlist = playlistByMode[requestedMode] || "Ranked Standard 3v3";
-    const creditsNeeded = playersToSync.length;
+    // APP112C: use the saved Tracker identity from rank/profile sync when present.
+    // This fixes cases where the app player name is "maglvxx" but Tracker/Parse needs
+    // a different platform handle like the real PSN/Epic/Xbox display name.
+    const resolvedPlayersToSync = playersToSync.map((p) => {
+      const saved = mmrProfiles?.[p.id] || {};
+      const savedHandle = String(saved.handle || saved.trackerName || "").trim();
+      const savedPlatform = String(saved.platform || "").trim();
+      const handle = savedHandle || p.handle || p.trackerName || p.name;
+      const platform = savedPlatform || p.platform || "epic";
+      return { ...p, handle, trackerName: handle, platform };
+    });
+    const creditsNeeded = resolvedPlayersToSync.length;
 
     // APP112B: show feedback immediately so the button never feels dead while credits/storage/API wake up.
     setMatchSyncing(true);
-    addToast?.(`starting latest ${requestedMode} sync…`, "🔄");
+    const identityNote = resolvedPlayersToSync.length === 1
+      ? ` · ${resolvedPlayersToSync[0].platform}/${resolvedPlayersToSync[0].handle}`
+      : "";
+    addToast?.(`starting latest ${requestedMode} sync${identityNote}…`, "🔄");
 
     const runParseCreditCheck = async () => {
       if (!useParseCredit) return true;
@@ -13677,14 +13692,15 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       addToast?.(`syncing latest ${requestedMode} match…`, "🔄");
       const freshSyncStats = await getFreshStatsForWrite(stats);
       const pulled = await Promise.all(
-        playersToSync.map(async (p) => ({
+        resolvedPlayersToSync.map(async (p) => ({
           player: p,
           match: await fetchLatestParseMatchForPlayer(p, playlist),
         }))
       );
 
       if (pulled.some(x => !x.match)) {
-        addToast?.(`waiting for ${playersToSync.length === 1 ? "your" : "all player"} ${requestedMode} match${playersToSync.length === 1 ? "" : "es"} to show on tracker`, "⏳");
+        const missing = pulled.filter(x => !x.match).map(x => `${x.player.name}:${x.player.platform}/${x.player.handle}`).join(", ");
+        addToast?.(`no new ${requestedMode} match found yet${missing ? ` · ${missing}` : ""}`, "⏳");
         setMatchSyncing(false);
         return;
       }
