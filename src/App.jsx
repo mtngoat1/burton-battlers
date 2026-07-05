@@ -81,7 +81,9 @@ import { createPortal } from "react-dom";
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
+// APP111_HOME_LIVE_SESSION_SECTION_TOGGLE_PATCH
 // APP136_SESSION_STRICT_FILTER_LOW_HEAT_PATCH
+// APP137_ADMIN_LAYOUT_LAB_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -2343,7 +2345,7 @@ function LiveSessionHomeCard({ currentPlayer, stats = [], appCustomizer, addToas
   const { session, saveSession } = useLiveSessionStore();
   const safe = normalizeLiveSession(session);
   const [open, setOpen] = useState(false);
-  if (!cfg.enabled) return null;
+  if (!cfg.enabled || cfg.homeCardEnabled === false) return null;
   const summary = buildLiveSessionStats(safe, stats);
   const player = PLAYERS.find(p => p.id === currentPlayer) || PLAYERS[0];
   const participantPlayers = safe.active ? getLiveSessionParticipants(safe, currentPlayer) : [player];
@@ -10773,6 +10775,11 @@ function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
     ["coinRecentFlipsTitle", "Coin flip · recent flips"],
   ];
   const save = (patch, message) => saveAppCustomizer({ ...cfg, ...patch }, setAppCustomizer, addToast, message);
+  const liveHomeCfg = normalizeLiveSessionConfig(cfg.liveSessionConfig || {});
+  const liveHomeSectionOn = liveHomeCfg.homeCardEnabled !== false;
+  const toggleHomeLiveSessionSection = () => save({
+    liveSessionConfig: normalizeLiveSessionConfig({ ...liveHomeCfg, homeCardEnabled: !liveHomeSectionOn })
+  }, liveHomeSectionOn ? "home Live Session section hidden" : "home Live Session section shown");
   const saveNested = (key, value, message) => save({ [key]: value }, message);
   const moveTab = (id, dir) => {
     const arr = [...cfg.tabOrder];
@@ -10806,6 +10813,109 @@ function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
     [arr[idx], arr[nextIdx]] = [arr[nextIdx], arr[idx]];
     saveNested("boxOrder", { ...cfg.boxOrder, [page]: arr }, `${page} box order saved`);
   };
+
+  const cloneLayoutLabValue = (value) => {
+    try { return JSON.parse(JSON.stringify(value || {})); } catch (_) { return value || {}; }
+  };
+  const buildLayoutLabBoxLayout = (hiddenMap = {}, optionMap = {}) => {
+    const next = cloneLayoutLabValue(DEFAULT_TAB_BOX_LAYOUT);
+    Object.entries(hiddenMap || {}).forEach(([tabId, ids]) => {
+      const base = next[tabId] || cloneLayoutLabValue(DEFAULT_TAB_BOX_LAYOUT?.[tabId] || {});
+      const hidden = { ...(base.hidden || {}) };
+      (Array.isArray(ids) ? ids : []).forEach(id => { hidden[id] = true; });
+      next[tabId] = { ...base, hidden };
+    });
+    Object.entries(optionMap || {}).forEach(([tabId, opts]) => {
+      const base = next[tabId] || cloneLayoutLabValue(DEFAULT_TAB_BOX_LAYOUT?.[tabId] || {});
+      next[tabId] = { ...base, ...(opts || {}) };
+    });
+    return next;
+  };
+  const applyLayoutLabPreset = async (presetId) => {
+    const defaultTabs = [...DEFAULT_APP_TAB_ORDER];
+    const presets = {
+      full:{
+        label:"full app restored",
+        patch:{
+          layoutLabPreset:"full",
+          hiddenTabs:{},
+          tabOrder:defaultTabs,
+          tabBoxLayout:cloneLayoutLabValue(DEFAULT_TAB_BOX_LAYOUT),
+          enabledBoxes:{ ...DEFAULT_BURTON_BOXES },
+          compactCards:false,
+          hideMutedText:false,
+          ambientFx:true,
+          liveSessionConfig:normalizeLiveSessionConfig({ ...cfg.liveSessionConfig, homeCardEnabled:true }),
+        },
+      },
+      cleanHome:{
+        label:"clean home test applied",
+        patch:{
+          layoutLabPreset:"cleanHome",
+          hiddenTabs:{},
+          tabOrder:["home","presence","jobs","boost","garage","room","social"],
+          compactCards:true,
+          hideMutedText:true,
+          tabBoxLayout:buildLayoutLabBoxLayout({
+            homeOverview:["weeklyModifier","coachNote","teamComparison","statChallenges"],
+            burtonOS:["courtRoom","autoCourt","economyEvents","teamSchedule","courtAppeals","limitedEvents","secretUnlocks","cursesBlessings","vault"],
+          }, { homeOverview:{ layoutMode:"featureGrid", density:"tight" }, burtonOS:{ layoutMode:"compactGrid", density:"tight" } }),
+        },
+      },
+      playOnly:{
+        label:"play night test applied",
+        patch:{
+          layoutLabPreset:"playOnly",
+          hiddenTabs:{ jobs:true, social:true, garage:true },
+          tabOrder:["home","presence","room","boost","jobs","garage","social"],
+          compactCards:true,
+          hideMutedText:true,
+          tabBoxLayout:buildLayoutLabBoxLayout({
+            homeOverview:["weeklyModifier","burtonOS","coachNote","teamComparison","statChallenges"],
+            burtonOS:["courtRoom","autoCourt","teamJobs","playerStocks","economyEvents","teamSchedule","courtAppeals","teamEconomy","limitedEvents","secretUnlocks","cursesBlessings","vault"],
+          }, { homeOverview:{ layoutMode:"stack", density:"tight" }, burtonOS:{ layoutMode:"rail", density:"tight" } }),
+        },
+      },
+      economyOnly:{
+        label:"economy arcade test applied",
+        patch:{
+          layoutLabPreset:"economyOnly",
+          hiddenTabs:{ room:true, social:true },
+          tabOrder:["home","jobs","boost","garage","presence","room","social"],
+          compactCards:false,
+          hideMutedText:false,
+          tabBoxLayout:buildLayoutLabBoxLayout({
+            homeOverview:["coachNote","teamComparison"],
+            burtonOS:["courtRoom","autoCourt","teamSchedule","courtAppeals","limitedEvents","secretUnlocks","cursesBlessings","vault"],
+          }, { homeOverview:{ layoutMode:"featureGrid", density:"normal" }, burtonOS:{ layoutMode:"twoColumn", density:"normal" } }),
+        },
+      },
+      tournament:{
+        label:"tournament prep test applied",
+        patch:{
+          layoutLabPreset:"tournament",
+          hiddenTabs:{ social:true, boost:true, garage:true },
+          tabOrder:["home","presence","room","jobs","boost","garage","social"],
+          compactCards:true,
+          hideMutedText:true,
+          tabBoxLayout:buildLayoutLabBoxLayout({
+            homeOverview:["openLoops","weeklyModifier","burtonOS","teamComparison","statChallenges"],
+            burtonOS:["chaos","courtRoom","autoCourt","teamJobs","playerStocks","economyEvents","courtAppeals","teamEconomy","limitedEvents","secretUnlocks","cursesBlessings","vault"],
+          }, { homeOverview:{ layoutMode:"stack", density:"tight" }, burtonOS:{ layoutMode:"stack", density:"tight" } }),
+        },
+      },
+    };
+    const preset = presets[presetId] || presets.full;
+    const next = normalizeAppCustomizer({ ...cfg, ...(preset.patch || {}) });
+    await saveAppCustomizer(next, setAppCustomizer, addToast, preset.label || "layout preset applied");
+  };
+  const layoutLabPresets = [
+    { id:"full", label:"full app", sub:"restore everything", color:"#B8FF4D" },
+    { id:"cleanHome", label:"clean home", sub:"less clutter, all tabs", color:"#FFD166" },
+    { id:"playOnly", label:"play night", sub:"home + squad + room + boost", color:"#4D9EFF" },
+    { id:"economyOnly", label:"economy arcade", sub:"jobs / boost / pass up front", color:"#A78BFA" },
+    { id:"tournament", label:"tournament prep", sub:"hide arcade/flex tabs", color:"#FF5C8A" },
+  ];
   return (
     <div style={{background:"linear-gradient(135deg,#11131F,#090B14)",border:"1px solid rgba(255,209,102,0.18)",borderRadius:18,padding:13,marginBottom:16,boxShadow:"0 16px 36px rgba(0,0,0,0.22)"}}>
       <button onClick={()=>setOpen(v=>!v)} className="bb-pressable" style={{width:"100%",background:"none",border:"none",padding:0,display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,cursor:"pointer",textAlign:"left"}}>
@@ -10826,6 +10936,13 @@ function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
               <button key={key} onClick={()=>save({ [key]: !cfg[key] }, `${label}: ${!cfg[key] ? "on" : "off"}`)} className="bb-pressable" style={{background:cfg[key]?"#FFD166":"rgba(255,255,255,0.05)",border:`1px solid ${cfg[key]?"#FFD166":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:10,fontWeight:900,color:cfg[key]?"#06070D":"#8B92A8",cursor:"pointer"}}>{label}</button>
             ))}
           </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>home sections</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr",gap:7,marginBottom:12}}>
+            <button onClick={toggleHomeLiveSessionSection} className="bb-pressable" style={{background:liveHomeSectionOn?"rgba(77,158,255,0.14)":"rgba(255,255,255,0.05)",border:`1px solid ${liveHomeSectionOn?"rgba(77,158,255,0.32)":"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"10px 9px",fontSize:11,fontWeight:950,color:liveHomeSectionOn?"#4D9EFF":"#8B92A8",cursor:"pointer",textAlign:"left"}}>
+              Home Live Session section: {liveHomeSectionOn ? "shown" : "hidden"}
+              <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.3,marginTop:3}}>Hides only the Live Session card on Home. It does not delete session data, replay vault, Film Room, or settings.</div>
+            </button>
+          </div>
           <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>animation depth</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7,marginBottom:12}}>
             {["low","normal","high"].map(depth => (
@@ -10835,6 +10952,21 @@ function AdminAppCommandCenter({ appCustomizer, setAppCustomizer, addToast }) {
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7,marginBottom:13}}>
             <button onClick={()=>save({ buttonMotion:cfg.buttonMotion==="bouncy"?"normal":"bouncy" }, cfg.buttonMotion==="bouncy"?"button bounce off":"button bounce on")} className="bb-pressable" style={{background:cfg.buttonMotion==="bouncy"?"#A78BFA":"rgba(255,255,255,0.05)",border:`1px solid ${cfg.buttonMotion==="bouncy"?"#A78BFA":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:10,fontWeight:900,color:cfg.buttonMotion==="bouncy"?"#06070D":"#8B92A8",cursor:"pointer"}}>button bounce</button>
             <button onClick={()=>save({ ambientFx:!cfg.ambientFx }, !cfg.ambientFx?"ambient fx on":"ambient fx off")} className="bb-pressable" style={{background:cfg.ambientFx?"#B8FF4D":"rgba(255,255,255,0.05)",border:`1px solid ${cfg.ambientFx?"#B8FF4D":"rgba(255,255,255,0.08)"}`,borderRadius:11,padding:"9px 6px",fontSize:10,fontWeight:900,color:cfg.ambientFx?"#06070D":"#8B92A8",cursor:"pointer"}}>ambient fx</button>
+          </div>
+          <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>layout lab presets</div>
+          <div style={{background:"rgba(255,255,255,0.035)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:14,padding:9,marginBottom:13}}>
+            <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4,marginBottom:8}}>Tap one preset, leave admin, use the app for a few minutes, then come back and restore full app if it feels wrong. Current: <span style={{color:"#E8ECF4",fontWeight:900}}>{cfg.layoutLabPreset || "custom"}</span></div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:7}}>
+              {layoutLabPresets.map(preset => {
+                const active = (cfg.layoutLabPreset || "full") === preset.id;
+                return (
+                  <button key={preset.id} onClick={()=>applyLayoutLabPreset(preset.id)} className="bb-pressable" style={{background:active?preset.color:"rgba(255,255,255,0.05)",border:`1px solid ${active?preset.color:"rgba(255,255,255,0.08)"}`,borderRadius:12,padding:"10px 8px",textAlign:"left",cursor:"pointer"}}>
+                    <div style={{fontSize:11,fontWeight:950,color:active?"#06070D":preset.color,textTransform:"lowercase"}}>{preset.label}</div>
+                    <div style={{fontSize:9.5,color:active?"rgba(6,7,13,.72)":"#8B92A8",marginTop:3,lineHeight:1.25}}>{preset.sub}</div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div style={{fontSize:10,color:"#FFD166",fontWeight:900,letterSpacing:1,textTransform:"uppercase",margin:"0 0 8px"}}>tabs · move / hide</div>
           <div style={{display:"grid",gap:7,marginBottom:13}}>
@@ -14751,6 +14883,7 @@ function normalizeReplayStatCardFields(input = {}) {
 
 const DEFAULT_LIVE_SESSION_CONFIG = {
   enabled: true,
+  homeCardEnabled: true,
   title: "live session",
   subtitle: "use this while queueing Rocket League",
   inactiveTitle: "no active session",
@@ -14861,6 +14994,7 @@ function normalizeLiveSessionConfig(input = {}) {
   ];
   const out = { ...DEFAULT_LIVE_SESSION_CONFIG, ...src };
   out.enabled = src.enabled !== false;
+  out.homeCardEnabled = src.homeCardEnabled !== false;
   out.replayVaultEnabled = src.replayVaultEnabled !== false;
   out.replayPasteEnabled = src.replayPasteEnabled === true;
   out.filmRoomEnabled = src.filmRoomEnabled !== false;
@@ -15025,6 +15159,7 @@ const DEFAULT_APP_CUSTOMIZER = {
   appealConfig: { enabled:true, cost:250, refundOnWin:true, doublePunishOnFail:true, votesNeeded:2 },
   openLoopsConfig: { enabled:true, rotationSeconds:5, showNews:true, showRareShop:true, showCourt:true, showJobs:true, showSchedule:true, showEconomy:true, copy:{} },
   finishStyle:"neon_pro",
+  layoutLabPreset:"full",
   uiPanelMode:"default",
   chatAnimationStyle:"slide",
   underConstruction:{},
@@ -15565,6 +15700,7 @@ function normalizeAppCustomizer(cfg = {}) {
     shopPriceBoxAccent: /^#[0-9a-f]{6}$/i.test(String(src.shopPriceBoxAccent || "")) ? String(src.shopPriceBoxAccent) : DEFAULT_APP_CUSTOMIZER.shopPriceBoxAccent,
     shopPriceBoxBorderOpacity: Math.max(0.14, Math.min(0.72, Number(src.shopPriceBoxBorderOpacity ?? DEFAULT_APP_CUSTOMIZER.shopPriceBoxBorderOpacity) || DEFAULT_APP_CUSTOMIZER.shopPriceBoxBorderOpacity)),
     shopPriceBoxBgOpacity: Math.max(0.04, Math.min(0.24, Number(src.shopPriceBoxBgOpacity ?? DEFAULT_APP_CUSTOMIZER.shopPriceBoxBgOpacity) || DEFAULT_APP_CUSTOMIZER.shopPriceBoxBgOpacity)),
+    layoutLabPreset: String(src.layoutLabPreset || DEFAULT_APP_CUSTOMIZER.layoutLabPreset || "custom"),
     animationDepth: ["low","normal","high"].includes(src.animationDepth) ? src.animationDepth : DEFAULT_APP_CUSTOMIZER.animationDepth,
     buttonMotion: ["normal","bouncy"].includes(src.buttonMotion) ? src.buttonMotion : DEFAULT_APP_CUSTOMIZER.buttonMotion,
     ambientFx: src.ambientFx !== false,
