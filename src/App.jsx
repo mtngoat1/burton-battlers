@@ -81,6 +81,7 @@ import { createPortal } from "react-dom";
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
+// APP112F_SYNCED_GAME_VISIBLE_FIX
 // APP112D_PARSE_SYNC_DEBUG_PANEL_PATCH
 // APP112_PARSE_TIME_DEBUG_PATCH
 // APP112B_PARSE_SYNC_FEEDBACK_PATCH
@@ -12223,7 +12224,7 @@ function ModeGamesSection({ stats, currentPlayer, playerColor, STAT_FIELDS, onUp
     <div>
       {["2v2", "1v1"].map(mode => {
         const isOpen = !!openModes[mode];
-        const count = mode === "2v2" ? getSessionGroups(stats).filter(g => g.mode === "2v2").length : (stats || []).filter(g => g.mode === mode && g.playerId === currentPlayer).length;
+        const count = mode === "2v2" ? getSessionGroups(stats).filter(g => normalizeGameMode(g.mode) === "2v2").length : (stats || []).filter(g => normalizeGameMode(g.mode) === mode && g.playerId === currentPlayer).length;
         return (
           <div key={mode} style={{marginBottom:12}}>
             <button onClick={() => toggleMode(mode)} className="bb-pressable"
@@ -13592,8 +13593,10 @@ const updateOpponentScore = async (game, theirScoreValue) => {
   await saveStatsEverywhere(upd, setStats);
   addToast?.("opponent score saved", "✅");
 };
-  const modeGames=stats.filter(g=>g.mode===mode);
+  // APP112F: normalize saved modes so Parse imports like "Ranked Duel 1v1" still show under the 1v1 tab.
+  const modeGames=stats.filter(g=>normalizeGameMode(g.mode)===mode);
   const myGames=modeGames.filter(g=>g.playerId===currentPlayer).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
+  const latestMyGame = myGames.length ? [...myGames].sort((a,b)=>new Date(b.ts)-new Date(a.ts))[0] : null;
   const avg=(arr,field)=>arr.length?(arr.reduce((s,g)=>s+(Number(g[field])||0),0)/arr.length).toFixed(1):"—";
   const winRate=(arr)=>{ if(!arr.length)return"—"; return Math.round((arr.filter(g=>gameIsWin(g)).length/arr.length)*100)+"%"; };
   const playerColor=PLAYERS.find(p=>p.id===currentPlayer)?.color||"#B8FF4D";
@@ -13790,6 +13793,9 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         if (refreshed) {
           setSyncDebug("already synced — refreshing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           await saveStatsEverywhere(updStats, setStats);
+          if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
+          setStatsSubTab("tracker");
+          setShowAllGames(true);
           const freshBetsForRefresh = await storeGet("bets").catch(() => []);
           const freshPointsForRefresh = await storeGet("points").catch(() => points) || points;
           await settleDueBetsNow({
@@ -13828,6 +13834,11 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       setSyncDebug("importing match", `match id: ${pulled[0]?.match?.id || "unknown"} · ${importedGames.length} row${importedGames.length === 1 ? "" : "s"}`);
       const updStats = [...importedGames, ...freshSyncStats];
       await saveStatsEverywhere(updStats, setStats);
+      // APP112F: after a successful sync, jump the Stats UI to the matching tracker mode and open all days
+      // so the imported game is visible instead of saved but hidden below collapsed groups.
+      if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
+      setStatsSubTab("tracker");
+      setShowAllGames(true);
       // APP56: settle any matching prop immediately after the next synced game is written.
       await settleDueBetsNow({
         bets: await storeGet("bets").catch(() => []),
@@ -14090,6 +14101,29 @@ return (
           </button>
         ))}
       </div>
+      {latestMyGame && (
+        <div style={{background:"linear-gradient(135deg,rgba(184,255,77,0.12),rgba(77,158,255,0.08))",border:`1px solid ${playerColor}33`,borderRadius:16,padding:13,marginBottom:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:8}}>
+            <div>
+              <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>latest visible {mode} game</div>
+              <div style={{fontFamily:"'Oswald',sans-serif",fontSize:20,fontWeight:700,color:"#E8ECF4",lineHeight:1}}>{formatGameScore(latestMyGame)}</div>
+            </div>
+            <div style={{fontSize:10,fontWeight:900,color:gameIsWin(latestMyGame)?"#7CFFB2":"#FF5C8A",background:gameIsWin(latestMyGame)?"rgba(124,255,178,0.1)":"rgba(255,92,138,0.1)",padding:"4px 9px",borderRadius:99}}>{gameIsWin(latestMyGame)?"WIN":"LOSS"}</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:`repeat(${getStatFieldsForMode(mode).length},1fr)`,gap:7,marginBottom:8}}>
+            {getStatFieldsForMode(mode).map(f => (
+              <div key={f} style={{background:"rgba(6,7,13,0.5)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:"8px 6px",textAlign:"center"}}>
+                <div style={{fontSize:8.5,color:"#8B92A8",fontWeight:900,letterSpacing:.5,textTransform:"uppercase"}}>{f}</div>
+                <div style={{fontSize:15,color:playerColor,fontWeight:900,marginTop:2}}>{latestMyGame[f]}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4}}>
+            saved under {fmtDay(new Date(latestMyGame.ts))} · match id: {latestMyGame.parseMatchId || latestMyGame.matchId || latestMyGame.id}
+          </div>
+          <ParseTimeDebugCard game={latestMyGame} accent={playerColor} />
+        </div>
+      )}
       <div style={{...s.sectionLabel,marginBottom:10}}>your averages · last {Math.min(5,myGames.length)} games</div>
       {myGames.length===0 ? (
         <div style={s.emptyQueue}>no {mode} games logged yet — tap log game to add one.</div>
@@ -14158,8 +14192,8 @@ return (
         });
         const days = Object.entries(dayMap).sort((a,b) => b[0].localeCompare(a[0]));
         const visibleDays = showAllGames ? days : days.slice(0,3);
-        return visibleDays.map(([dk, dayGames]) => (
-          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={jumpDate} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={updateOpponentScore}/>
+        return visibleDays.map(([dk, dayGames], idx) => (
+          <DayGameGroup key={dk} dk={dk} games={dayGames} playerColor={playerColor} jumpDate={idx === 0 ? dk : jumpDate} STAT_FIELDS={getStatFieldsForMode(mode)} allStats={stats} currentPlayer={currentPlayer} onUpdateOpponentScore={updateOpponentScore}/>
         ));
       })()}
 {Object.keys((()=>{const m={}; myGames.forEach(g=>{m[dateKey(new Date(g.ts))]=1;}); return m;})()).length > 3 && (
