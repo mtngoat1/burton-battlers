@@ -81,6 +81,7 @@ import { createPortal } from "react-dom";
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
+// APP112D_PARSE_SYNC_DEBUG_PANEL_PATCH
 // APP112_PARSE_TIME_DEBUG_PATCH
 // APP112B_PARSE_SYNC_FEEDBACK_PATCH
 // APP112C_PARSE_SYNC_SAVED_TRACKER_IDENTITY_PATCH
@@ -13472,6 +13473,19 @@ function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate,
   const [statsSubTab, setStatsSubTab] = useState("tracker");
 const [showRoom, setShowRoom] = useState(false);
 const [matchSyncing, setMatchSyncing] = useState(false);
+const [matchSyncDebug, setMatchSyncDebug] = useState(null);
+const setSyncDebug = (status, detail = "", meta = {}) => {
+  setMatchSyncDebug({
+    status: String(status || "sync status updated"),
+    detail: String(detail || ""),
+    ts: new Date().toISOString(),
+    ...meta,
+  });
+};
+const formatSyncDebugTs = (iso) => {
+  if (!iso) return "";
+  try { return new Date(iso).toLocaleTimeString([], { hour:"numeric", minute:"2-digit", second:"2-digit" }); } catch (_) { return ""; }
+};
 const [rankSyncing, setRankSyncing] = useState(false);
 const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
 const [syncMode, setSyncMode] = useState(currentPlayer === ADMIN_ID ? "3v3" : "2v2");
@@ -13620,7 +13634,10 @@ const updateOpponentScore = async (game, theirScoreValue) => {
   ];
 
   const syncLatestTeamMatch = async (requestedMode = syncMode, requestedPlayers = null) => {
-    if (matchSyncing) return;
+    if (matchSyncing) {
+      setSyncDebug("sync already running", "Wait for the current tracker request to finish.");
+      return;
+    }
 
     const playlistByMode = {
       "3v3": "Ranked Standard 3v3",
@@ -13637,11 +13654,13 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     }
 
     if (requestedMode === "3v3" && currentPlayer !== ADMIN_ID) {
+      setSyncDebug("blocked", "Only the captain can sync full team 3v3.");
       addToast?.("only the captain can sync full team 3v3", "🔒");
       return;
     }
 
     if (requestedMode === "2v2" && currentPlayer !== ADMIN_ID && !playersToSync.some(p => p.id === currentPlayer)) {
+      setSyncDebug("blocked", "Pick a duo that includes your player.");
       addToast?.("pick a duo you played in", "⚠️");
       return;
     }
@@ -13665,6 +13684,8 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     const identityNote = resolvedPlayersToSync.length === 1
       ? ` · ${resolvedPlayersToSync[0].platform}/${resolvedPlayersToSync[0].handle}`
       : "";
+    const identityList = resolvedPlayersToSync.map(p => `${p.name}: ${p.platform}/${p.handle}`).join(" · ");
+    setSyncDebug(`starting ${requestedMode} sync`, identityList);
     addToast?.(`starting latest ${requestedMode} sync${identityNote}…`, "🔄");
 
     const runParseCreditCheck = async () => {
@@ -13675,10 +13696,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           new Promise(resolve => setTimeout(() => resolve("timeout"), 9000)),
         ]);
         if (creditResult === "timeout") {
+          setSyncDebug("parse credit check timed out", "Refresh the app and try again. If this keeps happening, Parse/storage is hanging before the request.");
           addToast?.("parse credit check timed out — refresh and try again", "⚠️");
           return false;
         }
-        if (!creditResult) return false;
+        if (!creditResult) {
+          setSyncDebug("out of parse credits", `Needed ${creditsNeeded} credit${creditsNeeded === 1 ? "" : "s"} for this sync.`);
+          return false;
+        }
       }
       return true;
     };
@@ -13689,6 +13714,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         setMatchSyncing(false);
         return;
       }
+      setSyncDebug(`fetching latest ${requestedMode} match`, `playlist: ${playlist} · ${identityList}`);
       addToast?.(`syncing latest ${requestedMode} match…`, "🔄");
       const freshSyncStats = await getFreshStatsForWrite(stats);
       const pulled = await Promise.all(
@@ -13700,6 +13726,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
 
       if (pulled.some(x => !x.match)) {
         const missing = pulled.filter(x => !x.match).map(x => `${x.player.name}:${x.player.platform}/${x.player.handle}`).join(", ");
+        setSyncDebug(`no ${requestedMode} match returned`, missing ? `missing: ${missing}` : "Parse returned no latest match for this player/mode yet.");
         addToast?.(`no new ${requestedMode} match found yet${missing ? ` · ${missing}` : ""}`, "⏳");
         setMatchSyncing(false);
         return;
@@ -13707,7 +13734,9 @@ const updateOpponentScore = async (game, theirScoreValue) => {
 
       const missingStatPayload = pulled.filter(x => !hasUsableParseStatPayload(x.match, requestedMode));
       if (missingStatPayload.length) {
+        const statDebug = missingStatPayload.map(x => `${x.player.name}:${x.match?.id || "no-id"}`).join(", ");
         console.warn("Parse found matches without box-score stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, requestedMode) })));
+        setSyncDebug("match found but stats not loaded", statDebug || "Try syncing again in a minute.");
         addToast?.("match found, but live stats are still loading — try sync again in a minute", "⏳");
         setMatchSyncing(false);
         return;
@@ -13716,6 +13745,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       if (playersToSync.length > 1) {
         const times = pulled.map(x => new Date(x.match.metadata.dateCollected).getTime());
         if (Math.max(...times) - Math.min(...times) > 10 * 60 * 1000) {
+          setSyncDebug("team match mismatch", `Latest ${requestedMode} matches are more than 10 minutes apart, so the app did not group them.`);
           addToast?.(`latest games don't look like the same ${requestedMode} match yet`, "⚠️");
           setMatchSyncing(false);
           return;
@@ -13724,6 +13754,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         const results = pulled.map(x => x.match.metadata.result);
         const sameResult = results.every(r => r === results[0]);
         if (!sameResult) {
+          setSyncDebug("team result mismatch", `Latest ${requestedMode} results from Parse do not match yet.`);
           addToast?.(`latest ${requestedMode} results do not match yet`, "⚠️");
           setMatchSyncing(false);
           return;
@@ -13756,6 +13787,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           };
         });
         if (refreshed) {
+          setSyncDebug("already synced — refreshing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           await saveStatsEverywhere(updStats, setStats);
           const freshBetsForRefresh = await storeGet("bets").catch(() => []);
           const freshPointsForRefresh = await storeGet("points").catch(() => points) || points;
@@ -13774,9 +13806,11 @@ const updateOpponentScore = async (game, theirScoreValue) => {
             setPoints,
             games: refreshedGames,
           }).catch(e => console.warn("post-refresh bet regrade failed", e));
+          setSyncDebug("synced game refreshed", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           addToast?.("that synced game was refreshed with latest live stats", "✅");
           setTimeout(() => setShowSyncMatchModal(false), 350);
         } else {
+          setSyncDebug("already synced", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           addToast?.("that match was already synced", "✅");
         }
         setMatchSyncing(false);
@@ -13790,6 +13824,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       );
       importedGames = applySyncedTeamScores(importedGames, result);
 
+      setSyncDebug("importing match", `match id: ${pulled[0]?.match?.id || "unknown"} · ${importedGames.length} row${importedGames.length === 1 ? "" : "s"}`);
       const updStats = [...importedGames, ...freshSyncStats];
       await saveStatsEverywhere(updStats, setStats);
       // APP56: settle any matching prop immediately after the next synced game is written.
@@ -13800,10 +13835,12 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         setBets,
         setPoints,
       }).catch(e => console.warn("post-sync bet settle failed", e));
+      setSyncDebug("sync complete", `${sessionCode} ${requestedMode} imported · match id: ${pulled[0]?.match?.id || "unknown"}`);
       addToast?.(`${sessionCode} ${requestedMode} synced from tracker`, "✅");
       setTimeout(() => setShowSyncMatchModal(false), 350);
     } catch(e) {
       console.error(e);
+      setSyncDebug("sync error", e?.message || String(e || "Unknown tracker error"));
       addToast?.("tracker had a sync hiccup — try again", "❌");
     }
 
@@ -13905,6 +13942,14 @@ return (
               <X size={18}/>
             </button>
           </div>
+
+          {matchSyncDebug && (
+            <div style={{background:"rgba(77,158,255,0.08)",border:"1px solid rgba(77,158,255,0.22)",borderRadius:14,padding:12,marginBottom:14}}>
+              <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:6}}>SYNC DEBUG · {formatSyncDebugTs(matchSyncDebug.ts)}</div>
+              <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900,lineHeight:1.3}}>{matchSyncDebug.status}</div>
+              {matchSyncDebug.detail && <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginTop:5,wordBreak:"break-word"}}>{matchSyncDebug.detail}</div>}
+            </div>
+          )}
 
           <div style={{display:"none",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:18,padding:14,marginBottom:14}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:1,marginBottom:10}}>MODE</div>
@@ -14011,6 +14056,14 @@ return (
           </button>
         ))}
       </div>
+
+{matchSyncDebug && (
+  <div style={{background:"rgba(77,158,255,0.08)",border:"1px solid rgba(77,158,255,0.22)",borderRadius:14,padding:12,marginBottom:14}}>
+    <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:6}}>LAST SYNC CHECK · {formatSyncDebugTs(matchSyncDebug.ts)}</div>
+    <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900,lineHeight:1.3}}>{matchSyncDebug.status}</div>
+    {matchSyncDebug.detail && <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginTop:5,wordBreak:"break-word"}}>{matchSyncDebug.detail}</div>}
+  </div>
+)}
 
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"stats"},{id:"teamlink",label:"team link"},{id:"chem",label:"chem"},{id:"mmr",label:"mmr"}].map(sub=>(
