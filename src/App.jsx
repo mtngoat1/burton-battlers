@@ -81,6 +81,7 @@ import { createPortal } from "react-dom";
 // APP133_FACE_ID_AUTOPROMPT_BLACKSCREEN_PATCH
 // APP134_IN_APP_TWITCH_PLAYER_NO_EXTERNAL_VOD_LINKS_PATCH
 // APP135_AUTO_SESSION_SYNC_STATUS_PATCH
+// APP113B_STATS_BALLCHASING_REVIEW_ONLY_CLEAN_PATCH
 // APP113_STATS_PARSE_BALLCHASING_LINK_PATCH
 // APP112F_SYNCED_GAME_VISIBLE_FIX
 // APP112D_PARSE_SYNC_DEBUG_PANEL_PATCH
@@ -5153,7 +5154,6 @@ function SessionGroupCard({ session, allStats, gameLabel, onUpdateOpponentScore,
                     ))}
                   </div>
                 </div>
-                <ParseTimeDebugCard game={g} accent={p?.color || "#B8FF4D"} compact />
                 <StatsBallchasingPanel game={g} accent={p?.color || "#B8FF4D"} cfg={ballchasingCfg} compact onFindReplay={onFindBallchasingReplay} onUnlinkReplay={onUnlinkBallchasingReplay} />
               </div>
             );
@@ -12173,7 +12173,6 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
                 </div>
               ))}
             </div>
-            <ParseTimeDebugCard game={g} accent={playerColor} />
             <StatsBallchasingPanel game={g} accent={playerColor} cfg={ballchasingCfg} onFindReplay={onFindBallchasingReplay} onUnlinkReplay={onUnlinkBallchasingReplay} />
             
           </div>
@@ -13098,6 +13097,22 @@ function getStatsBallchasingScoreboardMatch(game = {}, replay = {}) {
   if (!Number.isFinite(blue) || !Number.isFinite(orange)) return false;
   return (our === blue && their === orange) || (our === orange && their === blue);
 }
+function getStatsBallchasingScoreboardKnown(game = {}, replay = {}) {
+  const safe = normalizeBallchasingReplay(replay || {});
+  const our = Number(game.ourScore);
+  const their = Number(game.theirScore);
+  const blue = Number(safe.teams?.[0]?.goals);
+  const orange = Number(safe.teams?.[1]?.goals);
+  return Number.isFinite(our) && Number.isFinite(their) && Number.isFinite(blue) && Number.isFinite(orange);
+}
+function getStatsBallchasingLooksWrong(game = {}, replay = {}) {
+  return getStatsBallchasingScoreboardKnown(game, replay) && !getStatsBallchasingScoreboardMatch(game, replay);
+}
+function getStatsBallchasingAutoLinkSafe(score = 0, game = {}, replay = {}) {
+  const n = Number(score) || 0;
+  if (getStatsBallchasingLooksWrong(game, replay)) return false;
+  return n >= 55;
+}
 function scoreBallchasingCandidateForStatGame(game = {}, replay = {}, playerId = ADMIN_ID, cfg = {}) {
   const safe = normalizeBallchasingReplay(replay || {});
   let score = 0;
@@ -13118,7 +13133,10 @@ function scoreBallchasingCandidateForStatGame(game = {}, replay = {}, playerId =
       (gameMode === "3v3" && (playlist.includes("standard") || playlist.includes("3v3") || playlist.includes("tournament")))) {
     score += 18; notes.push("mode");
   }
-  if (getStatsBallchasingScoreboardMatch(game, safe)) { score += 18; notes.push("score"); }
+  const scoreKnown = getStatsBallchasingScoreboardKnown(game, safe);
+  const scoreMatches = getStatsBallchasingScoreboardMatch(game, safe);
+  if (scoreMatches) { score += 24; notes.push("score"); }
+  else if (scoreKnown) { score -= 60; notes.push("score mismatch"); }
   const rows = buildBallchasingPlayerRows(safe, cfg);
   const appRow = rows.find(r => r.appPlayerId === playerId) || rows.find(r => replayLower(r.name) === replayLower(game.playerName || playerNameById(game.playerId)));
   if (appRow) {
@@ -13128,7 +13146,7 @@ function scoreBallchasingCandidateForStatGame(game = {}, replay = {}, playerId =
     score += Math.min(18, matched * 4);
     if (matched) notes.push(`${matched} stats`);
   }
-  return { score, notes };
+  return { score:Math.max(0, Math.min(100, score)), notes };
 }
 function getStatsBallchasingSearchAnchor(game = {}) {
   return game.matchStartAt || game.ts || game.syncedAt || new Date().toISOString();
@@ -13151,6 +13169,8 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
   const replay = getGameBallchasingReplay(game);
   const replayId = getGameBallchasingId(game);
   const confidence = getBallchasingConfidenceMeta(game.ballchasingMatchScore || game.ballchasingConfidence || 0);
+  const linkedScoreMismatch = replay ? getStatsBallchasingLooksWrong(game, replay) : false;
+  const linkedNeedsReview = !!replayId && (linkedScoreMismatch || confidence.label !== "high");
   const runFind = async (candidateId = "") => {
     if (!onFindReplay || busy) return;
     setBusy(true);
@@ -13164,7 +13184,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           <div style={{fontSize:9.5,color:"#4D9EFF",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>Ballchasing extra stats</div>
           <button onClick={()=>runFind()} disabled={busy || !onFindReplay} className="bb-pressable" style={{background:busy?"rgba(255,255,255,.04)":"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.28)",borderRadius:9,padding:"6px 8px",fontSize:8.8,fontWeight:950,color:busy?"#4A5066":"#4D9EFF",cursor:busy?"wait":"pointer"}}>{busy ? "finding…" : "find replay"}</button>
         </div>
-        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Adds map, Ballchasing player cards, boost/movement basics, and replay timestamp moments to this Stats game.</div>
+        <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Adds map, Ballchasing player cards, boost/movement basics, and game timestamp moments. Auto-link only accepts high-confidence same-score matches now.</div>
         {!!candidates.length && <div style={{display:"grid",gap:6,marginTop:8}}>
           {candidates.map(c => <button key={c.id} onClick={()=>runFind(c.id)} className="bb-pressable" style={{background:"rgba(255,255,255,.035)",border:`1px solid ${c.color}33`,borderRadius:9,padding:"7px 8px",textAlign:"left",fontSize:9.5,color:"#E8ECF4",fontWeight:850,cursor:"pointer"}}>{c.label}<span style={{color:c.color,fontWeight:950}}> · {c.confidence}</span></button>)}
         </div>}
@@ -13181,8 +13201,9 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
     <div style={{marginTop:compact?8:10,background:"linear-gradient(135deg,rgba(184,255,77,0.075),rgba(77,158,255,0.055))",border:`1px solid ${confidence.color}33`,borderRadius:12,padding:compact?9:11}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
         <div style={{minWidth:0}}>
-          <div style={{fontSize:9.5,color:confidence.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>Ballchasing linked · {confidence.label}</div>
+          <div style={{fontSize:9.5,color:linkedNeedsReview?"#FFD166":confidence.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{linkedNeedsReview ? "Ballchasing review needed" : "Ballchasing linked"} · {confidence.label}</div>
           <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {normalized.date ? new Date(normalized.date).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "time ?"}</div>
+          {linkedNeedsReview && <div style={{fontSize:9.5,color:"#FFD166",lineHeight:1.35,marginTop:5}}>{linkedScoreMismatch ? "Score does not match this Stats game. Press unlink, then find replay again after Rockpload uploads the right game." : "Medium/low matches are no longer trusted automatically. Review or unlink if this is not the right replay."}</div>}
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>open</button>}
@@ -13724,13 +13745,14 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
         matchScore:Number(d.matchScore || 0),
         matchNotes:d.matchNotes || [],
       })).slice(0, 4);
-      if (!best || Number(best.matchScore || 0) < 35) {
+      const bestReplay = best ? normalizeBallchasingReplay(best.replay || best) : null;
+      if (!best || !getStatsBallchasingAutoLinkSafe(best.matchScore, game, bestReplay)) {
         await saveBallchasingToStatGames(game, { ballchasingCandidates:candidatesForReview, ballchasingLastSearchAt:new Date().toISOString() });
-        setSyncDebug("Ballchasing needs review", "Found possible replays, but none were confident enough to auto-link.");
-        addToast?.("Ballchasing found candidates — review in game dropdown", "⚠️");
+        setSyncDebug("Ballchasing needs review", "Possible replays found, but auto-link now only accepts high-confidence matches with the same score.");
+        addToast?.("Ballchasing candidates need review", "⚠️");
         return;
       }
-      chosenReplay = normalizeBallchasingReplay(best.replay || best);
+      chosenReplay = bestReplay;
       matchScore = Number(best.matchScore || 0);
     }
     let timeline = null;
@@ -13751,7 +13773,7 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
       ballchasingCandidates:[],
       ballchasingLastSearchAt:new Date().toISOString(),
     });
-    setSyncDebug("Ballchasing linked", `${chosenReplay.mapName || "replay"} · ${getReplayScoreboardText(chosenReplay)} · ${conf}`);
+    setSyncDebug("Ballchasing linked", `${chosenReplay.mapName || "replay"} · ${getReplayScoreboardText(chosenReplay)} · high confidence`);
     addToast?.("Ballchasing replay linked to Stats game", "✅");
   } catch (e) {
     console.error(e);
@@ -14345,11 +14367,9 @@ return (
         ))}
       </div>
 
-{matchSyncDebug && (
-  <div style={{background:"rgba(77,158,255,0.08)",border:"1px solid rgba(77,158,255,0.22)",borderRadius:14,padding:12,marginBottom:14}}>
-    <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:6}}>LAST SYNC CHECK · {formatSyncDebugTs(matchSyncDebug.ts)}</div>
-    <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900,lineHeight:1.3}}>{matchSyncDebug.status}</div>
-    {matchSyncDebug.detail && <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginTop:5,wordBreak:"break-word"}}>{matchSyncDebug.detail}</div>}
+{matchSyncDebug && /sync complete|Ballchasing linked|Ballchasing needs review|Ballchasing candidates/i.test(String(matchSyncDebug.status || "")) && (
+  <div style={{background:"rgba(77,158,255,0.045)",border:"1px solid rgba(77,158,255,0.12)",borderRadius:12,padding:"8px 10px",marginBottom:12}}>
+    <div style={{fontSize:10,color:"#8B92A8",fontWeight:850,lineHeight:1.35}}>{matchSyncDebug.status}{matchSyncDebug.detail ? ` · ${String(matchSyncDebug.detail).replace(/match id:[^·]+/i, "").slice(0,70)}` : ""}</div>
   </div>
 )}
 
@@ -14397,7 +14417,6 @@ return (
           <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.4}}>
             saved under {fmtDay(new Date(latestMyGame.ts))} · match id: {latestMyGame.parseMatchId || latestMyGame.matchId || latestMyGame.id}
           </div>
-          <ParseTimeDebugCard game={latestMyGame} accent={playerColor} />
           <StatsBallchasingPanel game={latestMyGame} accent={playerColor} cfg={ballchasingCfg} onFindReplay={findBallchasingForStatGame} onUnlinkReplay={unlinkBallchasingForGame} />
         </div>
       )}
