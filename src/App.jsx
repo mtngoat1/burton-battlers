@@ -4152,6 +4152,7 @@ function GlobalStyles() {
       @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes bbProgressFillOnce { 0% { transform:scaleX(0); filter:saturate(1.18) brightness(1.08); } 68% { transform:scaleX(1.025); filter:saturate(1.18) brightness(1.08); } 100% { transform:scaleX(1); filter:none; } }
       @keyframes bbPassMeshSweep { 0% { background-position:0% 50%; } 100% { background-position:100% 50%; } }
+      @keyframes bbBootBar { 0% { transform:translateX(-42%); opacity:.72; } 100% { transform:translateX(72%); opacity:1; } }
       @keyframes wheelTickerFlicker { 0%,100%{ transform:translateY(-50%) rotate(0deg); } 25%{ transform:translateY(-50%) rotate(-9deg); } 50%{ transform:translateY(-50%) rotate(6deg); } 75%{ transform:translateY(-50%) rotate(-4deg); } }
       @keyframes wheelOuterLights { 0%{ transform:rotate(0deg) scale(1); filter:blur(.2px) drop-shadow(0 0 10px rgba(184,255,77,.38)); } 50%{ transform:rotate(180deg) scale(1.018); filter:blur(.2px) drop-shadow(0 0 20px rgba(255,209,102,.52)); } 100%{ transform:rotate(360deg) scale(1); filter:blur(.2px) drop-shadow(0 0 10px rgba(184,255,77,.38)); } }
       @keyframes coinFlipReal { 0%{ transform:translate3d(0,0,0) rotateX(0deg) rotateZ(-4deg); } 18%{ transform:translate3d(0,-16px,0) rotateX(360deg) rotateZ(4deg); } 40%{ transform:translate3d(0,-27px,0) rotateX(720deg) rotateZ(-3deg); } 62%{ transform:translate3d(0,-20px,0) rotateX(1080deg) rotateZ(3deg); } 82%{ transform:translate3d(0,-8px,0) rotateX(1440deg) rotateZ(-2deg); } 100%{ transform:translate3d(0,0,0) rotateX(1800deg) rotateZ(0deg); } }
@@ -23883,6 +23884,26 @@ const backBtnStyle = {
                   
                   
 
+
+const BB_BOOT_CACHE_PREFIX = "bb_boot_cache_v1";
+function readBootCache(playerId, key, fallback = null) {
+  try {
+    if (typeof localStorage === "undefined" || !playerId || !key) return fallback;
+    const raw = localStorage.getItem(`${BB_BOOT_CACHE_PREFIX}:${playerId}:${key}`);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed === undefined ? fallback : parsed;
+  } catch (_) {
+    return fallback;
+  }
+}
+function writeBootCache(playerId, key, value) {
+  try {
+    if (typeof localStorage === "undefined" || !playerId || !key || value === undefined || value === null) return;
+    localStorage.setItem(`${BB_BOOT_CACHE_PREFIX}:${playerId}:${key}`, JSON.stringify(value));
+  } catch (_) {}
+}
+
 function UnderConstructionPage({ tabId, appCustomizer }) {
   const label = (tabId || "page").replace(/([A-Z])/g," $1");
   const msg = appCustomizer?.underConstruction?.[tabId]?.message || "this page is being worked on right now. check back soon.";
@@ -24066,6 +24087,10 @@ const [toasts, setToasts] = useState([]);
   const [stats,setStats]=useState([]);
   const statsRef = useRef([]);
   useEffect(() => { statsRef.current = Array.isArray(stats) ? stats : []; }, [stats]);
+  useEffect(() => {
+    if (!currentPlayer || !sharedDataReady || !isMeaningfulStatsSnapshot(stats)) return;
+    writeBootCache(currentPlayer, "stats", sanitizeStatsForRender(stats));
+  }, [currentPlayer, sharedDataReady, stats]);
   const [presence,setPresence]=useState({});
   const presenceRef = useRef({});
   useEffect(() => { presenceRef.current = presence || {}; }, [presence]);
@@ -24074,6 +24099,14 @@ const [toasts, setToasts] = useState([]);
   const [points,setPoints]=useState({});
   const pointsRef = useRef({});
   useEffect(() => { pointsRef.current = points || {}; }, [points]);
+  useEffect(() => {
+    if (!currentPlayer || !sharedDataReady || !isMeaningfulPointsSnapshot(points) || looksLikeWipedPointsSnapshot(points)) return;
+    writeBootCache(currentPlayer, "points", points);
+  }, [currentPlayer, sharedDataReady, points]);
+  useEffect(() => {
+    if (!currentPlayer || !sharedDataReady || !appCustomizer || typeof appCustomizer !== "object") return;
+    writeBootCache(currentPlayer, "app_customizer", normalizeAppCustomizer(appCustomizer));
+  }, [currentPlayer, sharedDataReady, appCustomizer]);
 const [parseCredits, setParseCredits] = useState({});
 const [creditRequests, setCreditRequests] = useState([]);                      
 const [bets,setBets]=useState([]);
@@ -24102,6 +24135,10 @@ const [adminShopItems, setAdminShopItems]=useState(() => getAdminShopItemsSync()
 const [passXP, setPassXP] = useState({});       // { [playerId]: number }
 const passXPRef = useRef({});
 useEffect(() => { passXPRef.current = passXP || {}; }, [passXP]);
+useEffect(() => {
+  if (!currentPlayer || !sharedDataReady || !isPassXPSnapshot(passXP)) return;
+  writeBootCache(currentPlayer, "pass_xp", passXP);
+}, [currentPlayer, sharedDataReady, passXP]);
 const [passPremium, setPassPremium] = useState({}); // { [playerId]: true }
 const passPremiumRef = useRef({});
 useEffect(() => { passPremiumRef.current = passPremium || {}; }, [passPremium]);
@@ -24201,6 +24238,10 @@ const [soundboardEvent, setSoundboardEvent] = useState(null);
 const [burtonOS, setBurtonOS] = useState(DEFAULT_BURTON_OS);
 const burtonOSRef = useRef(DEFAULT_BURTON_OS);
 useEffect(() => { burtonOSRef.current = normalizeBurtonOS(burtonOS); }, [burtonOS]);
+useEffect(() => {
+  if (!currentPlayer || !sharedDataReady || !burtonOS || typeof burtonOS !== "object") return;
+  writeBootCache(currentPlayer, "burton_os", normalizeBurtonOS(burtonOS));
+}, [currentPlayer, sharedDataReady, burtonOS]);
 
 // Auto-unlock achievement/limited titles. This only appends newly earned title IDs to owned inventory.
 useEffect(() => {
@@ -25221,14 +25262,43 @@ return () => {
 
 const loadSharedData = (pid) => {
   // APP82_LOGIN_UNLOCK_PATCH: never let storage delays/errors block passcode login.
-  // Open the app immediately, then hydrate saved data safely in the background.
+  // APP138: hydrate the saved shell first so the home page never flashes default background/economy.
   if (!pid) return Promise.resolve(false);
+  const wasReady = authStage === "app" && currentPlayer === pid && sharedDataReady;
   setLoading(false);
   setSelectedPlayerId(pid);
   setCurrentPlayer(pid);
   setTab("home");
+  if (!wasReady) setSharedDataReady(false);
+
+  const cachedPoints = readBootCache(pid, "points", null);
+  if (cachedPoints && typeof cachedPoints === "object" && !Array.isArray(cachedPoints) && isMeaningfulPointsSnapshot(cachedPoints) && !looksLikeWipedPointsSnapshot(cachedPoints)) {
+    pointsRef.current = cachedPoints;
+    setPoints(cachedPoints);
+  }
+  const cachedCustomizer = readBootCache(pid, "app_customizer", null);
+  if (cachedCustomizer && typeof cachedCustomizer === "object" && !Array.isArray(cachedCustomizer)) {
+    setAppCustomizer(normalizeAppCustomizer(cachedCustomizer));
+  }
+  const cachedOS = readBootCache(pid, "burton_os", null);
+  if (cachedOS && typeof cachedOS === "object" && !Array.isArray(cachedOS)) {
+    const safeCachedOS = normalizeBurtonOS(cachedOS);
+    burtonOSRef.current = safeCachedOS;
+    setBurtonOS(safeCachedOS);
+  }
+  const cachedPassXP = readBootCache(pid, "pass_xp", null);
+  if (cachedPassXP && typeof cachedPassXP === "object" && !Array.isArray(cachedPassXP) && isPassXPSnapshot(cachedPassXP)) {
+    passXPRef.current = cachedPassXP;
+    setPassXP(cachedPassXP);
+  }
+  const cachedStats = readBootCache(pid, "stats", null);
+  if (Array.isArray(cachedStats) && isMeaningfulStatsSnapshot(cachedStats)) {
+    const safeCachedStats = sanitizeStatsForRender(cachedStats);
+    statsRef.current = safeCachedStats;
+    setStats(safeCachedStats);
+  }
+
   setAuthStage("app");
-  setSharedDataReady(false);
   const loginPresenceTs = new Date().toISOString();
   setPresence(prev => {
     const upd = { ...(prev || {}), [pid]: loginPresenceTs };
@@ -25468,7 +25538,7 @@ const loadSharedData = (pid) => {
     } catch (_) {}
   };
 
-  setTimeout(hydrateCritical, 150);
+  hydrateCritical();
   setTimeout(hydrateSecondary, BOOT_SECONDARY_HYDRATE_DELAY_MS);
   setTimeout(hydrateMmr, BOOT_MMR_HYDRATE_DELAY_MS);
   return Promise.resolve(true);
@@ -25594,6 +25664,18 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ setAdminStandalone(true); await loadSharedData(selectedPlayerId); setCurrentPlayer(selectedPlayerId); setAuthStage("app"); setAdminStandalone(true); }:undefined}/></>;
 // APP78: no full-screen login loading screen; keep rendering the current page while shared data warms up.
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onUseCredit={async()=>{ const current = parseCredits?.[selectedPlayerId] ?? PARSE_CREDITS_DEFAULT; if(current<=0) return false; const upd={...parseCredits,[selectedPlayerId]:current-1}; setParseCredits(upd); await storeSet("parse_credits",upd); return true; }} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
+  if (authStage==="app" && !sharedDataReady) {
+    const bootPlayer = PLAYERS.find((p)=>p.id===currentPlayer || p.id===selectedPlayerId);
+    const bootColor = bootPlayer?.color || "#B8FF4D";
+    return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",color:"#E8ECF4",display:"flex",alignItems:"center",justifyContent:"center",padding:24,animation:"fadeSlideUp .14s ease"}}>
+      <div style={{width:"100%",maxWidth:360,textAlign:"center",background:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${bootColor}33`,borderRadius:24,padding:"24px 18px",boxShadow:"0 22px 70px rgba(0,0,0,.45)"}}>
+        <div style={{width:12,height:12,borderRadius:99,background:bootColor,boxShadow:`0 0 20px ${bootColor}99`,margin:"0 auto 14px"}} />
+        <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:.4,textTransform:"lowercase",color:"#E8ECF4"}}>loading your setup</div>
+        <div style={{fontSize:11,color:"#8B92A8",fontWeight:800,marginTop:7,lineHeight:1.4}}>syncing saved background, economy, points, and home layout before opening</div>
+        <div style={{height:4,background:"rgba(255,255,255,.07)",borderRadius:999,overflow:"hidden",marginTop:18}}><div style={{height:"100%",width:"58%",background:`linear-gradient(90deg,${bootColor},rgba(255,255,255,.8))`,borderRadius:999,animation:"bbBootBar 1.1s ease-in-out infinite alternate"}} /></div>
+      </div>
+    </div></>;
+  }
   const playerObj=PLAYERS.find((p)=>p.id===currentPlayer);
   const userColor = playerObj?.color || "#B8FF4D";
   const isAdmin=currentPlayer===ADMIN_ID;
