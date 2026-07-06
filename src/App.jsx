@@ -95,6 +95,7 @@ import { createPortal } from "react-dom";
 // APP114_STATS_BALLCHASING_CLEANUP_DEMOS_BETS_PATCH
 // APP115_STATS_BALLCHASING_DEEP_CARD_TIMESTAMPS_PATCH
 // APP116_STATS_BALLCHASING_FULLSCREEN_CARD_PATCH
+// APP142_SMART_PARSE_BALLCHASING_JOB_SYNC_GRAVEYARD_PATCH
 // APP140_JOB_SYNC_BALLCHASING_CARD_TEXT_FIX
 // APP141_BALLCHASING_PLAYER_CARD_ONLY_NO_TIMELINE_PATCH
 // APP140_BALLCHASING_CARD_OPEN_TIMESTAMP_PATCH
@@ -3267,7 +3268,7 @@ function getDefaultJobShiftGroups() {
     { id:"morning", label:"morning shift", emoji:"🌅", multiplier:1, slots:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM"] },
     { id:"afternoon", label:"afternoon shift", emoji:"☀️", multiplier:1, slots:["12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM"] },
     { id:"night", label:"night shift", emoji:"🌙", multiplier:1, slots:["6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM"] },
-    { id:"graveyard", label:"graveyard shift · 2x pts", emoji:"🪦", multiplier:2, slots:["11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"] },
+    { id:"graveyard", label:"graveyard shift · 2x pts", emoji:"🪦", multiplier:2, slots:["10:00 PM","10:30 PM","11:00 PM","11:30 PM","12:00 AM","12:30 AM","1:00 AM","1:30 AM","2:00 AM","2:30 AM","3:00 AM","3:30 AM","4:00 AM"] },
   ];
 }
 function normalizeJobChallengeLines(value, required = 5, fallback = "sync/log one game during the job window") {
@@ -3283,7 +3284,7 @@ function normalizeJobShiftGroups(input) {
   return raw.map((g, idx) => {
     const base = byDefault[g?.id] || defaults[idx] || defaults[0];
     const slots = Array.isArray(g?.slots) ? g.slots : String(g?.slots || "").split(/\n|,/g);
-    const cleanSlots = slots.map(v => String(v || "").trim()).filter(Boolean).slice(0, 8);
+    const cleanSlots = slots.map(v => String(v || "").trim()).filter(Boolean).slice(0, 32);
     return {
       id:String(g?.id || base.id || `shift_${idx}`),
       label:String(g?.label || base.label || "shift").slice(0,42),
@@ -12226,7 +12227,7 @@ function DayGameGroup({ dk, games, playerColor, jumpDate, STAT_FIELDS, allStats,
                 </div>
               ))}
             </div>
-            <StatsBallchasingPanel game={g} accent={playerColor} cfg={ballchasingCfg} onFindReplay={onFindBallchasingReplay} onUnlinkReplay={onUnlinkBallchasingReplay} />
+            <StatsBallchasingPanel game={g} accent={playerColor} cfg={ballchasingCfg} compact onFindReplay={onFindBallchasingReplay} onUnlinkReplay={onUnlinkBallchasingReplay} />
             
           </div>
         );
@@ -14155,15 +14156,30 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
     const freshOS = normalizeBurtonOS(await storeGet(BURTON_OS_KEY).catch(() => burtonOS || {}));
     const jobs = Array.isArray(freshOS.jobs) ? freshOS.jobs : [];
     const syncedGames = Array.isArray(importedGames) ? importedGames.filter(Boolean) : [];
-    if (!jobs.length || !syncedGames.length) return;
+    if (!syncedGames.length) return;
 
+    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const syncedGameIds = new Set(syncedGames.map(g => g?.id).filter(Boolean).map(String));
+    const syncedParseKeys = new Set(syncedGames.map(g => g?.parseMatchId && g?.playerId ? `${g.playerId}__${g.parseMatchId}` : "").filter(Boolean));
+    const syncedReplayKeys = new Set(syncedGames.map(g => g?.ballchasingReplayId && g?.playerId ? `${g.playerId}__${g.ballchasingReplayId}` : "").filter(Boolean));
+
+    let statsForJobs = Array.isArray(nextStats) ? nextStats : [];
+    let stampedStatsChanged = false;
+    statsForJobs = statsForJobs.map(g => {
+      const idHit = g?.id && syncedGameIds.has(String(g.id));
+      const parseHit = g?.parseMatchId && g?.playerId && syncedParseKeys.has(`${g.playerId}__${g.parseMatchId}`);
+      const replayHit = g?.ballchasingReplayId && g?.playerId && syncedReplayKeys.has(`${g.playerId}__${g.ballchasingReplayId}`);
+      if (!idHit && !parseHit && !replayHit) return g;
+      if (g.jobCreditAt === nowIso && g.lastJobSyncSource === sourceLabel) return g;
+      stampedStatsChanged = true;
+      return { ...g, jobCreditAt:nowIso, jobSyncedAt:nowIso, lastJobSyncSource:sourceLabel };
+    });
+    if (stampedStatsChanged) await saveStatsEverywhere(statsForJobs, setStats);
+
+    if (!jobs.length) return;
     const syncedPlayerIds = new Set(syncedGames.map(g => g?.playerId).filter(Boolean));
     const syncedModeSet = new Set(syncedGames.map(g => normalizeGameMode(g?.mode)).filter(Boolean));
-    const syncedTimes = syncedGames
-      .map(g => safeDateObj(g?.matchStartAt || g?.ts || g?.date || g?.syncedAt, null)?.getTime())
-      .filter(t => Number.isFinite(t));
-    const earliestSyncedMs = syncedTimes.length ? Math.min(...syncedTimes) : Date.now();
-    const nowIso = new Date().toISOString();
     let touched = 0;
     let ready = 0;
     let bestProgress = null;
@@ -14175,29 +14191,50 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
       const jobMode = normalizeGameMode(job.gameMode || "any");
       if (jobMode !== "any" && syncedModeSet.size && !syncedModeSet.has(jobMode)) return job;
 
-      const syncGraceMs = safeDateObj(job.syncGraceUntil || job.expiresAt || Date.now() + DAY_MS, null)?.getTime();
-      const startGateMs = safeDateObj(job.startAt || job.acceptedAt || job.createdAt || Date.now(), null)?.getTime();
-      const inWindow = Number.isFinite(earliestSyncedMs) && (!Number.isFinite(startGateMs) || earliestSyncedMs >= startGateMs - 60000) && (!Number.isFinite(syncGraceMs) || earliestSyncedMs <= syncGraceMs + 60000);
-      if (!inWindow) return job;
+      const relevantSyncedGames = syncedGames.filter(g => syncedGameLooksLikeJobCandidate(g, job, jobMode));
+      if (!relevantSyncedGames.length) return job;
+
+      const startMs = safeDateObj(job.startAt || job.acceptedAt || job.createdAt || nowIso, null)?.getTime();
+      const acceptedMs = safeDateObj(job.acceptedAt || job.createdAt || job.startAt || nowIso, null)?.getTime();
+      const syncGraceMs = safeDateObj(job.syncGraceUntil || job.expiresAt || nowMs + DAY_MS, null)?.getTime();
+      const earlyGraceMs = 15 * 60 * 1000;
+      const windowStartMs = Number.isFinite(startMs)
+        ? Math.min(startMs, Number.isFinite(acceptedMs) ? acceptedMs : startMs) - earlyGraceMs
+        : nowMs - earlyGraceMs;
+      const windowEndMs = Number.isFinite(syncGraceMs) ? syncGraceMs + 5 * 60 * 1000 : nowMs + DAY_MS;
+      const hasMatchingSyncedGame = relevantSyncedGames.some(g => {
+        const candidates = getJobGameTimeCandidates({ ...g, jobCreditAt:g.jobCreditAt || nowIso, jobSyncedAt:g.jobSyncedAt || nowIso });
+        if (!candidates.length) return nowMs >= windowStartMs && nowMs <= windowEndMs;
+        return candidates.some(t => t >= windowStartMs && t <= windowEndMs) || (nowMs >= windowStartMs && nowMs <= windowEndMs);
+      });
+      if (!hasMatchingSyncedGame) return job;
 
       let nextJob = { ...job, lastStatsSyncAt:nowIso, lastStatsSyncSource:sourceLabel };
-      // If the player forgot to hit Start but synced a matching game inside the job window,
-      // start the job at the synced game's kickoff so this game can count without inheriting older stats.
+      // If a matching synced game arrives while the job is reserved, start it automatically.
+      // This prevents jobs from staying at 0/5 just because the player forgot to hit Start first.
       if (!nextJob.startedAt && job.status === "reserved") {
+        const creditTimes = relevantSyncedGames.flatMap(g => getJobGameTimeCandidates({ ...g, jobCreditAt:g.jobCreditAt || nowIso, jobSyncedAt:g.jobSyncedAt || nowIso })).filter(Number.isFinite);
+        const bestCreditMs = creditTimes.find(t => t >= windowStartMs && t <= windowEndMs) || nowMs;
+        const startedMs = Math.max(0, Math.min(bestCreditMs, nowMs) - 5000);
         nextJob.status = "active";
-        nextJob.startedAt = new Date(Math.max(0, earliestSyncedMs - 1000)).toISOString();
+        nextJob.startedAt = new Date(startedMs).toISOString();
         nextJob.progressStartedAt = nextJob.startedAt;
+        nextJob.acceptedAt = nextJob.acceptedAt || nextJob.startedAt;
         const minutes = getJobTimeLimitMinutes(nextJob?.difficulty, nextJob?.jobMode, nextJob?.minutes);
-        nextJob.expiresAt = new Date(safeDateObj(nextJob.startedAt).getTime() + minutes * 60000).toISOString();
-        nextJob.syncGraceUntil = new Date(safeDateObj(nextJob.startedAt).getTime() + (minutes + 15) * 60000).toISOString();
+        nextJob.minutes = minutes;
+        nextJob.expiresAt = new Date(startedMs + minutes * 60000).toISOString();
+        nextJob.syncGraceMinutes = 15;
+        nextJob.syncGraceUntil = new Date(startedMs + (minutes + 15) * 60000).toISOString();
+        nextJob.progressBaseline = "auto_started_from_stat_sync";
       }
 
-      const rows = buildJobRulesFromJob(nextJob).map(rule => ({ rule, progress:evaluateJobChallengeRule(rule, nextJob, nextStats) }));
+      const rows = buildJobRulesFromJob(nextJob).map(rule => ({ rule, progress:evaluateJobChallengeRule(rule, nextJob, statsForJobs) }));
       const doneCount = rows.filter(r => r.progress.done).length;
       const total = rows.length || Math.max(1, Number(nextJob?.required) || 1);
       nextJob.progress = doneCount;
       nextJob.lastProgressAt = nowIso;
       nextJob.lastProgressTotal = total;
+      nextJob.lastSyncedGameIds = Array.from(new Set([...(nextJob.lastSyncedGameIds || []), ...relevantSyncedGames.map(g => g.id).filter(Boolean)])).slice(-20);
       touched += 1;
       if (doneCount >= total) ready += 1;
       if (!bestProgress || doneCount / Math.max(total, 1) > bestProgress.done / Math.max(bestProgress.total, 1)) {
@@ -14218,8 +14255,7 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
   } catch (e) {
     console.warn("post-sync job progress update failed", e);
   }
-};
-const getBallchasingSearchNamesForStatGame = (game = {}) => {
+};const getBallchasingSearchNamesForStatGame = (game = {}) => {
   const p = PLAYERS.find(pl => pl.id === game.playerId) || PLAYERS.find(pl => pl.id === currentPlayer) || PLAYERS[0];
   const saved = mmrProfiles?.[p?.id] || {};
   const aliasMap = getBallchasingAliasMap(ballchasingCfg);
@@ -14452,6 +14488,7 @@ useEffect(() => {
 const saveGame=async(entry)=>{
   const baseStats = await getFreshStatsForWrite(stats);
   const upd=[entry,...baseStats]; await saveStatsEverywhere(upd, setStats);
+  await syncJobsAfterStatsWrite(upd, [entry], "manual_log");
   const pts=await storeGet("points")||{};
   let cur=pts[currentPlayer]||0;
   const pointsMult = isEventActive("double_points") ? 2 : 1;
@@ -14635,8 +14672,8 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     }
     setMatchSyncing(true);
     try {
-      setSyncDebug(`finding latest ${requestedMode} Ballchasing replay`, "No Parse credits used. Searching Rockpload/Ballchasing uploads first.");
-      addToast?.("checking Ballchasing first — no Parse", "🔎");
+      setSyncDebug(`finding latest ${requestedMode} Ballchasing replay`, "Searching Rockpload/Ballchasing uploads for the same smart sync.");
+      addToast?.("checking Ballchasing replay", "🔎");
       const seen = new Set();
       const basics = [];
       const pushCandidates = (raw) => {
@@ -14784,8 +14821,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       ? ` · ${resolvedPlayersToSync[0].platform}/${resolvedPlayersToSync[0].handle}`
       : "";
     const identityList = resolvedPlayersToSync.map(p => `${p.name}: ${p.platform}/${p.handle}`).join(" · ");
-    setSyncDebug(`starting ${requestedMode} sync`, identityList);
-    addToast?.(`starting latest ${requestedMode} sync${identityNote}…`, "🔄");
+    setSyncDebug(`starting smart ${requestedMode} sync`, `${identityList} · Parse first, Ballchasing fallback`);
+    addToast?.(`starting smart ${requestedMode} sync${identityNote}…`, "🔄");
+
+    const fallbackToBallchasing = async (reason = "Parse did not return the match") => {
+      setSyncDebug(`${reason} — trying Ballchasing`, "Same sync button is falling back to Rockpload/Ballchasing so the game can still import and count for jobs.");
+      addToast?.("Parse missed it — trying Ballchasing", "📼");
+      return syncLatestBallchasingTeamMatch(requestedMode, playersToSync);
+    };
 
     const runParseCreditCheck = async () => {
       if (!useParseCredit) return true;
@@ -14830,7 +14873,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       if (pulled.some(x => !x.match)) {
         const missing = pulled.filter(x => !x.match).map(x => `${x.player.name}:${x.player.platform}/${x.player.handle}`).join(", ");
         setSyncDebug(`no ${requestedMode} match returned`, missing ? `missing: ${missing}` : "Parse returned no latest match for this player/mode yet.");
-        addToast?.(`no new ${requestedMode} match found yet${missing ? ` · ${missing}` : ""}`, "⏳");
+        await fallbackToBallchasing(`no ${requestedMode} Parse match returned`);
         setMatchSyncing(false);
         return;
       }
@@ -14848,7 +14891,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         if (!teamSyncGroup.ok) {
           const mins = Number.isFinite(teamSyncGroup.spreadMs) ? Math.round(teamSyncGroup.spreadMs / 60000) : "?";
           setSyncDebug("team match mismatch", `${requestedMode} recent matches still do not look like one shared game. Spread: ${mins}m. ${teamSyncGroup.debug || ""}`);
-          addToast?.(`recent games don't look like the same ${requestedMode} match yet`, "⚠️");
+          await fallbackToBallchasing("Parse team match mismatch");
           setMatchSyncing(false);
           return;
         }
@@ -14857,7 +14900,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         const sameResult = results.length < 2 || results.every(r => r === results[0]);
         if (!sameResult) {
           setSyncDebug("team result mismatch", `Recent ${requestedMode} results from Parse do not match yet.`);
-          addToast?.(`recent ${requestedMode} results do not match yet`, "⚠️");
+          await fallbackToBallchasing("Parse team result mismatch");
           setMatchSyncing(false);
           return;
         }
@@ -14963,8 +15006,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       setTimeout(() => setShowSyncMatchModal(false), 350);
     } catch(e) {
       console.error(e);
-      setSyncDebug("sync error", e?.message || String(e || "Unknown tracker error"));
-      addToast?.("tracker had a sync hiccup — try again", "❌");
+      setSyncDebug("Parse sync error — trying Ballchasing", e?.message || String(e || "Unknown tracker error"));
+      try {
+        await fallbackToBallchasing("Parse sync error");
+      } catch (bcErr) {
+        console.error(bcErr);
+        setSyncDebug("sync error", `${e?.message || String(e || "Parse error")} · Ballchasing: ${bcErr?.message || String(bcErr || "failed")}`);
+        addToast?.("smart sync had a hiccup", "❌");
+      }
     }
 
     setMatchSyncing(false);
@@ -15098,22 +15147,14 @@ return (
             <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${playerColor}33`,borderRadius:18,padding:16,marginBottom:14}}>
               <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:6}}>FULL TEAM 3V3</div>
               <div style={{fontSize:13,color:"#E8ECF4",fontWeight:800,marginBottom:6}}>maglvxx · apcards5 · tqr11le</div>
-              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Captain-only. Pulls the latest ranked 3v3 match for all three players and groups it as the next Team Link game.</div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Captain-only. One smart sync: tries Parse first, then falls back to Ballchasing/Rockpload and pushes progress into active jobs.</div>
               <button
                 disabled={matchSyncing || currentPlayer !== ADMIN_ID}
                 onClick={()=>syncLatestTeamMatch("3v3", PLAYERS)}
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:currentPlayer===ADMIN_ID?playerColor:"rgba(255,255,255,0.05)",border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:currentPlayer===ADMIN_ID?"#06070D":"#4A5066",cursor:currentPlayer===ADMIN_ID?"pointer":"not-allowed",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync full team 3v3"}
-              </button>
-              <button
-                disabled={matchSyncing || currentPlayer !== ADMIN_ID}
-                onClick={()=>syncLatestBallchasingTeamMatch("3v3", PLAYERS)}
-                className="bb-pressable"
-                style={{width:"100%",marginTop:10,background:"rgba(77,158,255,0.12)",border:"1px solid rgba(77,158,255,0.32)",borderRadius:13,padding:"12px 0",fontSize:12,fontWeight:900,color:"#4D9EFF",cursor:currentPlayer===ADMIN_ID?"pointer":"not-allowed",opacity:matchSyncing?0.6:1}}
-              >
-                {matchSyncing ? "syncing…" : "sync from Ballchasing · no Parse"}
+                {matchSyncing ? "syncing…" : "smart sync full team 3v3"}
               </button>
             </div>
           )}
@@ -15149,15 +15190,7 @@ return (
                 className="bb-pressable bb-glow-violet"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync selected duo"}
-              </button>
-              <button
-                disabled={matchSyncing}
-                onClick={()=>syncLatestBallchasingTeamMatch("2v2", PLAYERS.filter(p => selectedDuoIds.includes(p.id)))}
-                className="bb-pressable"
-                style={{width:"100%",marginTop:10,background:"rgba(77,158,255,0.12)",border:"1px solid rgba(77,158,255,0.32)",borderRadius:13,padding:"12px 0",fontSize:12,fontWeight:900,color:"#4D9EFF",cursor:"pointer",opacity:matchSyncing?0.6:1}}
-              >
-                {matchSyncing ? "syncing…" : "sync duo from Ballchasing · no Parse"}
+                {matchSyncing ? "syncing…" : "smart sync selected duo"}
               </button>
             </div>
           )}
@@ -15172,7 +15205,7 @@ return (
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync my 1v1"}
+                {matchSyncing ? "syncing…" : "smart sync my 1v1"}
                      </button>
             </div>
           )}
@@ -16482,7 +16515,7 @@ const DEFAULT_APP_CUSTOMIZER = {
   tabBoxLayout: DEFAULT_TAB_BOX_LAYOUT,
   courtPunishments: DEFAULT_COURT_PUNISHMENTS,
   burtonOptionPools: DEFAULT_BURTON_OPTION_POOLS,
-  jobsConfig: { enabled:true, groupShifts:false, easy:{ challenges:5, minutes:45, payout:150 }, medium:{ challenges:7, minutes:75, payout:300 }, hard:{ challenges:7, minutes:120, payout:600 }, shiftGroups:getDefaultJobShiftGroups(), slotTimes:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"], templates:[
+  jobsConfig: { enabled:true, groupShifts:false, easy:{ challenges:5, minutes:45, payout:150 }, medium:{ challenges:7, minutes:75, payout:300 }, hard:{ challenges:7, minutes:120, payout:600 }, shiftGroups:getDefaultJobShiftGroups(), slotTimes:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","10:30 PM","11:00 PM","11:30 PM","12:00 AM","12:30 AM","1:00 AM","1:30 AM","2:00 AM","2:30 AM","3:00 AM","3:30 AM","4:00 AM"], templates:[
     { id:"job_ranked_shift", enabled:true, emoji:"📋", title:"Ranked Shift", desc:"clock in for synced ranked games", challengeText:"sync/log one game per challenge" },
     { id:"job_cleanup", enabled:true, emoji:"🧹", title:"Cleanup Crew", desc:"recover from rough games", challengeText:"log games after losses or low-score games" },
     { id:"job_demon", enabled:true, emoji:"🌑", title:"Demon Shift", desc:"late-night high pressure work", challengeText:"log games during the shift window" },
@@ -16772,6 +16805,33 @@ function sumJobStatForGames(games = [], stat = "game") {
   if (stat === "goal_streak") return bestJobStreak(units, u => (u.goals || 0) >= 1);
   return units.reduce((sum,u) => sum + jobUnitStat(u, stat), 0);
 }
+
+function getJobGameTimeCandidates(game = {}) {
+  return [
+    game.jobCreditAt,
+    game.jobSyncedAt,
+    game.syncedAt,
+    game.refreshedAt,
+    game.ballchasingLinkedAt,
+    game.matchStartAt,
+    game.ts,
+    game.date,
+    game.createdAt,
+  ].map(v => safeDateObj(v, null)?.getTime()).filter(t => Number.isFinite(t));
+}
+function getJobRuleGameTimeMs(game = {}, startMs = 0, endMs = Date.now() + DAY_MS) {
+  const times = getJobGameTimeCandidates(game);
+  if (!times.length) return null;
+  const inside = times.find(t => t >= startMs - 1000 && t <= endMs + 1000);
+  if (Number.isFinite(inside)) return inside;
+  return times[0];
+}
+function syncedGameLooksLikeJobCandidate(game = {}, job = {}, mode = "any") {
+  const ids = getJobParticipantIds(job);
+  if (ids.length && !ids.includes(game?.playerId)) return false;
+  if (mode !== "any" && normalizeGameMode(game?.mode) !== mode) return false;
+  return true;
+}
 function evaluateJobChallengeRule(rule, job, stats = []) {
   const ids = getJobParticipantIds(job);
   const target = Math.max(1, Number(rule.target) || 1);
@@ -16787,9 +16847,11 @@ function evaluateJobChallengeRule(rule, job, stats = []) {
 
   const end = safeDateObj(job?.expiresAt || Date.now() + DAY_MS);
   const mode = rule.mode && rule.mode !== "any" ? normalizeGameMode(rule.mode) : "any";
+  const startMs = start.getTime();
+  const endMs = end.getTime();
   const games = (Array.isArray(stats) ? stats : []).filter(g => {
-    const ts = safeDateObj(g?.ts || g?.date || 0).getTime();
-    if (!Number.isFinite(ts) || ts < start.getTime() || ts > end.getTime()) return false;
+    const ts = getJobRuleGameTimeMs(g, startMs, endMs);
+    if (!Number.isFinite(ts) || ts < startMs || ts > endMs) return false;
     if (mode !== "any" && normalizeGameMode(g?.mode) !== mode) return false;
     return ids.includes(g?.playerId);
   });
@@ -16851,7 +16913,7 @@ function normalizeJobsConfig(input = {}) {
       hourlyChallengeRules:safeObj(t.hourlyChallengeRules)
     };
   };
-  return { enabled:src.enabled !== false, groupShifts:src.groupShifts !== false, easy, medium, hard, shiftGroups, slotTimes:slotTimes.length?slotTimes:["7:00 AM","8:00 AM","10:00 AM","11:00 AM","1:00 PM","3:00 PM","4:00 PM","6:00 PM","8:00 PM","10:00 PM","12:00 AM","2:00 AM","3:00 AM"], templates:(Array.isArray(templates) ? templates : []).map(normalizeTemplate).slice(0,24) };
+  return { enabled:src.enabled !== false, groupShifts:src.groupShifts !== false, easy, medium, hard, shiftGroups, slotTimes:slotTimes.length?slotTimes:["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","10:30 PM","11:00 PM","11:30 PM","12:00 AM","12:30 AM","1:00 AM","1:30 AM","2:00 AM","2:30 AM","3:00 AM","3:30 AM","4:00 AM"], templates:(Array.isArray(templates) ? templates : []).map(normalizeTemplate).slice(0,24) };
 }
 function normalizeAutoCourtConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.autoCourtConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, lowScoreThreshold:Math.max(0,Math.min(800,Math.round(Number(s.lowScoreThreshold ?? b.lowScoreThreshold)||160))), lossOnly:s.lossOnly !== false, maxPerDay:Math.max(1,Math.min(20,Math.round(Number(s.maxPerDay ?? b.maxPerDay)||3))), charge:String(s.charge || b.charge || "auto-filed case").slice(0,80), evidence:String(s.evidence || b.evidence || "Burton OS opened this from live stats.").slice(0,180) }; }
 function normalizeStockMarketConfig(input = {}) { const b=DEFAULT_APP_CUSTOMIZER.stockMarketConfig||{}; const s=safeObj(input); return { enabled:s.enabled !== false, basePrice:Math.max(1,Math.min(1000,Math.round(Number(s.basePrice ?? b.basePrice)||100))), winBoost:Math.max(0,Math.min(100,Math.round(Number(s.winBoost ?? b.winBoost)||8))), xpBoost:Math.max(0,Math.min(100,Math.round(Number(s.xpBoost ?? b.xpBoost)||4))) }; }
@@ -16937,7 +16999,7 @@ function getDefaultHourlyJobRules(jobMode = "solo") {
     return out;
   };
   const pack = (mandatory, optional, seed) => [...mandatory, ...shuffle(optional, seed)].map((r, idx) => ({ ...r, id:`${r.id}_${idx}_${stableHashString(seed)}`.slice(0,48) }));
-  const slots = ["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","11:00 PM","12:00 AM","1:00 AM","2:00 AM","3:00 AM"];
+  const slots = ["7:00 AM","8:00 AM","9:00 AM","10:00 AM","11:00 AM","12:00 PM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","6:00 PM","7:00 PM","8:00 PM","9:00 PM","10:00 PM","10:30 PM","11:00 PM","11:30 PM","12:00 AM","12:30 AM","1:00 AM","1:30 AM","2:00 AM","2:30 AM","3:00 AM","3:30 AM","4:00 AM"];
   const out = { easy:{}, medium:{}, hard:{} };
   slots.forEach((slot, i) => {
     const bump = i % 3;
