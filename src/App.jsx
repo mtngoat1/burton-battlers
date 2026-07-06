@@ -18553,8 +18553,8 @@ function TokenDetailModal({ token, currentPlayer, passTokens, setPassTokens, act
   );
 }
 function StarfieldBg() {
-  if (BB_CPU_SAVER_MODE) return null;
-  const stars = Array.from({length:80},(_,i)=>({
+  // Keep moon-mode stars visible, but render fewer dots so CPU saver still helps battery.
+  const stars = Array.from({length:42},(_,i)=>({
     x: (i*137.5)%100, y: (i*97.3)%100,
     r: i%5===0?1.5:i%3===0?1:0.6,
     op: 0.3+((i*73)%100)/200,
