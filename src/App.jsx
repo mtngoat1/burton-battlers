@@ -95,6 +95,7 @@ import { createPortal } from "react-dom";
 // APP114_STATS_BALLCHASING_CLEANUP_DEMOS_BETS_PATCH
 // APP115_STATS_BALLCHASING_DEEP_CARD_TIMESTAMPS_PATCH
 // APP116_STATS_BALLCHASING_FULLSCREEN_CARD_PATCH
+// APP140_JOB_SYNC_BALLCHASING_CARD_TEXT_FIX
 // APP141_BALLCHASING_PLAYER_CARD_ONLY_NO_TIMELINE_PATCH
 // APP140_BALLCHASING_CARD_OPEN_TIMESTAMP_PATCH
 // ===================== Constants =====================
@@ -13676,11 +13677,11 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
     <>
     {fullScreenSheet}
     <div style={{marginTop:compact?8:10,background:"linear-gradient(135deg,rgba(184,255,77,0.075),rgba(77,158,255,0.055))",border:`1px solid ${confidence.color}33`,borderRadius:12,padding:compact?9:11}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
-        <div style={{minWidth:0}}>
+      <div style={{display:"flex",justifyContent:compact?"flex-end":"space-between",alignItems:"flex-start",gap:8,marginBottom:compact?7:8}}>
+        {!compact && <div style={{minWidth:0}}>
           <div style={{fontSize:9.5,color:linkedNeedsReview?"#FFD166":confidence.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{linkedNeedsReview ? "Ballchasing review needed" : "Ballchasing linked"} · {confidence.label}</div>
           <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {replayTimeLabel}</div>
-        </div>
+        </div>}
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <button onClick={()=>setSheetOpen(true)} className="bb-pressable" style={{background:"rgba(184,255,77,.10)",border:"1px solid rgba(184,255,77,.24)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>open</button>
           {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>replay</button>}
@@ -14126,7 +14127,7 @@ const [swipeOffset, setSwipeOffset] = useState(0);
 }
 
 
-function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit, points, setPoints, bets, setBets, chemistry, setChemistry, appCustomizer }) {
+function StatsTab({ stats, setStats, currentPlayer, passXP, setPassXP, jumpDate, onJumpHandled, schedule, setSchedule, teamRoom, setTeamRoom, mmrProfiles, setMmrProfiles, addToast, useParseCredit, points, setPoints, bets, setBets, chemistry, setChemistry, appCustomizer, burtonOS, setBurtonOS }) {
   stats = sanitizeStatsForRender(stats);
   const [mode,setMode]=useState("2v2");
   const [logging,setLogging]=useState(false);
@@ -14149,6 +14150,75 @@ const formatSyncDebugTs = (iso) => {
 };
 const ballchasingCfg = normalizeLiveSessionConfig(normalizeAppCustomizer(appCustomizer || {}).liveSessionConfig);
 const [ballchasingSyncingGameId, setBallchasingSyncingGameId] = useState(null);
+const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourceLabel = "sync") => {
+  try {
+    const freshOS = normalizeBurtonOS(await storeGet(BURTON_OS_KEY).catch(() => burtonOS || {}));
+    const jobs = Array.isArray(freshOS.jobs) ? freshOS.jobs : [];
+    const syncedGames = Array.isArray(importedGames) ? importedGames.filter(Boolean) : [];
+    if (!jobs.length || !syncedGames.length) return;
+
+    const syncedPlayerIds = new Set(syncedGames.map(g => g?.playerId).filter(Boolean));
+    const syncedModeSet = new Set(syncedGames.map(g => normalizeGameMode(g?.mode)).filter(Boolean));
+    const syncedTimes = syncedGames
+      .map(g => safeDateObj(g?.matchStartAt || g?.ts || g?.date || g?.syncedAt, null)?.getTime())
+      .filter(t => Number.isFinite(t));
+    const earliestSyncedMs = syncedTimes.length ? Math.min(...syncedTimes) : Date.now();
+    const nowIso = new Date().toISOString();
+    let touched = 0;
+    let ready = 0;
+    let bestProgress = null;
+
+    const nextJobs = jobs.map(job => {
+      if (!job || !["reserved", "active"].includes(job.status)) return job;
+      const participantIds = getJobParticipantIds(job);
+      if (!participantIds.some(pid => syncedPlayerIds.has(pid))) return job;
+      const jobMode = normalizeGameMode(job.gameMode || "any");
+      if (jobMode !== "any" && syncedModeSet.size && !syncedModeSet.has(jobMode)) return job;
+
+      const syncGraceMs = safeDateObj(job.syncGraceUntil || job.expiresAt || Date.now() + DAY_MS, null)?.getTime();
+      const startGateMs = safeDateObj(job.startAt || job.acceptedAt || job.createdAt || Date.now(), null)?.getTime();
+      const inWindow = Number.isFinite(earliestSyncedMs) && (!Number.isFinite(startGateMs) || earliestSyncedMs >= startGateMs - 60000) && (!Number.isFinite(syncGraceMs) || earliestSyncedMs <= syncGraceMs + 60000);
+      if (!inWindow) return job;
+
+      let nextJob = { ...job, lastStatsSyncAt:nowIso, lastStatsSyncSource:sourceLabel };
+      // If the player forgot to hit Start but synced a matching game inside the job window,
+      // start the job at the synced game's kickoff so this game can count without inheriting older stats.
+      if (!nextJob.startedAt && job.status === "reserved") {
+        nextJob.status = "active";
+        nextJob.startedAt = new Date(Math.max(0, earliestSyncedMs - 1000)).toISOString();
+        nextJob.progressStartedAt = nextJob.startedAt;
+        const minutes = getJobTimeLimitMinutes(nextJob?.difficulty, nextJob?.jobMode, nextJob?.minutes);
+        nextJob.expiresAt = new Date(safeDateObj(nextJob.startedAt).getTime() + minutes * 60000).toISOString();
+        nextJob.syncGraceUntil = new Date(safeDateObj(nextJob.startedAt).getTime() + (minutes + 15) * 60000).toISOString();
+      }
+
+      const rows = buildJobRulesFromJob(nextJob).map(rule => ({ rule, progress:evaluateJobChallengeRule(rule, nextJob, nextStats) }));
+      const doneCount = rows.filter(r => r.progress.done).length;
+      const total = rows.length || Math.max(1, Number(nextJob?.required) || 1);
+      nextJob.progress = doneCount;
+      nextJob.lastProgressAt = nowIso;
+      nextJob.lastProgressTotal = total;
+      touched += 1;
+      if (doneCount >= total) ready += 1;
+      if (!bestProgress || doneCount / Math.max(total, 1) > bestProgress.done / Math.max(bestProgress.total, 1)) {
+        bestProgress = { done:doneCount, total, title:nextJob.title || "job" };
+      }
+      return nextJob;
+    });
+
+    if (!touched) return;
+    const nextOS = normalizeBurtonOS({
+      ...freshOS,
+      jobs:nextJobs,
+      history:[{ id:`hist_job_sync_${Date.now()}`, type:"job_progress", emoji:ready ? "✅" : "📋", title:ready ? "Job ready after stat sync" : "Job progress synced", text:bestProgress ? `${bestProgress.title} · ${bestProgress.done}/${bestProgress.total}` : "stats synced into jobs", color:ready ? "#7CFFB2" : "#B8FF4D", ts:nowIso }, ...(freshOS.history || [])].slice(0, 90),
+    });
+    setBurtonOS?.(nextOS);
+    await storeSetWithPush(BURTON_OS_KEY, nextOS);
+    if (bestProgress) addToast?.(ready ? `${bestProgress.title} ready to settle` : `${bestProgress.title}: ${bestProgress.done}/${bestProgress.total}`, ready ? "✅" : "📋");
+  } catch (e) {
+    console.warn("post-sync job progress update failed", e);
+  }
+};
 const getBallchasingSearchNamesForStatGame = (game = {}) => {
   const p = PLAYERS.find(pl => pl.id === game.playerId) || PLAYERS.find(pl => pl.id === currentPlayer) || PLAYERS[0];
   const saved = mmrProfiles?.[p?.id] || {};
@@ -14183,6 +14253,12 @@ const saveBallchasingToStatGames = async (game, patch) => {
     return { ...g, ...perGamePatch, ballchasingUpdatedAt:new Date().toISOString() };
   });
   await saveStatsEverywhere(upd, setStats);
+  const jobGames = upd.filter(g => {
+    const sameSingle = !!game?.id && String(g.id) === String(game.id);
+    const sameSession = !!targetSession && (g.sessionCode === targetSession || g.roomId === targetSession) && normalizeGameMode(g.mode) === targetMode;
+    return sameSingle || sameSession;
+  });
+  await syncJobsAfterStatsWrite(upd, jobGames, "ballchasing_card_refresh");
   return upd;
 };
 const unlinkBallchasingForGame = async (game) => {
@@ -14625,11 +14701,13 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           return { ...g, ...buildStatsBallchasingSavePatch(g, safeReplay, timeline, 100, "ballchasing direct", g.playerId, ballchasingCfg), refreshedAt:new Date().toISOString() };
         });
         await saveStatsEverywhere(refreshed, setStats);
+        await syncJobsAfterStatsWrite(refreshed, refreshed.filter(g => g.ballchasingReplayId === safeReplay.id), "ballchasing_refresh");
         setSyncDebug("Ballchasing game refreshed", `${requestedMode} · ${getReplayScoreboardText(safeReplay)} · ${safeReplay.mapName || "map"}`);
         addToast?.("Ballchasing game refreshed", "✅");
       } else {
         const updStats = [...importedGames, ...freshSyncStats];
         await saveStatsEverywhere(updStats, setStats);
+        await syncJobsAfterStatsWrite(updStats, importedGames, "ballchasing_sync");
         await settleDueBetsNow({
           bets: await storeGet("bets").catch(() => []),
           stats: updStats,
@@ -14813,6 +14891,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         if (refreshed) {
           setSyncDebug("already synced — refreshing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           await saveStatsEverywhere(updStats, setStats);
+          await syncJobsAfterStatsWrite(updStats, refreshedGames, "tracker_refresh");
           if (refreshedGames.some(g => g.parseStatsIncomplete)) {
             setSyncDebug("refreshed shell — checking Ballchasing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
             try { await findBallchasingForStatGame(refreshedGames[0]); } catch (e) { console.warn("auto Ballchasing fill after refresh failed", e); }
@@ -14858,6 +14937,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       setSyncDebug("importing match", `match id: ${pulled[0]?.match?.id || "unknown"} · ${importedGames.length} row${importedGames.length === 1 ? "" : "s"}`);
       const updStats = [...importedGames, ...freshSyncStats];
       await saveStatsEverywhere(updStats, setStats);
+      await syncJobsAfterStatsWrite(updStats, importedGames, "tracker_sync");
       if (importedGames.some(g => g.parseStatsIncomplete)) {
         setSyncDebug("imported shell — checking Ballchasing", `${sessionCode} ${requestedMode} · Parse stats were missing`);
         try { await findBallchasingForStatGame(importedGames[0]); } catch (e) { console.warn("auto Ballchasing fill after import failed", e); }
@@ -24404,7 +24484,7 @@ function SquadHubTab(props) {
         ))}
       </div>
       {subTab === "squad" ? <PresenceTab {...props}/> : (
-        <StatsTab stats={props.stats} setStats={props.setStats} currentPlayer={props.currentPlayer} passXP={props.passXP} setPassXP={props.setPassXP} jumpDate={props.statsJumpDate} onJumpHandled={props.onStatsJumpHandled} schedule={props.schedule} setSchedule={props.setSchedule} teamRoom={props.teamRoom} setTeamRoom={props.setTeamRoom} mmrProfiles={props.mmrProfiles} setMmrProfiles={props.setMmrProfiles} addToast={props.addToast} useParseCredit={props.useParseCredit} points={props.points} setPoints={props.setPoints} bets={props.bets} setBets={props.setBets} chemistry={props.chemistry} setChemistry={props.setChemistry} appCustomizer={props.appCustomizer}/>
+        <StatsTab stats={props.stats} setStats={props.setStats} currentPlayer={props.currentPlayer} passXP={props.passXP} setPassXP={props.setPassXP} jumpDate={props.statsJumpDate} onJumpHandled={props.onStatsJumpHandled} schedule={props.schedule} setSchedule={props.setSchedule} teamRoom={props.teamRoom} setTeamRoom={props.setTeamRoom} mmrProfiles={props.mmrProfiles} setMmrProfiles={props.setMmrProfiles} addToast={props.addToast} useParseCredit={props.useParseCredit} points={props.points} setPoints={props.setPoints} bets={props.bets} setBets={props.setBets} chemistry={props.chemistry} setChemistry={props.setChemistry} appCustomizer={props.appCustomizer} burtonOS={props.burtonOS} setBurtonOS={props.setBurtonOS}/>
       )}
     </div>
   );
