@@ -99,6 +99,7 @@ import { createPortal } from "react-dom";
 // APP140_JOB_SYNC_BALLCHASING_CARD_TEXT_FIX
 // APP141_BALLCHASING_PLAYER_CARD_ONLY_NO_TIMELINE_PATCH
 // APP140_BALLCHASING_CARD_OPEN_TIMESTAMP_PATCH
+// APP143_FILM_ROOM_SYNC_JOBS_CARL2_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -2849,7 +2850,39 @@ const DEFAULT_BURTON_OS = {
   economyEvents:[],
   processedGames:{},
   economy:{},
+  filmRoomEntries:[],
 };
+
+function normalizeFilmRoomEntries(input = []) {
+  const arr = Array.isArray(input) ? input : (input?.entries && Array.isArray(input.entries) ? input.entries : []);
+  return arr.filter(Boolean).map((entry, idx) => {
+    const deep = entry.deepReview && typeof entry.deepReview === "object" ? entry.deepReview : {};
+    return {
+      id:String(entry.id || entry.gameId || `film_${idx}_${Date.now()}`),
+      gameId:String(entry.gameId || entry.id || ""),
+      teamGameId:String(entry.teamGameId || entry.sessionCode || entry.roomId || entry.gameId || entry.id || ""),
+      replayId:String(entry.replayId || entry.ballchasingReplayId || ""),
+      ballchasingUrl:String(entry.ballchasingUrl || entry.replayUrl || entry.viewUrl || ""),
+      mode:normalizeGameMode(entry.mode || "3v3"),
+      scoreText:String(entry.scoreText || ""),
+      result:String(entry.result || ""),
+      players:Array.isArray(entry.players) ? entry.players.filter(Boolean).slice(0,6) : [],
+      createdAt:entry.createdAt || new Date().toISOString(),
+      updatedAt:entry.updatedAt || entry.createdAt || new Date().toISOString(),
+      source:String(entry.source || "sync"),
+      reviewNotes:Array.isArray(entry.reviewNotes) ? entry.reviewNotes.filter(Boolean).slice(0,24) : [],
+      clips:Array.isArray(entry.clips) ? entry.clips.filter(Boolean).slice(0,24) : [],
+      carl2Assets:Array.isArray(entry.carl2Assets) ? entry.carl2Assets.filter(Boolean).slice(0,30) : [],
+      deepReview:{
+        status:deep.status || entry.deepReviewStatus || "none",
+        requestedBy:deep.requestedBy || entry.deepReviewRequestedBy || null,
+        requestedAt:deep.requestedAt || entry.deepReviewRequestedAt || null,
+        completedAt:deep.completedAt || entry.deepReviewCompletedAt || null,
+        summary:deep.summary || entry.deepReviewSummary || "",
+      },
+    };
+  }).sort((a,b)=>safeDateObj(b.createdAt).getTime()-safeDateObj(a.createdAt).getTime()).slice(0,120);
+}
 
 function normalizeBurtonOS(input = {}) {
   const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
@@ -2892,6 +2925,7 @@ function normalizeBurtonOS(input = {}) {
     economyEvents: Array.isArray(src.economyEvents) ? src.economyEvents.filter(Boolean).slice(0, 80) : [],
     processedGames: Object.fromEntries(processedEntries),
     economy: src.economy && typeof src.economy === "object" ? src.economy : {},
+    filmRoomEntries: normalizeFilmRoomEntries(src.filmRoomEntries || src.filmRoom || []),
   };
 }
 
@@ -13665,7 +13699,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           <div style={{fontSize:10,color:accent,fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Ballchasing full stats</div>
           <div style={{fontFamily:"Inter, sans-serif",fontSize:20,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:2}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)}</div>
         </div>
-        {openUrl && <button onClick={()=>window.open(openUrl, "_blank", "noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.10)",border:"1px solid rgba(77,158,255,.24)",borderRadius:12,padding:"10px 12px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer"}}>replay</button>}
+        {openUrl && <button onClick={()=>window.open(openUrl, "_blank", "noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.10)",border:"1px solid rgba(77,158,255,.24)",borderRadius:12,padding:"10px 12px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer"}}>3D replay</button>}
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"16px 14px max(28px, env(safe-area-inset-bottom))"}}>
         <div style={{display:"grid",gap:14,maxWidth:640,margin:"0 auto"}}>
@@ -13685,7 +13719,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
         </div>}
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <button onClick={()=>setSheetOpen(true)} className="bb-pressable" style={{background:"rgba(184,255,77,.10)",border:"1px solid rgba(184,255,77,.24)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>open</button>
-          {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>replay</button>}
+          {openUrl && <button onClick={(e)=>{e.stopPropagation?.(); window.open(openUrl, "_blank", "noopener,noreferrer");}} className="bb-pressable" style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.08)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#8B92A8",cursor:"pointer"}}>film</button>}
           <button onClick={()=>runFind(replayId)} disabled={busy} className="bb-pressable" style={{background:"rgba(77,158,255,.10)",border:"1px solid rgba(77,158,255,.22)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:busy?"#4A5066":"#4D9EFF",cursor:busy?"wait":"pointer"}}>{busy ? "…" : "refresh"}</button>
           {onUnlinkReplay && <button onClick={()=>onUnlinkReplay(game)} className="bb-pressable" style={{background:"rgba(255,92,138,.08)",border:"1px solid rgba(255,92,138,.18)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>unlink</button>}
         </div>
@@ -13721,6 +13755,238 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
       </div>}
     </div>
     </>
+  );
+}
+
+// ===================== Film Room / Deep Review helpers =====================
+function getBallchasing3DViewerUrl(replayOrId = "") {
+  const raw = typeof replayOrId === "object" ? (replayOrId.viewUrl || replayOrId.link || replayOrId.id || "") : replayOrId;
+  const id = extractBallchasingReplayId(raw || "");
+  if (id) return `https://ballchasing.com/replay/${id}`;
+  return String(raw || "").replace("/api/replays/", "/replay/");
+}
+function getFilmRoomGameKey(game = {}) {
+  const replayId = getGameBallchasingId(game);
+  if (replayId) return `bc_${replayId}`;
+  const sess = game.sessionCode || game.roomId || game.teamGameId;
+  if (sess) return `sess_${normalizeGameMode(game.mode)}_${sess}`;
+  return `game_${game.id || game.parseMatchId || game.ts || Date.now()}`;
+}
+function getFilmRoomSessionGames(allStats = [], game = {}) {
+  const session = game?.sessionCode || game?.roomId || "";
+  const mode = normalizeGameMode(game?.mode);
+  if (!session) return [game].filter(Boolean);
+  return (Array.isArray(allStats) ? allStats : []).filter(g => (g.sessionCode === session || g.roomId === session) && normalizeGameMode(g.mode) === mode);
+}
+function buildBasicFilmRoomNotes(games = []) {
+  const rows = (Array.isArray(games) ? games : []).filter(Boolean);
+  if (!rows.length) return [];
+  const first = rows[0];
+  const replay = getGameBallchasingReplay(rows.find(g => getGameBallchasingId(g)) || first);
+  const events = replay ? getReplayEvents(replay) : [];
+  const notes = [];
+  const push = (note) => {
+    if (!note || !note.title) return;
+    const key = `${note.time || "full"}_${note.title}_${note.body || ""}`.toLowerCase();
+    if (notes.some(n => `${n.time || "full"}_${n.title}_${n.body || ""}`.toLowerCase() === key)) return;
+    notes.push({ id:note.id || `note_${stableHashString(key)}_${notes.length}`, type:note.type || "auto", severity:note.severity || "review", time:note.time || null, title:note.title, body:note.body || "", createdAt:note.createdAt || new Date().toISOString() });
+  };
+  const our = Number(first.ourScore);
+  const their = Number(first.theirScore);
+  if (Number.isFinite(our) && Number.isFinite(their) && their > our) {
+    push({ severity:"warning", title:"loss review", body:"Open the 3D replay and check the goal-against sequences, third man position, and boost exits." });
+  }
+  events.slice(0,120).forEach(ev => {
+    const type = getReplayEventType(ev);
+    const t = fmtReplayTimecode(ev.time ?? ev.second ?? ev.seconds ?? ev.frameTime);
+    const names = getReplayEventPlayers(ev).join(" / ");
+    if (type.includes("goal")) push({ time:t, severity:"warning", title:"goal sequence", body:`Review the 10 seconds before this goal${names ? ` · ${names}` : ""}.` });
+    if (type.includes("demo") || type.includes("kill") || type.includes("death")) push({ time:t, severity:"note", title:type.includes("death") || type.includes("demoed") ? "demo taken" : "demo play", body:`Check spacing/recovery around this demo${names ? ` · ${names}` : ""}.` });
+    if (type.includes("save")) push({ time:t, severity:"good", title:"save sequence", body:`Review the recovery and outlet after the save${names ? ` · ${names}` : ""}.` });
+  });
+  const teamShots = rows.reduce((s,g)=>s+(Number(g.shots)||0),0);
+  const teamSaves = rows.reduce((s,g)=>s+(Number(g.saves)||0),0);
+  const teamDemosTaken = rows.reduce((s,g)=>s+(Number(g.demosTaken)||0),0);
+  if (teamShots <= 3 && rows.length > 1) push({ severity:"warning", title:"low offensive pressure", body:`Only ${teamShots} team shot${teamShots === 1 ? "" : "s"}. Review clears, passing lanes, and possession after first touch.` });
+  if (teamSaves >= 5) push({ severity:"warning", title:"defensive pressure", body:`${teamSaves} team saves usually means long defensive stretches. Review boost exits and first clear quality.` });
+  if (teamDemosTaken >= 2) push({ severity:"warning", title:"demo pressure", body:`The team got demoed ${teamDemosTaken} times. Review spacing and last-man coverage after demos.` });
+  rows.forEach(g => {
+    const p = playerNameById(g.playerId) || g.playerName || "player";
+    if ((Number(g.score)||0) < 150 && rows.length > 1) push({ severity:"note", title:`${p} low score`, body:"Check involvement, spacing, and whether this player was stuck rotating out/low boost." });
+    if ((Number(g.saves)||0) >= 3) push({ severity:"note", title:`${p} under pressure`, body:"High saves can mean good defense, but review why pressure kept coming back." });
+  });
+  if (!notes.length) push({ severity:"good", title:"film review ready", body:"Open the 3D replay and add any coach notes or highlight clips for this game." });
+  return notes.slice(0,12);
+}
+function buildFilmRoomEntryFromGames(allStats = [], games = [], source = "sync") {
+  const rows = (Array.isArray(games) ? games : []).filter(Boolean);
+  if (!rows.length) return null;
+  const withReplay = rows.find(g => getGameBallchasingId(g) || getGameBallchasingReplay(g)) || rows[0];
+  const replay = getGameBallchasingReplay(withReplay);
+  const replayId = getGameBallchasingId(withReplay);
+  if (!replayId && !replay) return null;
+  const sessionRows = getFilmRoomSessionGames(allStats, withReplay).length ? getFilmRoomSessionGames(allStats, withReplay) : rows;
+  const first = sessionRows[0] || withReplay;
+  const teamGameId = getFilmRoomGameKey(withReplay);
+  const our = getDisplayedOurScore(first);
+  const theirKnown = first?.theirScore !== null && first?.theirScore !== undefined && first?.theirScore !== "" && Number.isFinite(Number(first?.theirScore));
+  return {
+    id:teamGameId,
+    gameId:String(first.id || teamGameId),
+    teamGameId,
+    replayId:replayId || replay?.id || "",
+    ballchasingUrl:getBallchasing3DViewerUrl(replay || replayId),
+    mode:normalizeGameMode(first.mode || "3v3"),
+    scoreText:teamGameId ? `${our}-${theirKnown ? Number(first.theirScore) : "?"}` : "",
+    result:first.result || "",
+    players:Array.from(new Set(sessionRows.map(g => g.playerId).filter(Boolean))).map(pid => ({ id:pid, name:playerNameById(pid), color:PLAYERS.find(p=>p.id===pid)?.color || "#B8FF4D" })),
+    createdAt:replay?.date || first.matchStartAt || first.ts || new Date().toISOString(),
+    updatedAt:new Date().toISOString(),
+    source,
+    reviewNotes:buildBasicFilmRoomNotes(sessionRows),
+    clips:[],
+    carl2Assets:[],
+    deepReview:{ status:"none", requestedBy:null, requestedAt:null, completedAt:null, summary:"" },
+  };
+}
+function upsertFilmRoomEntriesFromSyncedGames(osInput = {}, allStats = [], games = [], source = "sync") {
+  const os = normalizeBurtonOS(osInput);
+  const rows = Array.isArray(games) ? games.filter(Boolean) : [];
+  if (!rows.length) return { os, changed:false, count:0 };
+  const grouped = new Map();
+  rows.forEach(g => {
+    const key = getFilmRoomGameKey(g);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(g);
+  });
+  let entries = normalizeFilmRoomEntries(os.filmRoomEntries);
+  let changed = false;
+  let count = 0;
+  grouped.forEach(groupRows => {
+    const entry = buildFilmRoomEntryFromGames(allStats, groupRows, source);
+    if (!entry) return;
+    const idx = entries.findIndex(e => e.id === entry.id || (entry.replayId && e.replayId === entry.replayId));
+    if (idx >= 0) {
+      entries[idx] = {
+        ...entries[idx],
+        ...entry,
+        clips:entries[idx].clips || [],
+        carl2Assets:entries[idx].carl2Assets || [],
+        deepReview:entries[idx].deepReview?.status ? entries[idx].deepReview : entry.deepReview,
+        reviewNotes:(entries[idx].reviewNotes && entries[idx].reviewNotes.length ? entries[idx].reviewNotes : entry.reviewNotes),
+        updatedAt:new Date().toISOString(),
+      };
+    } else {
+      entries.unshift(entry);
+    }
+    changed = true;
+    count += 1;
+  });
+  return { os:normalizeBurtonOS({ ...os, filmRoomEntries:entries }), changed, count };
+}
+
+function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) {
+  const os = normalizeBurtonOS(burtonOS || {});
+  const entries = normalizeFilmRoomEntries(os.filmRoomEntries);
+  const isAdmin = currentPlayer === ADMIN_ID;
+  const [openId, setOpenId] = useState(entries[0]?.id || null);
+  const [uploading, setUploading] = useState(false);
+  useEffect(()=>{ if (!openId && entries[0]?.id) setOpenId(entries[0].id); }, [entries.length, openId]);
+  const saveFilmEntries = async (nextEntries, msg = "Film Room updated", icon = "🎥") => {
+    const nextOS = normalizeBurtonOS({ ...os, filmRoomEntries:normalizeFilmRoomEntries(nextEntries) });
+    setBurtonOS?.(nextOS);
+    await storeSetWithPush(BURTON_OS_KEY, nextOS).catch(() => storeSet(BURTON_OS_KEY, nextOS));
+    if (msg) addToast?.(msg, icon);
+  };
+  const updateEntry = async (entryId, updater, msg, icon) => {
+    const next = entries.map(e => e.id === entryId ? normalizeFilmRoomEntries([typeof updater === "function" ? updater(e) : { ...e, ...updater }])[0] : e);
+    await saveFilmEntries(next, msg, icon);
+  };
+  const addClip = async (entry) => {
+    const url = prompt("Paste PS App / Xbox clip link");
+    if (!url) return;
+    const label = prompt("Label this highlight", "cool shot") || "highlight";
+    await updateEntry(entry.id, e => ({ ...e, clips:[{ id:`clip_${Date.now()}_${currentPlayer}`, url:String(url).trim(), label:String(label).slice(0,60), addedBy:currentPlayer, addedAt:new Date().toISOString() }, ...(e.clips || [])].slice(0,24) }), "highlight clip saved", "🎬");
+  };
+  const requestDeepReview = async (entry) => {
+    await updateEntry(entry.id, e => ({ ...e, deepReview:{ ...(e.deepReview || {}), status:"requested", requestedBy:currentPlayer, requestedAt:new Date().toISOString() } }), "deep review requested", "🧠");
+  };
+  const handleCarlUpload = async (entry, filesInput) => {
+    const files = Array.from(filesInput || []).filter(Boolean);
+    if (!files.length || !isAdmin) return;
+    setUploading(true);
+    try {
+      const assets = [];
+      for (const file of files.slice(0,10)) {
+        let url = "";
+        try {
+          const uploaded = await uploadPostImage(file);
+          url = typeof uploaded === "string" ? uploaded : (uploaded?.url || uploaded?.publicUrl || uploaded?.path || "");
+        } catch (_) {}
+        let text = "";
+        if (/json|csv|markdown|md|text/i.test(`${file.type} ${file.name}`)) {
+          text = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "").slice(0,18000)); reader.onerror = () => resolve(""); reader.readAsText(file); });
+        }
+        assets.push({ id:`carl2_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, name:file.name, type:file.type || (file.name.match(/\.(png|jpe?g|webp|gif)$/i) ? "image" : "file"), url, text, uploadedBy:currentPlayer, uploadedAt:new Date().toISOString() });
+      }
+      await updateEntry(entry.id, e => ({ ...e, carl2Assets:[...(assets || []), ...(e.carl2Assets || [])].slice(0,30), deepReview:{ ...(e.deepReview || {}), status:"ready", completedAt:new Date().toISOString(), summary:e.deepReview?.summary || "CARL2 report uploaded. Review the graphs and notes below." } }), "CARL2 deep review uploaded", "📊");
+    } finally {
+      setUploading(false);
+    }
+  };
+  if (!entries.length) return <EmptyState icon="🎥" title="No Film Room replays yet" body="Sync a Ballchasing/Rockpload game and the app will create a lightweight Film Room card here." />;
+  const openEntry = entries.find(e => e.id === openId) || entries[0];
+  const severityColor = (sev) => sev === "good" ? "#7CFFB2" : sev === "warning" ? "#FFD166" : "#A78BFA";
+  return (
+    <div style={{display:"grid",gap:12}}>
+      <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
+        {entries.slice(0,12).map(e => (
+          <button key={e.id} onClick={()=>setOpenId(e.id)} className="bb-pressable" style={{minWidth:150,textAlign:"left",background:openEntry.id===e.id?"rgba(184,255,77,.12)":"rgba(255,255,255,.045)",border:`1px solid ${openEntry.id===e.id?"rgba(184,255,77,.32)":"rgba(255,255,255,.08)"}`,borderRadius:14,padding:10,cursor:"pointer"}}>
+            <div style={{fontSize:9,color:openEntry.id===e.id?"#B8FF4D":"#8B92A8",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{e.mode} · {e.scoreText || "score ?"}</div>
+            <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:4}}>{(e.players || []).map(p=>p.name).join(" · ") || "synced replay"}</div>
+            <div style={{fontSize:9.5,color:"#4A5066",fontWeight:850,marginTop:3}}>{fmtRelTime(e.createdAt)} · {e.deepReview?.status === "ready" ? "CARL2 ready" : e.deepReview?.status === "requested" ? "requested" : "auto notes"}</div>
+          </button>
+        ))}
+      </div>
+      <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(184,255,77,.14)",borderRadius:20,padding:14,boxShadow:"0 16px 38px rgba(0,0,0,.24)"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}>
+          <div style={{minWidth:0}}>
+            <div style={{fontSize:10,color:"#B8FF4D",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Film Review</div>
+            <div style={{fontSize:17,color:"#E8ECF4",fontWeight:950,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{openEntry.mode} · {openEntry.scoreText || "score ?"}</div>
+            <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>{(openEntry.players || []).map(p=>p.name).join(" · ")}</div>
+          </div>
+          {openEntry.ballchasingUrl && <button onClick={()=>window.open(openEntry.ballchasingUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.11)",border:"1px solid rgba(77,158,255,.26)",borderRadius:12,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer",whiteSpace:"nowrap"}}>3D replay</button>}
+        </div>
+        {openEntry.ballchasingUrl && (
+          <div style={{background:"#000",border:"1px solid rgba(77,158,255,.18)",borderRadius:16,overflow:"hidden",marginBottom:12}}>
+            <div style={{position:"relative",paddingTop:"56.25%"}}>
+              <iframe title="Ballchasing 3D viewer" src={openEntry.ballchasingUrl} loading="lazy" allow="fullscreen; clipboard-read; clipboard-write" allowFullScreen style={{position:"absolute",inset:0,width:"100%",height:"100%",border:0,background:"#000"}} />
+            </div>
+          </div>
+        )}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+          <button onClick={()=>addClip(openEntry)} className="bb-pressable" style={{background:"rgba(167,139,250,.10)",border:"1px solid rgba(167,139,250,.24)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",cursor:"pointer"}}>add PS/Xbox clip</button>
+          <button onClick={()=>requestDeepReview(openEntry)} className="bb-pressable" style={{background:"rgba(255,209,102,.10)",border:"1px solid rgba(255,209,102,.24)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>{openEntry.deepReview?.status === "requested" ? "deep review requested" : "request CARL2 review"}</button>
+        </div>
+        <div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Auto Review Notes</div>
+        <div style={{display:"grid",gap:7,marginBottom:12}}>
+          {(openEntry.reviewNotes || []).slice(0,10).map(n => (
+            <div key={n.id} style={{background:"rgba(255,255,255,.04)",border:`1px solid ${bbAlpha(severityColor(n.severity),.22)}`,borderRadius:12,padding:"9px 10px"}}>
+              <div style={{display:"flex",gap:8,alignItems:"baseline"}}><div style={{fontSize:10,color:severityColor(n.severity),fontWeight:950,minWidth:34}}>{n.time || "full"}</div><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}>{n.title}</div></div>
+              {n.body && <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{n.body}</div>}
+            </div>
+          ))}
+        </div>
+        {!!openEntry.clips?.length && <><div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Team Clips</div><div style={{display:"grid",gap:7,marginBottom:12}}>{openEntry.clips.map(c => <button key={c.id} onClick={()=>window.open(c.url,"_blank","noopener,noreferrer")} className="bb-pressable" style={{textAlign:"left",background:"rgba(167,139,250,.07)",border:"1px solid rgba(167,139,250,.18)",borderRadius:12,padding:"9px 10px",color:"#E8ECF4",fontSize:11,fontWeight:850,cursor:"pointer"}}>🎬 {c.label || "clip"}<div style={{fontSize:9,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.url}</div></button>)}</div></>}
+        <div style={{background:"rgba(255,209,102,.05)",border:"1px solid rgba(255,209,102,.15)",borderRadius:14,padding:11}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
+            <div><div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>CARL2 Deep Review</div><div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>status: {openEntry.deepReview?.status || "none"}</div></div>
+            {isAdmin && <label className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#FFD166",cursor:uploading?"wait":"pointer",whiteSpace:"nowrap"}}>{uploading?"uploading…":"upload CARL2"}<input type="file" multiple accept="image/*,.json,.csv,.md,.markdown,text/*" onChange={e=>handleCarlUpload(openEntry, e.target.files)} style={{display:"none"}} /></label>}
+          </div>
+          {!!openEntry.carl2Assets?.length && <div style={{display:"grid",gap:10,marginTop:12}}>{openEntry.carl2Assets.map(a => /image/i.test(a.type) || /\.(png|jpe?g|webp|gif)$/i.test(a.name) ? <div key={a.id} style={{background:"rgba(0,0,0,.22)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,overflow:"hidden"}}><img src={a.url} alt={a.name} style={{width:"100%",display:"block"}}/><div style={{fontSize:10,color:"#8B92A8",padding:"7px 9px"}}>{a.name}</div></div> : <div key={a.id} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:10}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:900}}>{a.name}</div>{a.text && <pre style={{whiteSpace:"pre-wrap",fontSize:9.5,color:"#8B92A8",maxHeight:180,overflow:"auto",marginTop:8}}>{a.text.slice(0,4000)}</pre>}{a.url && <button onClick={()=>window.open(a.url,"_blank","noopener,noreferrer")} style={{marginTop:8,background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:9,padding:"7px 8px",fontSize:10,color:"#E8ECF4"}}>open file</button>}</div>)}</div>}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -14177,7 +14443,17 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
     });
     if (stampedStatsChanged) await saveStatsEverywhere(statsForJobs, setStats);
 
-    if (!jobs.length) return;
+    const filmPatch = upsertFilmRoomEntriesFromSyncedGames(freshOS, statsForJobs, syncedGames, sourceLabel);
+    const osWithFilm = filmPatch.changed ? filmPatch.os : freshOS;
+
+    if (!jobs.length) {
+      if (filmPatch.changed) {
+        setBurtonOS?.(osWithFilm);
+        await storeSetWithPush(BURTON_OS_KEY, osWithFilm);
+        addToast?.(filmPatch.count === 1 ? "Film Room replay created" : `${filmPatch.count} Film Room replays updated`, "🎥");
+      }
+      return;
+    }
     const syncedPlayerIds = new Set(syncedGames.map(g => g?.playerId).filter(Boolean));
     const syncedModeSet = new Set(syncedGames.map(g => normalizeGameMode(g?.mode)).filter(Boolean));
     let touched = 0;
@@ -14243,11 +14519,18 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
       return nextJob;
     });
 
-    if (!touched) return;
+    if (!touched) {
+      if (filmPatch.changed) {
+        setBurtonOS?.(osWithFilm);
+        await storeSetWithPush(BURTON_OS_KEY, osWithFilm);
+        addToast?.(filmPatch.count === 1 ? "Film Room replay created" : `${filmPatch.count} Film Room replays updated`, "🎥");
+      }
+      return;
+    }
     const nextOS = normalizeBurtonOS({
-      ...freshOS,
+      ...osWithFilm,
       jobs:nextJobs,
-      history:[{ id:`hist_job_sync_${Date.now()}`, type:"job_progress", emoji:ready ? "✅" : "📋", title:ready ? "Job ready after stat sync" : "Job progress synced", text:bestProgress ? `${bestProgress.title} · ${bestProgress.done}/${bestProgress.total}` : "stats synced into jobs", color:ready ? "#7CFFB2" : "#B8FF4D", ts:nowIso }, ...(freshOS.history || [])].slice(0, 90),
+      history:[{ id:`hist_job_sync_${Date.now()}`, type:"job_progress", emoji:ready ? "✅" : "📋", title:ready ? "Job ready after stat sync" : "Job progress synced", text:bestProgress ? `${bestProgress.title} · ${bestProgress.done}/${bestProgress.total}` : "stats synced into jobs", color:ready ? "#7CFFB2" : "#B8FF4D", ts:nowIso }, ...(osWithFilm.history || [])].slice(0, 90),
     });
     setBurtonOS?.(nextOS);
     await storeSetWithPush(BURTON_OS_KEY, nextOS);
@@ -15236,14 +15519,16 @@ return (
 )}
 
 <div style={{display:"flex",gap:8,marginBottom:18}}>
-{[{id:"tracker",label:"stats"},{id:"teamlink",label:"team link"},{id:"chem",label:"chem"},{id:"mmr",label:"mmr"}].map(sub=>(
+{[{id:"tracker",label:"stats"},{id:"teamlink",label:"team link"},{id:"film",label:"film"},{id:"chem",label:"chem"},{id:"mmr",label:"mmr"}].map(sub=>(
   <button key={sub.id} onClick={()=>setStatsSubTab(sub.id)} className="bb-pressable"
     style={{flex:1,border:"none",borderRadius:10,padding:"9px 0",fontSize:12,fontWeight:700,cursor:"pointer",background:statsSubTab===sub.id?playerColor:"rgba(255,255,255,0.05)",color:statsSubTab===sub.id?"#06070D":"#8B92A8"}}>
     {sub.label}
   </button>
 ))}
 </div>
-{statsSubTab==="mmr" ? (
+{statsSubTab==="film" ? (
+  <FilmRoomTab burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} stats={stats} addToast={addToast} />
+) : statsSubTab==="mmr" ? (
   <LiveMMRFeed mmrProfiles={mmrProfiles} />
 ) : statsSubTab==="teamlink" ? (
   <TeamLinkTab stats={stats} onUpdateOpponentScore={updateOpponentScore} onFindBallchasingReplay={findBallchasingForStatGame} onUnlinkBallchasingReplay={unlinkBallchasingForGame} ballchasingCfg={ballchasingCfg} />
