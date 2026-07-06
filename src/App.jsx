@@ -13020,6 +13020,132 @@ function getMatchStartInfo(match) {
 }
 
 
+// APP139_TEAM_SYNC_TIME_GRACE_PATCH
+// Tracker/Parse can expose dateCollected as the time each player's uploaded session was indexed,
+// not the actual kickoff time. Team sync should group by the best real start signal first,
+// then fall back to a guarded collection-time grace window so Rockpload/Ballchasing delays
+// do not split a real 3v3 into a mismatch.
+const TEAM_SYNC_RELIABLE_TIME_WINDOW_MS = 15 * 60 * 1000;
+const TEAM_SYNC_COLLECTED_GRACE_MS = 30 * 60 * 1000;
+const TEAM_SYNC_SCORE_CONFIRMED_GRACE_MS = 75 * 60 * 1000;
+
+function getParseCollectedTimeMs(match = {}) {
+  const metadata = match?.metadata || {};
+  const candidates = [
+    metadata?.dateCollected,
+    metadata?.collectedAt,
+    metadata?.updatedAt,
+    match?.dateCollected,
+    match?.collectedAt,
+    match?.updatedAt,
+    match?.ts,
+  ];
+  for (const value of candidates) {
+    if (!value) continue;
+    const t = new Date(value).getTime();
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
+}
+
+function getParseMatchStableId(match = {}) {
+  const metadata = match?.metadata || {};
+  return String(
+    metadata?.matchId ||
+    metadata?.gameId ||
+    metadata?.replayId ||
+    metadata?.sessionId ||
+    match?.matchId ||
+    match?.gameId ||
+    match?.replayId ||
+    match?.sessionId ||
+    match?.id ||
+    ""
+  ).trim();
+}
+
+function getTeamSyncScoreSignature(match = {}, player = null) {
+  const teamScore = getMatchTeamScoreInfo(match, player);
+  const our = Number(teamScore?.ourScore);
+  const their = Number(teamScore?.theirScore);
+  if (!Number.isFinite(our) || !Number.isFinite(their)) return "";
+  return `${our}-${their}`;
+}
+
+function getPulledTeamSyncTiming(pulledRow = {}) {
+  const match = pulledRow?.match || {};
+  const start = getMatchStartInfo(match);
+  const startMs = start?.iso ? new Date(start.iso).getTime() : null;
+  const collectedMs = getParseCollectedTimeMs(match);
+  return {
+    playerName: pulledRow?.player?.name || "player",
+    startMs: Number.isFinite(startMs) ? startMs : null,
+    startReliable: !!start?.reliable,
+    startSource: start?.source || "unknown",
+    collectedMs,
+    result: match?.metadata?.result || match?.result || "",
+    scoreSig: getTeamSyncScoreSignature(match, pulledRow?.player),
+    stableId: getParseMatchStableId(match),
+  };
+}
+
+function getTimeSpreadMs(values = []) {
+  const nums = values.filter(Number.isFinite);
+  if (nums.length < 2) return 0;
+  return Math.max(...nums) - Math.min(...nums);
+}
+
+function formatTeamSyncTimingDebug(infos = []) {
+  return infos.map(info => {
+    const time = Number.isFinite(info.startMs) ? info.startMs : info.collectedMs;
+    const label = Number.isFinite(time) ? new Date(time).toLocaleTimeString("en-US", { hour:"numeric", minute:"2-digit" }) : "no time";
+    const source = info.startReliable ? "start" : "collected";
+    const score = info.scoreSig ? ` · ${info.scoreSig}` : "";
+    return `${info.playerName}: ${label} ${source}${score}`;
+  }).join(" · ");
+}
+
+function validatePulledTeamSyncGroup(pulled = [], requestedMode = "3v3") {
+  const rows = (pulled || []).filter(row => row?.match);
+  if (rows.length <= 1) return { ok:true, reason:"solo" };
+
+  const infos = rows.map(getPulledTeamSyncTiming);
+  const ids = infos.map(i => i.stableId).filter(Boolean);
+  if (ids.length === rows.length && ids.every(id => id === ids[0])) {
+    return { ok:true, reason:"same_match_id", infos };
+  }
+
+  const reliableStartTimes = infos.map(i => i.startReliable ? i.startMs : null).filter(Number.isFinite);
+  const reliableSpread = getTimeSpreadMs(reliableStartTimes);
+  if (reliableStartTimes.length === rows.length && reliableSpread <= TEAM_SYNC_RELIABLE_TIME_WINDOW_MS) {
+    return { ok:true, reason:"reliable_start_time", infos, spreadMs:reliableSpread };
+  }
+
+  const results = infos.map(i => String(i.result || "").toLowerCase()).filter(Boolean);
+  const sameResult = results.length === rows.length && results.every(r => r === results[0]);
+  const scoreSigs = infos.map(i => i.scoreSig).filter(Boolean);
+  const sameScore = scoreSigs.length === rows.length && scoreSigs.every(sig => sig === scoreSigs[0]);
+  const collectedTimes = infos.map(i => i.collectedMs).filter(Number.isFinite);
+  const collectedSpread = getTimeSpreadMs(collectedTimes);
+
+  if (sameResult && sameScore && collectedTimes.length === rows.length && collectedSpread <= TEAM_SYNC_SCORE_CONFIRMED_GRACE_MS) {
+    return { ok:true, reason:"same_result_score_collected_grace", infos, spreadMs:collectedSpread };
+  }
+
+  if (sameResult && collectedTimes.length === rows.length && collectedSpread <= TEAM_SYNC_COLLECTED_GRACE_MS) {
+    return { ok:true, reason:"same_result_collected_grace", infos, spreadMs:collectedSpread };
+  }
+
+  return {
+    ok:false,
+    reason:"time_spread",
+    infos,
+    spreadMs: reliableStartTimes.length === rows.length ? reliableSpread : collectedSpread,
+    debug: formatTeamSyncTimingDebug(infos),
+  };
+}
+
+
 function parseDebugTimeMs(value) {
   if (!value) return null;
   const t = new Date(value).getTime();
@@ -13516,8 +13642,9 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     playerId: player.id,
     playerName: player.name,
     mode,
-    ts: match.metadata?.dateCollected || matchStart.iso || new Date().toISOString(),
+    ts: matchStart.reliable ? matchStart.iso : (match.metadata?.dateCollected || matchStart.iso || new Date().toISOString()),
     matchStartAt: matchStart.iso,
+    parseCollectedAt: match.metadata?.dateCollected || match?.dateCollected || null,
     matchStartReliable: !!matchStart.reliable,
     matchStartSource: matchStart.source,
     roomId: sessionCode,
@@ -13623,9 +13750,7 @@ console.log(pulled);
       return;
     }
 
-    const times = pulled.map(x => new Date(x.match.metadata.dateCollected).getTime());
-    const maxTime = Math.max(...times);
-    const minTime = Math.min(...times);
+    const teamSyncGroup = validatePulledTeamSyncGroup(pulled, teamRoom.mode);
     
     console.log("MATCH DATES:", pulled.map(x => ({
   player: x.player.name,
@@ -13633,18 +13758,15 @@ console.log(pulled);
   result: x.match.metadata.result,
   id: x.match.id
 })));
-    
-    
-    const within10Min = maxTime - minTime <= 10 * 60 * 1000;
-    console.log("WITHIN 10 MIN:", within10Min);
+    console.log("TEAM SYNC GROUP:", teamSyncGroup);
 
     const results = pulled.map(x => x.match.metadata.result);
     const sameResult = results.every(r => r === results[0]);
     console.log("SAME RESULT:", sameResult);
 console.log("RESULTS:", results);
 
- if (!within10Min) {
-      setRoomSyncMsg("found 3 games, but they don't look like the same match yet");
+ if (!teamSyncGroup.ok) {
+      setRoomSyncMsg(`found games, but they still don't look like the same match yet${teamSyncGroup.debug ? ` · ${teamSyncGroup.debug}` : ""}`);
       setRoomSyncing(false);
       return;
     }
@@ -14310,9 +14432,10 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       }
 
       if (playersToSync.length > 1) {
-        const times = pulled.map(x => new Date(x.match.metadata.dateCollected).getTime());
-        if (Math.max(...times) - Math.min(...times) > 10 * 60 * 1000) {
-          setSyncDebug("team match mismatch", `Latest ${requestedMode} matches are more than 10 minutes apart, so the app did not group them.`);
+        const teamSyncGroup = validatePulledTeamSyncGroup(pulled, requestedMode);
+        if (!teamSyncGroup.ok) {
+          const mins = Number.isFinite(teamSyncGroup.spreadMs) ? Math.round(teamSyncGroup.spreadMs / 60000) : "?";
+          setSyncDebug("team match mismatch", `${requestedMode} latest matches still do not look like one shared game. Spread: ${mins}m. ${teamSyncGroup.debug || ""}`);
           addToast?.(`latest games don't look like the same ${requestedMode} match yet`, "⚠️");
           setMatchSyncing(false);
           return;
