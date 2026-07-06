@@ -104,6 +104,7 @@ const PLAYERS = [
 ];
 
 // APP140_TEAM_SYNC_IDENTITY_ALIAS_PATCH
+// APP141_BALLCHASING_FIRST_SYNC_NO_PARSE_PATCH
 // Tracker/Parse can need a different platform handle than the display name used in the app.
 // Keep these local to sync so one bad saved MMR profile does not make team sync miss a teammate.
 const PARSE_TRACKER_ALIASES = {
@@ -14451,6 +14452,197 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     ["p2","p3"],
   ];
 
+  const scoreBallchasingTeamReplayForSync = (replay = {}, requestedMode = "3v3", requestedPlayers = []) => {
+    const safe = normalizeBallchasingReplay(replay || {});
+    const expectedIds = new Set((requestedPlayers || []).map(p => p.id).filter(Boolean));
+    const rows = buildBallchasingPlayerRows(safe, ballchasingCfg);
+    const matchedRows = rows.filter(r => r.appPlayerId && expectedIds.has(r.appPlayerId));
+    const playlistText = `${safe.playlistId || ""} ${safe.playlistName || ""}`.toLowerCase();
+    const modeOk =
+      requestedMode === "1v1" ? (playlistText.includes("duel") || playlistText.includes("1v1")) :
+      requestedMode === "2v2" ? (playlistText.includes("double") || playlistText.includes("2v2")) :
+      (playlistText.includes("standard") || playlistText.includes("3v3") || playlistText.includes("trio") || playlistText.includes("tournament"));
+    const replayMs = replayDateMs(safe);
+    const ageMinutes = replayMs > 0 ? Math.max(0, (Date.now() - replayMs) / 60000) : 99999;
+    const matchedCount = matchedRows.length;
+    const allMatched = expectedIds.size > 0 && matchedCount >= expectedIds.size;
+    const sameTeam = matchedRows.length <= 1 || matchedRows.every(r => r.teamColor === matchedRows[0].teamColor);
+    const score =
+      matchedCount * 55 +
+      (allMatched ? 120 : 0) +
+      (sameTeam ? 35 : -50) +
+      (modeOk ? 40 : -80) +
+      (ageMinutes <= 30 ? 35 : ageMinutes <= 120 ? 20 : ageMinutes <= 360 ? 8 : 0);
+    return { score, safe, rows, matchedRows, allMatched, sameTeam, modeOk, ageMinutes };
+  };
+
+  const buildBallchasingSyncStatEntry = ({ row, replay, timeline, player, sessionCode, requestedMode }) => {
+    const safe = normalizeBallchasingReplay(timeline ? { ...replay, timeline, raw:{ ...(replay.raw || {}), timeline } } : replay);
+    const teamScoreRaw = Number(row?.teamGoals);
+    const teamScore = Number.isFinite(teamScoreRaw) ? teamScoreRaw : Number(row?.goals ?? 0);
+    const their = getBallchasingOpponentGoalsForRow(safe, row);
+    const demos = Number(row?.demosInflicted ?? row?.demos ?? 0);
+    const replayTime = safe.date || new Date().toISOString();
+    const result = Number.isFinite(teamScore) && Number.isFinite(their)
+      ? (teamScore > their ? "win" : teamScore < their ? "loss" : "tie")
+      : null;
+    return {
+      id:`${sessionCode}_${player.id}_bc_${safe.id || Date.now()}`,
+      parseMatchId:`bc_${safe.id || Date.now()}_${player.id}`,
+      ballchasingReplayId:safe.id || null,
+      ballchasingReplay:safe,
+      ballchasingTimeline:timeline || null,
+      ballchasingLinkedAt:new Date().toISOString(),
+      ballchasingMatchScore:100,
+      ballchasingConfidence:"ballchasing direct",
+      ballchasingCandidates:[],
+      ballchasingNoExactCandidates:false,
+      ballchasingLastSearchAt:new Date().toISOString(),
+      playerId:player.id,
+      playerName:player.name,
+      mode:requestedMode,
+      ts:replayTime,
+      matchStartAt:replayTime,
+      matchStartReliable:true,
+      matchStartSource:"ballchasing_replay_date",
+      parseCollectedAt:null,
+      roomId:sessionCode,
+      sessionCode,
+      goals:Number(row?.goals) || 0,
+      assists:Number(row?.assists) || 0,
+      saves:Number(row?.saves) || 0,
+      shots:Number(row?.shots) || 0,
+      score:Number(row?.score) || 0,
+      demos:Number.isFinite(demos) ? Math.max(0, demos) : 0,
+      ourScore:Number.isFinite(teamScore) ? teamScore : (Number(row?.goals) || 0),
+      theirScore:Number.isFinite(their) ? their : null,
+      parseDetectedOurScore:Number.isFinite(teamScore) ? teamScore : null,
+      parseDetectedTheirScore:Number.isFinite(their) ? their : null,
+      opponent:"",
+      opponentScoreManual:Number.isFinite(their),
+      result,
+      rating:null,
+      ratingDelta:0,
+      source:"ballchasing_direct",
+      statsSource:"ballchasing",
+      parseStatsFound:true,
+      parseStatsIncomplete:false,
+      ballchasingStatsApplied:true,
+      parseStatDebug:{ source:"ballchasing_direct" },
+      syncedAt:new Date().toISOString(),
+    };
+  };
+
+  const syncLatestBallchasingTeamMatch = async (requestedMode = syncMode, requestedPlayers = null) => {
+    if (matchSyncing) {
+      setSyncDebug("sync already running", "Wait for the current request to finish.");
+      return;
+    }
+    const playersToSync = requestedPlayers || (
+      requestedMode === "3v3" ? PLAYERS :
+      requestedMode === "2v2" ? PLAYERS.filter(p => selectedDuoIds.includes(p.id)) :
+      PLAYERS.filter(p => p.id === currentPlayer)
+    );
+    if (requestedMode === "3v3" && currentPlayer !== ADMIN_ID) {
+      setSyncDebug("blocked", "Only the captain can sync full team 3v3.");
+      addToast?.("only the captain can sync full team 3v3", "🔒");
+      return;
+    }
+    setMatchSyncing(true);
+    try {
+      setSyncDebug(`finding latest ${requestedMode} Ballchasing replay`, "No Parse credits used. Searching Rockpload/Ballchasing uploads first.");
+      addToast?.("checking Ballchasing first — no Parse", "🔎");
+      const seen = new Set();
+      const basics = [];
+      const pushCandidates = (raw) => {
+        getBallchasingSearchCandidates(raw).forEach(item => {
+          const id = item.id || extractBallchasingReplayId(item.link || item.viewUrl || "");
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          basics.push({ ...item, id });
+        });
+      };
+      const aliases = getBallchasingAliasMap(ballchasingCfg);
+      const searchNames = playersToSync.flatMap(p => aliases[p.id] || [p.name]).map(v => String(v || "").trim()).filter(Boolean);
+      const uniqueNames = searchNames.filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i).slice(0, 8);
+      for (const name of uniqueNames) {
+        try {
+          const raw = await fetchBallchasingSearchRawViaConfig(ballchasingCfg, { playerName:name, mode:requestedMode, count:50 });
+          pushCandidates(raw);
+        } catch (e) {
+          console.warn("Ballchasing direct sync search skipped", name, e);
+        }
+        if (basics.length >= 40) break;
+      }
+      if (!basics.length) {
+        setSyncDebug("no Ballchasing replay found", "Rockpload may still be uploading, or the Ballchasing alias list needs the exact in-replay names.");
+        addToast?.("no Ballchasing replay found yet", "⏳");
+        setMatchSyncing(false);
+        return;
+      }
+      const detailed = [];
+      for (const item of basics.slice(0, 40)) {
+        try {
+          const replay = await fetchBallchasingViaConfig(ballchasingCfg, { replayId:item.id });
+          const scored = scoreBallchasingTeamReplayForSync(replay, requestedMode, playersToSync);
+          detailed.push({ ...item, replay:scored.safe, ...scored });
+        } catch (e) {
+          console.warn("Ballchasing direct sync detail skipped", item?.id, e);
+        }
+      }
+      detailed.sort((a,b) => Number(b.score || 0) - Number(a.score || 0));
+      const best = detailed[0];
+      if (!best || !best.allMatched || !best.sameTeam || !best.modeOk) {
+        const bestLabel = best ? `${best.matchedRows?.map(r => r.appName || r.name).join(" + ") || "no Burton players"} · ${best.safe?.playlistName || "playlist ?"} · ${getReplayScoreboardText(best.safe)}` : "none";
+        setSyncDebug("Ballchasing needs review", `Best candidate did not safely match the selected team: ${bestLabel}. Paste the exact replay in the game card or check aliases.`);
+        addToast?.("Ballchasing candidate needs review", "⚠️");
+        setMatchSyncing(false);
+        return;
+      }
+      let timeline = null;
+      try { timeline = await fetchBallchasingTimelineViaConfig(ballchasingCfg, best.safe.id); } catch (e) { console.warn("Ballchasing direct sync timeline skipped", e); }
+      const safeReplay = timeline ? normalizeBallchasingReplay({ ...best.safe, timeline, raw:{ ...(best.safe.raw || {}), timeline } }) : best.safe;
+      const sessionCode = getNextAutoGameSessionCode(await getFreshStatsForWrite(stats));
+      const freshSyncStats = await getFreshStatsForWrite(stats);
+      const alreadyImported = freshSyncStats.some(g => g.ballchasingReplayId && safeReplay.id && g.ballchasingReplayId === safeReplay.id && playersToSync.some(p => p.id === g.playerId));
+      const importedGames = playersToSync.map(player => {
+        const row = buildBallchasingPlayerRows(safeReplay, ballchasingCfg).find(r => r.appPlayerId === player.id);
+        return row ? buildBallchasingSyncStatEntry({ row, replay:safeReplay, timeline, player, sessionCode, requestedMode }) : null;
+      }).filter(Boolean);
+      if (alreadyImported) {
+        const refreshed = freshSyncStats.map(g => {
+          const row = buildBallchasingPlayerRows(safeReplay, ballchasingCfg).find(r => r.appPlayerId === g.playerId);
+          if (!row || g.ballchasingReplayId !== safeReplay.id) return g;
+          return { ...g, ...buildStatsBallchasingSavePatch(g, safeReplay, timeline, 100, "ballchasing direct", g.playerId, ballchasingCfg), refreshedAt:new Date().toISOString() };
+        });
+        await saveStatsEverywhere(refreshed, setStats);
+        setSyncDebug("Ballchasing game refreshed", `${requestedMode} · ${getReplayScoreboardText(safeReplay)} · ${safeReplay.mapName || "map"}`);
+        addToast?.("Ballchasing game refreshed", "✅");
+      } else {
+        const updStats = [...importedGames, ...freshSyncStats];
+        await saveStatsEverywhere(updStats, setStats);
+        await settleDueBetsNow({
+          bets: await storeGet("bets").catch(() => []),
+          stats: updStats,
+          points: await storeGet("points").catch(() => points) || points,
+          setBets,
+          setPoints,
+        }).catch(e => console.warn("post-ballchasing-sync bet settle failed", e));
+        setSyncDebug("Ballchasing sync complete", `${sessionCode} ${requestedMode} imported · ${getReplayScoreboardText(safeReplay)} · ${safeReplay.mapName || "map"}`);
+        addToast?.(`${sessionCode} ${requestedMode} synced from Ballchasing`, "✅");
+      }
+      if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
+      setStatsSubTab("tracker");
+      setShowAllGames(true);
+      setTimeout(() => setShowSyncMatchModal(false), 350);
+    } catch (e) {
+      console.error(e);
+      setSyncDebug("Ballchasing sync error", e?.message || String(e || "Ballchasing request failed"));
+      addToast?.("Ballchasing sync had a hiccup", "❌");
+    }
+    setMatchSyncing(false);
+  };
+
   const syncLatestTeamMatch = async (requestedMode = syncMode, requestedPlayers = null) => {
     if (matchSyncing) {
       setSyncDebug("sync already running", "Wait for the current tracker request to finish.");
@@ -14826,6 +15018,14 @@ return (
               >
                 {matchSyncing ? "syncing…" : "sync full team 3v3"}
               </button>
+              <button
+                disabled={matchSyncing || currentPlayer !== ADMIN_ID}
+                onClick={()=>syncLatestBallchasingTeamMatch("3v3", PLAYERS)}
+                className="bb-pressable"
+                style={{width:"100%",marginTop:10,background:"rgba(77,158,255,0.12)",border:"1px solid rgba(77,158,255,0.32)",borderRadius:13,padding:"12px 0",fontSize:12,fontWeight:900,color:"#4D9EFF",cursor:currentPlayer===ADMIN_ID?"pointer":"not-allowed",opacity:matchSyncing?0.6:1}}
+              >
+                {matchSyncing ? "syncing…" : "sync from Ballchasing · no Parse"}
+              </button>
             </div>
           )}
 
@@ -14861,6 +15061,14 @@ return (
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
                 {matchSyncing ? "syncing…" : "sync selected duo"}
+              </button>
+              <button
+                disabled={matchSyncing}
+                onClick={()=>syncLatestBallchasingTeamMatch("2v2", PLAYERS.filter(p => selectedDuoIds.includes(p.id)))}
+                className="bb-pressable"
+                style={{width:"100%",marginTop:10,background:"rgba(77,158,255,0.12)",border:"1px solid rgba(77,158,255,0.32)",borderRadius:13,padding:"12px 0",fontSize:12,fontWeight:900,color:"#4D9EFF",cursor:"pointer",opacity:matchSyncing?0.6:1}}
+              >
+                {matchSyncing ? "syncing…" : "sync duo from Ballchasing · no Parse"}
               </button>
             </div>
           )}
