@@ -102,6 +102,15 @@ const PLAYERS = [
   { id: "p2", name: "apcards5", color: "#4D9EFF", twitch: "Aaronperks05", platform: "xbl" },
   { id: "p3", name: "tqr11le",  color: "#FF61C1", twitch: "therealtqrt1e", platform: "xbl" },
 ];
+
+// APP140_TEAM_SYNC_IDENTITY_ALIAS_PATCH
+// Tracker/Parse can need a different platform handle than the display name used in the app.
+// Keep these local to sync so one bad saved MMR profile does not make team sync miss a teammate.
+const PARSE_TRACKER_ALIASES = {
+  p1: ["maglvxx", "maglvxxgoat"],
+  p2: ["apcards5", "APcards5", "Aaronperks05"],
+  p3: ["tqr11le", "tqr11e", "therealtqrt1e", "therealtqr11e", "therealtqr11le"],
+};
 const TRAINING_START = new Date("2026-07-01T00:00:00");
 const LEAGUE_START   = new Date("2026-07-20T00:00:00");
 const PLAYOFF_START  = new Date("2026-08-24T00:00:00");
@@ -12625,12 +12634,25 @@ async function fetchParseBotJson(endpoint, params = {}, attempts = 3) {
 
 async function fetchParseMatchCandidatesForPlayer(player, playlist, limit = 8) {
   const mode = playlist === "Ranked Duel 1v1" ? "1v1" : playlist === "Ranked Doubles 2v2" ? "2v2" : "3v3";
-  const handles = [player?.handle, player?.trackerName, player?.name]
+  const hardcodedPlayer = PLAYERS.find(p => p.id === player?.id || p.name === player?.name) || {};
+  const aliasList = Array.isArray(PARSE_TRACKER_ALIASES?.[player?.id]) ? PARSE_TRACKER_ALIASES[player.id] : [];
+  const handles = [
+    player?.handle,
+    player?.trackerName,
+    player?.name,
+    player?.twitch,
+    hardcodedPlayer?.name,
+    hardcodedPlayer?.twitch,
+    ...aliasList,
+  ]
+    .map(v => String(v || "").trim())
     .filter(Boolean)
-    .filter((v, i, arr) => arr.indexOf(v) === i);
-  const platforms = [player?.platform, "epic", "psn", "xbl", "steam"]
+    .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
+  const preferredPlatform = String(hardcodedPlayer?.platform || player?.platform || "").trim();
+  const platforms = [preferredPlatform, player?.platform, "xbl", "psn", "epic", "steam"]
+    .map(v => String(v || "").trim())
     .filter(Boolean)
-    .filter((v, i, arr) => arr.indexOf(v) === i);
+    .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
   const exactPlaylistUsable = [];
   const exactPlaylistFallbacks = [];
   const anyUsableFallbacks = [];
@@ -14470,8 +14492,10 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       const savedHandle = String(saved.handle || saved.trackerName || "").trim();
       const savedPlatform = String(saved.platform || "").trim();
       const handle = savedHandle || p.handle || p.trackerName || p.name;
-      const platform = savedPlatform || p.platform || "epic";
-      return { ...p, handle, trackerName: handle, platform };
+      // Prefer the roster platform first. A stale rank-sync profile can say epic/tqr11le
+      // even when this roster player is supposed to be searched on Xbox.
+      const platform = p.platform || savedPlatform || "epic";
+      return { ...p, handle, trackerName: handle, platform, savedPlatform };
     });
     const creditsNeeded = resolvedPlayersToSync.length;
 
