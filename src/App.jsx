@@ -95,6 +95,7 @@ import { createPortal } from "react-dom";
 // APP114_STATS_BALLCHASING_CLEANUP_DEMOS_BETS_PATCH
 // APP115_STATS_BALLCHASING_DEEP_CARD_TIMESTAMPS_PATCH
 // APP116_STATS_BALLCHASING_FULLSCREEN_CARD_PATCH
+// APP140_BALLCHASING_CARD_OPEN_TIMESTAMP_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -1322,6 +1323,10 @@ function buildBallchasingPlayerRows(replay, cfg = {}) {
       name,
       teamColor: player.teamColor,
       teamName: player.teamName,
+      // Keep the replay team score on every player row. Without this, direct Ballchasing
+      // sync falls back to the player's goals as the team score and every card gets
+      // flagged as review-needed even when the replay is correct.
+      teamGoals: numberStat(player.teamGoals ?? player.team?.goals ?? player.teamStats?.core?.goals, null),
       score: numberStat(core.score ?? player.score),
       goals: numberStat(core.goals ?? player.goals),
       assists: numberStat(core.assists ?? player.assists),
@@ -13638,9 +13643,16 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
   const normalized = replay || normalizeBallchasingReplay({ id:replayId });
   const rows = buildBallchasingPlayerRows(normalized, cfg);
   const visibleRows = getVisibleReplayRowsForMode(rows, game.mode || "1v1", game.playerId || ADMIN_ID);
+  const ownReplayRow = getBallchasingRowForStatGame(normalized, game, game.playerId || ADMIN_ID, cfg);
+  const compactRows = compact ? (ownReplayRow ? [ownReplayRow] : visibleRows.slice(0, 1)) : [];
   const playerNames = visibleRows.map(r => r.name).filter(Boolean);
   const moments = getReplayKeyMoments(normalized, playerNames.length ? playerNames : rows.map(r => r.name)).slice(0, compact ? 6 : 18);
   const openUrl = normalized.viewUrl || (replayId ? `https://ballchasing.com/replay/${replayId}` : "");
+  const replayDisplayTs = normalized.date || game.matchStartAt || game.ts || game.syncedAt || game.ballchasingLinkedAt || "";
+  const replayDisplayDate = replayDisplayTs ? new Date(replayDisplayTs) : null;
+  const replayTimeLabel = replayDisplayDate && Number.isFinite(replayDisplayDate.getTime())
+    ? replayDisplayDate.toLocaleTimeString([], { hour:"numeric", minute:"2-digit" })
+    : "time ?";
   const fullRows = visibleRows.length ? visibleRows.slice(0, normalizeGameMode(game.mode) === "1v1" ? 1 : 4) : [];
   const fullScreenSheet = sheetOpen && typeof document !== "undefined" ? createPortal((
     <div style={{position:"fixed",inset:0,zIndex:900,background:"rgba(3,5,15,.96)",backdropFilter:"blur(16px)",WebkitBackdropFilter:"blur(16px)",display:"flex",flexDirection:"column",fontFamily:"Inter, sans-serif"}}>
@@ -13666,7 +13678,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:8}}>
         <div style={{minWidth:0}}>
           <div style={{fontSize:9.5,color:linkedNeedsReview?"#FFD166":confidence.color,fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{linkedNeedsReview ? "Ballchasing review needed" : "Ballchasing linked"} · {confidence.label}</div>
-          <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {normalized.date ? new Date(normalized.date).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"}) : "time ?"}</div>
+          <div style={{fontSize:10.5,color:"#E8ECF4",fontWeight:850,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{normalized.mapName || "unknown map"} · {getReplayScoreboardText(normalized)} · {replayTimeLabel}</div>
         </div>
         <div style={{display:"flex",gap:6,flexShrink:0}}>
           <button onClick={()=>setSheetOpen(true)} className="bb-pressable" style={{background:"rgba(184,255,77,.10)",border:"1px solid rgba(184,255,77,.24)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#B8FF4D",cursor:"pointer"}}>open</button>
@@ -13675,9 +13687,9 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
           {onUnlinkReplay && <button onClick={()=>onUnlinkReplay(game)} className="bb-pressable" style={{background:"rgba(255,92,138,.08)",border:"1px solid rgba(255,92,138,.18)",borderRadius:8,padding:"5px 7px",fontSize:8.5,fontWeight:900,color:"#FF5C8A",cursor:"pointer"}}>unlink</button>}
         </div>
       </div>
-      {!!visibleRows.length && compact && <div style={{display:"grid",gridTemplateColumns:"1fr",gap:7,marginBottom:moments.length?8:0}}>
-        {visibleRows.slice(0, 2).map(r => (
-          <div key={`${replayId}_${r.name}_${r.appPlayerId || "opp"}`} style={{background:"rgba(6,7,13,.45)",border:`1px solid ${bbAlpha(r.color,.24)}`,borderRadius:10,padding:"8px 7px"}}>
+      {!!compactRows.length && compact && <div style={{display:"grid",gridTemplateColumns:"1fr",gap:7,marginBottom:moments.length?8:0}}>
+        {compactRows.map(r => (
+          <button key={`${replayId}_${r.name}_${r.appPlayerId || "opp"}`} onClick={()=>setSheetOpen(true)} className="bb-pressable" style={{width:"100%",textAlign:"left",background:"rgba(6,7,13,.45)",border:`1px solid ${bbAlpha(r.color,.24)}`,borderRadius:10,padding:"8px 7px",cursor:"pointer"}}>
             <div style={{display:"flex",justifyContent:"space-between",gap:6,alignItems:"center",marginBottom:5}}>
               <div style={{fontSize:10.5,color:r.color,fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.appName || r.name}</div>
               <div style={{fontSize:10,color:"#E8ECF4",fontWeight:950}}>{fmtReplayNumber(r.score)}</div>
@@ -13685,7 +13697,8 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
             <div style={{display:"grid",gridTemplateColumns:normalizeGameMode(game.mode)==="1v1"?"repeat(5,1fr)":"repeat(4,1fr)",gap:4}}>
               {[ ["G",r.goals], ["A",r.assists], ["S",r.saves], ["Sh",r.shots], ...(normalizeGameMode(game.mode)==="1v1" ? [["D", r.demosInflicted ?? r.demos ?? 0]] : []) ].map(([label,val]) => <div key={label} style={{textAlign:"center"}}><div style={{fontSize:7.5,color:"#4A5066",fontWeight:900}}>{label}</div><div style={{fontSize:10.5,color:r.color,fontWeight:950}}>{fmtReplayNumber(val)}</div></div>)}
             </div>
-          </div>
+            <div style={{fontSize:8.5,color:"#8B92A8",fontWeight:850,marginTop:6,textTransform:"uppercase"}}>tap for full stats</div>
+          </button>
         ))}
       </div>}
       {!!visibleRows.length && !compact && <div style={{display:"grid",gap:8,marginBottom:moments.length?10:0}}>
@@ -13707,7 +13720,7 @@ function StatsBallchasingPanel({ game, accent = "#B8FF4D", cfg = {}, onFindRepla
         <div style={{fontSize:9,color:"#FFD166",fontWeight:950,letterSpacing:.7,textTransform:"uppercase"}}>game timestamps</div>
         {moments.map((m, i) => <div key={`${m.id}_${i}`} style={{display:"flex",justifyContent:"space-between",gap:8,background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.045)",borderRadius:9,padding:"6px 7px"}}><div style={{fontSize:9.5,color:"#E8ECF4",fontWeight:850,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{m.label}</div><div style={{fontSize:8.5,color:m.kind==="goal"?"#FFD166":m.kind==="save"?"#4D9EFF":m.kind.includes("demo")?"#FF8C42":"#8B92A8",fontWeight:950,textTransform:"uppercase"}}>{m.kind}</div></div>)}
       </div>}
-      {!moments.length && <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Replay linked. Press refresh if timeline moments are missing.</div>}
+      {!moments.length && <div style={{fontSize:9.5,color:"#8B92A8",lineHeight:1.35}}>Replay linked · match time {replayTimeLabel}. Timeline moments are not loaded from Ballchasing yet; refresh can retry them, but the player card still opens full stats.</div>}
     </div>
     </>
   );
