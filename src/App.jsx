@@ -13086,6 +13086,7 @@ function getMatchStartInfo(match) {
 }
 
 
+// APP141_PARSE_SHELL_BALLCHASING_STATS_FILL_PATCH
 // APP140_TEAM_SYNC_RECENT_CANDIDATE_GROUP_PATCH
 // APP139_TEAM_SYNC_TIME_GRACE_PATCH
 // Tracker/Parse can expose dateCollected as the time each player's uploaded session was indexed,
@@ -13410,12 +13411,27 @@ function getStatsBallchasingPlayerStatMatchInfo(game = {}, replay = {}, playerId
 }
 function buildStatsBallchasingSavePatch(game = {}, replay = {}, timeline = null, matchScore = 100, confidenceLabel = "high", playerId = ADMIN_ID, cfg = {}) {
   const safe = normalizeBallchasingReplay(timeline ? { ...replay, timeline, raw:{ ...(replay.raw || {}), timeline } } : replay);
-  const oriented = getBallchasingOrientedScoreForStatGame(safe, game, playerId, cfg);
+  const targetPlayerId = playerId || game.playerId || ADMIN_ID;
+  const row = getBallchasingRowForStatGame(safe, game, targetPlayerId, cfg);
+  const oriented = getBallchasingOrientedScoreForStatGame(safe, game, targetPlayerId, cfg);
   const isOnes = normalizeGameMode(game.mode) === "1v1";
-  const demos = isOnes ? getBallchasingDemoCountForStatGame(safe, game, playerId, cfg) : null;
+  const demos = getBallchasingDemoCountForStatGame(safe, game, targetPlayerId, cfg);
+  const statPatch = row ? {
+    goals:Number(row.goals) || 0,
+    assists:Number(row.assists) || 0,
+    saves:Number(row.saves) || 0,
+    shots:Number(row.shots) || 0,
+    score:Number(row.score) || Number(game.score) || 0,
+    demos:Number.isFinite(Number(demos)) ? Math.max(0, Number(demos)) : (Number(game.demos) || 0),
+    statsSource:"ballchasing",
+    parseStatsFound:true,
+    parseStatsIncomplete:false,
+    ballchasingStatsApplied:true,
+  } : {};
   return {
+    ...statPatch,
     ...(oriented ? { ourScore:oriented.ourScore, theirScore:oriented.theirScore, parseDetectedOurScore:oriented.ourScore, parseDetectedTheirScore:oriented.theirScore, opponentScoreManual:true, result:oriented.ourScore > oriented.theirScore ? "win" : oriented.ourScore < oriented.theirScore ? "loss" : (game.result || null) } : {}),
-    ...(isOnes && Number.isFinite(demos) ? { demos:Math.max(0, demos), demosSource:"ballchasing" } : {}),
+    ...(Number.isFinite(Number(demos)) ? { demos:Math.max(0, Number(demos)), demosSource:"ballchasing" } : {}),
     ballchasingReplayId:safe.id,
     ballchasingReplay:safe,
     ballchasingTimeline:timeline,
@@ -13701,13 +13717,16 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
   const savesInfo = getMatchStatReadout(match, "saves");
   const shotsInfo = getMatchStatReadout(match, "shots");
   const demosInfo = normalizeGameMode(mode) === "1v1" ? getMatchStatReadout(match, "demos") : { value:0, found:false, values:[] };
+  const scoreInfo = getMatchStatReadout(match, "score");
   const goals = goalsInfo.value;
   const assists = assistsInfo.value;
   const saves = savesInfo.value;
   const shots = shotsInfo.value;
+  const score = scoreInfo.value;
   const demos = normalizeGameMode(mode) === "1v1" ? (demosInfo.value || 0) : 0;
-  const parseStatSummary = { goals:goalsInfo, assists:assistsInfo, saves:savesInfo, shots:shotsInfo, ...(normalizeGameMode(mode) === "1v1" ? { demos:demosInfo } : {}) };
-  const parseStatsFound = Object.values(parseStatSummary).some(info => info?.found);
+  const parseStatSummary = { goals:goalsInfo, assists:assistsInfo, saves:savesInfo, shots:shotsInfo, score:scoreInfo, ...(normalizeGameMode(mode) === "1v1" ? { demos:demosInfo } : {}) };
+  const coreParseStatsFound = [goalsInfo, assistsInfo, savesInfo, shotsInfo, ...(normalizeGameMode(mode) === "1v1" ? [demosInfo] : [])].some(info => info?.found);
+  const parseStatsFound = coreParseStatsFound;
   const teamScore = getMatchTeamScoreInfo(match, player);
   const matchStart = getMatchStartInfo(match);
   const detectedOurScore = Number.isFinite(teamScore.ourScore) ? teamScore.ourScore : null;
@@ -13729,6 +13748,7 @@ function parseGameToStatEntry({ sessionCode, player, match, mode, result }) {
     assists: Number(assists) || 0,
     saves: Number(saves) || 0,
     shots: Number(shots) || 0,
+    score: Number(score) || 0,
     demos,
     ourScore: Number.isFinite(detectedOurScore) && (detectedOurScore > 0 || (Number(goals) || 0) <= 0) ? detectedOurScore : (Number(goals) || 0),
     theirScore: Number.isFinite(detectedTheirScore) ? detectedTheirScore : null,
@@ -13823,10 +13843,8 @@ console.log(pulled);
 
     const missingStatPayload = pulled.filter(x => !hasUsableParseStatPayload(x.match, teamRoom.mode));
     if (missingStatPayload.length) {
-      console.warn("Parse found matches without box-score stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, teamRoom.mode) })));
-      setRoomSyncMsg("match found, but tracker stats are still loading — try again in a minute");
-      setRoomSyncing(false);
-      return;
+      console.warn("Parse found matches without box-score stats — importing shell so Ballchasing can fill stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, teamRoom.mode) })));
+      setRoomSyncMsg("match found — Parse stats are missing, importing shell for Ballchasing fill…");
     }
 
     const teamSyncGroup = selectedTeamGroup?.ok ? selectedTeamGroup : getBestPulledTeamSyncGroup(candidateGroups, teamRoom.mode);
@@ -14117,11 +14135,20 @@ const saveBallchasingToStatGames = async (game, patch) => {
   const baseStats = await getFreshStatsForWrite(stats);
   const targetSession = game?.sessionCode || game?.roomId || "";
   const targetMode = normalizeGameMode(game?.mode);
+  const sharedReplay = patch?.ballchasingReplay || null;
+  const sharedTimeline = patch?.ballchasingTimeline || null;
+  const sharedMatchScore = patch?.ballchasingMatchScore || patch?.matchScore || 100;
+  const sharedConfidence = patch?.ballchasingConfidence || "high";
   const upd = baseStats.map(g => {
     const sameSingle = !!game?.id && String(g.id) === String(game.id);
     const sameSession = !!targetSession && (g.sessionCode === targetSession || g.roomId === targetSession) && normalizeGameMode(g.mode) === targetMode;
     if (!sameSingle && !sameSession) return g;
-    return { ...g, ...patch, ballchasingUpdatedAt:new Date().toISOString() };
+    // When one replay is linked to a full team session, each teammate needs their own
+    // Ballchasing row. Do not copy one player's goals/saves/shots onto everyone.
+    const perGamePatch = sharedReplay
+      ? buildStatsBallchasingSavePatch(g, sharedReplay, sharedTimeline, sharedMatchScore, sharedConfidence, g.playerId || currentPlayer, ballchasingCfg)
+      : patch;
+    return { ...g, ...perGamePatch, ballchasingUpdatedAt:new Date().toISOString() };
   });
   await saveStatsEverywhere(upd, setStats);
   return upd;
@@ -14508,11 +14535,9 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       const missingStatPayload = pulled.filter(x => !hasUsableParseStatPayload(x.match, requestedMode));
       if (missingStatPayload.length) {
         const statDebug = missingStatPayload.map(x => `${x.player.name}:${x.match?.id || "no-id"}`).join(", ");
-        console.warn("Parse found matches without box-score stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, requestedMode) })));
-        setSyncDebug("match found but stats not loaded", statDebug || "Try syncing again in a minute.");
-        addToast?.("match found, but live stats are still loading — try sync again in a minute", "⏳");
-        setMatchSyncing(false);
-        return;
+        console.warn("Parse found matches without box-score stats — importing shell so Ballchasing can fill stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, requestedMode) })));
+        setSyncDebug("match found — filling from Ballchasing", statDebug || "Parse has the match but not the box score yet.");
+        addToast?.("match found — importing and checking Ballchasing for stats", "🔎");
       }
 
       if (playersToSync.length > 1) {
@@ -14563,6 +14588,10 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         if (refreshed) {
           setSyncDebug("already synced — refreshing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           await saveStatsEverywhere(updStats, setStats);
+          if (refreshedGames.some(g => g.parseStatsIncomplete)) {
+            setSyncDebug("refreshed shell — checking Ballchasing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
+            try { await findBallchasingForStatGame(refreshedGames[0]); } catch (e) { console.warn("auto Ballchasing fill after refresh failed", e); }
+          }
           if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
           setStatsSubTab("tracker");
           setShowAllGames(true);
@@ -14604,6 +14633,10 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       setSyncDebug("importing match", `match id: ${pulled[0]?.match?.id || "unknown"} · ${importedGames.length} row${importedGames.length === 1 ? "" : "s"}`);
       const updStats = [...importedGames, ...freshSyncStats];
       await saveStatsEverywhere(updStats, setStats);
+      if (importedGames.some(g => g.parseStatsIncomplete)) {
+        setSyncDebug("imported shell — checking Ballchasing", `${sessionCode} ${requestedMode} · Parse stats were missing`);
+        try { await findBallchasingForStatGame(importedGames[0]); } catch (e) { console.warn("auto Ballchasing fill after import failed", e); }
+      }
       // APP112F: after a successful sync, jump the Stats UI to the matching tracker mode and open all days
       // so the imported game is visible instead of saved but hidden below collapsed groups.
       if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
