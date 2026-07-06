@@ -12623,7 +12623,7 @@ async function fetchParseBotJson(endpoint, params = {}, attempts = 3) {
   throw lastErr || new Error(`${endpoint} unavailable`);
 }
 
-async function fetchLatestParseMatchForPlayer(player, playlist) {
+async function fetchParseMatchCandidatesForPlayer(player, playlist, limit = 8) {
   const mode = playlist === "Ranked Duel 1v1" ? "1v1" : playlist === "Ranked Doubles 2v2" ? "2v2" : "3v3";
   const handles = [player?.handle, player?.trackerName, player?.name]
     .filter(Boolean)
@@ -12631,41 +12631,107 @@ async function fetchLatestParseMatchForPlayer(player, playlist) {
   const platforms = [player?.platform, "epic", "psn", "xbl", "steam"]
     .filter(Boolean)
     .filter((v, i, arr) => arr.indexOf(v) === i);
-  let bestFallback = null;
-  let bestNoStatFallback = null;
+  const exactPlaylistUsable = [];
+  const exactPlaylistFallbacks = [];
+  const anyUsableFallbacks = [];
   let lastErr = null;
+
+  const addUnique = (bucket, match, source = {}) => {
+    if (!match || typeof match !== "object") return;
+    const stable = getParseMatchStableId(match) || match?.id || `${getParseDateMs(match)}_${match?.metadata?.playlist || match?.playlist || ""}_${match?.metadata?.result || match?.result || ""}`;
+    const key = `${stable}_${getParseDateMs(match)}`;
+    const alreadyKnown = exactPlaylistUsable.concat(exactPlaylistFallbacks, anyUsableFallbacks).some(m => {
+      const knownStable = getParseMatchStableId(m) || m?.id || `${getParseDateMs(m)}_${m?.metadata?.playlist || m?.playlist || ""}_${m?.metadata?.result || m?.result || ""}`;
+      return `${knownStable}_${getParseDateMs(m)}` === key;
+    });
+    if (alreadyKnown) return;
+    bucket.push({ ...match, __syncSource: source });
+  };
 
   for (const platform of platforms) {
     for (const handle of handles) {
       try {
         const json = await fetchParseBotJson("get_player_sessions", { platform, username: handle }, 3);
-        const matches = getParseMatchesFromJson(json);
-        const candidates = matches
-          .filter(match => parseMatchMatchesPlaylist(match, playlist))
-          .sort((a,b)=>getParseDateMs(b)-getParseDateMs(a));
-
-        // Best path: latest matching game with real player box-score stats.
-        const usable = candidates.find(match => hasUsableParseStatPayload(match, mode));
-        if (usable) return usable;
-
-        // Keep a fallback from this exact playlist so UI can say stats are still loading, not hard-fail.
-        if (!bestNoStatFallback && candidates[0]) bestNoStatFallback = candidates[0];
-
-        // Last-ditch: if Parse labels the playlist differently, use any latest match that clearly has the correct stat payload.
-        const anyUsable = matches
+        const matches = getParseMatchesFromJson(json).sort((a,b)=>getParseDateMs(b)-getParseDateMs(a));
+        const candidates = matches.filter(match => parseMatchMatchesPlaylist(match, playlist));
+        candidates.forEach(match => {
+          if (hasUsableParseStatPayload(match, mode)) addUnique(exactPlaylistUsable, match, { platform, handle, reason:"exact_playlist_usable" });
+          else addUnique(exactPlaylistFallbacks, match, { platform, handle, reason:"exact_playlist_waiting_stats" });
+        });
+        matches
           .filter(match => hasUsableParseStatPayload(match, mode))
-          .sort((a,b)=>getParseDateMs(b)-getParseDateMs(a))[0];
-        if (!bestFallback && anyUsable) bestFallback = anyUsable;
+          .forEach(match => addUnique(anyUsableFallbacks, match, { platform, handle, reason:"any_playlist_usable" }));
       } catch (e) {
         lastErr = e;
       }
     }
   }
 
-  if (bestNoStatFallback) return bestNoStatFallback;
-  if (bestFallback) return bestFallback;
-  console.warn("Parse sessions unavailable", { player: player?.name, playlist, error: lastErr?.message || lastErr });
-  return null;
+  const merged = [...exactPlaylistUsable, ...exactPlaylistFallbacks, ...anyUsableFallbacks]
+    .sort((a,b)=>getParseDateMs(b)-getParseDateMs(a));
+  if (!merged.length) {
+    console.warn("Parse sessions unavailable", { player: player?.name, playlist, error: lastErr?.message || lastErr });
+  }
+  return merged.slice(0, Math.max(1, Number(limit) || 8));
+}
+
+async function fetchLatestParseMatchForPlayer(player, playlist) {
+  const candidates = await fetchParseMatchCandidatesForPlayer(player, playlist, 1);
+  return candidates[0] || null;
+}
+
+function getBestPulledTeamSyncGroup(candidateGroups = [], requestedMode = "3v3") {
+  const groups = (candidateGroups || []).map(group => ({
+    player: group?.player,
+    candidates: Array.isArray(group?.candidates) ? group.candidates.filter(Boolean).slice(0, 8) : [],
+  }));
+  const latestPulled = groups.map(group => ({ player: group.player, match: group.candidates[0] || null }));
+  if (!groups.length || groups.some(group => !group.candidates.length)) {
+    return { ok:false, pulled:latestPulled, reason:"missing_candidates", debug:"Parse did not return a recent candidate for every player." };
+  }
+
+  let combos = [[]];
+  for (const group of groups) {
+    const next = [];
+    for (const combo of combos) {
+      for (const match of group.candidates) next.push([...combo, { player:group.player, match }]);
+    }
+    combos = next;
+  }
+
+  let best = null;
+  let bestRejected = null;
+  for (const pulled of combos) {
+    const validation = validatePulledTeamSyncGroup(pulled, requestedMode);
+    const infos = validation?.infos || pulled.map(getPulledTeamSyncTiming);
+    const collectedTimes = infos.map(i => i.collectedMs).filter(Number.isFinite);
+    const startTimes = infos.map(i => i.startMs).filter(Number.isFinite);
+    const newest = Math.max(...[...collectedTimes, ...startTimes].filter(Number.isFinite), 0);
+    const spread = Number.isFinite(validation?.spreadMs) ? validation.spreadMs : getTimeSpreadMs(collectedTimes.length === pulled.length ? collectedTimes : startTimes);
+    const scoreSigs = infos.map(i => i.scoreSig).filter(Boolean);
+    const sameScore = scoreSigs.length === pulled.length && scoreSigs.every(sig => sig === scoreSigs[0]);
+    const ids = infos.map(i => i.stableId).filter(Boolean);
+    const sameId = ids.length === pulled.length && ids.every(id => id === ids[0]);
+    const reliableCount = infos.filter(i => i.startReliable).length;
+    const resultCount = infos.filter(i => String(i.result || "").trim()).length;
+    const usableCount = pulled.filter(x => hasUsableParseStatPayload(x.match, requestedMode)).length;
+    const score =
+      (sameId ? 1000000 : 0) +
+      (validation.ok ? 500000 : 0) +
+      (sameScore ? 120000 : 0) +
+      (reliableCount * 25000) +
+      (usableCount * 20000) +
+      (resultCount * 6000) -
+      Math.round((Number.isFinite(spread) ? spread : 999999999) / 1000) +
+      Math.round(newest / 100000000);
+    const entry = { ...validation, pulled, score, spreadMs:spread, debug:validation.debug || formatTeamSyncTimingDebug(infos) };
+    if (validation.ok) {
+      if (!best || entry.score > best.score) best = entry;
+    } else if (!bestRejected || entry.score > bestRejected.score) {
+      bestRejected = entry;
+    }
+  }
+  return best || bestRejected || { ok:false, pulled:latestPulled, reason:"no_candidate_group", debug:formatTeamSyncTimingDebug(latestPulled.map(getPulledTeamSyncTiming)) };
 }
 
 
@@ -13020,6 +13086,7 @@ function getMatchStartInfo(match) {
 }
 
 
+// APP140_TEAM_SYNC_RECENT_CANDIDATE_GROUP_PATCH
 // APP139_TEAM_SYNC_TIME_GRACE_PATCH
 // Tracker/Parse can expose dateCollected as the time each player's uploaded session was indexed,
 // not the actual kickoff time. Team sync should group by the best real start signal first,
@@ -13028,6 +13095,7 @@ function getMatchStartInfo(match) {
 const TEAM_SYNC_RELIABLE_TIME_WINDOW_MS = 15 * 60 * 1000;
 const TEAM_SYNC_COLLECTED_GRACE_MS = 30 * 60 * 1000;
 const TEAM_SYNC_SCORE_CONFIRMED_GRACE_MS = 75 * 60 * 1000;
+const TEAM_SYNC_USABLE_STATS_GRACE_MS = 2 * 60 * 60 * 1000;
 
 function getParseCollectedTimeMs(match = {}) {
   const metadata = match?.metadata || {};
@@ -13069,6 +13137,9 @@ function getTeamSyncScoreSignature(match = {}, player = null) {
   const our = Number(teamScore?.ourScore);
   const their = Number(teamScore?.theirScore);
   if (!Number.isFinite(our) || !Number.isFinite(their)) return "";
+  // Parse/Tracker can expose placeholder team-score fields as 0-0 even after a completed game.
+  // Treat that as unknown so it does not confirm or reject a real shared team sync.
+  if (our === 0 && their === 0) return "";
   return `${our}-${their}`;
 }
 
@@ -13134,6 +13205,11 @@ function validatePulledTeamSyncGroup(pulled = [], requestedMode = "3v3") {
 
   if (sameResult && collectedTimes.length === rows.length && collectedSpread <= TEAM_SYNC_COLLECTED_GRACE_MS) {
     return { ok:true, reason:"same_result_collected_grace", infos, spreadMs:collectedSpread };
+  }
+
+  const allHaveUsableStats = rows.every(row => hasUsableParseStatPayload(row?.match, requestedMode));
+  if (allHaveUsableStats && collectedTimes.length === rows.length && collectedSpread <= TEAM_SYNC_USABLE_STATS_GRACE_MS) {
+    return { ok:true, reason:"usable_stats_collected_grace", infos, spreadMs:collectedSpread };
   }
 
   return {
@@ -13717,14 +13793,17 @@ const syncRoomFromParse = async () => {
 
   try {
     const freshRoomStats = await getFreshStatsForWrite(stats);
-    const pulled = await Promise.all(
-      PLAYERS
-  .filter(p => teamRoom.players.includes(p.id))
-  .map(async (p) => ({
+    const roomPlayers = PLAYERS.filter(p => teamRoom.players.includes(p.id));
+    const candidateGroups = await Promise.all(
+      roomPlayers.map(async (p) => ({
         player: p,
-        match: await fetchLatest3v3ForPlayer(p, teamRoom.createdAt),
+        candidates: await fetchParseMatchCandidatesForPlayer(p, teamRoom.playlist, roomPlayers.length > 1 ? 8 : 1),
       }))
     );
+    const selectedTeamGroup = roomPlayers.length > 1
+      ? getBestPulledTeamSyncGroup(candidateGroups, teamRoom.mode)
+      : { ok:true, pulled:candidateGroups.map(g => ({ player:g.player, match:g.candidates?.[0] || null })) };
+    const pulled = selectedTeamGroup.pulled || candidateGroups.map(g => ({ player:g.player, match:g.candidates?.[0] || null }));
     
     
     console.log("========== PULLED ==========");
@@ -13750,23 +13829,24 @@ console.log(pulled);
       return;
     }
 
-    const teamSyncGroup = validatePulledTeamSyncGroup(pulled, teamRoom.mode);
+    const teamSyncGroup = selectedTeamGroup?.ok ? selectedTeamGroup : getBestPulledTeamSyncGroup(candidateGroups, teamRoom.mode);
     
     console.log("MATCH DATES:", pulled.map(x => ({
   player: x.player.name,
-  date: x.match.metadata.dateCollected,
-  result: x.match.metadata.result,
-  id: x.match.id
+  date: x.match?.metadata?.dateCollected,
+  result: x.match?.metadata?.result || x.match?.result,
+  id: x.match?.id,
+  score:getTeamSyncScoreSignature(x.match, x.player)
 })));
     console.log("TEAM SYNC GROUP:", teamSyncGroup);
 
-    const results = pulled.map(x => x.match.metadata.result);
-    const sameResult = results.every(r => r === results[0]);
+    const results = pulled.map(x => String(x.match?.metadata?.result || x.match?.result || "").toLowerCase()).filter(Boolean);
+    const sameResult = results.length < 2 || results.every(r => r === results[0]);
     console.log("SAME RESULT:", sameResult);
 console.log("RESULTS:", results);
 
  if (!teamSyncGroup.ok) {
-      setRoomSyncMsg(`found games, but they still don't look like the same match yet${teamSyncGroup.debug ? ` · ${teamSyncGroup.debug}` : ""}`);
+      setRoomSyncMsg(`found recent games, but they still don't look like the same match yet${teamSyncGroup.debug ? ` · ${teamSyncGroup.debug}` : ""}`);
       setRoomSyncing(false);
       return;
     }
@@ -14406,12 +14486,16 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       setSyncDebug(`fetching latest ${requestedMode} match`, `playlist: ${playlist} · ${identityList}`);
       addToast?.(`syncing latest ${requestedMode} match…`, "🔄");
       const freshSyncStats = await getFreshStatsForWrite(stats);
-      const pulled = await Promise.all(
+      const candidateGroups = await Promise.all(
         resolvedPlayersToSync.map(async (p) => ({
           player: p,
-          match: await fetchLatestParseMatchForPlayer(p, playlist),
+          candidates: await fetchParseMatchCandidatesForPlayer(p, playlist, resolvedPlayersToSync.length > 1 ? 8 : 1),
         }))
       );
+      const selectedTeamGroup = resolvedPlayersToSync.length > 1
+        ? getBestPulledTeamSyncGroup(candidateGroups, requestedMode)
+        : { ok:true, pulled:candidateGroups.map(g => ({ player:g.player, match:g.candidates?.[0] || null })) };
+      const pulled = selectedTeamGroup.pulled || candidateGroups.map(g => ({ player:g.player, match:g.candidates?.[0] || null }));
 
       if (pulled.some(x => !x.match)) {
         const missing = pulled.filter(x => !x.match).map(x => `${x.player.name}:${x.player.platform}/${x.player.handle}`).join(", ");
@@ -14432,20 +14516,20 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       }
 
       if (playersToSync.length > 1) {
-        const teamSyncGroup = validatePulledTeamSyncGroup(pulled, requestedMode);
+        const teamSyncGroup = selectedTeamGroup?.ok ? selectedTeamGroup : getBestPulledTeamSyncGroup(candidateGroups, requestedMode);
         if (!teamSyncGroup.ok) {
           const mins = Number.isFinite(teamSyncGroup.spreadMs) ? Math.round(teamSyncGroup.spreadMs / 60000) : "?";
-          setSyncDebug("team match mismatch", `${requestedMode} latest matches still do not look like one shared game. Spread: ${mins}m. ${teamSyncGroup.debug || ""}`);
-          addToast?.(`latest games don't look like the same ${requestedMode} match yet`, "⚠️");
+          setSyncDebug("team match mismatch", `${requestedMode} recent matches still do not look like one shared game. Spread: ${mins}m. ${teamSyncGroup.debug || ""}`);
+          addToast?.(`recent games don't look like the same ${requestedMode} match yet`, "⚠️");
           setMatchSyncing(false);
           return;
         }
 
-        const results = pulled.map(x => x.match.metadata.result);
-        const sameResult = results.every(r => r === results[0]);
+        const results = pulled.map(x => String(x.match?.metadata?.result || x.match?.result || "").toLowerCase()).filter(Boolean);
+        const sameResult = results.length < 2 || results.every(r => r === results[0]);
         if (!sameResult) {
-          setSyncDebug("team result mismatch", `Latest ${requestedMode} results from Parse do not match yet.`);
-          addToast?.(`latest ${requestedMode} results do not match yet`, "⚠️");
+          setSyncDebug("team result mismatch", `Recent ${requestedMode} results from Parse do not match yet.`);
+          addToast?.(`recent ${requestedMode} results do not match yet`, "⚠️");
           setMatchSyncing(false);
           return;
         }
