@@ -100,6 +100,7 @@ import { createPortal } from "react-dom";
 // APP141_BALLCHASING_PLAYER_CARD_ONLY_NO_TIMELINE_PATCH
 // APP140_BALLCHASING_CARD_OPEN_TIMESTAMP_PATCH
 // APP143_FILM_ROOM_SYNC_JOBS_CARL2_PATCH
+// APP144_FILM_ROOM_IFRAME_FALLBACK_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -13771,6 +13772,12 @@ function getBallchasing3DViewerUrl(replayOrId = "") {
   if (id) return `https://ballchasing.com/replay/${id}`;
   return String(raw || "").replace("/api/replays/", "/replay/");
 }
+function getBallchasingWatchUrl(replayOrId = "") {
+  const base = getBallchasing3DViewerUrl(replayOrId);
+  if (!base) return "";
+  const clean = String(base).replace("/api/replays/", "/replay/").split("#")[0];
+  return `${clean}#watch`;
+}
 function getFilmRoomGameKey(game = {}) {
   const replayId = getGameBallchasingId(game);
   if (replayId) return `bc_${replayId}`;
@@ -13902,8 +13909,16 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   const isAdmin = currentPlayer === ADMIN_ID;
   const [openId, setOpenId] = useState(entries[0]?.id || null);
   const [uploading, setUploading] = useState(false);
+  const [viewerLoading, setViewerLoading] = useState(true);
+  const [viewerTimedOut, setViewerTimedOut] = useState(false);
   useEffect(()=>{ if (backfillPatch?.changed) { setBurtonOS?.(backfillPatch.os); storeSetWithPush(BURTON_OS_KEY, backfillPatch.os).catch(() => storeSet(BURTON_OS_KEY, backfillPatch.os)); } }, [backfillPatch?.changed]);
   useEffect(()=>{ if (!openId && entries[0]?.id) setOpenId(entries[0].id); }, [entries.length, openId]);
+  useEffect(()=>{
+    setViewerLoading(true);
+    setViewerTimedOut(false);
+    const timer = setTimeout(() => setViewerTimedOut(true), 14000);
+    return () => clearTimeout(timer);
+  }, [openId]);
   const saveFilmEntries = async (nextEntries, msg = "Film Room updated", icon = "🎥") => {
     const nextOS = normalizeBurtonOS({ ...os, filmRoomEntries:normalizeFilmRoomEntries(nextEntries) });
     setBurtonOS?.(nextOS);
@@ -13948,6 +13963,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   };
   if (!entries.length) return <EmptyState icon="🎥" title="No Film Room replays yet" body="Sync a Ballchasing/Rockpload game and the app will create a lightweight Film Room card here." />;
   const openEntry = entries.find(e => e.id === openId) || entries[0];
+  const openEntryWatchUrl = getBallchasingWatchUrl(openEntry?.ballchasingUrl || openEntry?.replayId || "");
   const severityColor = (sev) => sev === "good" ? "#7CFFB2" : sev === "warning" ? "#FFD166" : "#A78BFA";
   return (
     <div style={{display:"grid",gap:12}}>
@@ -13967,13 +13983,32 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
             <div style={{fontSize:17,color:"#E8ECF4",fontWeight:950,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{openEntry.mode} · {openEntry.scoreText || "score ?"}</div>
             <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>{(openEntry.players || []).map(p=>p.name).join(" · ")}</div>
           </div>
-          {openEntry.ballchasingUrl && <button onClick={()=>window.open(openEntry.ballchasingUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.11)",border:"1px solid rgba(77,158,255,.26)",borderRadius:12,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer",whiteSpace:"nowrap"}}>3D replay</button>}
+          {openEntryWatchUrl && <button onClick={()=>window.open(openEntryWatchUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.11)",border:"1px solid rgba(77,158,255,.26)",borderRadius:12,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer",whiteSpace:"nowrap"}}>3D replay</button>}
         </div>
-        {openEntry.ballchasingUrl && (
-          <div style={{background:"#000",border:"1px solid rgba(77,158,255,.18)",borderRadius:16,overflow:"hidden",marginBottom:12}}>
-            <div style={{position:"relative",paddingTop:"56.25%"}}>
-              <iframe title="Ballchasing 3D viewer" src={openEntry.ballchasingUrl} loading="lazy" allow="fullscreen; clipboard-read; clipboard-write" allowFullScreen style={{position:"absolute",inset:0,width:"100%",height:"100%",border:0,background:"#000"}} />
-            </div>
+        {openEntryWatchUrl && (
+          <div style={{position:"relative",background:"#000",border:"1px solid rgba(77,158,255,.18)",borderRadius:16,overflow:"hidden",marginBottom:12,minHeight:220}}>
+            <iframe
+              key={openEntryWatchUrl}
+              title="Ballchasing 3D replay"
+              src={openEntryWatchUrl}
+              allow="fullscreen; autoplay; clipboard-read; clipboard-write"
+              allowFullScreen
+              onLoad={()=>setViewerLoading(false)}
+              style={{width:"100%",height:260,border:0,display:"block",background:"#000"}}
+            />
+            {viewerLoading && (
+              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",textAlign:"center",flexDirection:"column",gap:9,background:"linear-gradient(135deg,#07111F,#000)",padding:18}}>
+                <div style={{width:28,height:28,borderRadius:999,border:"3px solid rgba(77,158,255,.24)",borderTopColor:"#4D9EFF",animation:"bbSpin .85s linear infinite"}} />
+                <div style={{fontSize:13,color:"#E8ECF4",fontWeight:950}}>preparing 3D replay…</div>
+                <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,maxWidth:310}}>Loading the Ballchasing watch view inside Film Room. This can take a few seconds while the replay viewer prepares.</div>
+              </div>
+            )}
+            {viewerTimedOut && (
+              <div style={{position:"absolute",left:10,right:10,bottom:10,background:"rgba(0,0,0,.74)",border:"1px solid rgba(77,158,255,.22)",borderRadius:12,padding:9,display:"flex",gap:8,alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{fontSize:10,color:"#8B92A8",lineHeight:1.25}}>Still loading? Open it directly if iOS blocks the embedded viewer.</div>
+                <button onClick={()=>window.open(openEntryWatchUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.16)",border:"1px solid rgba(77,158,255,.34)",borderRadius:10,padding:"7px 8px",fontSize:9.5,fontWeight:950,color:"#4D9EFF",cursor:"pointer",whiteSpace:"nowrap"}}>open</button>
+              </div>
+            )}
           </div>
         )}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
