@@ -101,6 +101,7 @@ import { createPortal } from "react-dom";
 // APP140_BALLCHASING_CARD_OPEN_TIMESTAMP_PATCH
 // APP143_FILM_ROOM_SYNC_JOBS_CARL2_PATCH
 // APP144_FILM_ROOM_IFRAME_FALLBACK_PATCH
+// APP145_ADVANCED_REVIEW_STATUS_PERSIST_FIX
 // APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
 // APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
 // ===================== Constants =====================
@@ -14152,6 +14153,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   const [openId, setOpenId] = useState(entries[0]?.id || null);
   const [uploading, setUploading] = useState(false);
   const [parserRunning, setParserRunning] = useState(false);
+  const [parserLocalById, setParserLocalById] = useState({});
   const [viewerLoading, setViewerLoading] = useState(true);
   const [viewerTimedOut, setViewerTimedOut] = useState(false);
   useEffect(()=>{ if (backfillPatch?.changed) { setBurtonOS?.(backfillPatch.os); storeSetWithPush(BURTON_OS_KEY, backfillPatch.os).catch(() => storeSet(BURTON_OS_KEY, backfillPatch.os)); } }, [backfillPatch?.changed]);
@@ -14171,6 +14173,28 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   const updateEntry = async (entryId, updater, msg, icon) => {
     const next = entries.map(e => e.id === entryId ? normalizeFilmRoomEntries([typeof updater === "function" ? updater(e) : { ...e, ...updater }])[0] : e);
     await saveFilmEntries(next, msg, icon);
+  };
+
+  const mergeFilmRoomEntryPatch = (entry = {}, patch = {}) => normalizeFilmRoomEntries([{
+    ...entry,
+    ...patch,
+    deepReview:{ ...(entry.deepReview || {}), ...(patch.deepReview || {}) },
+    advancedReview:{ ...(entry.advancedReview || {}), ...(patch.advancedReview || {}) },
+    clips:patch.clips || entry.clips || [],
+    carl2Assets:patch.carl2Assets || entry.carl2Assets || [],
+    reviewNotes:patch.reviewNotes || entry.reviewNotes || [],
+    updatedAt:new Date().toISOString(),
+  }])[0];
+
+  const rememberParserPatch = (entryId, patch = {}) => {
+    if (!entryId) return;
+    setParserLocalById(prev => {
+      const current = prev?.[entryId] || {};
+      return {
+        ...(prev || {}),
+        [entryId]: mergeFilmRoomEntryPatch(current, patch),
+      };
+    });
   };
   const addClip = async (entry) => {
     const url = prompt("Paste PS App / Xbox clip link");
@@ -14220,6 +14244,14 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
     if (!entry || parserRunning) return;
     setParserRunning(true);
     const startedAt = new Date().toISOString();
+    rememberParserPatch(entry.id, {
+      advancedReview:{
+        status:"backend_running",
+        parserMessage:"Backend parser is running. This local status is pinned so live sync cannot snap the card back to none.",
+        generatedAt:startedAt,
+      },
+      deepReview:{ status:"parsing", summary:"Native backend parser is running." },
+    });
     try {
       await updateEntry(entry.id, e => ({
         ...e,
@@ -14248,6 +14280,15 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
       if (!res.ok || !json?.ok) throw new Error(json?.error || `backend parser failed (${res.status})`);
       const report = normalizeAdvancedBackendReport(json.report || json);
       if (!report) throw new Error("backend parser returned no report");
+      rememberParserPatch(entry.id, {
+        advancedReview:{
+          status:report.status || "backend_ready",
+          parserMessage:report.parserMessage || "Native backend coach report generated.",
+          backendReport:report,
+          generatedAt:report.generatedAt || new Date().toISOString(),
+        },
+        deepReview:{ status:"ready", completedAt:new Date().toISOString(), summary:"Native backend coach report generated." },
+      });
       await updateEntry(entry.id, e => ({
         ...e,
         advancedReview:{
@@ -14262,6 +14303,15 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
     } catch (err) {
       const nativeReview = buildNativeAdvancedReview(entry, stats);
       const fallbackReport = buildClientFallbackAdvancedBackendReport(entry, stats, nativeReview, err);
+      rememberParserPatch(entry.id, {
+        advancedReview:{
+          status:"backend_client_fallback",
+          parserMessage:fallbackReport?.parserMessage || err?.message || "backend parser failed; local fallback saved",
+          backendReport:fallbackReport,
+          generatedAt:new Date().toISOString(),
+        },
+        deepReview:{ status:"ready", completedAt:new Date().toISOString(), summary:"Local fallback coach report generated because the backend route did not complete." },
+      });
       addToast?.("backend route failed — saved local report", "⚠️");
       await updateEntry(entry.id, e => ({
         ...e,
@@ -14279,7 +14329,9 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
     }
   };
   if (!entries.length) return <EmptyState icon="🎥" title="No Film Room replays yet" body="Sync a Ballchasing/Rockpload game and the app will create a lightweight Film Room card here." />;
-  const openEntry = entries.find(e => e.id === openId) || entries[0];
+  const rawOpenEntry = entries.find(e => e.id === openId) || entries[0];
+  const openEntryLocalPatch = rawOpenEntry?.id ? parserLocalById?.[rawOpenEntry.id] : null;
+  const openEntry = openEntryLocalPatch ? mergeFilmRoomEntryPatch(rawOpenEntry, openEntryLocalPatch) : rawOpenEntry;
   const openEntryWatchUrl = getBallchasingWatchUrl(openEntry?.ballchasingUrl || openEntry?.replayId || "");
   const advancedStatusText = parserRunning
     ? "parsing"
