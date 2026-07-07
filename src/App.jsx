@@ -110,6 +110,7 @@ import { createPortal } from "react-dom";
 // APP147_FAST_PARSE_FIRST_SYNC_UI_CPU_PATCH
 // APP146_FILMROOM_VISUALS_SOCIAL_STABILITY_CPU_PATCH
 // APP148_JOB_FRESH_START_PROGRESS_LOCK_PATCH
+// APP149_JOB_3V3_STALE_LOCK_RESET_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -3310,6 +3311,52 @@ function normalizeFilmRoomEntries(input = []) {
   }).sort((a,b)=>safeDateObj(b.createdAt).getTime()-safeDateObj(a.createdAt).getTime()).slice(0,120);
 }
 
+
+// APP149_JOB_3V3_STALE_LOCK_RESET_PATCH
+// Old saved 3v3/team jobs from earlier builds could keep every 3s slot marked "filled"
+// even after the fresh-start logic was fixed. Only jobs created by this schema are allowed
+// to lock a 3v3 slot now; legacy 3v3 reserved/active jobs are auto-released on load.
+const JOB_FRESH_SCHEMA_VERSION = "fresh_start_v3";
+function isThreeVThreeJob(job = {}) {
+  const jobMode = String(job?.jobMode || "").toLowerCase();
+  const gameMode = normalizeGameMode(job?.gameMode || job?.mode || "");
+  return jobMode === "team" || gameMode === "3v3";
+}
+function jobHasFreshStartSchema(job = {}) {
+  return String(job?.jobFreshSchemaVersion || job?.freshJobVersion || "") === JOB_FRESH_SCHEMA_VERSION;
+}
+function releaseLegacyThreeVThreeJobs(rawJobs = []) {
+  const nowIso = new Date().toISOString();
+  return (Array.isArray(rawJobs) ? rawJobs : []).filter(Boolean).map(job => {
+    const status = String(job?.status || "").toLowerCase();
+    const live = status === "reserved" || status === "active";
+    const staleThree = live && isThreeVThreeJob(job) && !jobHasFreshStartSchema(job);
+    if (!staleThree) {
+      if (status === "reserved") {
+        return {
+          ...job,
+          progress:0,
+          lastProgressAt:null,
+          lastProgressTotal:null,
+          lastSyncedGameIds:Array.isArray(job?.lastSyncedGameIds) ? job.lastSyncedGameIds : [],
+        };
+      }
+      return job;
+    }
+    return {
+      ...job,
+      status:"released",
+      releasedAt:job?.releasedAt || nowIso,
+      releasedBy:job?.releasedBy || "system",
+      releaseReason:job?.releaseReason || "stale_3v3_job_lock_reset",
+      progress:0,
+      lastProgressAt:null,
+      lastProgressTotal:null,
+      lastSyncedGameIds:[],
+    };
+  }).slice(0,80);
+}
+
 function normalizeBurtonOS(input = {}) {
   const src = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const settings = src.settings && typeof src.settings === "object" ? src.settings : {};
@@ -3344,7 +3391,7 @@ function normalizeBurtonOS(input = {}) {
     curses: src.curses && typeof src.curses === "object" && !Array.isArray(src.curses) ? src.curses : {},
     blessings: src.blessings && typeof src.blessings === "object" && !Array.isArray(src.blessings) ? src.blessings : {},
     courtTitles: src.courtTitles && typeof src.courtTitles === "object" && !Array.isArray(src.courtTitles) ? src.courtTitles : {},
-    jobs: Array.isArray(src.jobs) ? src.jobs.filter(Boolean).slice(0, 80) : [],
+    jobs: releaseLegacyThreeVThreeJobs(src.jobs),
     schedule: src.schedule && typeof src.schedule === "object" && !Array.isArray(src.schedule) ? { availability:src.schedule.availability && typeof src.schedule.availability === "object" ? src.schedule.availability : {}, events:Array.isArray(src.schedule.events) ? src.schedule.events.filter(Boolean).slice(0, 80) : [] } : { availability:{}, events:[] },
     appeals: Array.isArray(src.appeals) ? src.appeals.filter(Boolean).slice(0, 80) : [],
     stockLedger: src.stockLedger && typeof src.stockLedger === "object" && !Array.isArray(src.stockLedger) ? src.stockLedger : {},
@@ -4238,7 +4285,7 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
     const payout = Math.round(Number(diff.payout || 0) * multiplier);
     const jobMinutes = getJobTimeLimitMinutes(difficulty, selectedMode, diff.minutes);
     const now = new Date().toISOString();
-    const job={ id:`job_${Date.now()}_${currentPlayer}`, slotKey, templateId:template.id, playerId:currentPlayer, playerIds:selectedPlayerIds, playerName:playerNameById(currentPlayer), playerNames:selectedPlayerIds.map(playerNameById), jobMode:selectedMode, gameMode:activeGameMode, title:template.title, emoji:template.emoji, desc:template.desc, challengeText:template.challengeText, challengeList, challengeRules, shiftId:meta?.id, shiftLabel:meta?.label, shiftEmoji:meta?.emoji, shiftMultiplier:multiplier, difficulty, payout, basePayout:diff.payout, required:diff.challenges, minutes:jobMinutes, slotLabel, startAt:startAt.toISOString(), reminderAt:reminderAt.toISOString(), reminderMinutes, acceptedAt:now, expiresAt:new Date(startAt.getTime()+jobMinutes*60000).toISOString(), syncGraceMinutes:15, syncGraceUntil:new Date(startAt.getTime()+(jobMinutes+15)*60000).toISOString(), status:"reserved" };
+    const job={ id:`job_${Date.now()}_${currentPlayer}`, slotKey, templateId:template.id, playerId:currentPlayer, playerIds:selectedPlayerIds, playerName:playerNameById(currentPlayer), playerNames:selectedPlayerIds.map(playerNameById), jobMode:selectedMode, gameMode:activeGameMode, title:template.title, emoji:template.emoji, desc:template.desc, challengeText:template.challengeText, challengeList, challengeRules, shiftId:meta?.id, shiftLabel:meta?.label, shiftEmoji:meta?.emoji, shiftMultiplier:multiplier, difficulty, payout, basePayout:diff.payout, required:diff.challenges, minutes:jobMinutes, slotLabel, startAt:startAt.toISOString(), reminderAt:reminderAt.toISOString(), reminderMinutes, acceptedAt:now, expiresAt:new Date(startAt.getTime()+jobMinutes*60000).toISOString(), syncGraceMinutes:15, syncGraceUntil:new Date(startAt.getTime()+(jobMinutes+15)*60000).toISOString(), status:"reserved", jobFreshSchemaVersion:JOB_FRESH_SCHEMA_VERSION, progressBaseline:"reserved_zero", progressStartedAt:null, progress:0, lastProgressAt:null, lastProgressTotal:null, lastSyncedGameIds:[] };
     await save({ ...os, jobs:[job, ...jobs].slice(0,140), history:[{id:`hist_job_${Date.now()}`,type:"job",emoji:template.emoji,title:`${selectedPlayerIds.map(playerNameById).join(" + ")} claimed ${template.title}`,text:`${slotLabel} · ${meta?.label || "shift"} · ${selectedMode}/${activeGameMode} · ${difficulty} · pays ${payout} pts each`,color:"#B8FF4D",ts:now}, ...(os.history||[])].slice(0,90) }, "job slot claimed", template.emoji || "📋");
     setViewJobId(job.id);
   };
@@ -4272,6 +4319,7 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
         expiresAt,
         syncGraceMinutes:15,
         syncGraceUntil,
+        jobFreshSchemaVersion:JOB_FRESH_SCHEMA_VERSION,
         progressBaseline:"fresh_start",
         progress:0,
         lastProgressAt:null,
@@ -18059,7 +18107,11 @@ function jobIncludesPlayer(job, playerId) {
   return getJobParticipantIds(job).map(String).includes(pid);
 }
 function isSameJobSlotFilled(job, slotKey) {
-  return job?.slotKey === slotKey && ["reserved","active"].includes(job?.status);
+  if (!job || job.slotKey !== slotKey) return false;
+  if (!["reserved","active"].includes(job.status)) return false;
+  // Legacy 3v3/team jobs from old builds should not keep the board locked.
+  if (isThreeVThreeJob(job) && !jobHasFreshStartSchema(job)) return false;
+  return true;
 }
 function getJobGameUnitKey(g) {
   const mode = normalizeGameMode(g?.mode || "game");
@@ -18163,6 +18215,9 @@ function syncedGameLooksLikeJobCandidate(game = {}, job = {}, mode = "any") {
 function evaluateJobChallengeRule(rule, job, stats = []) {
   const ids = getJobParticipantIds(job);
   const target = Math.max(1, Number(rule.target) || 1);
+  if (isThreeVThreeJob(job) && !jobHasFreshStartSchema(job)) {
+    return { current:0, target, done:false, games:[], legacyReset:true };
+  }
   const rawStartedAt = job?.manualStartedAt || (job?.progressBaseline === "fresh_start" ? (job?.progressStartedAt || job?.startedAt) : null);
   const start = rawStartedAt ? safeDateObj(rawStartedAt, null) : null;
 
