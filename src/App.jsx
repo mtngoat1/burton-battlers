@@ -104,6 +104,7 @@ import { createPortal } from "react-dom";
 // APP145_ADVANCED_REVIEW_STATUS_PERSIST_FIX
 // APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
 // APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
+// APP146_FILM_ROOM_CLIP_FEED_CLEAN_PATCH
 // APP146_FILMROOM_VISUALS_SOCIAL_STABILITY_CPU_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
@@ -14480,6 +14481,18 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
     : ((openEntry?.advancedReview?.status && openEntry.advancedReview.status !== "not_started") ? openEntry.advancedReview.status : (openEntry?.deepReview?.status || "none"));
   const advancedStatusMessage = openEntry?.advancedReview?.parserMessage || openEntry?.deepReview?.summary || "";
   const severityColor = (sev) => sev === "good" ? "#7CFFB2" : sev === "warning" ? "#FFD166" : "#A78BFA";
+  const clipFeed = entries.flatMap(e => {
+    const meta = getFilmRoomDisplayMeta(e, stats);
+    return (Array.isArray(e.clips) ? e.clips : []).map(c => ({
+      ...c,
+      entryId:e.id,
+      meta,
+      replayId:e.replayId,
+      ballchasingUrl:e.ballchasingUrl,
+      ts:c.addedAt || e.updatedAt || e.createdAt || new Date().toISOString(),
+    }));
+  }).sort((a,b) => new Date(b.ts || 0) - new Date(a.ts || 0));
+  const replayOfWeek = clipFeed[0] || null;
   return (
     <div style={{display:"grid",gap:12}}>
       <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
@@ -14490,7 +14503,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
           <button key={e.id} onClick={()=>setOpenId(String(e.id))} className="bb-pressable" style={{minWidth:150,textAlign:"left",background:active?"rgba(184,255,77,.12)":"rgba(255,255,255,.045)",border:`1px solid ${active?"rgba(184,255,77,.32)":"rgba(255,255,255,.08)"}`,borderRadius:14,padding:10,cursor:"pointer"}}>
             <div style={{fontSize:9,color:active?"#B8FF4D":"#8B92A8",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{meta.mode} · {meta.scoreText}</div>
             <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:4}}>{(meta.players || []).map(p=>p.name).join(" · ") || "synced replay"}</div>
-            <div style={{fontSize:9.5,color:"#4A5066",fontWeight:850,marginTop:3}}>{fmtRelTime(e.createdAt)} · {e.advancedReview?.status === "backend_ready" ? "backend ready" : e.deepReview?.status === "ready" ? "review ready" : e.deepReview?.status === "requested" ? "requested" : "auto notes"}</div>
+            <div style={{fontSize:9.5,color:"#4A5066",fontWeight:850,marginTop:3}}>{fmtRelTime(e.createdAt)} · {(e.clips || []).length ? `${(e.clips || []).length} clip${(e.clips || []).length === 1 ? "" : "s"}` : "replay link"}</div>
           </button>
           );
         })}
@@ -14509,7 +14522,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
               <div style={{minWidth:0}}>
                 <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>3D replay ready</div>
-                <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginTop:4}}>Ballchasing blocks iframe embeds, so Film Room opens the real watch page externally and keeps the native coach report here.</div>
+                <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginTop:4}}>Ballchasing blocks iframe embeds, so Film Room opens the real watch page externally and keeps your PS/Xbox highlight clips here.</div>
               </div>
               <button onClick={()=>window.open(openEntryWatchUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"#4D9EFF",border:"none",borderRadius:12,padding:"10px 11px",fontSize:10,fontWeight:950,color:"#06070D",cursor:"pointer",whiteSpace:"nowrap"}}>open watch</button>
             </div>
@@ -14519,64 +14532,43 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
             </div>
           </div>
         )}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-          <button onClick={()=>addClip(openEntry)} className="bb-pressable" style={{background:"rgba(167,139,250,.10)",border:"1px solid rgba(167,139,250,.24)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",cursor:"pointer"}}>add PS/Xbox clip</button>
-          <button onClick={()=>requestDeepReview(openEntry)} className="bb-pressable" style={{background:"rgba(255,209,102,.10)",border:"1px solid rgba(255,209,102,.24)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>{openEntry.deepReview?.status === "requested" ? "deep review requested" : "request deep review"}</button>
+        <div style={{display:"grid",gridTemplateColumns:"1fr",gap:8,marginBottom:12}}>
+          <button onClick={()=>addClip(openEntry)} className="bb-pressable" style={{background:"rgba(167,139,250,.10)",border:"1px solid rgba(167,139,250,.24)",borderRadius:12,padding:"11px",fontSize:10.8,fontWeight:950,color:"#A78BFA",cursor:"pointer"}}>add PS/Xbox clip</button>
         </div>
-        <div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Auto Review Notes</div>
-        <div style={{display:"grid",gap:7,marginBottom:12}}>
-          {(openEntry.reviewNotes || []).slice(0,10).map(n => (
-            <div key={n.id} style={{background:"rgba(255,255,255,.04)",border:`1px solid ${bbAlpha(severityColor(n.severity),.22)}`,borderRadius:12,padding:"9px 10px"}}>
-              <div style={{display:"flex",gap:8,alignItems:"baseline"}}><div style={{fontSize:10,color:severityColor(n.severity),fontWeight:950,minWidth:34}}>{n.time || "full"}</div><div style={{fontSize:12,color:"#E8ECF4",fontWeight:900}}>{n.title}</div></div>
-              {n.body && <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{n.body}</div>}
-            </div>
-          ))}
-        </div>
-        {(() => {
-          const nativeReview = buildNativeAdvancedReview(openEntry, stats);
-          const backendReady = !!nativeReview.backend;
-          const visibleSections = backendReady
-            ? nativeReview.sections.filter(sec => /coach|timeline|training/i.test(String(sec.title || "")))
-            : nativeReview.sections;
-          const mapConfig = [
-            { key:"shotMap", title:"Shot / xG Map", accent:"#4D9EFF", type:"shot", subtitle:"quality" },
-            { key:"boostMap", title:"Boost Control Map", accent:"#B8FF4D", type:"boost", subtitle:"routes" },
-            { key:"passMap", title:"Pass / Touch Map", accent:"#A78BFA", type:"pass", subtitle:"creation" },
-            { key:"fiftyMap", title:"50/50 Pressure Map", accent:"#FFD166", type:"fifty", subtitle:"challenges" },
-          ];
-          return (
-            <div style={{background:"rgba(77,158,255,.045)",border:"1px solid rgba(77,158,255,.16)",borderRadius:16,padding:12,marginBottom:12,overflow:"hidden"}}>
-              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
-                <div style={{minWidth:0}}>
-                  <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Burton Coach Engine</div>
-                  <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>status: {nativeReview.parserStatus} · {nativeReview.linkedCount} linked stat card{nativeReview.linkedCount === 1 ? "" : "s"}</div>
-                </div>
-                <div style={{fontSize:9.5,color:backendReady?"#7CFFB2":"#A78BFA",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{backendReady?"backend ready":"local review"}</div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(118px,1fr))",gap:7,marginBottom:10}}>
-                {nativeReview.cards.map(card => <div key={card.label} style={{background:"rgba(0,0,0,.18)",border:`1px solid ${bbAlpha(card.color,.22)}`,borderRadius:11,padding:"9px 8px",minWidth:0}}><div style={{fontSize:8.4,color:"#4A5066",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{card.label}</div><div style={{fontSize:13,color:card.color,fontWeight:950,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{card.value}</div><div style={{height:6,borderRadius:99,background:"rgba(255,255,255,.055)",overflow:"hidden",marginTop:7}}><div style={{height:"100%",width:`${getAdvancedVisualScore(card)}%`,background:card.color,borderRadius:99}}/></div></div>)}
-              </div>
-              {!!visibleSections.length && <div style={{display:"grid",gap:7,marginBottom:10}}>
-                {visibleSections.map(sec => <div key={sec.title} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:11,padding:"9px 10px",minWidth:0}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"baseline"}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:950,minWidth:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sec.title}</div><div style={{fontSize:8.5,color:sec.status === "ready" || sec.status === "stats ready" || /backend/i.test(sec.status || "") ? "#7CFFB2" : sec.status === "estimated" ? "#FFD166" : "#A78BFA",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{sec.status}</div></div><div style={{fontSize:10.3,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{sec.body}</div></div>)}
-              </div>}
-              {!!nativeReview.events.length && <div style={{display:"flex",gap:6,overflowX:"auto",padding:"2px 0 10px"}}>{nativeReview.events.slice(0,10).map(ev => <div key={ev.id || `${ev.time}_${ev.player}_${ev.kind}`} style={{minWidth:120,background:"rgba(184,255,77,.055)",border:"1px solid rgba(184,255,77,.15)",borderRadius:10,padding:"8px"}}><div style={{fontSize:9,color:"#B8FF4D",fontWeight:950}}>{fmtReplayTimecode(ev.time)}</div><div style={{fontSize:10,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ev.player || "player"} · {ev.kind || ev.type}</div></div>)}</div>}
-              {!!nativeReview.backend && (
-                <div style={{display:"grid",gap:9,marginTop:2}}>
-                  {mapConfig.map(cfg => <AdvancedReviewMapPanel key={cfg.key} title={cfg.title} rows={getAdvancedBackendMapRows(nativeReview.backend, cfg.key)} accent={cfg.accent} type={cfg.type} subtitle={cfg.subtitle}/>) }
-                </div>
-              )}
-              <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.35,marginTop:9}}>{nativeReview.parserDetail}</div>
-            </div>
-          );
-        })()}
         {!!openEntry.clips?.length && <><div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Team Clips</div><div style={{display:"grid",gap:7,marginBottom:12}}>{openEntry.clips.map(c => <button key={c.id} onClick={()=>window.open(c.url,"_blank","noopener,noreferrer")} className="bb-pressable" style={{textAlign:"left",background:"rgba(167,139,250,.07)",border:"1px solid rgba(167,139,250,.18)",borderRadius:12,padding:"9px 10px",color:"#E8ECF4",fontSize:11,fontWeight:850,cursor:"pointer"}}>🎬 {c.label || "clip"}<div style={{fontSize:9,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.url}</div></button>)}</div></>}
-        <div style={{background:"rgba(255,209,102,.05)",border:"1px solid rgba(255,209,102,.15)",borderRadius:14,padding:11}}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
-            <div><div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Advanced Deep Review</div><div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>status: {advancedStatusText}</div>{advancedStatusMessage && <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.3,marginTop:4,maxWidth:280}}>{advancedStatusMessage}</div>}</div>
-            {isAdmin && <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>runBackendAdvancedReview(openEntry)} disabled={parserRunning} className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:parserRunning?"wait":"pointer",whiteSpace:"nowrap"}}>{parserRunning?"parsing…":"run backend"}</button><label className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#FFD166",cursor:uploading?"wait":"pointer",whiteSpace:"nowrap"}}>{uploading?"uploading…":"upload replay/data"}<input type="file" multiple accept="image/*,.replay,.json,.csv,.md,.markdown,.txt,text/*" onChange={e=>handleCarlUpload(openEntry, e.target.files)} style={{display:"none"}} /></label></div>}
+        {!!clipFeed.length && (
+          <div style={{background:"rgba(184,255,77,.045)",border:"1px solid rgba(184,255,77,.14)",borderRadius:16,padding:12,marginTop:4}}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",marginBottom:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:10,color:"#B8FF4D",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Team Clip Feed</div>
+                <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>All PS/Xbox clips attached to Film Room games. Use this for replay of the week picks.</div>
+              </div>
+              <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,whiteSpace:"nowrap"}}>{clipFeed.length} clip{clipFeed.length === 1 ? "" : "s"}</div>
+            </div>
+            {replayOfWeek && (
+              <button onClick={()=>window.open(replayOfWeek.url,"_blank","noopener,noreferrer")} className="bb-pressable" style={{width:"100%",textAlign:"left",background:"linear-gradient(135deg,rgba(255,209,102,.14),rgba(184,255,77,.07))",border:"1px solid rgba(255,209,102,.28)",borderRadius:14,padding:"11px 12px",marginBottom:10,color:"#E8ECF4",cursor:"pointer"}}>
+                <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline"}}>
+                  <div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Replay of the week</div>
+                  <div style={{fontSize:9,color:"#8B92A8",fontWeight:850,whiteSpace:"nowrap"}}>{fmtRelTime(replayOfWeek.ts)}</div>
+                </div>
+                <div style={{fontSize:13,color:"#E8ECF4",fontWeight:950,marginTop:5,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>🎬 {replayOfWeek.label || "highlight clip"}</div>
+                <div style={{fontSize:10,color:"#8B92A8",marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{replayOfWeek.meta?.mode} · {replayOfWeek.meta?.scoreText} · {(replayOfWeek.meta?.players || []).map(p=>p.name).join(" · ")}</div>
+              </button>
+            )}
+            <div style={{display:"grid",gap:7}}>
+              {clipFeed.slice(0,20).map(c => (
+                <button key={`${c.entryId}_${c.id || c.url}`} onClick={()=>window.open(c.url,"_blank","noopener,noreferrer")} className="bb-pressable" style={{width:"100%",textAlign:"left",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:"9px 10px",color:"#E8ECF4",fontSize:11,fontWeight:850,cursor:"pointer",display:"grid",gridTemplateColumns:"1fr auto",gap:8,alignItems:"center"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>🎬 {c.label || "highlight clip"}</div>
+                    <div style={{fontSize:9,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.meta?.mode} · {c.meta?.scoreText} · {(c.meta?.players || []).map(p=>p.name).join(" · ")}</div>
+                  </div>
+                  <div style={{fontSize:9,color:"#4A5066",fontWeight:900,whiteSpace:"nowrap"}}>{fmtRelTime(c.ts)}</div>
+                </button>
+              ))}
+            </div>
           </div>
-          {!!openEntry.carl2Assets?.length && <div style={{display:"grid",gap:10,marginTop:12}}>{openEntry.carl2Assets.map(a => /image/i.test(a.type) || /\.(png|jpe?g|webp|gif)$/i.test(a.name) ? <div key={a.id} style={{background:"rgba(0,0,0,.22)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,overflow:"hidden"}}><img src={a.url} alt={a.name} style={{width:"100%",display:"block"}}/><div style={{fontSize:10,color:"#8B92A8",padding:"7px 9px"}}>{a.name}</div></div> : <div key={a.id} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:10}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:900}}>{a.name}</div>{a.text && <pre style={{whiteSpace:"pre-wrap",fontSize:9.5,color:"#8B92A8",maxHeight:180,overflow:"auto",marginTop:8}}>{a.text.slice(0,4000)}</pre>}{a.url && <button onClick={()=>window.open(a.url,"_blank","noopener,noreferrer")} style={{marginTop:8,background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:9,padding:"7px 8px",fontSize:10,color:"#E8ECF4"}}>open file</button>}</div>)}</div>}
-        </div>
+        )}
+
       </div>
     </div>
   );
