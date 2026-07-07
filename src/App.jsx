@@ -101,6 +101,8 @@ import { createPortal } from "react-dom";
 // APP140_BALLCHASING_CARD_OPEN_TIMESTAMP_PATCH
 // APP143_FILM_ROOM_SYNC_JOBS_CARL2_PATCH
 // APP144_FILM_ROOM_IFRAME_FALLBACK_PATCH
+// APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
+// APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -358,9 +360,9 @@ function bbHaptic(pattern = 14) {
 function tKey(dk, pid) { return `${dk}__${pid}`; }
 function normalizeGameMode(mode) {
   const m = String(mode || "").toLowerCase();
-  if (m.includes("1v1") || m.includes("duel")) return "1v1";
-  if (m.includes("2v2") || m.includes("double")) return "2v2";
-  if (m.includes("3v3") || m.includes("standard") || m.includes("trios")) return "3v3";
+  if (m.includes("1v1") || m.includes("duel") || m.includes("1s")) return "1v1";
+  if (m.includes("2v2") || m.includes("double") || m.includes("2s")) return "2v2";
+  if (m.includes("3v3") || m.includes("standard") || m.includes("trios") || m.includes("3s")) return "3v3";
   return String(mode || "");
 }
 
@@ -980,7 +982,7 @@ function normalizeLiveReplayVault(input = {}) {
     lastAutoSyncStatus: String(src.lastAutoSyncStatus || "").slice(0, 180),
     autoSyncedCount: Number.isFinite(Number(src.autoSyncedCount)) ? Math.max(0, Number(src.autoSyncedCount)) : 0,
     lastReplayFoundAt: src.lastReplayFoundAt || null,
-    expectedUploadDelayMinutes: Number.isFinite(Number(src.expectedUploadDelayMinutes)) ? Math.max(1, Math.min(30, Number(src.expectedUploadDelayMinutes))) : 10,
+    expectedUploadDelayMinutes: Number.isFinite(Number(src.expectedUploadDelayMinutes)) ? Math.max(1, Math.min(90, Number(src.expectedUploadDelayMinutes))) : 45,
   };
 }
 function extractBallchasingReplayId(value = "") {
@@ -1248,7 +1250,7 @@ function getReplayEventTime(event = {}) {
   return Number.isFinite(frame) ? Math.round(frame / 30) : null;
 }
 function getReplayTimelineForPlayer(replay, row, kind = "goal") {
-  const rowNames = [row?.name, row?.appName].map(replayLower).filter(Boolean);
+  const rowNames = [row?.name, row?.appName, ...(PARSE_TRACKER_ALIASES[row?.appPlayerId] || [])].map(replayLower).filter(Boolean);
   const kindLower = replayLower(kind);
   const events = getReplayEvents(replay);
   return events.filter(ev => {
@@ -1265,7 +1267,7 @@ function getReplayTimelineForPlayer(replay, row, kind = "goal") {
 }
 function fmtReplayTimeline(events, count = 0) {
   if (events?.length) return events.join(", ");
-  return Number(count) > 0 ? "timeline unavailable" : "none";
+  return Number(count) > 0 ? "no timestamp found" : "none";
 }
 function getReplayKeyMoments(replay, playerNames = []) {
   const allowed = new Set((playerNames || []).map(replayLower).filter(Boolean));
@@ -2831,6 +2833,162 @@ const DEFAULT_BURTON_BOXES = {
   secretUnlocks:true,
   cursesBlessings:true,
 };
+
+function normalizeFilmSyncSession(input = null) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const rawMode = normalizeGameMode(input.mode || "3v3");
+  const mode = ["1v1","2v2","3v3"].includes(rawMode) ? rawMode : "3v3";
+  const playerIds = Array.isArray(input.playerIds) && input.playerIds.length
+    ? input.playerIds.filter(pid => PLAYERS.some(p => p.id === pid)).slice(0, 3)
+    : (mode === "3v3" ? PLAYERS.map(p => p.id) : mode === "2v2" ? ["p1","p2"] : [ADMIN_ID]);
+  const startedAt = input.startedAt || new Date().toISOString();
+  const endedAt = input.endedAt || null;
+  const delayMinutes = Math.max(1, Math.min(120, Number(input.delayMinutes ?? 45) || 45));
+  const readyAt = input.readyAt || (endedAt ? new Date(safeDateObj(endedAt).getTime() + delayMinutes * 60000).toISOString() : null);
+  const status = endedAt ? (input.status === "imported" ? "imported" : input.status === "checking" ? "checking" : "waiting") : "running";
+  return {
+    id:String(input.id || `film_session_${Date.now()}`),
+    mode,
+    playerIds,
+    startedAt,
+    endedAt,
+    delayMinutes,
+    readyAt,
+    status,
+    importedReplayIds:Array.isArray(input.importedReplayIds) ? input.importedReplayIds.filter(Boolean).slice(0,80) : [],
+    importedGameIds:Array.isArray(input.importedGameIds) ? input.importedGameIds.filter(Boolean).slice(0,120) : [],
+    lastCheckedAt:input.lastCheckedAt || null,
+    lastStatus:String(input.lastStatus || "").slice(0,260),
+    createdBy:input.createdBy || ADMIN_ID,
+  };
+}
+function getFilmSyncSessionStatus(sessionInput = null) {
+  const session = normalizeFilmSyncSession(sessionInput);
+  if (!session) return { label:"no session", color:"#4A5066", detail:"start a session before playing", ready:false };
+  if (!session.endedAt) return { label:"running", color:"#B8FF4D", detail:`started ${fmtRelTime(session.startedAt)}`, ready:false };
+  const readyMs = safeDateObj(session.readyAt, Date.now()).getTime();
+  const waitMs = readyMs - Date.now();
+  if (session.status === "imported") return { label:"imported", color:"#7CFFB2", detail:session.lastStatus || "session import complete", ready:true };
+  if (waitMs > 0) {
+    const mins = Math.ceil(waitMs / 60000);
+    return { label:"waiting", color:"#FFD166", detail:`auto-import ready in ${mins}m · check now can still retry`, ready:false };
+  }
+  return { label:"ready", color:"#4D9EFF", detail:"Rockpload should have had enough time — check session import", ready:true };
+}
+function getNextGameCodeWithOffset(stats = [], offset = 0) {
+  const nums = (stats || [])
+    .map(g => String(g.sessionCode || "").match(/^game\s+(\d+)$/i))
+    .filter(Boolean)
+    .map(m => Number(m[1]))
+    .filter(Number.isFinite);
+  const next = (nums.length ? Math.max(...nums) + 1 : 1) + Math.max(0, Number(offset) || 0);
+  return `game ${next}`;
+}
+function getReplayDateInWindow(replay = {}, startIso = null, endIso = null, beforeMinutes = 8, afterMinutes = 90) {
+  const rMs = replayDateMs(replay);
+  if (!Number.isFinite(rMs) || rMs <= 0) return false;
+  const startMs = safeDateObj(startIso, 0).getTime();
+  const endMs = endIso ? safeDateObj(endIso, Date.now()).getTime() : Date.now();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
+  return rMs >= startMs - Math.max(0, Number(beforeMinutes)||0) * 60000 && rMs <= endMs + Math.max(0, Number(afterMinutes)||0) * 60000;
+}
+function getFilmRoomEntryAssets(entry = {}) {
+  return [
+    ...(Array.isArray(entry.carl2Assets) ? entry.carl2Assets : []),
+    ...(entry.advancedReview && Array.isArray(entry.advancedReview.rawReplayAssets) ? entry.advancedReview.rawReplayAssets : []),
+  ].filter(Boolean);
+}
+function getEntryLinkedStats(entry = {}, stats = []) {
+  const replayId = String(entry.replayId || "");
+  const teamKey = String(entry.teamGameId || "");
+  const gameId = String(entry.gameId || "");
+  return (Array.isArray(stats) ? stats : []).filter(g => {
+    if (replayId && String(g.ballchasingReplayId || "") === replayId) return true;
+    const gKey = getFilmRoomGameKey(g);
+    if (teamKey && gKey === teamKey) return true;
+    if (gameId && String(g.id || "") === gameId) return true;
+    return false;
+  });
+}
+
+function normalizeAdvancedBackendReport(input = null) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const cards = Array.isArray(input.cards) ? input.cards.filter(Boolean).slice(0, 12) : [];
+  const sections = Array.isArray(input.sections) ? input.sections.filter(Boolean).slice(0, 18) : [];
+  const maps = input.maps && typeof input.maps === "object" && !Array.isArray(input.maps) ? input.maps : {};
+  const timelineEvents = Array.isArray(input.timelineEvents) ? input.timelineEvents.filter(Boolean).slice(0, 32) : [];
+  return {
+    ready:true,
+    status:String(input.status || "ready").slice(0, 40),
+    statusLabel:String(input.statusLabel || input.status || "backend ready").slice(0, 80),
+    parserMessage:String(input.parserMessage || input.message || "Backend coach report generated.").slice(0, 400),
+    generatedAt:input.generatedAt || new Date().toISOString(),
+    confidence:Number.isFinite(Number(input.confidence)) ? Math.max(0, Math.min(100, Number(input.confidence))) : null,
+    cards,
+    sections,
+    maps,
+    timelineEvents,
+    trainingFocus:Array.isArray(input.trainingFocus) ? input.trainingFocus.filter(Boolean).slice(0, 10) : [],
+  };
+}
+function getAdvancedBackendMapRows(report = null, key = "") {
+  const safe = normalizeAdvancedBackendReport(report);
+  const list = safe?.maps?.[key];
+  return Array.isArray(list) ? list.filter(Boolean).slice(0, 12) : [];
+}
+
+function buildNativeAdvancedReview(entry = {}, stats = []) {
+  const linked = getEntryLinkedStats(entry, stats);
+  const assets = getFilmRoomEntryAssets(entry);
+  const hasRawReplay = assets.some(a => /\.replay$/i.test(String(a.name || "")) || /rocket.*replay/i.test(`${a.type || ""} ${a.name || ""}`));
+  const hasDataExport = assets.some(a => /\.(json|csv|md|markdown|txt)$/i.test(String(a.name || "")) || /json|csv|markdown|text/i.test(String(a.type || "")));
+  const replayGame = linked.find(g => getGameBallchasingReplay(g));
+  const replay = replayGame ? getGameBallchasingReplay(replayGame) : null;
+  const rows = replay ? buildBallchasingPlayerRows(replay, {}) : [];
+  const events = replay ? getReplayKeyMoments(replay, rows.map(r => r.name)).slice(0, 18) : [];
+  const teamShots = linked.reduce((s,g)=>s+(Number(g.shots)||0),0);
+  const teamGoals = linked.reduce((s,g)=>s+(Number(g.goals)||0),0);
+  const teamSaves = linked.reduce((s,g)=>s+(Number(g.saves)||0),0);
+  const teamDemos = linked.reduce((s,g)=>s+(Number(g.demos)||0),0);
+  const shotQuality = teamShots ? Math.min(100, Math.round((teamGoals / Math.max(teamShots,1)) * 100)) : 0;
+  const parserStatus = hasDataExport ? "report uploaded" : hasRawReplay ? "raw replay queued" : "using Ballchasing stats";
+  const parserDetail = hasDataExport
+    ? "Imported report files can be read inside Film Room. Native parser wiring can use these same slots later."
+    : hasRawReplay
+      ? "Raw .replay is attached. Backend/parser is not wired yet, so advanced maps stay pending instead of faking them."
+      : "Built from Ballchasing stats/timeline. Raw replay physics sections stay labeled until a parser is connected.";
+  const training = [];
+  if (teamShots <= Math.max(3, linked.length)) training.push("controlled clears into follow-up touches");
+  if (teamSaves >= 5) training.push("third-man patience and boost exits");
+  if (teamDemos >= 2) training.push("demo awareness and recovery spacing");
+  if (!training.length) training.push("review one goal against and one best offensive possession");
+  const baseCards = [
+    { label:"team shots", value:teamShots, color:"#4D9EFF" },
+    { label:"team goals", value:teamGoals, color:"#B8FF4D" },
+    { label:"team saves", value:teamSaves, color:"#FFD166" },
+    { label:"shot quality", value:teamShots ? `${shotQuality}%` : "pending", color:"#A78BFA" },
+  ];
+  const baseSections = [
+    { title:"Coach Report", status:"ready", body: linked.length ? `Synced ${linked.length} player card${linked.length === 1 ? "" : "s"}. Use the moments below to review pressure, boost, and spacing.` : "Sync/import this replay to generate player-linked notes." },
+    { title:"Timeline", status:events.length ? "ready" : "waiting", body: events.length ? "Goal, shot, save, and demo moments were pulled from the Ballchasing timeline." : "No timeline events found yet. The stat card should say no timestamp found instead of loading forever." },
+    { title:"Shot Map / xG", status:hasRawReplay || hasDataExport ? "queued" : "estimated", body: teamShots ? `Temporary shot-quality estimate: ${teamGoals}/${teamShots} goals/shots. True xG/shot map needs raw replay parser coordinates.` : "Waiting for shot coordinates from raw replay parser." },
+    { title:"Boost Map", status:rows.length ? "stats ready" : "waiting", body: rows.length ? "Boost collected/stolen/low-boost stats are available. Route overlays need raw replay movement data." : "Waiting for Ballchasing player rows or raw replay parser data." },
+    { title:"Pass Map", status:hasRawReplay || hasDataExport ? "queued" : "parser needed", body:"Pass/giveaway maps require ball touches and player positions from raw replay parsing. Slot is ready; fake pass maps are intentionally not generated." },
+    { title:"50/50 Map", status:hasRawReplay || hasDataExport ? "queued" : "parser needed", body:"50/50 maps require collision/challenge extraction from raw replay data. Slot is ready for the parser." },
+    { title:"Training Focus", status:"ready", body:training.join(" · ") },
+  ];
+  const backend = normalizeAdvancedBackendReport(entry?.advancedReview?.backendReport || entry?.backendReport || null);
+  return {
+    parserStatus: backend?.statusLabel || parserStatus,
+    parserDetail: backend?.parserMessage || parserDetail,
+    linkedCount:linked.length,
+    events:(backend?.timelineEvents && backend.timelineEvents.length) ? backend.timelineEvents : events,
+    rows,
+    cards:(backend?.cards && backend.cards.length) ? backend.cards : baseCards,
+    sections:(backend?.sections && backend.sections.length) ? backend.sections : baseSections,
+    backend,
+  };
+}
 const DEFAULT_BURTON_OS = {
   settings: {
     autoState:true,
@@ -2854,6 +3012,7 @@ const DEFAULT_BURTON_OS = {
   processedGames:{},
   economy:{},
   filmRoomEntries:[],
+  filmSyncSession:null,
 };
 
 function normalizeFilmRoomEntries(input = []) {
@@ -2882,6 +3041,13 @@ function normalizeFilmRoomEntries(input = []) {
         requestedAt:deep.requestedAt || entry.deepReviewRequestedAt || null,
         completedAt:deep.completedAt || entry.deepReviewCompletedAt || null,
         summary:deep.summary || entry.deepReviewSummary || "",
+      },
+      advancedReview:{
+        status:entry.advancedReview?.status || entry.parserStatus || "not_started",
+        parserMessage:String(entry.advancedReview?.parserMessage || entry.parserMessage || "").slice(0,300),
+        rawReplayAssets:Array.isArray(entry.advancedReview?.rawReplayAssets) ? entry.advancedReview.rawReplayAssets.filter(Boolean).slice(0,30) : [],
+        generatedAt:entry.advancedReview?.generatedAt || null,
+        backendReport:entry.advancedReview?.backendReport || entry.backendReport || null,
       },
     };
   }).sort((a,b)=>safeDateObj(b.createdAt).getTime()-safeDateObj(a.createdAt).getTime()).slice(0,120);
@@ -2929,6 +3095,7 @@ function normalizeBurtonOS(input = {}) {
     processedGames: Object.fromEntries(processedEntries),
     economy: src.economy && typeof src.economy === "object" ? src.economy : {},
     filmRoomEntries: normalizeFilmRoomEntries(src.filmRoomEntries || src.filmRoom || []),
+    filmSyncSession: normalizeFilmSyncSession(src.filmSyncSession || null),
   };
 }
 
@@ -13860,6 +14027,7 @@ function buildFilmRoomEntryFromGames(allStats = [], games = [], source = "sync")
     clips:[],
     carl2Assets:[],
     deepReview:{ status:"none", requestedBy:null, requestedAt:null, completedAt:null, summary:"" },
+    advancedReview:{ status:"not_started", parserMessage:"", rawReplayAssets:[], generatedAt:null },
   };
 }
 function upsertFilmRoomEntriesFromSyncedGames(osInput = {}, allStats = [], games = [], source = "sync") {
@@ -13909,6 +14077,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   const isAdmin = currentPlayer === ADMIN_ID;
   const [openId, setOpenId] = useState(entries[0]?.id || null);
   const [uploading, setUploading] = useState(false);
+  const [parserRunning, setParserRunning] = useState(false);
   const [viewerLoading, setViewerLoading] = useState(true);
   const [viewerTimedOut, setViewerTimedOut] = useState(false);
   useEffect(()=>{ if (backfillPatch?.changed) { setBurtonOS?.(backfillPatch.os); storeSetWithPush(BURTON_OS_KEY, backfillPatch.os).catch(() => storeSet(BURTON_OS_KEY, backfillPatch.os)); } }, [backfillPatch?.changed]);
@@ -13956,9 +14125,63 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
         }
         assets.push({ id:`carl2_${Date.now()}_${Math.random().toString(36).slice(2,7)}`, name:file.name, type:file.type || (file.name.match(/\.(png|jpe?g|webp|gif)$/i) ? "image" : "file"), url, text, uploadedBy:currentPlayer, uploadedAt:new Date().toISOString() });
       }
-      await updateEntry(entry.id, e => ({ ...e, carl2Assets:[...(assets || []), ...(e.carl2Assets || [])].slice(0,30), deepReview:{ ...(e.deepReview || {}), status:"ready", completedAt:new Date().toISOString(), summary:e.deepReview?.summary || "CARL2 report uploaded. Review the graphs and notes below." } }), "CARL2 deep review uploaded", "📊");
+      await updateEntry(entry.id, e => ({
+        ...e,
+        carl2Assets:[...(assets || []), ...(e.carl2Assets || [])].slice(0,30),
+        advancedReview:{
+          ...(e.advancedReview || {}),
+          status:assets.some(a => /\.replay$/i.test(a.name || "")) ? "queued" : "ready",
+          parserMessage:assets.some(a => /\.replay$/i.test(a.name || "")) ? "Raw replay/data attached. Run backend to generate the native coach report from linked stats, timeline, and uploaded files." : "Report/data files uploaded.",
+          rawReplayAssets:[...(assets || []), ...((e.advancedReview && e.advancedReview.rawReplayAssets) || [])].slice(0,30),
+          generatedAt:new Date().toISOString(),
+        },
+        deepReview:{ ...(e.deepReview || {}), status:"ready", completedAt:new Date().toISOString(), summary:e.deepReview?.summary || "Advanced report uploaded. Review the graphs, raw replay/data files, and native coach notes below." }
+      }), "advanced review uploaded", "📊");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const runBackendAdvancedReview = async (entry) => {
+    if (!entry || parserRunning) return;
+    setParserRunning(true);
+    try {
+      const linkedStats = getEntryLinkedStats(entry, stats);
+      const nativeReview = buildNativeAdvancedReview(entry, stats);
+      const res = await fetch("/api/advanced-review-parser", {
+        method:"POST",
+        headers:{ "Content-Type":"application/json" },
+        body:JSON.stringify({
+          entry,
+          linkedStats:linkedStats.slice(0,8),
+          nativeReview,
+          assets:getFilmRoomEntryAssets(entry).map(a => ({ id:a.id, name:a.name, type:a.type, text:a.text || "", url:a.url || "" })).slice(0,30),
+          players:PLAYERS,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `backend parser failed (${res.status})`);
+      const report = normalizeAdvancedBackendReport(json.report || json);
+      if (!report) throw new Error("backend parser returned no report");
+      await updateEntry(entry.id, e => ({
+        ...e,
+        advancedReview:{
+          ...(e.advancedReview || {}),
+          status:report.status || "backend_ready",
+          parserMessage:report.parserMessage,
+          backendReport:report,
+          generatedAt:report.generatedAt || new Date().toISOString(),
+        },
+        deepReview:{ ...(e.deepReview || {}), status:"ready", completedAt:new Date().toISOString(), summary:e.deepReview?.summary || "Native backend coach report generated." },
+      }), "backend coach report ready", "🧠");
+    } catch (err) {
+      addToast?.(err?.message || "backend parser failed", "⚠️");
+      await updateEntry(entry.id, e => ({
+        ...e,
+        advancedReview:{ ...(e.advancedReview || {}), status:"backend_failed", parserMessage:err?.message || "backend parser failed" },
+      }), null, "⚠️").catch(() => {});
+    } finally {
+      setParserRunning(false);
     }
   };
   if (!entries.length) return <EmptyState icon="🎥" title="No Film Room replays yet" body="Sync a Ballchasing/Rockpload game and the app will create a lightweight Film Room card here." />;
@@ -13972,7 +14195,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
           <button key={e.id} onClick={()=>setOpenId(e.id)} className="bb-pressable" style={{minWidth:150,textAlign:"left",background:openEntry.id===e.id?"rgba(184,255,77,.12)":"rgba(255,255,255,.045)",border:`1px solid ${openEntry.id===e.id?"rgba(184,255,77,.32)":"rgba(255,255,255,.08)"}`,borderRadius:14,padding:10,cursor:"pointer"}}>
             <div style={{fontSize:9,color:openEntry.id===e.id?"#B8FF4D":"#8B92A8",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{e.mode} · {e.scoreText || "score ?"}</div>
             <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:4}}>{(e.players || []).map(p=>p.name).join(" · ") || "synced replay"}</div>
-            <div style={{fontSize:9.5,color:"#4A5066",fontWeight:850,marginTop:3}}>{fmtRelTime(e.createdAt)} · {e.deepReview?.status === "ready" ? "CARL2 ready" : e.deepReview?.status === "requested" ? "requested" : "auto notes"}</div>
+            <div style={{fontSize:9.5,color:"#4A5066",fontWeight:850,marginTop:3}}>{fmtRelTime(e.createdAt)} · {e.deepReview?.status === "ready" ? "review ready" : e.deepReview?.status === "requested" ? "requested" : "auto notes"}</div>
           </button>
         ))}
       </div>
@@ -13986,34 +14209,23 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
           {openEntryWatchUrl && <button onClick={()=>window.open(openEntryWatchUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.11)",border:"1px solid rgba(77,158,255,.26)",borderRadius:12,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer",whiteSpace:"nowrap"}}>3D replay</button>}
         </div>
         {openEntryWatchUrl && (
-          <div style={{position:"relative",background:"#000",border:"1px solid rgba(77,158,255,.18)",borderRadius:16,overflow:"hidden",marginBottom:12,minHeight:220}}>
-            <iframe
-              key={openEntryWatchUrl}
-              title="Ballchasing 3D replay"
-              src={openEntryWatchUrl}
-              allow="fullscreen; autoplay; clipboard-read; clipboard-write"
-              allowFullScreen
-              onLoad={()=>setViewerLoading(false)}
-              style={{width:"100%",height:260,border:0,display:"block",background:"#000"}}
-            />
-            {viewerLoading && (
-              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",textAlign:"center",flexDirection:"column",gap:9,background:"linear-gradient(135deg,#07111F,#000)",padding:18}}>
-                <div style={{width:28,height:28,borderRadius:999,border:"3px solid rgba(77,158,255,.24)",borderTopColor:"#4D9EFF",animation:"bbSpin .85s linear infinite"}} />
-                <div style={{fontSize:13,color:"#E8ECF4",fontWeight:950}}>preparing 3D replay…</div>
-                <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,maxWidth:310}}>Loading the Ballchasing watch view inside Film Room. This can take a few seconds while the replay viewer prepares.</div>
+          <div style={{background:"linear-gradient(135deg,rgba(77,158,255,.11),rgba(167,139,250,.06))",border:"1px solid rgba(77,158,255,.22)",borderRadius:16,padding:13,marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>3D replay ready</div>
+                <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.35,marginTop:4}}>Ballchasing blocks iframe embeds, so Film Room opens the real watch page externally and keeps the native coach report here.</div>
               </div>
-            )}
-            {viewerTimedOut && (
-              <div style={{position:"absolute",left:10,right:10,bottom:10,background:"rgba(0,0,0,.74)",border:"1px solid rgba(77,158,255,.22)",borderRadius:12,padding:9,display:"flex",gap:8,alignItems:"center",justifyContent:"space-between"}}>
-                <div style={{fontSize:10,color:"#8B92A8",lineHeight:1.25}}>Still loading? Open it directly if iOS blocks the embedded viewer.</div>
-                <button onClick={()=>window.open(openEntryWatchUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.16)",border:"1px solid rgba(77,158,255,.34)",borderRadius:10,padding:"7px 8px",fontSize:9.5,fontWeight:950,color:"#4D9EFF",cursor:"pointer",whiteSpace:"nowrap"}}>open</button>
-              </div>
-            )}
+              <button onClick={()=>window.open(openEntryWatchUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"#4D9EFF",border:"none",borderRadius:12,padding:"10px 11px",fontSize:10,fontWeight:950,color:"#06070D",cursor:"pointer",whiteSpace:"nowrap"}}>open watch</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 96px",gap:8,marginTop:10}}>
+              <div style={{background:"rgba(0,0,0,.18)",border:"1px solid rgba(255,255,255,.06)",borderRadius:10,padding:"8px 9px",fontSize:9.5,color:"#8B92A8",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{openEntryWatchUrl}</div>
+              <button onClick={()=>{ try { navigator.clipboard?.writeText(openEntryWatchUrl); addToast?.("replay link copied","🔗"); } catch (_) {} }} className="bb-pressable" style={{background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:10,padding:"8px 9px",fontSize:9.5,fontWeight:950,color:"#E8ECF4",cursor:"pointer"}}>copy</button>
+            </div>
           </div>
         )}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
           <button onClick={()=>addClip(openEntry)} className="bb-pressable" style={{background:"rgba(167,139,250,.10)",border:"1px solid rgba(167,139,250,.24)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#A78BFA",cursor:"pointer"}}>add PS/Xbox clip</button>
-          <button onClick={()=>requestDeepReview(openEntry)} className="bb-pressable" style={{background:"rgba(255,209,102,.10)",border:"1px solid rgba(255,209,102,.24)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>{openEntry.deepReview?.status === "requested" ? "deep review requested" : "request CARL2 review"}</button>
+          <button onClick={()=>requestDeepReview(openEntry)} className="bb-pressable" style={{background:"rgba(255,209,102,.10)",border:"1px solid rgba(255,209,102,.24)",borderRadius:12,padding:"10px",fontSize:10.5,fontWeight:950,color:"#FFD166",cursor:"pointer"}}>{openEntry.deepReview?.status === "requested" ? "deep review requested" : "request deep review"}</button>
         </div>
         <div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Auto Review Notes</div>
         <div style={{display:"grid",gap:7,marginBottom:12}}>
@@ -14024,11 +14236,43 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
             </div>
           ))}
         </div>
+        {(() => {
+          const nativeReview = buildNativeAdvancedReview(openEntry, stats);
+          return (
+            <div style={{background:"rgba(77,158,255,.045)",border:"1px solid rgba(77,158,255,.16)",borderRadius:14,padding:11,marginBottom:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
+                <div>
+                  <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Native Coach Report</div>
+                  <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>parser: {nativeReview.parserStatus} · {nativeReview.linkedCount} linked stat card{nativeReview.linkedCount === 1 ? "" : "s"}</div>
+                </div>
+                <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase"}}>CARL2 alt</div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:7,marginBottom:10}}>
+                {nativeReview.cards.map(card => <div key={card.label} style={{background:"rgba(0,0,0,.18)",border:`1px solid ${bbAlpha(card.color,.22)}`,borderRadius:10,padding:"8px 6px",textAlign:"center"}}><div style={{fontSize:8,color:"#4A5066",fontWeight:950,textTransform:"uppercase"}}>{card.label}</div><div style={{fontSize:12,color:card.color,fontWeight:950,marginTop:3}}>{card.value}</div></div>)}
+              </div>
+              <div style={{display:"grid",gap:7}}>
+                {nativeReview.sections.map(sec => <div key={sec.title} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:11,padding:"9px 10px"}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"baseline"}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:950}}>{sec.title}</div><div style={{fontSize:8.5,color:sec.status === "ready" || sec.status === "stats ready" ? "#7CFFB2" : sec.status === "estimated" ? "#FFD166" : "#A78BFA",fontWeight:950,textTransform:"uppercase"}}>{sec.status}</div></div><div style={{fontSize:10.3,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{sec.body}</div></div>)}
+              </div>
+              {!!nativeReview.events.length && <div style={{display:"flex",gap:6,overflowX:"auto",paddingTop:10}}>{nativeReview.events.slice(0,10).map(ev => <div key={ev.id || `${ev.time}_${ev.player}_${ev.kind}`} style={{minWidth:120,background:"rgba(184,255,77,.055)",border:"1px solid rgba(184,255,77,.15)",borderRadius:10,padding:"8px"}}><div style={{fontSize:9,color:"#B8FF4D",fontWeight:950}}>{fmtReplayTimecode(ev.time)}</div><div style={{fontSize:10,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ev.player || "player"} · {ev.kind || ev.type}</div></div>)}</div>}
+              {!!nativeReview.backend && (
+                <div style={{display:"grid",gap:7,marginTop:10}}>
+                  {["shotMap","boostMap","passMap","fiftyMap"].map(mapKey => {
+                    const rows = getAdvancedBackendMapRows(nativeReview.backend, mapKey);
+                    if (!rows.length) return null;
+                    const label = mapKey === "shotMap" ? "backend shot/xG map" : mapKey === "boostMap" ? "backend boost map" : mapKey === "passMap" ? "backend pass map" : "backend 50/50 map";
+                    return <div key={mapKey} style={{background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.07)",borderRadius:11,padding:"9px 10px"}}><div style={{fontSize:9,color:"#4D9EFF",fontWeight:950,letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>{label}</div><div style={{display:"grid",gap:5}}>{rows.slice(0,5).map((r,idx)=><div key={`${mapKey}_${idx}`} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:10.2,color:"#8B92A8"}}><span style={{minWidth:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.label || r.player || r.zone || r.title || "row"}</span><span style={{color:r.color || "#E8ECF4",fontWeight:950,whiteSpace:"nowrap"}}>{r.value ?? r.score ?? r.note ?? "ready"}</span></div>)}</div></div>;
+                  })}
+                </div>
+              )}
+              <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.35,marginTop:9}}>{nativeReview.parserDetail}</div>
+            </div>
+          );
+        })()}
         {!!openEntry.clips?.length && <><div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Team Clips</div><div style={{display:"grid",gap:7,marginBottom:12}}>{openEntry.clips.map(c => <button key={c.id} onClick={()=>window.open(c.url,"_blank","noopener,noreferrer")} className="bb-pressable" style={{textAlign:"left",background:"rgba(167,139,250,.07)",border:"1px solid rgba(167,139,250,.18)",borderRadius:12,padding:"9px 10px",color:"#E8ECF4",fontSize:11,fontWeight:850,cursor:"pointer"}}>🎬 {c.label || "clip"}<div style={{fontSize:9,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.url}</div></button>)}</div></>}
         <div style={{background:"rgba(255,209,102,.05)",border:"1px solid rgba(255,209,102,.15)",borderRadius:14,padding:11}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
-            <div><div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>CARL2 Deep Review</div><div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>status: {openEntry.deepReview?.status || "none"}</div></div>
-            {isAdmin && <label className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#FFD166",cursor:uploading?"wait":"pointer",whiteSpace:"nowrap"}}>{uploading?"uploading…":"upload CARL2"}<input type="file" multiple accept="image/*,.json,.csv,.md,.markdown,text/*" onChange={e=>handleCarlUpload(openEntry, e.target.files)} style={{display:"none"}} /></label>}
+            <div><div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Advanced Deep Review</div><div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>status: {openEntry.deepReview?.status || "none"}</div></div>
+            {isAdmin && <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>runBackendAdvancedReview(openEntry)} disabled={parserRunning} className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:parserRunning?"wait":"pointer",whiteSpace:"nowrap"}}>{parserRunning?"parsing…":"run backend"}</button><label className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#FFD166",cursor:uploading?"wait":"pointer",whiteSpace:"nowrap"}}>{uploading?"uploading…":"upload replay/data"}<input type="file" multiple accept="image/*,.replay,.json,.csv,.md,.markdown,.txt,text/*" onChange={e=>handleCarlUpload(openEntry, e.target.files)} style={{display:"none"}} /></label></div>}
           </div>
           {!!openEntry.carl2Assets?.length && <div style={{display:"grid",gap:10,marginTop:12}}>{openEntry.carl2Assets.map(a => /image/i.test(a.type) || /\.(png|jpe?g|webp|gif)$/i.test(a.name) ? <div key={a.id} style={{background:"rgba(0,0,0,.22)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,overflow:"hidden"}}><img src={a.url} alt={a.name} style={{width:"100%",display:"block"}}/><div style={{fontSize:10,color:"#8B92A8",padding:"7px 9px"}}>{a.name}</div></div> : <div key={a.id} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:10}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:900}}>{a.name}</div>{a.text && <pre style={{whiteSpace:"pre-wrap",fontSize:9.5,color:"#8B92A8",maxHeight:180,overflow:"auto",marginTop:8}}>{a.text.slice(0,4000)}</pre>}{a.url && <button onClick={()=>window.open(a.url,"_blank","noopener,noreferrer")} style={{marginTop:8,background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:9,padding:"7px 8px",fontSize:10,color:"#E8ECF4"}}>open file</button>}</div>)}</div>}
         </div>
@@ -14464,6 +14708,18 @@ const formatSyncDebugTs = (iso) => {
 };
 const ballchasingCfg = normalizeLiveSessionConfig(normalizeAppCustomizer(appCustomizer || {}).liveSessionConfig);
 const [ballchasingSyncingGameId, setBallchasingSyncingGameId] = useState(null);
+const statsOS = normalizeBurtonOS(burtonOS || {});
+const filmSyncSession = normalizeFilmSyncSession(statsOS.filmSyncSession || null);
+const filmSyncStatus = getFilmSyncSessionStatus(filmSyncSession);
+const saveFilmSyncSession = async (sessionPatch = null, msg = "session saved", icon = "🎬") => {
+  const fresh = normalizeBurtonOS(await storeGet(BURTON_OS_KEY).catch(() => burtonOS || {}));
+  const nextSession = sessionPatch ? normalizeFilmSyncSession(sessionPatch) : null;
+  const nextOS = normalizeBurtonOS({ ...fresh, filmSyncSession:nextSession });
+  setBurtonOS?.(nextOS);
+  await storeSetWithPush(BURTON_OS_KEY, nextOS).catch(() => storeSet(BURTON_OS_KEY, nextOS));
+  if (msg) addToast?.(msg, icon);
+  return nextSession;
+};
 const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourceLabel = "sync") => {
   try {
     const freshOS = normalizeBurtonOS(await storeGet(BURTON_OS_KEY).catch(() => burtonOS || {}));
@@ -15097,6 +15353,201 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     setMatchSyncing(false);
   };
 
+  const getPlayersForFilmSessionMode = (requestedMode = syncMode) => (
+    requestedMode === "3v3" ? PLAYERS :
+    requestedMode === "2v2" ? PLAYERS.filter(p => selectedDuoIds.includes(p.id)) :
+    PLAYERS.filter(p => p.id === currentPlayer)
+  );
+
+  const startFilmSyncSession = async () => {
+    if (syncMode === "3v3" && currentPlayer !== ADMIN_ID) {
+      addToast?.("only the captain can start a 3v3 import session", "🔒");
+      return;
+    }
+    const players = getPlayersForFilmSessionMode(syncMode);
+    const next = normalizeFilmSyncSession({
+      id:`film_session_${Date.now()}_${syncMode}`,
+      mode:syncMode,
+      playerIds:players.map(p => p.id),
+      startedAt:new Date().toISOString(),
+      delayMinutes:45,
+      status:"running",
+      createdBy:currentPlayer,
+      lastStatus:`${syncMode} session started · play normally, then end session after your last game`,
+    });
+    await saveFilmSyncSession(next, "session import started", "🎬");
+    setStatsSubTab("film");
+  };
+
+  const endFilmSyncSession = async () => {
+    const session = normalizeFilmSyncSession(filmSyncSession || null);
+    if (!session) {
+      addToast?.("start a session first", "⚠️");
+      return;
+    }
+    const endedAt = new Date().toISOString();
+    const next = normalizeFilmSyncSession({
+      ...session,
+      endedAt,
+      delayMinutes:session.delayMinutes || 45,
+      readyAt:new Date(safeDateObj(endedAt).getTime() + (session.delayMinutes || 45) * 60000).toISOString(),
+      status:"waiting",
+      lastStatus:`session ended · delayed import ready in ${session.delayMinutes || 45} min`,
+    });
+    await saveFilmSyncSession(next, "session ended — delayed import armed", "⏳");
+    setStatsSubTab("film");
+  };
+
+  const checkFilmSyncSessionImport = async () => {
+    if (matchSyncing) return;
+    const currentSession = normalizeFilmSyncSession(filmSyncSession || null);
+    if (!currentSession) {
+      setSyncDebug("no session to import", "Start Session before playing, then End Session after your last game.");
+      addToast?.("start a session first", "⚠️");
+      return;
+    }
+    if (!currentSession.endedAt) {
+      setSyncDebug("session still running", "End the session first so the app knows the replay search window.");
+      addToast?.("end session first", "⏱️");
+      return;
+    }
+    if (currentSession.mode === "3v3" && currentPlayer !== ADMIN_ID) {
+      addToast?.("only the captain can import full 3v3 sessions", "🔒");
+      return;
+    }
+    setMatchSyncing(true);
+    const nowIso = new Date().toISOString();
+    try {
+      const playersToSync = PLAYERS.filter(p => (currentSession.playerIds || []).includes(p.id));
+      const expectedCount = Math.max(1, playersToSync.length);
+      setSyncDebug("checking session uploads", `${currentSession.mode} · searching Ballchasing from ${new Date(currentSession.startedAt).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})} to ${new Date(currentSession.endedAt).toLocaleTimeString([], {hour:"numeric", minute:"2-digit"})}`);
+      const seen = new Set();
+      const basics = [];
+      const pushCandidates = (raw) => {
+        getBallchasingSearchCandidates(raw).forEach(item => {
+          const id = item.id || extractBallchasingReplayId(item.link || item.viewUrl || "");
+          if (!id || seen.has(id)) return;
+          seen.add(id);
+          basics.push({ ...item, id });
+        });
+      };
+      const aliases = getBallchasingAliasMap(ballchasingCfg);
+      const uniqueNames = playersToSync.flatMap(p => aliases[p.id] || [p.name]).map(v => String(v || "").trim()).filter(Boolean).filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i).slice(0, 10);
+      for (const name of uniqueNames) {
+        try {
+          const raw = await fetchBallchasingSearchRawViaConfig(ballchasingCfg, { playerName:name, mode:currentSession.mode, count:80 });
+          pushCandidates(raw);
+        } catch (e) {
+          console.warn("session import search skipped", name, e);
+        }
+      }
+      if (!basics.length) {
+        const fresh = normalizeBurtonOS(await storeGet(BURTON_OS_KEY).catch(() => burtonOS || {}));
+        const nextSession = normalizeFilmSyncSession({ ...currentSession, lastCheckedAt:nowIso, status:"waiting", lastStatus:"no Ballchasing replays found yet — Rockpload may still be uploading" });
+        const nextOS = normalizeBurtonOS({ ...fresh, filmSyncSession:nextSession });
+        setBurtonOS?.(nextOS);
+        await storeSetWithPush(BURTON_OS_KEY, nextOS).catch(() => storeSet(BURTON_OS_KEY, nextOS));
+        setSyncDebug("no session replays found", "Rockpload/Ballchasing may still be processing. Wait a bit and hit Check Session Import again.");
+        addToast?.("no session replays yet", "⏳");
+        setMatchSyncing(false);
+        return;
+      }
+      const detailed = [];
+      for (const item of basics.slice(0, 70)) {
+        try {
+          const replay = await fetchBallchasingViaConfig(ballchasingCfg, { replayId:item.id });
+          if (!getReplayDateInWindow(replay, currentSession.startedAt, currentSession.endedAt, 8, 90)) continue;
+          const scored = scoreBallchasingTeamReplayForSync(replay, currentSession.mode, playersToSync);
+          if (!scored.modeOk || !scored.sameTeam || !scored.allMatched) continue;
+          detailed.push({ ...item, replay:scored.safe, ...scored });
+        } catch (e) {
+          console.warn("session import replay detail skipped", item?.id, e);
+        }
+      }
+      const uniqueDetailed = [];
+      const detailIds = new Set();
+      sortReplaysByDateAsc(detailed.map(d => d.replay || d.safe || d)).forEach(rep => {
+        const id = extractBallchasingReplayId(rep.id || rep.link || rep.viewUrl || "");
+        const found = detailed.find(d => (d.replay?.id || d.safe?.id || d.id) === id);
+        if (!id || detailIds.has(id) || !found) return;
+        detailIds.add(id);
+        uniqueDetailed.push(found);
+      });
+      if (!uniqueDetailed.length) {
+        const nextSession = normalizeFilmSyncSession({ ...currentSession, lastCheckedAt:nowIso, status:"waiting", lastStatus:`found ${basics.length} replay candidates, but none safely matched this ${currentSession.mode} session window` });
+        const fresh = normalizeBurtonOS(await storeGet(BURTON_OS_KEY).catch(() => burtonOS || {}));
+        const nextOS = normalizeBurtonOS({ ...fresh, filmSyncSession:nextSession });
+        setBurtonOS?.(nextOS);
+        await storeSetWithPush(BURTON_OS_KEY, nextOS).catch(() => storeSet(BURTON_OS_KEY, nextOS));
+        setSyncDebug("session candidates need review", `Found ${basics.length} candidates, but none matched all selected players in the session window.`);
+        addToast?.("session candidates need review", "⚠️");
+        setMatchSyncing(false);
+        return;
+      }
+      let freshStats = await getFreshStatsForWrite(stats);
+      let nextStats = [...freshStats];
+      const importedGames = [];
+      const touchedGames = [];
+      const importedReplayIds = [];
+      for (const found of uniqueDetailed.slice(0, 12)) {
+        let timeline = null;
+        try { timeline = await fetchBallchasingTimelineViaConfig(ballchasingCfg, found.replay.id || found.safe?.id || found.id); } catch (e) { console.warn("session timeline skipped", found.id, e); }
+        const safeReplay = timeline ? normalizeBallchasingReplay({ ...(found.replay || found.safe), timeline, raw:{ ...((found.replay || found.safe)?.raw || {}), timeline } }) : normalizeBallchasingReplay(found.replay || found.safe || found);
+        const rows = buildBallchasingPlayerRows(safeReplay, ballchasingCfg);
+        const sessionCode = getNextGameCodeWithOffset(nextStats.concat(importedGames), importedReplayIds.length);
+        const replayTouched = [];
+        playersToSync.forEach(player => {
+          const row = rows.find(r => r.appPlayerId === player.id);
+          if (!row) return;
+          const existingIdx = nextStats.findIndex(g => g.ballchasingReplayId === safeReplay.id && g.playerId === player.id);
+          if (existingIdx >= 0) {
+            const patched = { ...nextStats[existingIdx], ...buildStatsBallchasingSavePatch(nextStats[existingIdx], safeReplay, timeline, 100, "session import", player.id, ballchasingCfg), refreshedAt:new Date().toISOString(), sessionImportId:currentSession.id };
+            nextStats[existingIdx] = patched;
+            replayTouched.push(patched);
+          } else {
+            const entry = buildBallchasingSyncStatEntry({ row, replay:safeReplay, timeline, player, sessionCode, requestedMode:currentSession.mode });
+            const withSession = { ...entry, sessionImportId:currentSession.id, sessionImportStartedAt:currentSession.startedAt, sessionImportEndedAt:currentSession.endedAt };
+            importedGames.push(withSession);
+            replayTouched.push(withSession);
+          }
+        });
+        if (replayTouched.length) {
+          importedReplayIds.push(safeReplay.id);
+          touchedGames.push(...replayTouched);
+        }
+      }
+      if (!touchedGames.length) {
+        setSyncDebug("session already imported", "All matching replays were already saved for the selected players.");
+        addToast?.("session already imported", "✅");
+      }
+      const savedStats = importedGames.length ? [...importedGames, ...nextStats] : nextStats;
+      await saveStatsEverywhere(savedStats, setStats);
+      await syncJobsAfterStatsWrite(savedStats, touchedGames, "session_import");
+      const latestOS = normalizeBurtonOS(await storeGet(BURTON_OS_KEY).catch(() => burtonOS || {}));
+      const nextSession = normalizeFilmSyncSession({
+        ...currentSession,
+        status:"imported",
+        lastCheckedAt:nowIso,
+        importedReplayIds:Array.from(new Set([...(currentSession.importedReplayIds || []), ...importedReplayIds])).slice(0,80),
+        importedGameIds:Array.from(new Set([...(currentSession.importedGameIds || []), ...touchedGames.map(g => g.id).filter(Boolean)])).slice(0,120),
+        lastStatus:`imported/refreshed ${touchedGames.length} player card${touchedGames.length === 1 ? "" : "s"} from ${importedReplayIds.length} replay${importedReplayIds.length === 1 ? "" : "s"}`,
+      });
+      const nextOS = normalizeBurtonOS({ ...latestOS, filmSyncSession:nextSession });
+      setBurtonOS?.(nextOS);
+      await storeSetWithPush(BURTON_OS_KEY, nextOS).catch(() => storeSet(BURTON_OS_KEY, nextOS));
+      setSyncDebug("session import complete", nextSession.lastStatus);
+      addToast?.(nextSession.lastStatus, "✅");
+      setStatsSubTab("film");
+      setShowAllGames(true);
+    } catch (e) {
+      console.error(e);
+      setSyncDebug("session import failed", e?.message || String(e || "Ballchasing session import failed"));
+      addToast?.("session import failed", "❌");
+    }
+    setMatchSyncing(false);
+  };
+
+
   const syncLatestTeamMatch = async (requestedMode = syncMode, requestedPlayers = null) => {
     if (matchSyncing) {
       setSyncDebug("sync already running", "Wait for the current tracker request to finish.");
@@ -15564,6 +16015,23 @@ return (
     <div style={{fontSize:10,color:"#8B92A8",fontWeight:850,lineHeight:1.35}}>{matchSyncDebug.status}{matchSyncDebug.detail ? ` · ${String(matchSyncDebug.detail).replace(/match id:[^·]+/i, "").slice(0,70)}` : ""}</div>
   </div>
 )}
+
+
+<div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${filmSyncStatus.color}33`,borderRadius:16,padding:12,marginBottom:14}}>
+  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:9}}>
+    <div>
+      <div style={{fontSize:10,color:filmSyncStatus.color,fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>session import · {filmSyncStatus.label}</div>
+      <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{filmSyncStatus.detail}</div>
+    </div>
+    <div style={{fontSize:9,color:"#4A5066",fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{filmSyncSession?.mode || syncMode}</div>
+  </div>
+  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>
+    <button onClick={startFilmSyncSession} disabled={matchSyncing || !!(filmSyncSession && !filmSyncSession.endedAt)} className="bb-pressable" style={{background:filmSyncSession && !filmSyncSession.endedAt?"rgba(255,255,255,.04)":"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.24)",borderRadius:10,padding:"9px 6px",fontSize:9.5,fontWeight:950,color:filmSyncSession && !filmSyncSession.endedAt?"#4A5066":"#B8FF4D",cursor:filmSyncSession && !filmSyncSession.endedAt?"default":"pointer"}}>start</button>
+    <button onClick={endFilmSyncSession} disabled={matchSyncing || !filmSyncSession || !!filmSyncSession.endedAt} className="bb-pressable" style={{background:filmSyncSession && !filmSyncSession.endedAt?"rgba(255,209,102,.12)":"rgba(255,255,255,.04)",border:"1px solid rgba(255,209,102,.24)",borderRadius:10,padding:"9px 6px",fontSize:9.5,fontWeight:950,color:filmSyncSession && !filmSyncSession.endedAt?"#FFD166":"#4A5066",cursor:filmSyncSession && !filmSyncSession.endedAt?"pointer":"default"}}>end</button>
+    <button onClick={checkFilmSyncSessionImport} disabled={matchSyncing || !filmSyncSession || !filmSyncSession.endedAt} className="bb-pressable" style={{background:filmSyncSession?.endedAt?"rgba(77,158,255,.12)":"rgba(255,255,255,.04)",border:"1px solid rgba(77,158,255,.24)",borderRadius:10,padding:"9px 6px",fontSize:9.5,fontWeight:950,color:filmSyncSession?.endedAt?"#4D9EFF":"#4A5066",cursor:filmSyncSession?.endedAt?"pointer":"default"}}>{matchSyncing?"checking…":"check import"}</button>
+  </div>
+  <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.35,marginTop:8}}>Use this tonight: start before games, end after the last game, then wait about 45 minutes or hit check import to retry. It imports every safe Ballchasing replay in that window and credits jobs.</div>
+</div>
 
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"stats"},{id:"teamlink",label:"team link"},{id:"film",label:"film"},{id:"chem",label:"chem"},{id:"mmr",label:"mmr"}].map(sub=>(
