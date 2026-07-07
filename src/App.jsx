@@ -109,6 +109,7 @@ import { createPortal } from "react-dom";
 // APP146_FILM_ROOM_CLIP_FEED_CLEAN_PATCH
 // APP147_FAST_PARSE_FIRST_SYNC_UI_CPU_PATCH
 // APP146_FILMROOM_VISUALS_SOCIAL_STABILITY_CPU_PATCH
+// APP148_JOB_FRESH_START_PROGRESS_LOCK_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -3989,7 +3990,14 @@ async function maybeSendDueJobShiftReminder({ currentPlayer, burtonOS, setBurton
   if (!currentPlayer) return;
   const os = normalizeBurtonOS(burtonOS);
   const now = Date.now();
-  const jobs = Array.isArray(os.jobs) ? os.jobs : [];
+  const rawJobs = Array.isArray(os.jobs) ? os.jobs : [];
+  // APP148: old builds could auto-start a reserved job from an old stat sync.
+  // Treat those stale auto-started jobs as reserved again until the player manually presses Start.
+  const jobs = rawJobs.map(j => (
+    j && j.status === "active" && j.progressBaseline === "auto_started_from_stat_sync" && !j.manualStartedAt
+      ? { ...j, status:"reserved", startedAt:null, progressStartedAt:null, progress:0, lastProgressAt:null, lastProgressTotal:null, lastSyncedGameIds:[] }
+      : j
+  ));
   const dueJob = jobs.find(job => {
     if (!job || !jobIncludesPlayer(job, currentPlayer)) return false;
     if (!["reserved","active"].includes(job.status)) return false;
@@ -4256,13 +4264,19 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
         ...j,
         status:"active",
         startedAt,
+        manualStartedAt:startedAt,
+        startedBy:currentPlayer,
         progressStartedAt:startedAt,
         acceptedAt:j.acceptedAt||startedAt,
         minutes:jobMinutes,
         expiresAt,
         syncGraceMinutes:15,
         syncGraceUntil,
-        progressBaseline:"fresh_start"
+        progressBaseline:"fresh_start",
+        progress:0,
+        lastProgressAt:null,
+        lastProgressTotal:null,
+        lastSyncedGameIds:[]
       }:j)
     }, "job started fresh", job.emoji || "📋");
   };
@@ -15256,7 +15270,9 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
     let bestProgress = null;
 
     const nextJobs = jobs.map(job => {
-      if (!job || !["reserved", "active"].includes(job.status)) return job;
+      // APP148: never let a synced stat auto-start a job. The player has to press Start,
+      // and the job only counts games whose actual match time is after that manual start.
+      if (!job || job.status !== "active" || !job.manualStartedAt) return job;
       const participantIds = getJobParticipantIds(job);
       if (!participantIds.some(pid => syncedPlayerIds.has(pid))) return job;
       const jobMode = normalizeGameMode(job.gameMode || "any");
@@ -15265,39 +15281,17 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
       const relevantSyncedGames = syncedGames.filter(g => syncedGameLooksLikeJobCandidate(g, job, jobMode));
       if (!relevantSyncedGames.length) return job;
 
-      const startMs = safeDateObj(job.startAt || job.acceptedAt || job.createdAt || nowIso, null)?.getTime();
-      const acceptedMs = safeDateObj(job.acceptedAt || job.createdAt || job.startAt || nowIso, null)?.getTime();
+      const startMs = safeDateObj(job.progressStartedAt || job.manualStartedAt || job.startedAt, null)?.getTime();
       const syncGraceMs = safeDateObj(job.syncGraceUntil || job.expiresAt || nowMs + DAY_MS, null)?.getTime();
-      const earlyGraceMs = 15 * 60 * 1000;
-      const windowStartMs = Number.isFinite(startMs)
-        ? Math.min(startMs, Number.isFinite(acceptedMs) ? acceptedMs : startMs) - earlyGraceMs
-        : nowMs - earlyGraceMs;
+      const windowStartMs = Number.isFinite(startMs) ? startMs : nowMs;
       const windowEndMs = Number.isFinite(syncGraceMs) ? syncGraceMs + 5 * 60 * 1000 : nowMs + DAY_MS;
       const hasMatchingSyncedGame = relevantSyncedGames.some(g => {
-        const candidates = getJobGameTimeCandidates({ ...g, jobCreditAt:g.jobCreditAt || nowIso, jobSyncedAt:g.jobSyncedAt || nowIso });
-        if (!candidates.length) return nowMs >= windowStartMs && nowMs <= windowEndMs;
-        return candidates.some(t => t >= windowStartMs && t <= windowEndMs) || (nowMs >= windowStartMs && nowMs <= windowEndMs);
+        const candidates = getJobActualGameTimeCandidates(g);
+        return candidates.some(t => t >= windowStartMs - 1000 && t <= windowEndMs);
       });
       if (!hasMatchingSyncedGame) return job;
 
       let nextJob = { ...job, lastStatsSyncAt:nowIso, lastStatsSyncSource:sourceLabel };
-      // If a matching synced game arrives while the job is reserved, start it automatically.
-      // This prevents jobs from staying at 0/5 just because the player forgot to hit Start first.
-      if (!nextJob.startedAt && job.status === "reserved") {
-        const creditTimes = relevantSyncedGames.flatMap(g => getJobGameTimeCandidates({ ...g, jobCreditAt:g.jobCreditAt || nowIso, jobSyncedAt:g.jobSyncedAt || nowIso })).filter(Number.isFinite);
-        const bestCreditMs = creditTimes.find(t => t >= windowStartMs && t <= windowEndMs) || nowMs;
-        const startedMs = Math.max(0, Math.min(bestCreditMs, nowMs) - 5000);
-        nextJob.status = "active";
-        nextJob.startedAt = new Date(startedMs).toISOString();
-        nextJob.progressStartedAt = nextJob.startedAt;
-        nextJob.acceptedAt = nextJob.acceptedAt || nextJob.startedAt;
-        const minutes = getJobTimeLimitMinutes(nextJob?.difficulty, nextJob?.jobMode, nextJob?.minutes);
-        nextJob.minutes = minutes;
-        nextJob.expiresAt = new Date(startedMs + minutes * 60000).toISOString();
-        nextJob.syncGraceMinutes = 15;
-        nextJob.syncGraceUntil = new Date(startedMs + (minutes + 15) * 60000).toISOString();
-        nextJob.progressBaseline = "auto_started_from_stat_sync";
-      }
 
       const rows = buildJobRulesFromJob(nextJob).map(rule => ({ rule, progress:evaluateJobChallengeRule(rule, nextJob, statsForJobs) }));
       const doneCount = rows.filter(r => r.progress.done).length;
@@ -18141,8 +18135,20 @@ function getJobGameTimeCandidates(game = {}) {
     game.createdAt,
   ].map(v => safeDateObj(v, null)?.getTime()).filter(t => Number.isFinite(t));
 }
+function getJobActualGameTimeCandidates(game = {}) {
+  // APP148: job progress must use the real match time, not the time an old replay got
+  // refreshed, linked to Ballchasing, or background-synced. This keeps every new job at 0.
+  return [
+    game.matchStartAt,
+    game.startTime,
+    game.dateStarted,
+    game.replayDate,
+    game.ts,
+    game.date,
+  ].map(v => safeDateObj(v, null)?.getTime()).filter(t => Number.isFinite(t));
+}
 function getJobRuleGameTimeMs(game = {}, startMs = 0, endMs = Date.now() + DAY_MS) {
-  const times = getJobGameTimeCandidates(game);
+  const times = getJobActualGameTimeCandidates(game);
   if (!times.length) return null;
   const inside = times.find(t => t >= startMs - 1000 && t <= endMs + 1000);
   if (Number.isFinite(inside)) return inside;
@@ -18157,13 +18163,12 @@ function syncedGameLooksLikeJobCandidate(game = {}, job = {}, mode = "any") {
 function evaluateJobChallengeRule(rule, job, stats = []) {
   const ids = getJobParticipantIds(job);
   const target = Math.max(1, Number(rule.target) || 1);
-  const rawStartedAt = job?.startedAt || job?.progressStartedAt || null;
+  const rawStartedAt = job?.manualStartedAt || (job?.progressBaseline === "fresh_start" ? (job?.progressStartedAt || job?.startedAt) : null);
   const start = rawStartedAt ? safeDateObj(rawStartedAt, null) : null;
 
-  // Jobs must start fresh. A newly claimed/reserved job should not inherit old synced
-  // stats from earlier in the day, the chosen slot time, or the claim time. Progress
-  // only begins after the user presses Start and the job gets a real startedAt value.
-  if (!start || !Number.isFinite(start.getTime())) {
+  // Jobs must start fresh. Reserved jobs and old auto-started jobs never inherit old synced stats.
+  // Progress begins only after the player manually presses Start, then only real match times count.
+  if (!start || !Number.isFinite(start.getTime()) || job?.status === "reserved") {
     return { current:0, target, done:false, games:[], pendingStart:true };
   }
 
