@@ -104,6 +104,7 @@ import { createPortal } from "react-dom";
 // APP145_ADVANCED_REVIEW_STATUS_PERSIST_FIX
 // APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
 // APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
+// APP146_FILMROOM_VISUALS_SOCIAL_STABILITY_CPU_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
 const PLAYERS = [
@@ -2938,6 +2939,94 @@ function getAdvancedBackendMapRows(report = null, key = "") {
   return Array.isArray(list) ? list.filter(Boolean).slice(0, 12) : [];
 }
 
+function getSafeFilmScoreText(value = "") {
+  const raw = String(value || "").trim();
+  if (!raw || /score\s*\?/i.test(raw)) return "";
+  if (/\?/.test(raw)) return "";
+  if (/^0\s*[-–]\s*0$/.test(raw)) return "";
+  return raw.replace(/\s*–\s*/g, "-");
+}
+function getFilmRoomDisplayMeta(entry = {}, stats = []) {
+  const linked = getEntryLinkedStats(entry, stats);
+  const firstLinked = linked[0] || null;
+  const replayGame = linked.find(g => getGameBallchasingReplay(g)) || null;
+  const replay = replayGame ? getGameBallchasingReplay(replayGame) : null;
+  const replayScore = replay ? getSafeFilmScoreText(getReplayScoreboardText(replay)) : "";
+  const linkedScore = firstLinked ? getSafeFilmScoreText(formatGameScore(firstLinked)) : "";
+  const entryScore = getSafeFilmScoreText(entry.scoreText);
+  const mode = normalizeGameMode(firstLinked?.mode || entry.mode || replay?.playlistName || replay?.playlistId || "3v3") || "3v3";
+  const scoreText = entryScore || replayScore || linkedScore || "score pending";
+  const players = (Array.isArray(entry.players) && entry.players.length ? entry.players : linked.map(g => ({ id:g.playerId, name:playerNameById(g.playerId) || g.playerName || g.playerId, color:PLAYERS.find(p=>p.id===g.playerId)?.color || "#B8FF4D" }))).filter(Boolean);
+  return { mode, scoreText, players, linkedCount:linked.length, replayScore, linkedScore };
+}
+function getAdvancedVisualScore(row = {}, fallbackIndex = 0) {
+  const direct = Number(row.score);
+  if (Number.isFinite(direct)) return Math.max(3, Math.min(100, direct));
+  const nums = String(row.value ?? row.note ?? "").match(/\d+(?:\.\d+)?/g)?.map(Number).filter(Number.isFinite) || [];
+  if (nums.length) return Math.max(6, Math.min(100, nums[nums.length - 1] > 100 ? nums[nums.length - 1] / 10 : nums[nums.length - 1]));
+  return 24 + (fallbackIndex % 4) * 13;
+}
+function AdvancedReviewMetricBars({ rows = [], accent = "#4D9EFF" }) {
+  const safeRows = (Array.isArray(rows) ? rows : []).filter(Boolean).slice(0, 6);
+  if (!safeRows.length) return null;
+  return (
+    <div style={{display:"grid",gap:7,minWidth:0}}>
+      {safeRows.map((r, idx) => {
+        const color = r.color || accent;
+        const score = getAdvancedVisualScore(r, idx);
+        const value = r.value ?? r.score ?? r.note ?? "ready";
+        return (
+          <div key={`${r.player || r.label || "row"}_${idx}`} style={{display:"grid",gridTemplateColumns:"minmax(88px,1fr) minmax(0,1.45fr)",gap:8,alignItems:"center",minWidth:0}}>
+            <div style={{minWidth:0}}>
+              <div style={{fontSize:10.2,color:"#E8ECF4",fontWeight:950,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.player || r.label || r.zone || r.title || "player"}</div>
+              <div className="bb-advanced-map-row-value" style={{fontSize:9.4,color:color,fontWeight:950,lineHeight:1.2,marginTop:2,textAlign:"left"}}>{value}</div>
+            </div>
+            <div style={{height:10,borderRadius:99,background:"rgba(255,255,255,.055)",border:"1px solid rgba(255,255,255,.06)",overflow:"hidden",minWidth:0}}>
+              <div style={{height:"100%",width:`${score}%`,borderRadius:99,background:`linear-gradient(90deg,${bbAlpha(color,.22)},${color})`,boxShadow:`0 0 16px ${bbAlpha(color,.18)}`}} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+function AdvancedReviewFieldViz({ rows = [], accent = "#4D9EFF", type = "shot" }) {
+  const safeRows = (Array.isArray(rows) ? rows : []).filter(Boolean).slice(0, 6);
+  if (!safeRows.length) return null;
+  return (
+    <div style={{position:"relative",height:126,borderRadius:16,overflow:"hidden",background:"radial-gradient(circle at 50% 50%, rgba(77,158,255,.12), rgba(5,8,18,.96) 62%)",border:"1px solid rgba(255,255,255,.075)",boxShadow:"inset 0 0 0 1px rgba(255,255,255,.025)"}}>
+      <div style={{position:"absolute",left:"50%",top:0,bottom:0,width:1,background:"rgba(255,255,255,.08)"}} />
+      <div style={{position:"absolute",left:"18%",top:"18%",bottom:"18%",width:"22%",border:"1px solid rgba(255,255,255,.07)",borderRadius:12}} />
+      <div style={{position:"absolute",right:"18%",top:"18%",bottom:"18%",width:"22%",border:"1px solid rgba(255,255,255,.07)",borderRadius:12}} />
+      <div style={{position:"absolute",left:"50%",top:"50%",width:38,height:38,marginLeft:-19,marginTop:-19,border:"1px solid rgba(255,255,255,.07)",borderRadius:99}} />
+      {safeRows.map((r, idx) => {
+        const color = r.color || accent;
+        const score = getAdvancedVisualScore(r, idx);
+        const left = type === "boost" ? 18 + ((idx * 17 + score) % 64) : type === "pass" ? 22 + ((idx * 19) % 58) : type === "fifty" ? 16 + ((idx * 23 + score) % 66) : 25 + ((idx * 15 + score) % 50);
+        const top = type === "boost" ? 20 + ((idx * 29 + score) % 56) : type === "pass" ? 27 + ((idx * 13 + score) % 46) : type === "fifty" ? 24 + ((idx * 31) % 52) : 18 + ((idx * 21 + score) % 58);
+        const size = 10 + Math.min(18, Math.max(0, score / 5));
+        return <div key={`${r.player || r.label || idx}_dot`} title={String(r.value || r.label || "")} style={{position:"absolute",left:`${left}%`,top:`${top}%`,width:size,height:size,marginLeft:-size/2,marginTop:-size/2,borderRadius:99,background:color,border:"2px solid rgba(255,255,255,.42)",boxShadow:`0 0 18px ${bbAlpha(color,.42)}`}} />;
+      })}
+    </div>
+  );
+}
+function AdvancedReviewMapPanel({ title, rows = [], accent = "#4D9EFF", type = "shot", subtitle = "" }) {
+  const safeRows = (Array.isArray(rows) ? rows : []).filter(Boolean).slice(0, 8);
+  if (!safeRows.length) return null;
+  return (
+    <div className="bb-advanced-map-panel" style={{background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.075)",borderRadius:15,padding:11,minWidth:0}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"baseline",marginBottom:9,minWidth:0}}>
+        <div style={{fontSize:9.5,color:accent,fontWeight:950,letterSpacing:.9,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{title}</div>
+        {subtitle && <div style={{fontSize:8.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{subtitle}</div>}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"minmax(128px,.9fr) minmax(0,1.1fr)",gap:10,alignItems:"stretch"}}>
+        <AdvancedReviewFieldViz rows={safeRows} accent={accent} type={type} />
+        <AdvancedReviewMetricBars rows={safeRows} accent={accent} />
+      </div>
+    </div>
+  );
+}
+
 function buildNativeAdvancedReview(entry = {}, stats = []) {
   const linked = getEntryLinkedStats(entry, stats);
   const assets = getFilmRoomEntryAssets(entry);
@@ -3100,7 +3189,7 @@ function normalizeFilmRoomEntries(input = []) {
       teamGameId:String(entry.teamGameId || entry.sessionCode || entry.roomId || entry.gameId || entry.id || ""),
       replayId:String(entry.replayId || entry.ballchasingReplayId || ""),
       ballchasingUrl:String(entry.ballchasingUrl || entry.replayUrl || entry.viewUrl || ""),
-      mode:normalizeGameMode(entry.mode || "3v3"),
+      mode:normalizeGameMode(entry.mode || entry.playlistName || entry.playlist || "3v3") || "3v3",
       scoreText:String(entry.scoreText || ""),
       result:String(entry.result || ""),
       players:Array.isArray(entry.players) ? entry.players.filter(Boolean).slice(0,6) : [],
@@ -4562,8 +4651,21 @@ body.bb-pwa-shell { position:fixed; inset:0; width:100%; height:100dvh; min-heig
         backface-visibility:hidden;
         -webkit-backface-visibility:hidden;
       }
-      .bb-social-comments-modal {
+      .bb-social-comments-modal, .bb-social-composer-modal {
         font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+        letter-spacing:0 !important;
+      }
+      .bb-social-comments-modal input, .bb-social-comments-modal textarea, .bb-social-comments-modal button,
+      .bb-social-composer-modal input, .bb-social-composer-modal textarea, .bb-social-composer-modal button {
+        font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+      }
+      .bb-advanced-map-panel {
+        min-width:0;
+        overflow:hidden;
+      }
+      .bb-advanced-map-row-value {
+        overflow-wrap:anywhere;
+        white-space:normal !important;
       }
 
       body.bb-fullscreen-float .bb-fullscreen-shell {
@@ -9404,7 +9506,8 @@ function SocialComposer({ currentPlayer, onPost, onClose }) {
       onClick={onClose}
     >
       <div
-        style={{...s.modalBox,width:"100%",maxWidth:450,borderRadius:24,border:"1px solid rgba(167,139,250,0.26)",borderBottom:"1px solid rgba(167,139,250,0.18)",maxHeight:"calc(100dvh - env(safe-area-inset-top) - 104px)",overflowY:"auto",paddingBottom:"max(22px, env(safe-area-inset-bottom))",boxShadow:"0 24px 80px rgba(0,0,0,0.58), 0 0 0 1px rgba(167,139,250,0.06)",animation:"dropDown .2s cubic-bezier(.2,.8,.2,1)"}}
+        className="bb-social-composer-modal"
+        style={{...s.modalBox,width:"100%",maxWidth:450,borderRadius:24,border:"1px solid rgba(167,139,250,0.26)",borderBottom:"1px solid rgba(167,139,250,0.18)",maxHeight:"calc(100dvh - env(safe-area-inset-top) - 104px)",overflowY:"auto",paddingBottom:"max(22px, env(safe-area-inset-bottom))",boxShadow:"0 24px 80px rgba(0,0,0,0.58), 0 0 0 1px rgba(167,139,250,0.06)",animation:"dropDown .2s cubic-bezier(.2,.8,.2,1)",fontFamily:"inherit"}}
         onClick={(e)=>e.stopPropagation()}
       >
         <div style={s.modalHeader}>
@@ -9700,7 +9803,7 @@ function PostCommentsModal({ post, onAddComment, onHeartComment, currentPlayer, 
     >
       <div
         className="bb-social-comments-modal"
-        style={{...s.modalBox,width:"100%",maxWidth:480,maxHeight:"72dvh",display:"flex",flexDirection:"column",paddingBottom:"max(18px, env(safe-area-inset-bottom))",overflow:"hidden",borderRadius:"24px",border:"1px solid rgba(255,255,255,0.10)",borderBottom:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 26px 80px rgba(0,0,0,0.58)",animation:"modalSheetUp .2s cubic-bezier(.2,.8,.2,1)",fontFamily:"'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"}}
+        style={{...s.modalBox,width:"100%",maxWidth:480,maxHeight:"72dvh",display:"flex",flexDirection:"column",paddingBottom:"max(18px, env(safe-area-inset-bottom))",overflow:"hidden",borderRadius:"24px",border:"1px solid rgba(255,255,255,0.10)",borderBottom:"1px solid rgba(255,255,255,0.08)",boxShadow:"0 26px 80px rgba(0,0,0,0.58)",animation:"modalSheetUp .2s cubic-bezier(.2,.8,.2,1)",fontFamily:"inherit"}}
         onClick={(e)=>e.stopPropagation()}
       >
         <div style={s.modalHeader}><div style={s.modalTitle}>comments</div><button onClick={onClose} className="bb-pressable" style={s.modalClose}><X size={20}/></button></div>
@@ -9758,6 +9861,30 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
   };
 
   useEffect(() => {
+    let alive = true;
+    const syncSocialPosts = async () => {
+      const fresh = await storeGet("posts").catch(() => null);
+      if (!alive || !Array.isArray(fresh)) return;
+      setPosts(prev => {
+        const current = Array.isArray(prev) ? prev : [];
+        return bbStableStorageString(current) === bbStableStorageString(fresh) ? current : fresh;
+      });
+    };
+    syncSocialPosts();
+    const timer = setInterval(syncSocialPosts, 18000);
+    const onFocus = () => syncSocialPosts();
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { alive = false; clearInterval(timer); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); };
+  }, [setPosts]);
+
+  useEffect(() => {
+    if (!commentingOn?.id) return;
+    const fresh = (posts || []).find(p => String(p.id) === String(commentingOn.id));
+    if (fresh && bbStableStorageString(fresh) !== bbStableStorageString(commentingOn)) setCommentingOn(fresh);
+  }, [posts, commentingOn?.id]);
+
+  useEffect(() => {
     if (!deepLink) return;
     if (deepLink.subTab === "bets") {
       setSubTab("bets");
@@ -9780,13 +9907,23 @@ function SocialTab({ posts, setPosts, currentPlayer, addToast, bets, setBets, po
 
   const addPost = async (data) => {
     let img = null;
-    if (data.file) img = await uploadPostImage(data.file);
-    const post = { id: Date.now().toString(), playerId: currentPlayer, caption: data.caption, image: img, isVideo: data.file?.type?.startsWith("video/"), ts: new Date().toISOString(), hearts: [], comments: [] };
-    const upd = [post, ...posts];
-    setPosts(upd);
-    await storeSet("posts", upd);
-    await notifyNewPostPush(post);
-    addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name} posted something`, "📸");
+    try {
+      if (data.file) {
+        const uploaded = await uploadPostImage(data.file);
+        img = typeof uploaded === "string" ? uploaded : (uploaded?.url || uploaded?.publicUrl || uploaded?.path || "");
+      }
+      const fresh = await storeGet("posts").catch(() => null);
+      const base = Array.isArray(fresh) ? fresh : (Array.isArray(posts) ? posts : []);
+      const post = { id: Date.now().toString(), playerId: currentPlayer, caption: data.caption, image: img, isVideo: data.file?.type?.startsWith("video/"), ts: new Date().toISOString(), hearts: [], comments: [] };
+      const upd = [post, ...base].slice(0, 120);
+      setPosts(upd);
+      await storeSetWithPush("posts", upd);
+      await notifyNewPostPush(post);
+      addToast?.(`${PLAYERS.find(pl => pl.id === currentPlayer)?.name} posted something`, "📸");
+    } catch (err) {
+      addToast?.("post upload failed — try again", "⚠️");
+      throw err;
+    }
   };
 
 const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "", postId = "", commentId = "" }) => {
@@ -9814,7 +9951,7 @@ const pushActivity = async ({ to, type, fromName, text, message = "", gameId = "
     const isLiking = !hearts.includes(currentPlayer);
     const upd = posts.map(p => { if (p.id !== postId) return p; return { ...p, hearts: hearts.includes(currentPlayer) ? hearts.filter(id => id !== currentPlayer) : [...hearts, currentPlayer] }; });
     setPosts(upd);
-    await storeSet("posts", upd);
+    await storeSetWithPush("posts", upd);
     if (isLiking && post && post.playerId !== currentPlayer) {
       await pushActivity({ to: post.playerId, type: "like", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `liked your post`, postId });
     }
@@ -9824,7 +9961,7 @@ const reactToPost = async (postId, emoji) => {
     const post = posts.find(p => p.id === postId);
     const upd = posts.map(p => p.id===postId ? {...p, postReactions:[...(p.postReactions||[]), {playerId:currentPlayer, emoji, ts:new Date().toISOString()}]} : p);
     setPosts(upd);
-    await storeSet("posts", upd);
+    await storeSetWithPush("posts", upd);
     if (post && post.playerId !== currentPlayer) {
       await pushActivity({ to: post.playerId, type: "post_react", fromName: PLAYERS.find(p=>p.id===currentPlayer)?.name, text: `reacted ${emoji} to your post`, postId });
     }
@@ -9835,7 +9972,7 @@ const addComment = async (postId, text, replyTo = null) => {
     const comment = { id: Date.now().toString(), playerId: currentPlayer, text, ts: new Date().toISOString(), hearts: [], replyTo };
     const upd = posts.map(p => p.id === postId ? { ...p, comments: [...(p.comments || []), comment] } : p);
     setPosts(upd);
-    await storeSet("posts", upd);
+    await storeSetWithPush("posts", upd);
     setCommentingOn(prev => prev ? upd.find(p => p.id === prev.id) : prev);
     const post = posts.find(p => p.id === postId);
     if (post && post.playerId !== currentPlayer) {
@@ -9855,7 +9992,7 @@ const addComment = async (postId, text, replyTo = null) => {
       return { ...p, comments };
     });
     setPosts(upd);
-    await storeSet("posts", upd);
+    await storeSetWithPush("posts", upd);
     setCommentingOn(prev => prev ? upd.find(p => p.id === prev.id) : prev);
     const post = posts.find(p => p.id === postId);
     const comment = post?.comments?.find(c => c.id === commentId);
@@ -14085,14 +14222,18 @@ function buildFilmRoomEntryFromGames(allStats = [], games = [], source = "sync")
   const teamGameId = getFilmRoomGameKey(withReplay);
   const our = getDisplayedOurScore(first);
   const theirKnown = first?.theirScore !== null && first?.theirScore !== undefined && first?.theirScore !== "" && Number.isFinite(Number(first?.theirScore));
+  const replayScoreText = replay ? getSafeFilmScoreText(getReplayScoreboardText(replay)) : "";
+  const linkedScoreText = getSafeFilmScoreText(`${our}-${theirKnown ? Number(first.theirScore) : "?"}`);
+  const resolvedScoreText = replayScoreText || linkedScoreText || `${our}-${theirKnown ? Number(first.theirScore) : "?"}`;
+  const resolvedMode = normalizeGameMode(first.mode || replay?.playlistName || replay?.playlistId || "3v3") || "3v3";
   return {
     id:teamGameId,
     gameId:String(first.id || teamGameId),
     teamGameId,
     replayId:replayId || replay?.id || "",
     ballchasingUrl:getBallchasing3DViewerUrl(replay || replayId),
-    mode:normalizeGameMode(first.mode || "3v3"),
-    scoreText:teamGameId ? `${our}-${theirKnown ? Number(first.theirScore) : "?"}` : "",
+    mode:resolvedMode,
+    scoreText:teamGameId ? resolvedScoreText : "",
     result:first.result || "",
     players:Array.from(new Set(sessionRows.map(g => g.playerId).filter(Boolean))).map(pid => ({ id:pid, name:playerNameById(pid), color:PLAYERS.find(p=>p.id===pid)?.color || "#B8FF4D" })),
     createdAt:replay?.date || first.matchStartAt || first.ts || new Date().toISOString(),
@@ -14332,6 +14473,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   const rawOpenEntry = entries.find(e => e.id === openId) || entries[0];
   const openEntryLocalPatch = rawOpenEntry?.id ? parserLocalById?.[rawOpenEntry.id] : null;
   const openEntry = openEntryLocalPatch ? mergeFilmRoomEntryPatch(rawOpenEntry, openEntryLocalPatch) : rawOpenEntry;
+  const openMeta = getFilmRoomDisplayMeta(openEntry, stats);
   const openEntryWatchUrl = getBallchasingWatchUrl(openEntry?.ballchasingUrl || openEntry?.replayId || "");
   const advancedStatusText = parserRunning
     ? "parsing"
@@ -14341,20 +14483,24 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   return (
     <div style={{display:"grid",gap:12}}>
       <div style={{display:"flex",gap:8,overflowX:"auto",paddingBottom:4}}>
-        {entries.slice(0,12).map(e => (
-          <button key={e.id} onClick={()=>setOpenId(e.id)} className="bb-pressable" style={{minWidth:150,textAlign:"left",background:openEntry.id===e.id?"rgba(184,255,77,.12)":"rgba(255,255,255,.045)",border:`1px solid ${openEntry.id===e.id?"rgba(184,255,77,.32)":"rgba(255,255,255,.08)"}`,borderRadius:14,padding:10,cursor:"pointer"}}>
-            <div style={{fontSize:9,color:openEntry.id===e.id?"#B8FF4D":"#8B92A8",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{e.mode} · {e.scoreText || "score ?"}</div>
-            <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:4}}>{(e.players || []).map(p=>p.name).join(" · ") || "synced replay"}</div>
-            <div style={{fontSize:9.5,color:"#4A5066",fontWeight:850,marginTop:3}}>{fmtRelTime(e.createdAt)} · {e.deepReview?.status === "ready" ? "review ready" : e.deepReview?.status === "requested" ? "requested" : "auto notes"}</div>
+        {entries.slice(0,12).map(e => {
+          const meta = getFilmRoomDisplayMeta(e, stats);
+          const active = String(openEntry.id) === String(e.id);
+          return (
+          <button key={e.id} onClick={()=>setOpenId(String(e.id))} className="bb-pressable" style={{minWidth:150,textAlign:"left",background:active?"rgba(184,255,77,.12)":"rgba(255,255,255,.045)",border:`1px solid ${active?"rgba(184,255,77,.32)":"rgba(255,255,255,.08)"}`,borderRadius:14,padding:10,cursor:"pointer"}}>
+            <div style={{fontSize:9,color:active?"#B8FF4D":"#8B92A8",fontWeight:950,letterSpacing:.8,textTransform:"uppercase"}}>{meta.mode} · {meta.scoreText}</div>
+            <div style={{fontSize:12,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginTop:4}}>{(meta.players || []).map(p=>p.name).join(" · ") || "synced replay"}</div>
+            <div style={{fontSize:9.5,color:"#4A5066",fontWeight:850,marginTop:3}}>{fmtRelTime(e.createdAt)} · {e.advancedReview?.status === "backend_ready" ? "backend ready" : e.deepReview?.status === "ready" ? "review ready" : e.deepReview?.status === "requested" ? "requested" : "auto notes"}</div>
           </button>
-        ))}
+          );
+        })}
       </div>
       <div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:"1px solid rgba(184,255,77,.14)",borderRadius:20,padding:14,boxShadow:"0 16px 38px rgba(0,0,0,.24)"}}>
         <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:12}}>
           <div style={{minWidth:0}}>
             <div style={{fontSize:10,color:"#B8FF4D",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Film Review</div>
-            <div style={{fontSize:17,color:"#E8ECF4",fontWeight:950,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{openEntry.mode} · {openEntry.scoreText || "score ?"}</div>
-            <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>{(openEntry.players || []).map(p=>p.name).join(" · ")}</div>
+            <div style={{fontSize:17,color:"#E8ECF4",fontWeight:950,marginTop:3,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{openMeta.mode} · {openMeta.scoreText}</div>
+            <div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>{(openMeta.players || []).map(p=>p.name).join(" · ")}</div>
           </div>
           {openEntryWatchUrl && <button onClick={()=>window.open(openEntryWatchUrl,"_blank","noopener,noreferrer")} className="bb-pressable" style={{background:"rgba(77,158,255,.11)",border:"1px solid rgba(77,158,255,.26)",borderRadius:12,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:"pointer",whiteSpace:"nowrap"}}>3D replay</button>}
         </div>
@@ -14388,30 +14534,35 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
         </div>
         {(() => {
           const nativeReview = buildNativeAdvancedReview(openEntry, stats);
+          const backendReady = !!nativeReview.backend;
+          const visibleSections = backendReady
+            ? nativeReview.sections.filter(sec => /coach|timeline|training/i.test(String(sec.title || "")))
+            : nativeReview.sections;
+          const mapConfig = [
+            { key:"shotMap", title:"Shot / xG Map", accent:"#4D9EFF", type:"shot", subtitle:"quality" },
+            { key:"boostMap", title:"Boost Control Map", accent:"#B8FF4D", type:"boost", subtitle:"routes" },
+            { key:"passMap", title:"Pass / Touch Map", accent:"#A78BFA", type:"pass", subtitle:"creation" },
+            { key:"fiftyMap", title:"50/50 Pressure Map", accent:"#FFD166", type:"fifty", subtitle:"challenges" },
+          ];
           return (
-            <div style={{background:"rgba(77,158,255,.045)",border:"1px solid rgba(77,158,255,.16)",borderRadius:14,padding:11,marginBottom:12}}>
+            <div style={{background:"rgba(77,158,255,.045)",border:"1px solid rgba(77,158,255,.16)",borderRadius:16,padding:12,marginBottom:12,overflow:"hidden"}}>
               <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:10}}>
-                <div>
-                  <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Native Coach Report</div>
-                  <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>parser: {nativeReview.parserStatus} · {nativeReview.linkedCount} linked stat card{nativeReview.linkedCount === 1 ? "" : "s"}</div>
+                <div style={{minWidth:0}}>
+                  <div style={{fontSize:10,color:"#4D9EFF",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Burton Coach Engine</div>
+                  <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>status: {nativeReview.parserStatus} · {nativeReview.linkedCount} linked stat card{nativeReview.linkedCount === 1 ? "" : "s"}</div>
                 </div>
-                <div style={{fontSize:9.5,color:"#4A5066",fontWeight:900,textTransform:"uppercase"}}>CARL2 alt</div>
+                <div style={{fontSize:9.5,color:backendReady?"#7CFFB2":"#A78BFA",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{backendReady?"backend ready":"local review"}</div>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:7,marginBottom:10}}>
-                {nativeReview.cards.map(card => <div key={card.label} style={{background:"rgba(0,0,0,.18)",border:`1px solid ${bbAlpha(card.color,.22)}`,borderRadius:10,padding:"8px 6px",textAlign:"center"}}><div style={{fontSize:8,color:"#4A5066",fontWeight:950,textTransform:"uppercase"}}>{card.label}</div><div style={{fontSize:12,color:card.color,fontWeight:950,marginTop:3}}>{card.value}</div></div>)}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(118px,1fr))",gap:7,marginBottom:10}}>
+                {nativeReview.cards.map(card => <div key={card.label} style={{background:"rgba(0,0,0,.18)",border:`1px solid ${bbAlpha(card.color,.22)}`,borderRadius:11,padding:"9px 8px",minWidth:0}}><div style={{fontSize:8.4,color:"#4A5066",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{card.label}</div><div style={{fontSize:13,color:card.color,fontWeight:950,marginTop:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{card.value}</div><div style={{height:6,borderRadius:99,background:"rgba(255,255,255,.055)",overflow:"hidden",marginTop:7}}><div style={{height:"100%",width:`${getAdvancedVisualScore(card)}%`,background:card.color,borderRadius:99}}/></div></div>)}
               </div>
-              <div style={{display:"grid",gap:7}}>
-                {nativeReview.sections.map(sec => <div key={sec.title} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:11,padding:"9px 10px"}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"baseline"}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:950}}>{sec.title}</div><div style={{fontSize:8.5,color:sec.status === "ready" || sec.status === "stats ready" ? "#7CFFB2" : sec.status === "estimated" ? "#FFD166" : "#A78BFA",fontWeight:950,textTransform:"uppercase"}}>{sec.status}</div></div><div style={{fontSize:10.3,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{sec.body}</div></div>)}
-              </div>
-              {!!nativeReview.events.length && <div style={{display:"flex",gap:6,overflowX:"auto",paddingTop:10}}>{nativeReview.events.slice(0,10).map(ev => <div key={ev.id || `${ev.time}_${ev.player}_${ev.kind}`} style={{minWidth:120,background:"rgba(184,255,77,.055)",border:"1px solid rgba(184,255,77,.15)",borderRadius:10,padding:"8px"}}><div style={{fontSize:9,color:"#B8FF4D",fontWeight:950}}>{fmtReplayTimecode(ev.time)}</div><div style={{fontSize:10,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ev.player || "player"} · {ev.kind || ev.type}</div></div>)}</div>}
+              {!!visibleSections.length && <div style={{display:"grid",gap:7,marginBottom:10}}>
+                {visibleSections.map(sec => <div key={sec.title} style={{background:"rgba(255,255,255,.035)",border:"1px solid rgba(255,255,255,.07)",borderRadius:11,padding:"9px 10px",minWidth:0}}><div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"baseline"}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:950,minWidth:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{sec.title}</div><div style={{fontSize:8.5,color:sec.status === "ready" || sec.status === "stats ready" || /backend/i.test(sec.status || "") ? "#7CFFB2" : sec.status === "estimated" ? "#FFD166" : "#A78BFA",fontWeight:950,textTransform:"uppercase",whiteSpace:"nowrap"}}>{sec.status}</div></div><div style={{fontSize:10.3,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{sec.body}</div></div>)}
+              </div>}
+              {!!nativeReview.events.length && <div style={{display:"flex",gap:6,overflowX:"auto",padding:"2px 0 10px"}}>{nativeReview.events.slice(0,10).map(ev => <div key={ev.id || `${ev.time}_${ev.player}_${ev.kind}`} style={{minWidth:120,background:"rgba(184,255,77,.055)",border:"1px solid rgba(184,255,77,.15)",borderRadius:10,padding:"8px"}}><div style={{fontSize:9,color:"#B8FF4D",fontWeight:950}}>{fmtReplayTimecode(ev.time)}</div><div style={{fontSize:10,color:"#E8ECF4",fontWeight:900,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{ev.player || "player"} · {ev.kind || ev.type}</div></div>)}</div>}
               {!!nativeReview.backend && (
-                <div style={{display:"grid",gap:7,marginTop:10}}>
-                  {["shotMap","boostMap","passMap","fiftyMap"].map(mapKey => {
-                    const rows = getAdvancedBackendMapRows(nativeReview.backend, mapKey);
-                    if (!rows.length) return null;
-                    const label = mapKey === "shotMap" ? "backend shot/xG map" : mapKey === "boostMap" ? "backend boost map" : mapKey === "passMap" ? "backend pass map" : "backend 50/50 map";
-                    return <div key={mapKey} style={{background:"rgba(0,0,0,.16)",border:"1px solid rgba(255,255,255,.07)",borderRadius:11,padding:"9px 10px"}}><div style={{fontSize:9,color:"#4D9EFF",fontWeight:950,letterSpacing:.8,textTransform:"uppercase",marginBottom:6}}>{label}</div><div style={{display:"grid",gap:5}}>{rows.slice(0,5).map((r,idx)=><div key={`${mapKey}_${idx}`} style={{display:"flex",justifyContent:"space-between",gap:8,fontSize:10.2,color:"#8B92A8"}}><span style={{minWidth:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{r.label || r.player || r.zone || r.title || "row"}</span><span style={{color:r.color || "#E8ECF4",fontWeight:950,whiteSpace:"nowrap"}}>{r.value ?? r.score ?? r.note ?? "ready"}</span></div>)}</div></div>;
-                  })}
+                <div style={{display:"grid",gap:9,marginTop:2}}>
+                  {mapConfig.map(cfg => <AdvancedReviewMapPanel key={cfg.key} title={cfg.title} rows={getAdvancedBackendMapRows(nativeReview.backend, cfg.key)} accent={cfg.accent} type={cfg.type} subtitle={cfg.subtitle}/>) }
                 </div>
               )}
               <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.35,marginTop:9}}>{nativeReview.parserDetail}</div>
@@ -20189,9 +20340,9 @@ const RT_KEYS = ["chat", "posts", "completions", "training", "schedule", "commen
 // Keep realtime on only the keys that need to feel instant. The full RT_KEYS list still exists
 // for reference/hydration, but subscribing to every slow-changing key was making Supabase work too hard.
 const RT_KEYS_LIVE = [
-  // APP138: keep only instant gameplay/chat/session keys live.
-  // Slow admin/shop/credits/notification feeds hydrate on boot or update through explicit writes, cutting Supabase realtime load.
-  "chat", "stats", "points", "bets", "presence",
+  // APP146: keep realtime lean, but include posts so Social updates without logging out.
+  // Slow admin/shop/credits/notification feeds still hydrate on boot or explicit writes.
+  "chat", "posts", "stats", "points", "bets", "presence",
   "team_room", "team_sessions", "live_session", "typing",
   ADMIN_LIVE_SYNC_KEY
 ];
@@ -27586,15 +27737,15 @@ const TABS=[...customTabOrder.map(id=>tabById[id]).filter(Boolean), ...BASE_TABS
 {tab==="home"&&<HomeTab key={tab} schedule={schedule} mmrProfiles={mmrProfiles} currentPlayer={currentPlayer} points={points} setPoints={setPoints} onResync={handleResync} resyncingId={resyncingId} trainingData={trainingData} completions={completions} onGotoTraining={(dayKey)=>{ if(dayKey) setJumpKey(dayKey); setShowTrainingFull(true); }} stats={stats} setCompletions={setCompletions} onGotoStats={()=>setTab("presence")} statsJumpDate={statsJumpDate} setStatsJumpDate={setStatsJumpDate} passXP={passXP} setPassXP={setPassXP} timeLogs={timeLogs} setTimeLogs={setTimeLogs} onOpenBracket={()=>setShowBracket(true)} burtonOS={burtonOS} setBurtonOS={setBurtonOS} pings={pings} setPings={setPings} addToast={addToast} appCustomizer={appCustomizer} setTab={setTab}/>}
 {tab==="jobs"&&<JobsTab key={tab} burtonOS={burtonOS} setBurtonOS={setBurtonOS} currentPlayer={currentPlayer} points={points} setPoints={setPoints} stats={stats} appCustomizer={appCustomizer} addToast={addToast} setTab={setTab}/>}
 {tab==="training"&&<TrainingTab key={tab} trainingData={trainingData} completions={completions} setCompletions={setCompletions} currentPlayer={currentPlayer} onOpenComments={setCommentDay} jumpKey={jumpKey} onJumpHandled={()=>setJumpKey(null)}/>}
-      <div style={{display:tab==="social"?"block":"none",height:"100%",minHeight:"100%"}} aria-hidden={tab!=="social"}><SocialTab key="social-mounted" posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)} appCustomizer={appCustomizer} burtonOS={burtonOS} setBurtonOS={setBurtonOS} pings={pings} setPings={setPings}/></div>
+      {tab==="social"&&<AppSectionBoundary resetKey={`social-${currentPlayer}-${posts.length}`} label="social" accent={userColor} onGoHome={()=>setTab("home")}><SocialTab key={`social-${currentPlayer}`} posts={posts} setPosts={setPosts} currentPlayer={currentPlayer} addToast={addToast} bets={bets} setBets={setBets} points={points} setPoints={setPoints} stats={stats} deepLink={socialDeepLink} onDeepLinkHandled={()=>setSocialDeepLink(null)} appCustomizer={appCustomizer} burtonOS={burtonOS} setBurtonOS={setBurtonOS} pings={pings} setPings={setPings}/></AppSectionBoundary>}
         {tab==="stream"&&<StreamTab key={tab} streamProfiles={streamProfiles} setStreamProfiles={setStreamProfiles} currentPlayer={currentPlayer} appCustomizer={appCustomizer}/>}
           
 {tab==="room"&&(
 <div style={{display:"flex",flexDirection:"column",alignItems:"center",minHeight:"100%",padding:"20px 20px max(36px, env(safe-area-inset-bottom))",overflow:"visible"}}>
     <div style={{width:"100%",maxWidth:480,overflow:"visible"}}>
       <div style={{fontFamily:"'Oswald',sans-serif",fontSize:22,fontWeight:700,letterSpacing:0.5,marginBottom:4,textAlign:"center"}}>voice room</div>
-      <VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce} soundboardEvent={soundboardEvent}/>
-      <TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/>
+      <AppSectionBoundary resetKey={`voice-room-${currentPlayer}-${autoJoinVoiceNonce || "open"}`} label="voice room" accent={userColor} onGoHome={()=>setTab("home")}><VoiceRoom currentPlayer={currentPlayer} addToast={addToast} points={points} autoJoinNonce={autoJoinVoiceNonce} soundboardEvent={soundboardEvent}/></AppSectionBoundary>
+      <AppSectionBoundary resetKey={`session-planner-${currentPlayer}`} label="session planner" accent={userColor} onGoHome={()=>setTab("home")}><TeamSessionPlanner currentPlayer={currentPlayer} teamSessions={teamSessions} setTeamSessions={setTeamSessions} pings={pings} setPings={setPings} addToast={addToast}/></AppSectionBoundary>
 </div>
   </div>
 )}    
