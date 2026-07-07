@@ -2989,6 +2989,80 @@ function buildNativeAdvancedReview(entry = {}, stats = []) {
     backend,
   };
 }
+
+function buildClientFallbackAdvancedBackendReport(entry = {}, stats = [], nativeReview = {}, err = null) {
+  const linked = getEntryLinkedStats(entry, stats);
+  const rows = Array.isArray(nativeReview.rows) && nativeReview.rows.length
+    ? nativeReview.rows
+    : linked.map(g => ({
+        name: playerNameById(g.playerId) || g.playerName || g.playerId || "player",
+        player: playerNameById(g.playerId) || g.playerName || g.playerId || "player",
+        goals:Number(g.goals)||0,
+        assists:Number(g.assists)||0,
+        saves:Number(g.saves)||0,
+        shots:Number(g.shots)||0,
+        demos:Number(g.demos)||0,
+        score:Number(g.score)||0,
+        color:PLAYERS.find(p => p.id === g.playerId)?.color || "#B8FF4D",
+      }));
+  const totals = linked.reduce((acc, g) => {
+    acc.goals += Number(g.goals) || 0;
+    acc.assists += Number(g.assists) || 0;
+    acc.saves += Number(g.saves) || 0;
+    acc.shots += Number(g.shots) || 0;
+    acc.demos += Number(g.demos) || 0;
+    acc.score += Number(g.score) || 0;
+    return acc;
+  }, { goals:0, assists:0, saves:0, shots:0, demos:0, score:0 });
+  const shotQuality = totals.shots ? Math.round((totals.goals / Math.max(totals.shots, 1)) * 100) : 0;
+  const estXg = Math.max(0, Math.min(9.99, (totals.shots * 0.16) + (totals.assists * 0.18) + (totals.goals * 0.22)));
+  const pressure = Math.max(0, Math.min(100, Math.round((totals.shots * 8) + (totals.goals * 15) - (totals.saves * 4))));
+  const defensiveStress = Math.max(0, Math.min(100, Math.round((totals.saves * 11) - (totals.shots * 3))));
+  const events = Array.isArray(nativeReview.events) ? nativeReview.events.slice(0,24) : [];
+  const maps = {
+    shotMap: rows.map((r, idx) => {
+      const player = r.appName || r.name || r.player || "player";
+      const shots = Number(r.shots) || 0;
+      const goals = Number(r.goals) || 0;
+      const pxg = shots ? Math.max(0.05, (shots * 0.16) + (goals * 0.22) + ((Number(r.assists)||0) * 0.08)) : 0;
+      return { player, label:`${player} shot quality`, value:shots ? `${goals}/${shots} · xG ${pxg.toFixed(2)}` : "no shots", score:shots ? Math.round((goals / Math.max(shots,1))*100) : 0, zone:idx % 3 === 0 ? "left lane" : idx % 3 === 1 ? "center lane" : "right lane", color:r.color || "#4D9EFF" };
+    }),
+    boostMap: rows.map(r => {
+      const player = r.appName || r.name || r.player || "player";
+      const avgBoost = Number(r.avgBoost);
+      const boostCollected = Number(r.boostCollected);
+      const boostStolen = Number(r.boostStolen);
+      return { player, label:`${player} boost control`, value:Number.isFinite(avgBoost) ? `avg ${Math.round(avgBoost)} · stolen ${Math.round(boostStolen || 0)}` : Number.isFinite(boostCollected) ? `collected ${Math.round(boostCollected)}` : "needs boost data", score:Number.isFinite(avgBoost) ? Math.round(avgBoost) : null, color:r.color || "#FFD166" };
+    }),
+    passMap: rows.map(r => { const player = r.appName || r.name || r.player || "player"; const assists = Number(r.assists)||0; const shots = Number(r.shots)||0; return { player, label:`${player} passing impact`, value:assists ? `${assists} assist${assists === 1 ? "" : "s"}` : `${shots} shots created`, score:assists * 30 + shots * 5, color:r.color || "#A78BFA" }; }),
+    fiftyMap: rows.map(r => { const player = r.appName || r.name || r.player || "player"; const demos = Number(r.demos || r.demosInflicted)||0; const saves = Number(r.saves)||0; return { player, label:`${player} challenge pressure`, value:demos ? `${demos} demos` : saves ? `${saves} saves under pressure` : "review challenges", score:demos * 20 + saves * 8, color:r.color || "#B8FF4D" }; }),
+  };
+  return normalizeAdvancedBackendReport({
+    status:"backend_client_fallback",
+    statusLabel:"client fallback ready",
+    parserMessage:`Backend route did not complete${err?.message ? ` (${err.message})` : ""}. Saved a local CARL2-alt report so the card updates instead of staying on none. If you want the real server endpoint, make sure api/advanced-review-parser.js is deployed at the project root.`,
+    generatedAt:new Date().toISOString(),
+    confidence:58,
+    cards:[
+      { label:"est. xG", value:estXg.toFixed(2), color:"#A78BFA" },
+      { label:"shot quality", value:totals.shots ? `${shotQuality}%` : "pending", color:"#4D9EFF" },
+      { label:"pressure", value:`${pressure}%`, color:"#B8FF4D" },
+      { label:"def stress", value:`${defensiveStress}%`, color:"#FFD166" },
+    ],
+    sections:[
+      { title:"Coach Report", status:"client fallback", body:`Local parser fallback analyzed ${linked.length || rows.length} linked player row${(linked.length || rows.length) === 1 ? "" : "s"}. This keeps Film Room usable while the backend route is checked.` },
+      { title:"Timeline", status:events.length ? "ready" : "limited", body:events.length ? `${events.length} key moments available from the saved timeline.` : "No saved timeline events found; use score/stat notes until the Ballchasing timeline is available." },
+      { title:"Shot Map / xG", status:"estimated", body:`Estimated xG ${estXg.toFixed(2)} from ${totals.shots} shots and ${totals.goals} goals. True coordinate xG still needs raw replay parsing.` },
+      { title:"Boost Map", status:maps.boostMap.length ? "stats ready" : "limited", body:"Boost section is generated from linked player rows when Ballchasing boost stats are present." },
+      { title:"Pass Map", status:"estimated", body:"Pass map uses assists/shots as a proxy until raw ball-touch chains are decoded." },
+      { title:"50/50 Map", status:"estimated", body:"50/50 map uses demos/saves/challenge pressure as a proxy until raw collision/challenge data is decoded." },
+    ],
+    timelineEvents:events,
+    maps,
+    trainingFocus:Array.isArray(nativeReview.sections) ? nativeReview.sections.filter(s => /training/i.test(s.title || "")).map(s => s.body).filter(Boolean).slice(0,5) : [],
+  });
+}
+
 const DEFAULT_BURTON_OS = {
   settings: {
     autoState:true,
@@ -14145,7 +14219,18 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   const runBackendAdvancedReview = async (entry) => {
     if (!entry || parserRunning) return;
     setParserRunning(true);
+    const startedAt = new Date().toISOString();
     try {
+      await updateEntry(entry.id, e => ({
+        ...e,
+        advancedReview:{
+          ...(e.advancedReview || {}),
+          status:"backend_running",
+          parserMessage:"Backend parser is running. If the Vercel API route is missing, the app will save a local fallback report instead of staying on none.",
+          generatedAt:startedAt,
+        },
+        deepReview:{ ...(e.deepReview || {}), status:"parsing", summary:"Native backend parser is running." },
+      }), null, null).catch(() => {});
       const linkedStats = getEntryLinkedStats(entry, stats);
       const nativeReview = buildNativeAdvancedReview(entry, stats);
       const res = await fetch("/api/advanced-review-parser", {
@@ -14175,11 +14260,20 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
         deepReview:{ ...(e.deepReview || {}), status:"ready", completedAt:new Date().toISOString(), summary:e.deepReview?.summary || "Native backend coach report generated." },
       }), "backend coach report ready", "🧠");
     } catch (err) {
-      addToast?.(err?.message || "backend parser failed", "⚠️");
+      const nativeReview = buildNativeAdvancedReview(entry, stats);
+      const fallbackReport = buildClientFallbackAdvancedBackendReport(entry, stats, nativeReview, err);
+      addToast?.("backend route failed — saved local report", "⚠️");
       await updateEntry(entry.id, e => ({
         ...e,
-        advancedReview:{ ...(e.advancedReview || {}), status:"backend_failed", parserMessage:err?.message || "backend parser failed" },
-      }), null, "⚠️").catch(() => {});
+        advancedReview:{
+          ...(e.advancedReview || {}),
+          status:"backend_client_fallback",
+          parserMessage:fallbackReport?.parserMessage || err?.message || "backend parser failed; local fallback saved",
+          backendReport:fallbackReport,
+          generatedAt:new Date().toISOString(),
+        },
+        deepReview:{ ...(e.deepReview || {}), status:"ready", completedAt:new Date().toISOString(), summary:"Local fallback coach report generated because the backend route did not complete." },
+      }), "local backend fallback saved", "⚠️").catch(() => {});
     } finally {
       setParserRunning(false);
     }
@@ -14187,6 +14281,10 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
   if (!entries.length) return <EmptyState icon="🎥" title="No Film Room replays yet" body="Sync a Ballchasing/Rockpload game and the app will create a lightweight Film Room card here." />;
   const openEntry = entries.find(e => e.id === openId) || entries[0];
   const openEntryWatchUrl = getBallchasingWatchUrl(openEntry?.ballchasingUrl || openEntry?.replayId || "");
+  const advancedStatusText = parserRunning
+    ? "parsing"
+    : ((openEntry?.advancedReview?.status && openEntry.advancedReview.status !== "not_started") ? openEntry.advancedReview.status : (openEntry?.deepReview?.status || "none"));
+  const advancedStatusMessage = openEntry?.advancedReview?.parserMessage || openEntry?.deepReview?.summary || "";
   const severityColor = (sev) => sev === "good" ? "#7CFFB2" : sev === "warning" ? "#FFD166" : "#A78BFA";
   return (
     <div style={{display:"grid",gap:12}}>
@@ -14271,7 +14369,7 @@ function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) 
         {!!openEntry.clips?.length && <><div style={{fontSize:10,color:"#4A5066",fontWeight:950,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Team Clips</div><div style={{display:"grid",gap:7,marginBottom:12}}>{openEntry.clips.map(c => <button key={c.id} onClick={()=>window.open(c.url,"_blank","noopener,noreferrer")} className="bb-pressable" style={{textAlign:"left",background:"rgba(167,139,250,.07)",border:"1px solid rgba(167,139,250,.18)",borderRadius:12,padding:"9px 10px",color:"#E8ECF4",fontSize:11,fontWeight:850,cursor:"pointer"}}>🎬 {c.label || "clip"}<div style={{fontSize:9,color:"#8B92A8",marginTop:2,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{c.url}</div></button>)}</div></>}
         <div style={{background:"rgba(255,209,102,.05)",border:"1px solid rgba(255,209,102,.15)",borderRadius:14,padding:11}}>
           <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center"}}>
-            <div><div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Advanced Deep Review</div><div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>status: {openEntry.deepReview?.status || "none"}</div></div>
+            <div><div style={{fontSize:10,color:"#FFD166",fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>Advanced Deep Review</div><div style={{fontSize:10.5,color:"#8B92A8",marginTop:3}}>status: {advancedStatusText}</div>{advancedStatusMessage && <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.3,marginTop:4,maxWidth:280}}>{advancedStatusMessage}</div>}</div>
             {isAdmin && <div style={{display:"flex",gap:7,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end"}}><button onClick={()=>runBackendAdvancedReview(openEntry)} disabled={parserRunning} className="bb-pressable" style={{background:"rgba(77,158,255,.12)",border:"1px solid rgba(77,158,255,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#4D9EFF",cursor:parserRunning?"wait":"pointer",whiteSpace:"nowrap"}}>{parserRunning?"parsing…":"run backend"}</button><label className="bb-pressable" style={{background:"rgba(255,209,102,.12)",border:"1px solid rgba(255,209,102,.26)",borderRadius:11,padding:"9px 10px",fontSize:10,fontWeight:950,color:"#FFD166",cursor:uploading?"wait":"pointer",whiteSpace:"nowrap"}}>{uploading?"uploading…":"upload replay/data"}<input type="file" multiple accept="image/*,.replay,.json,.csv,.md,.markdown,.txt,text/*" onChange={e=>handleCarlUpload(openEntry, e.target.files)} style={{display:"none"}} /></label></div>}
           </div>
           {!!openEntry.carl2Assets?.length && <div style={{display:"grid",gap:10,marginTop:12}}>{openEntry.carl2Assets.map(a => /image/i.test(a.type) || /\.(png|jpe?g|webp|gif)$/i.test(a.name) ? <div key={a.id} style={{background:"rgba(0,0,0,.22)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,overflow:"hidden"}}><img src={a.url} alt={a.name} style={{width:"100%",display:"block"}}/><div style={{fontSize:10,color:"#8B92A8",padding:"7px 9px"}}>{a.name}</div></div> : <div key={a.id} style={{background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,padding:10}}><div style={{fontSize:11,color:"#E8ECF4",fontWeight:900}}>{a.name}</div>{a.text && <pre style={{whiteSpace:"pre-wrap",fontSize:9.5,color:"#8B92A8",maxHeight:180,overflow:"auto",marginTop:8}}>{a.text.slice(0,4000)}</pre>}{a.url && <button onClick={()=>window.open(a.url,"_blank","noopener,noreferrer")} style={{marginTop:8,background:"rgba(255,255,255,.06)",border:"1px solid rgba(255,255,255,.10)",borderRadius:9,padding:"7px 8px",fontSize:10,color:"#E8ECF4"}}>open file</button>}</div>)}</div>}
