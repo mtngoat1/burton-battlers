@@ -3737,20 +3737,46 @@ function normalizeJobChallengeLines(value, required = 5, fallback = "sync/log on
   while (lines.length < Math.max(1, Number(required)||5)) lines.push(fallback);
   return lines;
 }
+const REQUIRED_GRAVEYARD_JOB_SLOTS = ["10:00 PM","10:30 PM","11:00 PM","11:30 PM","12:00 AM","12:30 AM","1:00 AM","1:30 AM","2:00 AM","2:30 AM","3:00 AM","3:30 AM","4:00 AM"];
+
+function mergeUniqueJobSlots(slots = [], requiredOrder = []) {
+  const clean = (Array.isArray(slots) ? slots : String(slots || "").split(/\n|,/g))
+    .map(v => String(v || "").trim())
+    .filter(Boolean);
+  const all = Array.from(new Set([...clean, ...requiredOrder]));
+  const orderedRequired = requiredOrder.filter(slot => all.includes(slot));
+  const extras = all.filter(slot => !orderedRequired.includes(slot));
+  return [...orderedRequired, ...extras].slice(0, 40);
+}
+
 function normalizeJobShiftGroups(input) {
   const defaults = getDefaultJobShiftGroups();
-  const raw = Array.isArray(input) && input.length ? input : defaults;
+  const rawInput = Array.isArray(input) && input.length ? input : [];
+
+  // Saved admin settings from older builds could still have the old graveyard block
+  // with only 10:00 PM -> 1:30 AM, or could be missing the graveyard block entirely.
+  // Always merge defaults back in so every job mode gets the half-hour graveyard slots.
+  const raw = rawInput.length
+    ? [...rawInput, ...defaults.filter(d => !rawInput.some(g => String(g?.id || "") === d.id))]
+    : defaults;
   const byDefault = Object.fromEntries(defaults.map(g => [g.id, g]));
   return raw.map((g, idx) => {
     const base = byDefault[g?.id] || defaults[idx] || defaults[0];
+    const shiftId = String(g?.id || base.id || `shift_${idx}`);
+    const shiftLabel = String(g?.label || base.label || "shift").slice(0,42);
     const slots = Array.isArray(g?.slots) ? g.slots : String(g?.slots || "").split(/\n|,/g);
-    const cleanSlots = slots.map(v => String(v || "").trim()).filter(Boolean).slice(0, 32);
+    const cleanSlots = slots.map(v => String(v || "").trim()).filter(Boolean);
+    const isGraveyard = shiftId.toLowerCase().includes("grave") || shiftLabel.toLowerCase().includes("grave") || cleanSlots.includes("1:30 AM") || cleanSlots.includes("2:00 AM");
+    const baseSlots = cleanSlots.length ? cleanSlots : (base.slots || []);
+    const normalizedSlots = isGraveyard
+      ? mergeUniqueJobSlots(baseSlots, REQUIRED_GRAVEYARD_JOB_SLOTS)
+      : Array.from(new Set(baseSlots)).slice(0, 40);
     return {
-      id:String(g?.id || base.id || `shift_${idx}`),
-      label:String(g?.label || base.label || "shift").slice(0,42),
+      id:shiftId,
+      label:shiftLabel,
       emoji:String(g?.emoji || base.emoji || "🕒").slice(0,4),
       multiplier:Math.max(1, Math.min(5, Number(g?.multiplier ?? base.multiplier ?? 1) || 1)),
-      slots:cleanSlots.length ? cleanSlots : base.slots,
+      slots:normalizedSlots.length ? normalizedSlots : base.slots,
     };
   }).slice(0,6);
 }
