@@ -104,6 +104,7 @@ import { createPortal } from "react-dom";
 // APP145_ADVANCED_REVIEW_STATUS_PERSIST_FIX
 // APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
 // APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
+// APP151_SYNC_FALLBACK_JOBS_POST_START_FIX
 // APP146_TIMESTAMPS_TQR11LE_1S_SYNC_FIX
 // APP146_PARSE_ONLY_SYNC_AUTOFILL_DATE_DEDUPE_PATCH
 // APP146_FILM_ROOM_CLIP_FEED_CLEAN_PATCH
@@ -15337,10 +15338,7 @@ const syncJobsAfterStatsWrite = async (nextStats = [], importedGames = [], sourc
       const syncGraceMs = safeDateObj(job.syncGraceUntil || job.expiresAt || nowMs + DAY_MS, null)?.getTime();
       const windowStartMs = Number.isFinite(startMs) ? startMs : nowMs;
       const windowEndMs = Number.isFinite(syncGraceMs) ? syncGraceMs + 5 * 60 * 1000 : nowMs + DAY_MS;
-      const hasMatchingSyncedGame = relevantSyncedGames.some(g => {
-        const candidates = getJobActualGameTimeCandidates(g);
-        return candidates.some(t => t >= windowStartMs - 1000 && t <= windowEndMs);
-      });
+      const hasMatchingSyncedGame = relevantSyncedGames.length && nowMs >= windowStartMs - 1000 && nowMs <= windowEndMs;
       if (!hasMatchingSyncedGame) return job;
 
       let nextJob = { ...job, lastStatsSyncAt:nowIso, lastStatsSyncSource:sourceLabel };
@@ -15830,11 +15828,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       ballchasingStatsApplied:true,
       parseStatDebug:{ source:"ballchasing_direct" },
       syncedAt:new Date().toISOString(),
+      jobCreditAt:new Date().toISOString(),
+      jobSyncedAt:new Date().toISOString(),
+      lastJobSyncSource:"ballchasing_direct",
     };
   };
 
-  const syncLatestBallchasingTeamMatch = async (requestedMode = syncMode, requestedPlayers = null) => {
-    if (matchSyncing) {
+  const syncLatestBallchasingTeamMatch = async (requestedMode = syncMode, requestedPlayers = null, forceRun = false) => {
+    if (matchSyncing && !forceRun) {
       setSyncDebug("sync already running", "Wait for the current request to finish.");
       return;
     }
@@ -15943,6 +15944,26 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       addToast?.("Ballchasing sync had a hiccup", "❌");
     }
     setMatchSyncing(false);
+  };
+
+  const ballchasingDirectRetryRef = useRef({});
+  const queueBallchasingDirectSyncRetries = (requestedMode = syncMode, requestedPlayers = null, reason = "waiting for Rockpload") => {
+    const players = (requestedPlayers && requestedPlayers.length ? requestedPlayers : (
+      requestedMode === "3v3" ? PLAYERS :
+      requestedMode === "2v2" ? PLAYERS.filter(p => selectedDuoIds.includes(p.id)) :
+      PLAYERS.filter(p => p.id === currentPlayer)
+    )).filter(Boolean);
+    const key = `${requestedMode}__${players.map(p => p.id || p.name).sort().join("_")}`;
+    const now = Date.now();
+    const last = Number(ballchasingDirectRetryRef.current?.[key] || 0);
+    if (last && now - last < 4 * 60 * 1000) return;
+    ballchasingDirectRetryRef.current = { ...(ballchasingDirectRetryRef.current || {}), [key]:now };
+    [20000, 60000, 120000, 240000, 420000].forEach((delay, idx) => {
+      setTimeout(() => {
+        if (matchSyncing && idx > 0) return;
+        syncLatestBallchasingTeamMatch(requestedMode, players, true).catch(e => console.warn("direct Ballchasing retry failed", reason, idx, e));
+      }, delay);
+    });
   };
 
   const getPlayersForFilmSessionMode = (requestedMode = syncMode) => (
@@ -16198,8 +16219,10 @@ const updateOpponentScore = async (game, theirScoreValue) => {
     addToast?.(`starting smart ${requestedMode} sync${identityNote}…`, "🔄");
 
     const fallbackToBallchasing = async (reason = "Parse did not return the match") => {
-      setSyncDebug(reason, "No stat card was saved because Parse did not return a safe exact-mode stat line. Sync Parse again after Tracker updates, or use the Ballchasing panel on an existing card after Rockpload uploads.");
-      addToast?.("no safe Parse stat line yet", "⚠️");
+      setSyncDebug(reason, "Trying Ballchasing/Rockpload now. If Rockpload is still uploading, this will keep retrying in the background.");
+      addToast?.("trying Ballchasing/Rockpload", "🔎");
+      queueBallchasingDirectSyncRetries(requestedMode, resolvedPlayersToSync, reason);
+      await syncLatestBallchasingTeamMatch(requestedMode, resolvedPlayersToSync, true);
       return null;
     };
 
@@ -18266,8 +18289,9 @@ function evaluateJobChallengeRule(rule, job, stats = []) {
     const creditTimes = getJobCreditTimeCandidates(g);
     const creditedAfterStart = creditTimes.some(t => t >= startMs - 1000 && t <= endMs + 5 * 60 * 1000);
     if (!creditedAfterStart) return false;
-    const ts = getJobRuleGameTimeMs(g, startMs, endMs);
-    if (!Number.isFinite(ts) || ts < startMs - 1000 || ts > endMs + 1000) return false;
+    // APP151: use the post-Start sync credit as the job gate. Parse/Ballchasing can
+    // report match kickoff a few minutes before Start or only a collected/upload time;
+    // the baseline snapshot already blocks old saved cards, so do not reject fresh syncs by kickoff timestamp here.
     if (mode !== "any" && normalizeGameMode(g?.mode) !== mode) return false;
     return ids.includes(g?.playerId);
   });
