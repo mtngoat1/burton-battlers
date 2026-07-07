@@ -104,6 +104,7 @@ import { createPortal } from "react-dom";
 // APP145_ADVANCED_REVIEW_STATUS_PERSIST_FIX
 // APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
 // APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
+// APP146_TIMESTAMPS_TQR11LE_1S_SYNC_FIX
 // APP146_PARSE_ONLY_SYNC_AUTOFILL_DATE_DEDUPE_PATCH
 // APP146_FILM_ROOM_CLIP_FEED_CLEAN_PATCH
 // APP147_FAST_PARSE_FIRST_SYNC_UI_CPU_PATCH
@@ -123,7 +124,7 @@ const PLAYERS = [
 const PARSE_TRACKER_ALIASES = {
   p1: ["maglvxx", "maglvxxgoat"],
   p2: ["apcards5", "APcards5", "Aaronperks05"],
-  p3: ["tqr11le", "tqr11e", "therealtqrt1e", "therealtqr11e", "therealtqr11le"],
+  p3: ["tqr11le", "tqr11e", "TQR11LE", "TQR11E", "therealtqrt1e", "therealtqrtle", "therealtqr11e", "therealtqr11le", "TheRealTQR11E", "TheRealTQR11LE"],
 };
 const TRAINING_START = new Date("2026-07-01T00:00:00");
 const LEAGUE_START   = new Date("2026-07-20T00:00:00");
@@ -1189,54 +1190,126 @@ function getReplayScoreboardText(replay) {
   const orange = safe.teams?.[1]?.goals ?? 0;
   return `${blue}-${orange}`;
 }
+function normalizeBallchasingTimelineEvent(ev, type = "", player = {}, team = "") {
+  if (ev === null || ev === undefined) return null;
+  let obj = ev;
+  if (Array.isArray(ev)) {
+    obj = { time:ev[0], extra:ev[1], shift:ev[2] };
+  }
+  if (!obj || typeof obj !== "object") return null;
+  const time = replayPick(obj.time, obj.time_seconds, obj.seconds, obj.game_time, obj.gameSeconds, obj.timestamp, obj.clock, obj.t);
+  const frame = Number(replayPick(obj.frame, obj.frame_number, obj.frameNumber));
+  if ((time === null || time === undefined || time === "") && !Number.isFinite(frame)) return null;
+  const playerName = replayPick(
+    obj.player, obj.player_name, obj.playerName, obj.name,
+    obj.scorer, obj.scorer_name, obj.scorerName,
+    obj.saver, obj.saver_name, obj.saverName,
+    obj.actor, obj.actor_name, obj.actorName,
+    player.player, player.name, player.player_name, player.playerName
+  );
+  return {
+    ...obj,
+    type:obj.type || obj.event || obj.kind || obj.action || type,
+    event:obj.event || obj.type || obj.kind || type,
+    kind:obj.kind || obj.event || obj.type || type,
+    player:playerName || "",
+    player_name:playerName || "",
+    team:obj.team || team,
+    time:time !== null && time !== undefined && time !== "" ? time : Math.round(frame / 30),
+    extra:obj.extra,
+    shift:obj.shift,
+  };
+}
 function flattenBallchasingTimelineEvents(timeline = {}) {
   const safe = liveReplaySafeObj(timeline);
   const out = [];
   const fields = [
-    ["goals", "goal"],
-    ["shots", "shot"],
-    ["saves", "save"],
-    ["assists", "assist"],
-    ["kills", "demo"],
-    ["deaths", "demoed"],
+    ["goals", "goal"], ["goal", "goal"], ["scored", "goal"],
+    ["shots", "shot"], ["shot", "shot"],
+    ["saves", "save"], ["save", "save"],
+    ["assists", "assist"], ["assist", "assist"],
+    ["kills", "demo"], ["demos", "demo"], ["demolitions", "demo"], ["demo", "demo"],
+    ["deaths", "demoed"], ["demoed", "demoed"], ["taken", "demoed"],
   ];
   ["blue", "orange"].forEach(team => {
-    const players = Array.isArray(safe?.[team]) ? safe[team] : [];
+    const teamObj = safe?.[team];
+    const players = Array.isArray(teamObj)
+      ? teamObj
+      : Array.isArray(teamObj?.players)
+        ? teamObj.players
+        : Array.isArray(teamObj?.timeline)
+          ? teamObj.timeline
+          : [];
     players.forEach(player => {
       fields.forEach(([field, type]) => {
         const list = Array.isArray(player?.[field]) ? player[field] : [];
         list.forEach(ev => {
-          if (!ev || typeof ev !== "object") return;
-          out.push({
-            ...ev,
-            type,
-            event:type,
-            kind:type,
-            player:player.player || player.name || "",
-            player_name:player.player || player.name || "",
-            team,
-            time:ev.time,
-            extra:ev.extra,
-            shift:ev.shift,
-          });
+          const norm = normalizeBallchasingTimelineEvent(ev, type, player, team);
+          if (norm) out.push(norm);
         });
       });
     });
   });
-  return out.sort((a,b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+  return out.sort((a,b) => (Number(getReplayEventTime(a)) || 0) - (Number(getReplayEventTime(b)) || 0));
+}
+function looseBallchasingEventTypeFromPath(path = "", obj = {}) {
+  const p = String(path || "").toLowerCase();
+  const direct = replayLower(obj.type || obj.event || obj.kind || obj.action || obj.stat || obj.category || obj.name);
+  if (direct) return direct;
+  if (/(^|\.|_|-)goals?($|\.|_|-)/.test(p)) return "goal";
+  if (/(^|\.|_|-)saves?($|\.|_|-)/.test(p)) return "save";
+  if (/(^|\.|_|-)shots?($|\.|_|-)/.test(p)) return "shot";
+  if (/(^|\.|_|-)assists?($|\.|_|-)/.test(p)) return "assist";
+  if (/(^|\.|_|-)(kills?|demos?|demolitions?)($|\.|_|-)/.test(p)) return "demo";
+  if (/(^|\.|_|-)(deaths?|demoed|taken)($|\.|_|-)/.test(p)) return "demoed";
+  return "";
+}
+function collectLooseBallchasingEvents(root, path = "", depth = 0, out = [], seen = new Set()) {
+  if (!root || out.length >= 400 || depth > 8) return out;
+  if (typeof root !== "object") return out;
+  if (seen.has(root)) return out;
+  seen.add(root);
+  if (Array.isArray(root)) {
+    root.forEach((item, idx) => {
+      const typeFromPath = looseBallchasingEventTypeFromPath(path, {});
+      const norm = normalizeBallchasingTimelineEvent(item, typeFromPath, {}, "");
+      if (norm && typeFromPath) out.push(norm);
+      else collectLooseBallchasingEvents(item, `${path}.${idx}`, depth + 1, out, seen);
+    });
+    return out;
+  }
+  const typeFromPath = looseBallchasingEventTypeFromPath(path, root);
+  const maybeEvent = normalizeBallchasingTimelineEvent(root, typeFromPath, {}, root.team || "");
+  if (maybeEvent && typeFromPath) out.push(maybeEvent);
+  Object.entries(root).forEach(([key, val]) => {
+    if (val && typeof val === "object") collectLooseBallchasingEvents(val, path ? `${path}.${key}` : key, depth + 1, out, seen);
+  });
+  return out;
+}
+function uniqReplayEvents(events = []) {
+  const seen = new Set();
+  return (events || []).filter(ev => {
+    const key = [getReplayEventType(ev), getReplayEventPlayers(ev).join("|"), String(getReplayEventTime(ev) ?? "")].join("::");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 function getReplayEvents(replay) {
   const safe = normalizeBallchasingReplay(replay || {});
   const raw = safe.raw || {};
-  const timelineEvents = flattenBallchasingTimelineEvents(safe.timeline || raw.timeline || raw.keyMoments || raw.eventsTimeline);
+  const timelineEvents = flattenBallchasingTimelineEvents(safe.timeline || raw.timeline || raw.timelineData || raw.timeline_data || raw.keyMoments || raw.eventsTimeline);
   const buckets = [
     raw.events, raw.goals, raw.saves, raw.stats?.events, raw.stats?.timeline,
     raw.game?.events, raw.game?.goals, raw.game?.saves, raw.replay?.events, raw.replay?.goals,
+    safe.timeline?.events, safe.timeline?.goals, safe.timeline?.saves,
   ];
-  return [
+  const looseEvents = collectLooseBallchasingEvents(safe.timeline || raw.timeline || raw.timelineData || raw.timeline_data || raw.eventsTimeline || {}, "timeline");
+  return uniqReplayEvents([
     ...buckets.flatMap(v => Array.isArray(v) ? v : []),
     ...timelineEvents,
-  ].filter(v => v && typeof v === "object");
+    ...looseEvents,
+  ].filter(v => v && typeof v === "object"));
 }
 function getReplayEventType(event = {}) {
   return replayLower(event.type || event.event || event.kind || event.name || event.action || event.stat || event.category);
@@ -1245,7 +1318,7 @@ function getReplayEventPlayers(event = {}) {
   const names = [
     event.player, event.player_name, event.playerName, event.name, event.actor, event.actor_name, event.actorName,
     event.scorer, event.scorer_name, event.scorerName, event.saver, event.saver_name, event.saverName,
-    event.assister, event.assister_name, event.assisterName,
+    event.assister, event.assister_name, event.assisterName, event.victim, event.victim_name, event.target, event.target_name,
   ].flatMap(v => {
     if (!v) return [];
     if (typeof v === "string") return [v];
@@ -1260,6 +1333,16 @@ function getReplayEventTime(event = {}) {
   const frame = Number(replayPick(event.frame, event.frame_number, event.frameNumber));
   return Number.isFinite(frame) ? Math.round(frame / 30) : null;
 }
+function compactReplayName(v = "") { return replayLower(v).replace(/[^a-z0-9]/g, ""); }
+function replayNameMatchesAny(name = "", allowed = []) {
+  const n = replayLower(name);
+  const c = compactReplayName(name);
+  return (allowed || []).some(a => {
+    const al = replayLower(a);
+    const ac = compactReplayName(a);
+    return (n && al && n === al) || (c && ac && c === ac);
+  });
+}
 function getReplayTimelineForPlayer(replay, row, kind = "goal") {
   const rowNames = [row?.name, row?.appName, ...(PARSE_TRACKER_ALIASES[row?.appPlayerId] || [])].map(replayLower).filter(Boolean);
   const kindLower = replayLower(kind);
@@ -1268,11 +1351,11 @@ function getReplayTimelineForPlayer(replay, row, kind = "goal") {
     const type = getReplayEventType(ev);
     const players = getReplayEventPlayers(ev);
     let kindMatch = false;
-    if (kindLower === "goal") kindMatch = type.includes("goal") || !!ev.scorer || !!ev.scorer_name;
-    else if (kindLower === "save") kindMatch = type.includes("save") || !!ev.saver || !!ev.saver_name;
-    else if (kindLower === "demo") kindMatch = (type.includes("demo") || type.includes("kill")) && !(type.includes("demoed") || type.includes("death"));
+    if (kindLower === "goal") kindMatch = type.includes("goal") || !!ev.scorer || !!ev.scorer_name || !!ev.scorerName;
+    else if (kindLower === "save") kindMatch = type.includes("save") || !!ev.saver || !!ev.saver_name || !!ev.saverName;
+    else if (kindLower === "demo") kindMatch = (type.includes("demo") || type.includes("kill") || type.includes("demolition")) && !(type.includes("demoed") || type.includes("death") || type.includes("taken"));
     else kindMatch = type.includes(kindLower);
-    const playerMatch = !players.length || rowNames.some(n => players.includes(n));
+    const playerMatch = !players.length || players.some(n => replayNameMatchesAny(n, rowNames));
     return kindMatch && playerMatch;
   }).map(ev => fmtReplayTimecode(getReplayEventTime(ev))).filter(t => t && t !== "—").slice(0, 10);
 }
@@ -13129,10 +13212,17 @@ async function fetchParseMatchCandidatesForPlayer(player, playlist, limit = 8) {
     .map(v => String(v || "").trim())
     .filter(Boolean)
     .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i)
-    .slice(0, 4);
+    .slice(0, 10);
   const preferredPlatform = String(hardcodedPlayer?.platform || player?.platform || "").trim();
+  const platformVariants = (value = "") => {
+    const p = String(value || "").trim().toLowerCase();
+    if (!p) return [];
+    if (p === "xbl" || p === "xbox" || p === "xbox_live") return ["xbl", "xbox"];
+    if (p === "psn" || p === "playstation") return ["psn"];
+    return [p];
+  };
   const platforms = [preferredPlatform, player?.platform]
-    .map(v => String(v || "").trim())
+    .flatMap(platformVariants)
     .filter(Boolean)
     .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
   const exactPlaylistUsable = [];
