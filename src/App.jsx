@@ -104,6 +104,7 @@ import { createPortal } from "react-dom";
 // APP145_ADVANCED_REVIEW_STATUS_PERSIST_FIX
 // APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
 // APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
+// APP146_PARSE_ONLY_SYNC_AUTOFILL_DATE_DEDUPE_PATCH
 // APP146_FILM_ROOM_CLIP_FEED_CLEAN_PATCH
 // APP147_FAST_PARSE_FIRST_SYNC_UI_CPU_PATCH
 // APP146_FILMROOM_VISUALS_SOCIAL_STABILITY_CPU_PATCH
@@ -344,7 +345,13 @@ function safeDateObj(input, fallback = new Date()) {
   if (Number.isFinite(fallbackDate.getTime())) return fallbackDate;
   return new Date();
 }
-function dateKey(d) { return safeDateObj(d).toISOString().slice(0,10); }
+function dateKey(d) {
+  const x = safeDateObj(d);
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, "0");
+  const day = String(x.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 function fmtDay(d) { return safeDateObj(d).toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" }); }
 function fmtDayShort(d) { return safeDateObj(d).toLocaleDateString("en-US", { weekday:"short" }); }
 function fmtRelTime(iso) {
@@ -12964,8 +12971,55 @@ async function getFreshStatsForWrite(fallback = []) {
   return sanitizeStatsForRender(Array.isArray(fallback) ? fallback : []);
 }
 
+
+function getStatDedupeKey(game = {}) {
+  if (!game || typeof game !== "object") return "";
+  const pid = String(game.playerId || "");
+  const parseId = String(game.parseMatchId || game.matchId || "").trim();
+  if (parseId && pid) return `parse:${parseId}:${pid}`;
+  const replayId = String(game.ballchasingReplayId || "").trim();
+  if (replayId && pid) return `bc:${replayId}:${pid}`;
+  const session = String(game.sessionCode || game.roomId || "").trim();
+  const modeKey = normalizeGameMode(game.mode || "");
+  const tsBucket = safeDateObj(game.matchStartAt || game.ts || game.syncedAt || Date.now()).getTime();
+  const minuteBucket = Number.isFinite(tsBucket) ? Math.floor(tsBucket / 60000) : "";
+  return session && pid ? `session:${session}:${modeKey}:${pid}` : `loose:${modeKey}:${pid}:${minuteBucket}:${Number(game.goals)||0}:${Number(game.shots)||0}`;
+}
+function getStatCompletenessScore(game = {}) {
+  let score = 0;
+  if (game.ballchasingReplayId) score += 80;
+  if (game.ballchasingTimeline) score += 25;
+  if (game.statsSource === "ballchasing" || game.ballchasingStatsApplied) score += 20;
+  if (game.parseStatsFound) score += 15;
+  if (!game.parseStatsIncomplete) score += 5;
+  if (Number.isFinite(Number(game.theirScore))) score += 8;
+  if (game.opponentScoreManual) score += 3;
+  const refreshed = safeDateObj(game.refreshedAt || game.syncedAt || game.ts || 0, 0).getTime();
+  return score + (Number.isFinite(refreshed) ? Math.min(5, refreshed / 10**15) : 0);
+}
+function dedupeStatEntries(list = []) {
+  const ordered = sanitizeStatsForRender(Array.isArray(list) ? list : []);
+  const map = new Map();
+  ordered.forEach(game => {
+    const key = getStatDedupeKey(game);
+    if (!key) return;
+    const existing = map.get(key);
+    if (!existing) { map.set(key, game); return; }
+    const keepNew = getStatCompletenessScore(game) >= getStatCompletenessScore(existing);
+    map.set(key, keepNew ? { ...existing, ...game, id: existing.id || game.id } : { ...game, ...existing, id: existing.id || game.id });
+  });
+  const seenIds = new Set();
+  return Array.from(map.values()).filter(game => {
+    const id = String(game.id || "");
+    if (!id) return true;
+    if (seenIds.has(id)) return false;
+    seenIds.add(id);
+    return true;
+  });
+}
+
 async function saveStatsEverywhere(nextStats, setStatsFn) {
-  const clean = sanitizeStatsForRender(nextStats);
+  const clean = dedupeStatEntries(nextStats);
   if (typeof setStatsFn === "function") setStatsFn(clean);
   await storeSet("stats", clean);
   if (isMeaningfulStatsSnapshot(clean)) storeSetBackground("stats_backup", clean).catch(() => {});
@@ -13074,9 +13128,10 @@ async function fetchParseMatchCandidatesForPlayer(player, playlist, limit = 8) {
   ]
     .map(v => String(v || "").trim())
     .filter(Boolean)
-    .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
+    .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i)
+    .slice(0, 4);
   const preferredPlatform = String(hardcodedPlayer?.platform || player?.platform || "").trim();
-  const platforms = [preferredPlatform, player?.platform, "xbl", "psn", "epic", "steam"]
+  const platforms = [preferredPlatform, player?.platform]
     .map(v => String(v || "").trim())
     .filter(Boolean)
     .filter((v, i, arr) => arr.findIndex(x => x.toLowerCase() === v.toLowerCase()) === i);
@@ -13100,23 +13155,22 @@ async function fetchParseMatchCandidatesForPlayer(player, playlist, limit = 8) {
   for (const platform of platforms) {
     for (const handle of handles) {
       try {
-        const json = await fetchParseBotJson("get_player_sessions", { platform, username: handle }, 3);
+        const json = await fetchParseBotJson("get_player_sessions", { platform, username: handle }, 1);
         const matches = getParseMatchesFromJson(json).sort((a,b)=>getParseDateMs(b)-getParseDateMs(a));
         const candidates = matches.filter(match => parseMatchMatchesPlaylist(match, playlist));
         candidates.forEach(match => {
           if (hasUsableParseStatPayload(match, mode)) addUnique(exactPlaylistUsable, match, { platform, handle, reason:"exact_playlist_usable" });
           else addUnique(exactPlaylistFallbacks, match, { platform, handle, reason:"exact_playlist_waiting_stats" });
         });
-        matches
-          .filter(match => hasUsableParseStatPayload(match, mode))
-          .forEach(match => addUnique(anyUsableFallbacks, match, { platform, handle, reason:"any_playlist_usable" }));
+        // Do not import broad any-playlist fallbacks from the quick sync button.
+        // They can create random-looking cards when Tracker/Parse has stale data for a different mode.
       } catch (e) {
         lastErr = e;
       }
     }
   }
 
-  const merged = [...exactPlaylistUsable, ...exactPlaylistFallbacks, ...anyUsableFallbacks]
+  const merged = [...exactPlaylistUsable, ...exactPlaylistFallbacks]
     .sort((a,b)=>getParseDateMs(b)-getParseDateMs(a));
   if (!merged.length) {
     console.warn("Parse sessions unavailable", { player: player?.name, playlist, error: lastErr?.message || lastErr });
@@ -13421,6 +13475,34 @@ function hasUsableParseStatPayload(match, mode = "3v3") {
   const fields = getParseStatFieldsForMode(mode);
   return fields.some(field => getMatchStatReadout(match, field).found);
 }
+
+function parseMatchHasConsistentResultAndScore(match, mode = "3v3", player = null) {
+  if (!match || typeof match !== "object") return false;
+  const teamScore = getMatchTeamScoreInfo(match, player);
+  const our = Number(teamScore?.ourScore);
+  const their = Number(teamScore?.theirScore);
+  const result = String(match?.metadata?.result || match?.result || "").toLowerCase();
+  if (!Number.isFinite(our) || !Number.isFinite(their) || !result) return true;
+  if ((result.includes("win") || result.includes("victory")) && our < their) return false;
+  if ((result.includes("loss") || result.includes("defeat")) && our > their) return false;
+  if (normalizeGameMode(mode) === "1v1") {
+    const goals = getMatchStatReadout(match, "goals").value;
+    if (Number.isFinite(Number(goals)) && Number(goals) !== our) return false;
+  }
+  return true;
+}
+function parseStatEntryLooksConsistent(game = {}) {
+  const our = Number(game.ourScore);
+  const their = Number(game.theirScore);
+  const result = String(game.result || "").toLowerCase();
+  if (Number.isFinite(our) && Number.isFinite(their) && result) {
+    if ((result.includes("win") || result.includes("victory")) && our < their) return false;
+    if ((result.includes("loss") || result.includes("defeat")) && our > their) return false;
+  }
+  if (normalizeGameMode(game.mode) === "1v1" && Number.isFinite(our) && Number.isFinite(Number(game.goals)) && our !== Number(game.goals)) return false;
+  return true;
+}
+
 function getParseStatDebugSummary(match, mode = "3v3") {
   const fields = getParseStatFieldsForMode(mode);
   return Object.fromEntries(fields.map(field => {
@@ -15310,7 +15392,7 @@ const queueBallchasingAutoFillForGames = (games = [], reason = "parse_first_sync
   const list = (Array.isArray(games) ? games : [games]).filter(Boolean);
   if (!list.length) return;
   const now = Date.now();
-  const scheduleDelays = [2500, 45000, 120000];
+  const scheduleDelays = [15000, 45000, 90000, 180000, 300000, 600000];
   const unique = [];
   const seen = new Set();
   list.forEach(g => {
@@ -15337,6 +15419,27 @@ const queueBallchasingAutoFillForGames = (games = [], reason = "parse_first_sync
     });
   });
 };
+
+useEffect(() => {
+  if (!Array.isArray(stats) || !stats.length) return;
+  const cleaned = dedupeStatEntries(stats).filter(g => !(g?.source === "parse_sessions" && !parseStatEntryLooksConsistent(g)));
+  if (cleaned.length !== stats.length) {
+    saveStatsEverywhere(cleaned, setStats).catch(e => console.warn("stats cleanup skipped", e));
+  }
+}, [stats]);
+
+useEffect(() => {
+  const recentUnlinked = (Array.isArray(stats) ? stats : [])
+    .filter(g => g?.source === "parse_sessions" && !g.ballchasingReplayId && g.parseStatsFound)
+    .filter(g => Date.now() - safeDateObj(g.syncedAt || g.ts || Date.now()).getTime() < 6 * 60 * 60 * 1000)
+    .sort((a,b) => safeDateObj(b.syncedAt || b.ts || 0).getTime() - safeDateObj(a.syncedAt || a.ts || 0).getTime())
+    .slice(0, 4);
+  if (!recentUnlinked.length) return;
+  const initial = setTimeout(() => queueBallchasingAutoFillForGames(recentUnlinked, "open_stats_autofill"), 18000);
+  const timer = setInterval(() => queueBallchasingAutoFillForGames(recentUnlinked, "open_stats_autofill"), 60000);
+  return () => { clearTimeout(initial); clearInterval(timer); };
+}, [stats]);
+
 const [rankSyncing, setRankSyncing] = useState(false);
 const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
 const [syncMode, setSyncMode] = useState(currentPlayer === ADMIN_ID ? "3v3" : "2v2");
@@ -15929,13 +16032,13 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       ? ` · ${resolvedPlayersToSync[0].platform}/${resolvedPlayersToSync[0].handle}`
       : "";
     const identityList = resolvedPlayersToSync.map(p => `${p.name}: ${p.platform}/${p.handle}`).join(" · ");
-    setSyncDebug(`starting smart ${requestedMode} sync`, `${identityList} · Parse first, Ballchasing fallback`);
+    setSyncDebug(`starting ${requestedMode} sync`, `${identityList}`);
     addToast?.(`starting smart ${requestedMode} sync${identityNote}…`, "🔄");
 
     const fallbackToBallchasing = async (reason = "Parse did not return the match") => {
-      setSyncDebug(`${reason} — trying Ballchasing`, "Same sync button is falling back to Rockpload/Ballchasing so the game can still import and count for jobs.");
-      addToast?.("Parse missed it — trying Ballchasing", "📼");
-      return syncLatestBallchasingTeamMatch(requestedMode, playersToSync);
+      setSyncDebug(reason, "No stat card was saved because Parse did not return a safe exact-mode stat line. Sync Parse again after Tracker updates, or use the Ballchasing panel on an existing card after Rockpload uploads.");
+      addToast?.("no safe Parse stat line yet", "⚠️");
+      return null;
     };
 
     const runParseCreditCheck = async () => {
@@ -15978,6 +16081,14 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         : { ok:true, pulled:candidateGroups.map(g => ({ player:g.player, match:g.candidates?.[0] || null })) };
       const pulled = selectedTeamGroup.pulled || candidateGroups.map(g => ({ player:g.player, match:g.candidates?.[0] || null }));
 
+      const inconsistentPulled = pulled.filter(x => x.match && !parseMatchHasConsistentResultAndScore(x.match, requestedMode, x.player));
+      if (inconsistentPulled.length) {
+        setSyncDebug("Parse returned inconsistent score", inconsistentPulled.map(x => `${x.player.name}:${x.match?.id || "no-id"}`).join(", ") || "Result and score did not agree.");
+        addToast?.("Parse score looked wrong — not importing", "⚠️");
+        setMatchSyncing(false);
+        return;
+      }
+
       if (pulled.some(x => !x.match)) {
         const missing = pulled.filter(x => !x.match).map(x => `${x.player.name}:${x.player.platform}/${x.player.handle}`).join(", ");
         setSyncDebug(`no ${requestedMode} match returned`, missing ? `missing: ${missing}` : "Parse returned no latest match for this player/mode yet.");
@@ -15989,9 +16100,11 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       const missingStatPayload = pulled.filter(x => !hasUsableParseStatPayload(x.match, requestedMode));
       if (missingStatPayload.length) {
         const statDebug = missingStatPayload.map(x => `${x.player.name}:${x.match?.id || "no-id"}`).join(", ");
-        console.warn("Parse found matches without box-score stats — importing shell so Ballchasing can fill stats", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, requestedMode) })));
-        setSyncDebug("match found — filling from Ballchasing", statDebug || "Parse has the match but not the box score yet.");
-        addToast?.("match found — importing and checking Ballchasing for stats", "🔎");
+        console.warn("Parse found matches without box-score stats — not importing shell cards", missingStatPayload.map(x => ({ player:x.player.name, id:x.match?.id, debug:getParseStatDebugSummary(x.match, requestedMode) })));
+        setSyncDebug("Parse match found, stats not ready", statDebug || "Parse has the match but not the box score yet. Try Sync Match again in a minute.");
+        addToast?.("Parse found the match, stats not ready yet", "⏳");
+        setMatchSyncing(false);
+        return;
       }
 
       if (playersToSync.length > 1) {
@@ -16024,7 +16137,13 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         let refreshedGames = pulled.map(({ player, match }) =>
           parseGameToStatEntry({ sessionCode: existingSession, player, match, mode: requestedMode, result: refreshResult })
         );
-        refreshedGames = applySyncedTeamScores(refreshedGames, refreshResult);
+        refreshedGames = applySyncedTeamScores(refreshedGames, refreshResult).filter(g => g.parseStatsFound && parseStatEntryLooksConsistent(g));
+        if (!refreshedGames.length) {
+          setSyncDebug("Parse refresh failed safety check", "The refreshed score/result looked wrong, so the old card was left alone.");
+          addToast?.("Parse refresh looked wrong — skipped", "⚠️");
+          setMatchSyncing(false);
+          return;
+        }
         let refreshed = false;
         const updStats = freshSyncStats.map(g => {
           const fresh = refreshedGames.find(f => f.parseMatchId === g.parseMatchId && f.playerId === g.playerId);
@@ -16070,6 +16189,12 @@ const updateOpponentScore = async (game, theirScoreValue) => {
         parseGameToStatEntry({ sessionCode, player, match, mode: requestedMode, result })
       );
       importedGames = applySyncedTeamScores(importedGames, result);
+      if (!importedGames.length || importedGames.some(g => !g.parseStatsFound || !parseStatEntryLooksConsistent(g))) {
+        setSyncDebug("Parse stat line failed safety check", "No card was saved because the score/result looked wrong or incomplete.");
+        addToast?.("Parse stats looked wrong — not importing", "⚠️");
+        setMatchSyncing(false);
+        return;
+      }
 
       setSyncDebug("importing match", `match id: ${pulled[0]?.match?.id || "unknown"} · ${importedGames.length} row${importedGames.length === 1 ? "" : "s"}`);
       const updStats = [...importedGames, ...freshSyncStats];
@@ -16091,8 +16216,8 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           setPoints,
         }).catch(e => console.warn("post-sync bet settle failed", e));
       }, 300);
-      setSyncDebug("parse sync complete", `${sessionCode} ${requestedMode} saved instantly · Ballchasing will fill full cards in the background`);
-      addToast?.(`${sessionCode} ${requestedMode} basic stats synced`, "✅");
+      setSyncDebug("sync complete", `${sessionCode} ${requestedMode} saved`);
+      addToast?.(`${sessionCode} ${requestedMode} synced`, "✅");
       setTimeout(() => setShowSyncMatchModal(false), 120);
     } catch(e) {
       console.error(e);
@@ -16230,14 +16355,14 @@ return (
             <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${playerColor}33`,borderRadius:18,padding:16,marginBottom:14}}>
               <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:6}}>FULL TEAM 3V3</div>
               <div style={{fontSize:13,color:"#E8ECF4",fontWeight:800,marginBottom:6}}>maglvxx · apcards5 · tqr11le</div>
-              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Captain-only. One smart sync: tries Parse saves the basic card first. Ballchasing/Rockpload fills the full stat card in the background.</div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Captain-only. Syncs the selected 3v3 mode.</div>
               <button
                 disabled={matchSyncing || currentPlayer !== ADMIN_ID}
                 onClick={()=>syncLatestTeamMatch("3v3", PLAYERS)}
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:currentPlayer===ADMIN_ID?playerColor:"rgba(255,255,255,0.05)",border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:currentPlayer===ADMIN_ID?"#06070D":"#4A5066",cursor:currentPlayer===ADMIN_ID?"pointer":"not-allowed",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync basic 3v3"}
+                {matchSyncing ? "syncing…" : "sync 3v3"}
               </button>
             </div>
           )}
@@ -16273,7 +16398,7 @@ return (
                 className="bb-pressable bb-glow-violet"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync basic duo"}
+                {matchSyncing ? "syncing…" : "sync 2v2"}
               </button>
             </div>
           )}
@@ -16288,7 +16413,7 @@ return (
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "sync basic 1v1"}
+                {matchSyncing ? "syncing…" : "sync 1v1"}
                      </button>
             </div>
           )}
@@ -16299,7 +16424,7 @@ return (
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
           <div>
             <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:4}}>SYNC MATCH</div>
-            <div style={{fontSize:11,color:"#8B92A8",fontWeight:800}}>Parse first · Ballchasing fills later · {syncMode}</div>
+            <div style={{fontSize:11,color:"#8B92A8",fontWeight:800}}>{syncMode}</div>
           </div>
           <ChevronRight size={18} color={playerColor} style={{flexShrink:0}}/>
         </div>
