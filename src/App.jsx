@@ -110,6 +110,7 @@ import { createPortal } from "react-dom";
 // APP147_FAST_PARSE_FIRST_SYNC_UI_CPU_PATCH
 // APP146_FILMROOM_VISUALS_SOCIAL_STABILITY_CPU_PATCH
 // APP148_JOB_FRESH_START_PROGRESS_LOCK_PATCH
+// APP150_JOB_TRUE_ZERO_BASELINE_PATCH
 // APP149_JOB_3V3_STALE_LOCK_RESET_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
@@ -4303,6 +4304,7 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
     const startedAt = new Date().toISOString();
     const jobMinutes = getJobTimeLimitMinutes(job?.difficulty, job?.jobMode, job?.minutes);
     const startMs = safeDateObj(startedAt).getTime();
+    const jobStatBaselineKeys = getJobStatBaselineKeys(stats);
     const expiresAt = new Date(startMs + jobMinutes * 60000).toISOString();
     const syncGraceUntil = new Date(startMs + (jobMinutes + 15) * 60000).toISOString();
     await save({
@@ -4321,6 +4323,8 @@ function TeamJobsBox({ burtonOS, save, currentPlayer, points, setPoints, stats, 
         syncGraceUntil,
         jobFreshSchemaVersion:JOB_FRESH_SCHEMA_VERSION,
         progressBaseline:"fresh_start",
+        jobStatBaselineAt:startedAt,
+        jobStatBaselineKeys,
         progress:0,
         lastProgressAt:null,
         lastProgressTotal:null,
@@ -18187,6 +18191,27 @@ function getJobGameTimeCandidates(game = {}) {
     game.createdAt,
   ].map(v => safeDateObj(v, null)?.getTime()).filter(t => Number.isFinite(t));
 }
+function getJobCreditTimeCandidates(game = {}) {
+  // APP150: progress is credited only from a stat sync that happened after Start.
+  // This stops old saved 3v3 stat rows from instantly completing new jobs.
+  return [
+    game.jobCreditAt,
+    game.jobSyncedAt,
+    game.lastJobCreditAt,
+  ].map(v => safeDateObj(v, null)?.getTime()).filter(t => Number.isFinite(t));
+}
+function getJobStatBaselineKey(game = {}) {
+  const player = String(game?.playerId || "player");
+  const mode = normalizeGameMode(game?.mode || game?.playlist || "game") || "game";
+  const direct = game?.parseMatchId || game?.matchId || game?.ballchasingReplayId || game?.replayId || game?.sessionCode || game?.roomId || game?.id;
+  if (direct) return `${player}__${mode}__${direct}`;
+  const ts = safeDateObj(game?.matchStartAt || game?.ts || game?.date || 0, null)?.getTime();
+  const bucket = Number.isFinite(ts) ? Math.floor(ts / (10 * 60 * 1000)) : 0;
+  return `${player}__${mode}__${bucket}`;
+}
+function getJobStatBaselineKeys(stats = []) {
+  return Array.from(new Set((Array.isArray(stats) ? stats : []).map(getJobStatBaselineKey).filter(Boolean))).slice(0, 600);
+}
 function getJobActualGameTimeCandidates(game = {}) {
   // APP148: job progress must use the real match time, not the time an old replay got
   // refreshed, linked to Ballchasing, or background-synced. This keeps every new job at 0.
@@ -18220,11 +18245,15 @@ function evaluateJobChallengeRule(rule, job, stats = []) {
   }
   const rawStartedAt = job?.manualStartedAt || (job?.progressBaseline === "fresh_start" ? (job?.progressStartedAt || job?.startedAt) : null);
   const start = rawStartedAt ? safeDateObj(rawStartedAt, null) : null;
+  const baselineKeys = Array.isArray(job?.jobStatBaselineKeys) ? new Set(job.jobStatBaselineKeys.map(String)) : null;
 
   // Jobs must start fresh. Reserved jobs and old auto-started jobs never inherit old synced stats.
-  // Progress begins only after the player manually presses Start, then only real match times count.
+  // Progress begins only after the player manually presses Start, then only games synced after Start count.
   if (!start || !Number.isFinite(start.getTime()) || job?.status === "reserved") {
     return { current:0, target, done:false, games:[], pendingStart:true };
+  }
+  if (!baselineKeys) {
+    return { current:0, target, done:false, games:[], missingFreshBaseline:true };
   }
 
   const end = safeDateObj(job?.expiresAt || Date.now() + DAY_MS);
@@ -18232,8 +18261,13 @@ function evaluateJobChallengeRule(rule, job, stats = []) {
   const startMs = start.getTime();
   const endMs = end.getTime();
   const games = (Array.isArray(stats) ? stats : []).filter(g => {
+    const statKey = getJobStatBaselineKey(g);
+    if (baselineKeys.has(String(statKey))) return false;
+    const creditTimes = getJobCreditTimeCandidates(g);
+    const creditedAfterStart = creditTimes.some(t => t >= startMs - 1000 && t <= endMs + 5 * 60 * 1000);
+    if (!creditedAfterStart) return false;
     const ts = getJobRuleGameTimeMs(g, startMs, endMs);
-    if (!Number.isFinite(ts) || ts < startMs || ts > endMs) return false;
+    if (!Number.isFinite(ts) || ts < startMs - 1000 || ts > endMs + 1000) return false;
     if (mode !== "any" && normalizeGameMode(g?.mode) !== mode) return false;
     return ids.includes(g?.playerId);
   });
