@@ -1069,6 +1069,7 @@ function normalizeBallchasingReplay(raw = {}) {
           ? team.players.map(p => ({ ...p, teamColor: p.teamColor || team.color || (idx === 0 ? "blue" : "orange"), teamName: p.teamName || team.name || team.color || (idx === 0 ? "blue" : "orange"), teamStats: liveReplaySafeObj(p.teamStats || team.stats) }))
           : [],
       })),
+      timeline: data.timeline || data.raw?.timeline || null,
       raw: data.raw || data,
     };
   }
@@ -1094,6 +1095,7 @@ function normalizeBallchasingReplay(raw = {}) {
     duration: Number(data.duration || 0) || 0,
     date: data.date || data.created || null,
     teams,
+    timeline: data.timeline || data.raw?.timeline || null,
     raw:data,
   };
 }
@@ -1262,7 +1264,7 @@ function getReplayTimelineForPlayer(replay, row, kind = "goal") {
 }
 function fmtReplayTimeline(events, count = 0) {
   if (events?.length) return events.join(", ");
-  return Number(count) > 0 ? "fetching timeline…" : "none";
+  return Number(count) > 0 ? "timeline unavailable" : "none";
 }
 function getReplayKeyMoments(replay, playerNames = []) {
   const allowed = new Set((playerNames || []).map(replayLower).filter(Boolean));
@@ -13378,9 +13380,13 @@ function getGameBallchasingId(game = {}) {
 }
 function getGameBallchasingReplay(game = {}) {
   const raw = game.ballchasingReplay || game.replay || null;
-  if (raw && typeof raw === "object") return normalizeBallchasingReplay(raw);
+  const timeline = game.ballchasingTimeline || raw?.timeline || raw?.raw?.timeline || null;
+  if (raw && typeof raw === "object") {
+    const rawData = raw.raw && typeof raw.raw === "object" ? raw.raw : {};
+    return normalizeBallchasingReplay({ ...raw, timeline, raw:{ ...rawData, timeline:timeline || rawData.timeline } });
+  }
   const id = getGameBallchasingId(game);
-  return id ? normalizeBallchasingReplay({ id, link:`https://ballchasing.com/api/replays/${id}` }) : null;
+  return id ? normalizeBallchasingReplay({ id, link:`https://ballchasing.com/api/replays/${id}`, timeline }) : null;
 }
 function getBallchasingConfidenceMeta(scoreOrLabel = 0) {
   const s = typeof scoreOrLabel === "string" ? scoreOrLabel.toLowerCase() : "";
@@ -13887,10 +13893,16 @@ function upsertFilmRoomEntriesFromSyncedGames(osInput = {}, allStats = [], games
 
 function FilmRoomTab({ burtonOS, setBurtonOS, currentPlayer, stats, addToast }) {
   const os = normalizeBurtonOS(burtonOS || {});
-  const entries = normalizeFilmRoomEntries(os.filmRoomEntries);
+  const storedEntries = normalizeFilmRoomEntries(os.filmRoomEntries);
+  const linkedReplayStats = (Array.isArray(stats) ? stats : []).filter(g => getGameBallchasingId(g) || getGameBallchasingReplay(g));
+  const backfillPatch = (!storedEntries.length && linkedReplayStats.length)
+    ? upsertFilmRoomEntriesFromSyncedGames(os, stats, linkedReplayStats, "film_backfill")
+    : null;
+  const entries = normalizeFilmRoomEntries(backfillPatch?.os?.filmRoomEntries || storedEntries);
   const isAdmin = currentPlayer === ADMIN_ID;
   const [openId, setOpenId] = useState(entries[0]?.id || null);
   const [uploading, setUploading] = useState(false);
+  useEffect(()=>{ if (backfillPatch?.changed) { setBurtonOS?.(backfillPatch.os); storeSetWithPush(BURTON_OS_KEY, backfillPatch.os).catch(() => storeSet(BURTON_OS_KEY, backfillPatch.os)); } }, [backfillPatch?.changed]);
   useEffect(()=>{ if (!openId && entries[0]?.id) setOpenId(entries[0].id); }, [entries.length, openId]);
   const saveFilmEntries = async (nextEntries, msg = "Film Room updated", icon = "🎥") => {
     const nextOS = normalizeBurtonOS({ ...os, filmRoomEntries:normalizeFilmRoomEntries(nextEntries) });
