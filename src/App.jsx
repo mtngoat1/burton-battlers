@@ -105,6 +105,7 @@ import { createPortal } from "react-dom";
 // APP145_NATIVE_REPLAY_PARSER_BACKEND_PATCH
 // APP145_PLAY_TONIGHT_SESSION_NATIVE_REVIEW_PATCH
 // APP146_FILM_ROOM_CLIP_FEED_CLEAN_PATCH
+// APP147_FAST_PARSE_FIRST_SYNC_UI_CPU_PATCH
 // APP146_FILMROOM_VISUALS_SOCIAL_STABILITY_CPU_PATCH
 // ===================== Constants =====================
 const ADMIN_ID = "p1";
@@ -15303,6 +15304,39 @@ const findBallchasingForStatGame = async (game, forcedReplayId = "") => {
     setBallchasingSyncingGameId(null);
   }
 };
+
+const ballchasingAutoFillQueuedRef = useRef({});
+const queueBallchasingAutoFillForGames = (games = [], reason = "parse_first_sync") => {
+  const list = (Array.isArray(games) ? games : [games]).filter(Boolean);
+  if (!list.length) return;
+  const now = Date.now();
+  const scheduleDelays = [2500, 45000, 120000];
+  const unique = [];
+  const seen = new Set();
+  list.forEach(g => {
+    const key = String(g?.id || g?.parseMatchId || `${g?.sessionCode || "session"}_${g?.playerId || "player"}`);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    unique.push({ game:g, key });
+  });
+  unique.slice(0, 3).forEach(({ game, key }, idx) => {
+    const lastQueued = Number(ballchasingAutoFillQueuedRef.current?.[key] || 0);
+    if (lastQueued && now - lastQueued < 4 * 60 * 1000) return;
+    ballchasingAutoFillQueuedRef.current = { ...(ballchasingAutoFillQueuedRef.current || {}), [key]:now };
+    scheduleDelays.forEach((delay, attempt) => {
+      setTimeout(() => {
+        const latestStats = Array.isArray(stats) ? stats : [];
+        const latest = latestStats.find(x =>
+          (game?.id && String(x?.id) === String(game.id)) ||
+          (game?.parseMatchId && String(x?.parseMatchId) === String(game.parseMatchId)) ||
+          (game?.sessionCode && x?.sessionCode === game.sessionCode && x?.playerId === game.playerId)
+        ) || game;
+        if (!latest || latest.ballchasingReplayId) return;
+        findBallchasingForStatGame(latest).catch(e => console.warn("background Ballchasing autofill failed", reason, attempt, e));
+      }, delay + idx * 700);
+    });
+  });
+};
 const [rankSyncing, setRankSyncing] = useState(false);
 const [showSyncMatchModal, setShowSyncMatchModal] = useState(false);
 const [syncMode, setSyncMode] = useState(currentPlayer === ADMIN_ID ? "3v3" : "2v2");
@@ -15637,7 +15671,7 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
       setStatsSubTab("tracker");
       setShowAllGames(true);
-      setTimeout(() => setShowSyncMatchModal(false), 350);
+      setTimeout(() => setShowSyncMatchModal(false), 120);
     } catch (e) {
       console.error(e);
       setSyncDebug("Ballchasing sync error", e?.message || String(e || "Ballchasing request failed"));
@@ -16009,33 +16043,19 @@ const updateOpponentScore = async (game, theirScoreValue) => {
           setSyncDebug("already synced — refreshing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           await saveStatsEverywhere(updStats, setStats);
           await syncJobsAfterStatsWrite(updStats, refreshedGames, "tracker_refresh");
-          if (refreshedGames.some(g => g.parseStatsIncomplete)) {
-            setSyncDebug("refreshed shell — checking Ballchasing", `match id: ${pulled[0]?.match?.id || "unknown"}`);
-            try { await findBallchasingForStatGame(refreshedGames[0]); } catch (e) { console.warn("auto Ballchasing fill after refresh failed", e); }
+          if (refreshedGames.some(g => g.parseStatsIncomplete) || !refreshedGames.some(g => g.ballchasingReplayId)) {
+            queueBallchasingAutoFillForGames(refreshedGames, "parse_refresh_background");
           }
           if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
           setStatsSubTab("tracker");
           setShowAllGames(true);
-          const freshBetsForRefresh = await storeGet("bets").catch(() => []);
-          const freshPointsForRefresh = await storeGet("points").catch(() => points) || points;
-          await settleDueBetsNow({
-            bets: freshBetsForRefresh,
-            stats: updStats,
-            points: freshPointsForRefresh,
-            setBets,
-            setPoints,
-          }).catch(e => console.warn("post-refresh bet settle failed", e));
-          await regradeLostBetsForGames({
-            bets: await storeGet("bets").catch(() => freshBetsForRefresh),
-            stats: updStats,
-            points: await storeGet("points").catch(() => freshPointsForRefresh) || freshPointsForRefresh,
-            setBets,
-            setPoints,
-            games: refreshedGames,
-          }).catch(e => console.warn("post-refresh bet regrade failed", e));
+          setTimeout(() => {
+            settleDueBetsNow({ bets: Array.isArray(bets) ? bets : [], stats:updStats, points:points || {}, setBets, setPoints }).catch(e => console.warn("post-refresh bet settle failed", e));
+            regradeLostBetsForGames({ bets:Array.isArray(bets) ? bets : [], stats:updStats, points:points || {}, setBets, setPoints, games:refreshedGames }).catch(e => console.warn("post-refresh bet regrade failed", e));
+          }, 300);
           setSyncDebug("synced game refreshed", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           addToast?.("that synced game was refreshed with latest live stats", "✅");
-          setTimeout(() => setShowSyncMatchModal(false), 350);
+          setTimeout(() => setShowSyncMatchModal(false), 120);
         } else {
           setSyncDebug("already synced", `match id: ${pulled[0]?.match?.id || "unknown"}`);
           addToast?.("that match was already synced", "✅");
@@ -16055,29 +16075,25 @@ const updateOpponentScore = async (game, theirScoreValue) => {
       const updStats = [...importedGames, ...freshSyncStats];
       await saveStatsEverywhere(updStats, setStats);
       await syncJobsAfterStatsWrite(updStats, importedGames, "tracker_sync");
-      if (importedGames.some(g => g.parseStatsIncomplete)) {
-        setSyncDebug("imported shell — checking Ballchasing", `${sessionCode} ${requestedMode} · Parse stats were missing`);
-        try { await findBallchasingForStatGame(importedGames[0]); } catch (e) { console.warn("auto Ballchasing fill after import failed", e); }
-      }
+      queueBallchasingAutoFillForGames(importedGames, "parse_import_background");
       // APP112F: after a successful sync, jump the Stats UI to the matching tracker mode and open all days
       // so the imported game is visible instead of saved but hidden below collapsed groups.
       if (requestedMode === "1v1" || requestedMode === "2v2") setMode(requestedMode);
       setStatsSubTab("tracker");
       setShowAllGames(true);
-      // APP56: settle any matching prop immediately after the next synced game is written.
-      await settleDueBetsNow({
-        bets: await storeGet("bets").catch(() => []),
-        stats: updStats,
-        points: await storeGet("points").catch(() => points) || points,
-        setBets,
-        setPoints,
-      }).catch(e => console.warn("post-sync bet settle failed", e));
-      setSyncDebug("sync complete", `${sessionCode} ${requestedMode} imported · match id: ${pulled[0]?.match?.id || "unknown"}`);
-      addToast?.(`${sessionCode} ${requestedMode} synced from tracker`, "✅");
-      // APP113: after Parse imports the Stats game, immediately try to attach its Ballchasing replay.
-      // If Rockpload has not uploaded yet, the game dropdown keeps a Find Replay button for later.
-      setTimeout(() => findBallchasingForStatGame(importedGames[0]).catch(e => console.warn("post-sync Ballchasing link failed", e)), 450);
-      setTimeout(() => setShowSyncMatchModal(false), 350);
+      // Settle bets in the background so Parse-first sync closes instantly.
+      setTimeout(() => {
+        settleDueBetsNow({
+          bets: (Array.isArray(bets) ? bets : []),
+          stats: updStats,
+          points: points || {},
+          setBets,
+          setPoints,
+        }).catch(e => console.warn("post-sync bet settle failed", e));
+      }, 300);
+      setSyncDebug("parse sync complete", `${sessionCode} ${requestedMode} saved instantly · Ballchasing will fill full cards in the background`);
+      addToast?.(`${sessionCode} ${requestedMode} basic stats synced`, "✅");
+      setTimeout(() => setShowSyncMatchModal(false), 120);
     } catch(e) {
       console.error(e);
       setSyncDebug("Parse sync error — trying Ballchasing", e?.message || String(e || "Unknown tracker error"));
@@ -16189,13 +16205,6 @@ return (
             </button>
           </div>
 
-          {matchSyncDebug && (
-            <div style={{background:"rgba(77,158,255,0.08)",border:"1px solid rgba(77,158,255,0.22)",borderRadius:14,padding:12,marginBottom:14}}>
-              <div style={{fontSize:10,color:"#4D9EFF",fontWeight:900,letterSpacing:1,marginBottom:6}}>SYNC DEBUG · {formatSyncDebugTs(matchSyncDebug.ts)}</div>
-              <div style={{fontSize:13,color:"#E8ECF4",fontWeight:900,lineHeight:1.3}}>{matchSyncDebug.status}</div>
-              {matchSyncDebug.detail && <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginTop:5,wordBreak:"break-word"}}>{matchSyncDebug.detail}</div>}
-            </div>
-          )}
 
           <div style={{display:"none",background:"linear-gradient(135deg,#11131F,#0B0D17)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:18,padding:14,marginBottom:14}}>
             <div style={{fontSize:10,color:"#4A5066",fontWeight:800,letterSpacing:1,marginBottom:10}}>MODE</div>
@@ -16221,14 +16230,14 @@ return (
             <div style={{background:"linear-gradient(135deg,#11131F,#0B0D17)",border:`1px solid ${playerColor}33`,borderRadius:18,padding:16,marginBottom:14}}>
               <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:6}}>FULL TEAM 3V3</div>
               <div style={{fontSize:13,color:"#E8ECF4",fontWeight:800,marginBottom:6}}>maglvxx · apcards5 · tqr11le</div>
-              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Captain-only. One smart sync: tries Parse first, then falls back to Ballchasing/Rockpload and pushes progress into active jobs.</div>
+              <div style={{fontSize:11,color:"#8B92A8",lineHeight:1.45,marginBottom:14}}>Captain-only. One smart sync: tries Parse saves the basic card first. Ballchasing/Rockpload fills the full stat card in the background.</div>
               <button
                 disabled={matchSyncing || currentPlayer !== ADMIN_ID}
                 onClick={()=>syncLatestTeamMatch("3v3", PLAYERS)}
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:currentPlayer===ADMIN_ID?playerColor:"rgba(255,255,255,0.05)",border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:currentPlayer===ADMIN_ID?"#06070D":"#4A5066",cursor:currentPlayer===ADMIN_ID?"pointer":"not-allowed",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "smart sync full team 3v3"}
+                {matchSyncing ? "syncing…" : "sync basic 3v3"}
               </button>
             </div>
           )}
@@ -16264,7 +16273,7 @@ return (
                 className="bb-pressable bb-glow-violet"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "smart sync selected duo"}
+                {matchSyncing ? "syncing…" : "sync basic duo"}
               </button>
             </div>
           )}
@@ -16279,7 +16288,7 @@ return (
                 className="bb-pressable bb-glow-lime"
                 style={{width:"100%",background:playerColor,border:"none",borderRadius:13,padding:"12px 0",fontSize:13,fontWeight:900,color:"#06070D",cursor:"pointer",opacity:matchSyncing?0.6:1}}
               >
-                {matchSyncing ? "syncing…" : "smart sync my 1v1"}
+                {matchSyncing ? "syncing…" : "sync basic 1v1"}
                      </button>
             </div>
           )}
@@ -16290,7 +16299,7 @@ return (
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
           <div>
             <div style={{fontSize:10,color:playerColor,fontWeight:900,letterSpacing:1,marginBottom:4}}>SYNC MATCH</div>
-            <div style={{fontSize:11,color:"#8B92A8",fontWeight:800}}>selected: {syncMode}</div>
+            <div style={{fontSize:11,color:"#8B92A8",fontWeight:800}}>Parse first · Ballchasing fills later · {syncMode}</div>
           </div>
           <ChevronRight size={18} color={playerColor} style={{flexShrink:0}}/>
         </div>
@@ -16303,28 +16312,7 @@ return (
         ))}
       </div>
 
-{matchSyncDebug && /sync complete|Ballchasing linked|Ballchasing needs review|Ballchasing candidates/i.test(String(matchSyncDebug.status || "")) && (
-  <div style={{background:"rgba(77,158,255,0.045)",border:"1px solid rgba(77,158,255,0.12)",borderRadius:12,padding:"8px 10px",marginBottom:12}}>
-    <div style={{fontSize:10,color:"#8B92A8",fontWeight:850,lineHeight:1.35}}>{matchSyncDebug.status}{matchSyncDebug.detail ? ` · ${String(matchSyncDebug.detail).replace(/match id:[^·]+/i, "").slice(0,70)}` : ""}</div>
-  </div>
-)}
 
-
-<div style={{background:"linear-gradient(135deg,#11131F,#080A12)",border:`1px solid ${filmSyncStatus.color}33`,borderRadius:16,padding:12,marginBottom:14}}>
-  <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"flex-start",marginBottom:9}}>
-    <div>
-      <div style={{fontSize:10,color:filmSyncStatus.color,fontWeight:950,letterSpacing:1,textTransform:"uppercase"}}>session import · {filmSyncStatus.label}</div>
-      <div style={{fontSize:10.5,color:"#8B92A8",lineHeight:1.35,marginTop:3}}>{filmSyncStatus.detail}</div>
-    </div>
-    <div style={{fontSize:9,color:"#4A5066",fontWeight:900,textTransform:"uppercase",whiteSpace:"nowrap"}}>{filmSyncSession?.mode || syncMode}</div>
-  </div>
-  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:7}}>
-    <button onClick={startFilmSyncSession} disabled={matchSyncing || !!(filmSyncSession && !filmSyncSession.endedAt)} className="bb-pressable" style={{background:filmSyncSession && !filmSyncSession.endedAt?"rgba(255,255,255,.04)":"rgba(184,255,77,.12)",border:"1px solid rgba(184,255,77,.24)",borderRadius:10,padding:"9px 6px",fontSize:9.5,fontWeight:950,color:filmSyncSession && !filmSyncSession.endedAt?"#4A5066":"#B8FF4D",cursor:filmSyncSession && !filmSyncSession.endedAt?"default":"pointer"}}>start</button>
-    <button onClick={endFilmSyncSession} disabled={matchSyncing || !filmSyncSession || !!filmSyncSession.endedAt} className="bb-pressable" style={{background:filmSyncSession && !filmSyncSession.endedAt?"rgba(255,209,102,.12)":"rgba(255,255,255,.04)",border:"1px solid rgba(255,209,102,.24)",borderRadius:10,padding:"9px 6px",fontSize:9.5,fontWeight:950,color:filmSyncSession && !filmSyncSession.endedAt?"#FFD166":"#4A5066",cursor:filmSyncSession && !filmSyncSession.endedAt?"pointer":"default"}}>end</button>
-    <button onClick={checkFilmSyncSessionImport} disabled={matchSyncing || !filmSyncSession || !filmSyncSession.endedAt} className="bb-pressable" style={{background:filmSyncSession?.endedAt?"rgba(77,158,255,.12)":"rgba(255,255,255,.04)",border:"1px solid rgba(77,158,255,.24)",borderRadius:10,padding:"9px 6px",fontSize:9.5,fontWeight:950,color:filmSyncSession?.endedAt?"#4D9EFF":"#4A5066",cursor:filmSyncSession?.endedAt?"pointer":"default"}}>{matchSyncing?"checking…":"check import"}</button>
-  </div>
-  <div style={{fontSize:9.5,color:"#4A5066",lineHeight:1.35,marginTop:8}}>Use this tonight: start before games, end after the last game, then wait about 45 minutes or hit check import to retry. It imports every safe Ballchasing replay in that window and credits jobs.</div>
-</div>
 
 <div style={{display:"flex",gap:8,marginBottom:18}}>
 {[{id:"tracker",label:"stats"},{id:"teamlink",label:"team link"},{id:"film",label:"film"},{id:"chem",label:"chem"},{id:"mmr",label:"mmr"}].map(sub=>(
@@ -20338,10 +20326,10 @@ const RT_KEYS_LIVE = [
   "team_room", "team_sessions", "live_session", "typing",
   ADMIN_LIVE_SYNC_KEY
 ];
-const BOOT_LIVE_DELAY_MS = 2500;
-const BOOT_SECONDARY_HYDRATE_DELAY_MS = 3200;
-const BOOT_MMR_HYDRATE_DELAY_MS = 9000;
-const BOOT_BACKGROUND_EFFECT_DELAY_MS = 3500;
+const BOOT_LIVE_DELAY_MS = 600;
+const BOOT_SECONDARY_HYDRATE_DELAY_MS = 1800;
+const BOOT_MMR_HYDRATE_DELAY_MS = 6500;
+const BOOT_BACKGROUND_EFFECT_DELAY_MS = 1600;
 // APP120: disable in-app notification/toast UI and dropdown hydration. Phone/native push paths still run through storeSetWithPush/showLocalNotification.
 const APP_IN_APP_NOTIFICATIONS_ENABLED = false;
 
@@ -20349,7 +20337,7 @@ const APP_IN_APP_NOTIFICATIONS_ENABLED = false;
 // Keep the app cooler on phones by reducing background writes/reads while keeping the important live pieces instant.
 const BB_CPU_SAVER_MODE = true;
 const BB_BACKGROUND_WRITE_DELAY_MS = 900;
-const BB_BACKGROUND_WRITE_MIN_MS = 45000;
+const BB_BACKGROUND_WRITE_MIN_MS = 90000;
 const CHAT_PANEL_CLOSE_MS = 260;
 const BB_BACKGROUND_WRITE_CACHE = new Map();
 const BB_BACKGROUND_WRITE_TIMERS = new Map();
@@ -27380,7 +27368,7 @@ const scrollToTop = () => { scrollContainerRef.current?.scrollTo(0, 0); };
   if (authStage==="enter") return <><GlobalStyles/><EnterPasscodeScreen player={selectedPlayer} onSuccess={()=>loadSharedData(selectedPlayerId)} onBack={()=>setAuthStage("select")} onAdmin={selectedPlayer?.id===ADMIN_ID?async()=>{ setAdminStandalone(true); await loadSharedData(selectedPlayerId); setCurrentPlayer(selectedPlayerId); setAuthStage("app"); setAdminStandalone(true); }:undefined}/></>;
 // APP78: no full-screen login loading screen; keep rendering the current page while shared data warms up.
   if (authStage==="tracker") return <><GlobalStyles/><TrackerSetup player={selectedPlayer} onUseCredit={async()=>{ const current = parseCredits?.[selectedPlayerId] ?? PARSE_CREDITS_DEFAULT; if(current<=0) return false; const upd={...parseCredits,[selectedPlayerId]:current-1}; setParseCredits(upd); await storeSet("parse_credits",upd); return true; }} onComplete={async()=>{ const profile=await getMMR(selectedPlayerId); setMmrProfiles((prev)=>({...prev,[selectedPlayerId]:profile})); setAuthStage("app"); }}/></>;
-  if (authStage==="app" && !sharedDataReady) {
+  if (false && authStage==="app" && !sharedDataReady) {
     const bootPlayer = PLAYERS.find((p)=>p.id===currentPlayer || p.id===selectedPlayerId);
     const bootColor = bootPlayer?.color || "#B8FF4D";
     return <><GlobalStyles/><div style={{...s.appShell,background:"#06070D",color:"#E8ECF4",display:"flex",alignItems:"center",justifyContent:"center",padding:24,animation:"fadeSlideUp .14s ease"}}>
